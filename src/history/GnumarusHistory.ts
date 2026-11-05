@@ -74,10 +74,24 @@ export function applyImageDiff(
   }
 }
 
-export interface GnumarusHistoryEntry {
-  layerId: string;
-  diff: GnumarusImageDiff;
+export interface GnumarusMergedLayerSnapshot {
+  id: string;
+  name: string;
+  visible: boolean;
+  opacity: number;
+  stackIndex: number;
+  buffer: Uint8ClampedArray;
 }
+
+export interface GnumarusMergeRecord {
+  lowerLayerId: string;
+  lowerDiff: GnumarusImageDiff | null;
+  upper: GnumarusMergedLayerSnapshot;
+}
+
+export type GnumarusHistoryEntry =
+  | { type: "stroke"; layerId: string; diff: GnumarusImageDiff }
+  | { type: "merge"; merge: GnumarusMergeRecord };
 
 export interface GnumarusHistoryLayer {
   buffer: Uint8ClampedArray;
@@ -109,33 +123,63 @@ export class GnumarusHistory {
     return this.redoStack.length > 0;
   }
 
-  undo(findLayer: (layerId: string) => GnumarusHistoryLayer | null): boolean {
+  undo(
+    findLayer: (layerId: string) => GnumarusHistoryLayer | null,
+    restoreLayer: (snapshot: GnumarusMergedLayerSnapshot) => void,
+  ): boolean {
     for (;;) {
       const entry = this.undoStack.pop();
       if (entry === undefined) {
         return false;
       }
-      const layer = findLayer(entry.layerId);
-      if (layer === null) {
+      if (entry.type === "stroke") {
+        const layer = findLayer(entry.layerId);
+        if (layer === null) {
+          continue;
+        }
+        applyImageDiff(layer.buffer, layer.width, entry.diff, "before");
+        this.redoStack.push(entry);
+        return true;
+      }
+      const lower = findLayer(entry.merge.lowerLayerId);
+      if (lower === null) {
         continue;
       }
-      applyImageDiff(layer.buffer, layer.width, entry.diff, "before");
+      if (entry.merge.lowerDiff !== null) {
+        applyImageDiff(lower.buffer, lower.width, entry.merge.lowerDiff, "before");
+      }
+      restoreLayer(entry.merge.upper);
       this.redoStack.push(entry);
       return true;
     }
   }
 
-  redo(findLayer: (layerId: string) => GnumarusHistoryLayer | null): boolean {
+  redo(
+    findLayer: (layerId: string) => GnumarusHistoryLayer | null,
+    removeLayer: (layerId: string) => void,
+  ): boolean {
     for (;;) {
       const entry = this.redoStack.pop();
       if (entry === undefined) {
         return false;
       }
-      const layer = findLayer(entry.layerId);
-      if (layer === null) {
+      if (entry.type === "stroke") {
+        const layer = findLayer(entry.layerId);
+        if (layer === null) {
+          continue;
+        }
+        applyImageDiff(layer.buffer, layer.width, entry.diff, "after");
+        this.undoStack.push(entry);
+        return true;
+      }
+      const lower = findLayer(entry.merge.lowerLayerId);
+      if (lower === null) {
         continue;
       }
-      applyImageDiff(layer.buffer, layer.width, entry.diff, "after");
+      if (entry.merge.lowerDiff !== null) {
+        applyImageDiff(lower.buffer, lower.width, entry.merge.lowerDiff, "after");
+      }
+      removeLayer(entry.merge.upper.id);
       this.undoStack.push(entry);
       return true;
     }

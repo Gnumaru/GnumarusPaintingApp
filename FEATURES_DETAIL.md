@@ -21,8 +21,9 @@
 
 ## 3. Layers
 
-- Layers panel (right dock): add, delete (never the last one), reorder up/down, rename (double-click, Enter/blur commits, Escape cancels), per-layer visibility checkbox and opacity slider, click to activate; status bar shows active layer name and stack position.
-- Layer model: `{ id, name, visible, opacity }` with stable filename-safe ids; bottom-to-top stack order; painting, clear and undo/redo target the active layer; structural ops are not undoable.
+- Layers panel (right dock): add, delete (never the last one), reorder up/down, rename (double-click, Enter/blur commits, Escape cancels), per-layer visibility checkbox and opacity slider, click to activate; right-click a row for the context menu (Merge Down, disabled on the bottom layer); status bar shows active layer name and stack position.
+- Layer model: `{ id, name, visible, opacity }` with stable filename-safe ids; bottom-to-top stack order; painting, clear and undo/redo target the active layer; add/remove/reorder/rename/visibility/opacity are not undoable.
+- Merge Down composites the layer over the one below using the upper layer's opacity (straight-alpha src-over) and is fully undoable (restores the removed layer with its pixels); undo/redo resync the panel via `onLayersChanged`.
 - Save writes every layer as `cells/<layerId>_frame0.png`; Open loads every layer and validates dimensions; old single-layer projects open unchanged.
 
 ## 4. Pure logic modules (fully unit-tested)

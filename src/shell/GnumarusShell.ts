@@ -242,6 +242,42 @@ export class GnumarusShell extends LitElement {
       flex: 1 1 auto;
       min-width: 0;
     }
+    .context-blocker {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+    }
+    .context-menu {
+      position: fixed;
+      z-index: 41;
+      min-width: 160px;
+      background: #2b2b2b;
+      border: 1px solid #111;
+      border-radius: 4px;
+      padding: 4px;
+    }
+    .context-menu button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: transparent;
+      color: #e6e6e6;
+      border: none;
+      border-radius: 4px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .context-menu button:hover {
+      background: #0e639c;
+    }
+    .context-menu button:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+    .context-menu button:disabled:hover {
+      background: transparent;
+    }
     .statusbar {
       display: flex;
       align-items: center;
@@ -320,6 +356,7 @@ export class GnumarusShell extends LitElement {
     flipText: { type: String },
     cursorText: { type: String },
     canvasText: { type: String },
+    layerText: { type: String },
     projectName: { type: String },
     dirty: { type: Boolean },
     statusMessage: { type: String },
@@ -336,8 +373,10 @@ export class GnumarusShell extends LitElement {
     canRedo: { type: Boolean },
     layers: { type: Array },
     activeLayerId: { type: String },
-    layerText: { type: String },
     renamingId: { type: String },
+    contextMenuLayerId: { type: String },
+    contextMenuX: { type: Number },
+    contextMenuY: { type: Number },
     checkerColorA: { type: String },
     checkerColorB: { type: String },
   };
@@ -367,6 +406,9 @@ export class GnumarusShell extends LitElement {
   declare activeLayerId: string;
   declare layerText: string;
   declare renamingId: string | null;
+  declare contextMenuLayerId: string | null;
+  declare contextMenuX: number;
+  declare contextMenuY: number;
   declare checkerColorA: string;
   declare checkerColorB: string;
 
@@ -400,6 +442,9 @@ export class GnumarusShell extends LitElement {
     this.activeLayerId = "";
     this.layerText = "-";
     this.renamingId = null;
+    this.contextMenuLayerId = null;
+    this.contextMenuX = 0;
+    this.contextMenuY = 0;
     this.checkerColorA = DEFAULT_CHECKER_SETTINGS.colorA;
     this.checkerColorB = DEFAULT_CHECKER_SETTINGS.colorB;
   }
@@ -476,6 +521,7 @@ export class GnumarusShell extends LitElement {
           </button>
           <input
             type="color"
+            id="pencilColor"
             .value=${this.colorValue}
             title="Pencil color"
             @input=${(event: Event): void => {
@@ -500,6 +546,10 @@ export class GnumarusShell extends LitElement {
                   class="layer-row ${layer.id === this.activeLayerId ? "active" : ""}"
                   data-layer-id=${layer.id}
                   @click=${(): void => this.onSelectLayer(layer.id)}
+                  @contextmenu=${(event: MouseEvent): void => {
+                    event.preventDefault();
+                    this.openLayerMenu(layer.id, event.clientX, event.clientY);
+                  }}
                 >
                   <div class="layer-top">
                     <input
@@ -591,6 +641,31 @@ export class GnumarusShell extends LitElement {
             )}
           </div>
         </aside>
+        ${this.contextMenuLayerId !== null
+          ? html`
+              <div class="context-blocker" @click=${(): void => this.closeLayerMenu()} @contextmenu=${(
+                event: Event,
+              ): void => {
+                event.preventDefault();
+                this.closeLayerMenu();
+              }}></div>
+              <div
+                class="context-menu"
+                style="left: ${this.contextMenuX}px; top: ${this.contextMenuY}px;"
+              >
+                <button
+                  ?disabled=${this.layers.length > 0 && this.layers[0]?.id === this.contextMenuLayerId}
+                  @click=${(): void => {
+                    if (this.contextMenuLayerId !== null) {
+                      this.onMergeDown(this.contextMenuLayerId);
+                    }
+                  }}
+                >
+                  Merge Down
+                </button>
+              </div>
+            `
+          : html``}
       </div>
       <div class="statusbar">
         <span>${this.tool}</span>
@@ -665,6 +740,9 @@ export class GnumarusShell extends LitElement {
       this.engine = new GnumarusCanvasEngine(host, {
         onToolChanged: (tool): void => {
           this.tool = tool;
+        },
+        onLayersChanged: (): void => {
+          this.refreshLayers();
         },
         checker: storedChecker,
         onStats: (stats): void => {
@@ -874,6 +952,27 @@ export class GnumarusShell extends LitElement {
 
   private onRenameCancel(): void {
     this.renamingId = null;
+  }
+
+  private openLayerMenu(id: string, clientX: number, clientY: number): void {
+    this.contextMenuLayerId = id;
+    this.contextMenuX = Math.min(clientX, window.innerWidth - 180);
+    this.contextMenuY = Math.min(clientY, window.innerHeight - 60);
+  }
+
+  private closeLayerMenu(): void {
+    this.contextMenuLayerId = null;
+  }
+
+  private onMergeDown(id: string): void {
+    this.closeLayerMenu();
+    if (this.engine?.mergeDown(id) === true) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = "Layers merged";
+    } else {
+      this.statusMessage = "Nothing below to merge with";
+    }
   }
 
   private onRenameCommit(id: string): void {

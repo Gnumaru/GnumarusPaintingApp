@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import {
   clearPixelBuffer,
+  compositeOver,
   createPixelBuffer,
   drawPixelLine,
   getPixel,
@@ -15,7 +16,11 @@ import {
   type GnumarusCheckerMode,
   type GnumarusCheckerSettings,
 } from "../settings/GnumarusCheckerSettings";
-import { computeImageDiff, GnumarusHistory } from "../history/GnumarusHistory";
+import {
+  computeImageDiff,
+  GnumarusHistory,
+  type GnumarusMergedLayerSnapshot,
+} from "../history/GnumarusHistory";
 
 export interface GnumarusEngineStats {
   width: number;
@@ -108,6 +113,7 @@ export interface GnumarusEngineOptions {
   onStats: (stats: GnumarusEngineStats) => void;
   onPixelsChanged: () => void;
   onToolChanged?: (tool: GnumarusCanvasTool) => void;
+  onLayersChanged?: () => void;
   checker?: GnumarusCheckerSettings;
 }
 
@@ -172,12 +178,14 @@ export class GnumarusCanvasEngine {
   private readonly onStats: (stats: GnumarusEngineStats) => void;
   private readonly onPixelsChanged: () => void;
   private readonly onToolChanged: ((tool: GnumarusCanvasTool) => void) | undefined;
+  private readonly onLayersChanged: (() => void) | undefined;
 
   constructor(container: HTMLElement, options: GnumarusEngineOptions) {
     this.container = container;
     this.onStats = options.onStats;
     this.onPixelsChanged = options.onPixelsChanged;
     this.onToolChanged = options.onToolChanged;
+    this.onLayersChanged = options.onLayersChanged;
     const initialChecker = options.checker ?? DEFAULT_CHECKER_SETTINGS;
     this.checkerMode = initialChecker.mode;
     this.checkerSizeX = clampCheckerSize(initialChecker.sizeX);
@@ -276,10 +284,11 @@ export class GnumarusCanvasEngine {
     texture.generateMipmaps = false;
     texture.flipY = true;
     texture.needsUpdate = true;
+    const clampedOpacity = Math.min(1, Math.max(0, opacity));
     const material = new THREE.ShaderMaterial({
       uniforms: {
         uMap: { value: texture },
-        uOpacity: { value: opacity },
+        uOpacity: { value: clampedOpacity },
       },
       vertexShader: LAYER_VERTEX_SHADER,
       fragmentShader: LAYER_FRAGMENT_SHADER,
@@ -293,7 +302,7 @@ export class GnumarusCanvasEngine {
     plane.renderOrder = stackIndex;
     plane.visible = visible;
     this.scene.add(plane);
-    return { id, name, visible, opacity, buffer, texture, material, plane };
+    return { id, name, visible, opacity: clampedOpacity, buffer, texture, material, plane };
   }
 
   private refreshLayerStacking(): void {
@@ -359,6 +368,16 @@ export class GnumarusCanvasEngine {
     if (this.layers.length <= 1) {
       return false;
     }
+    if (!this.removeLayerSilent(id)) {
+      return false;
+    }
+    this.refreshLayerStacking();
+    this.render();
+    this.emitStats();
+    return true;
+  }
+
+  private removeLayerSilent(id: string): boolean {
     const index = this.layers.findIndex((layer) => layer.id === id);
     if (index < 0) {
       return false;
@@ -375,6 +394,56 @@ export class GnumarusCanvasEngine {
         this.activeLayerId = next.id;
       }
     }
+    return true;
+  }
+
+  private insertLayerSnapshot(snapshot: GnumarusMergedLayerSnapshot): void {
+    const buffer = new Uint8ClampedArray(snapshot.buffer);
+    const layer = this.createLayerInternal(
+      snapshot.id,
+      snapshot.name,
+      snapshot.visible,
+      snapshot.opacity,
+      buffer,
+    );
+    const at = Math.min(Math.max(0, snapshot.stackIndex), this.layers.length);
+    this.layers.splice(at, 0, layer);
+    this.activeLayerId = snapshot.id;
+    this.refreshLayerStacking();
+  }
+
+  /**
+   * Merge the layer into the one immediately below it using the upper
+   * layer's current opacity. The result is a single undoable history entry.
+   */
+  mergeDown(id: string): boolean {
+    const index = this.layers.findIndex((layer) => layer.id === id);
+    if (index <= 0) {
+      return false;
+    }
+    const upper = this.layers[index];
+    const lower = this.layers[index - 1];
+    if (upper === undefined || lower === undefined) {
+      return false;
+    }
+    const base = lower.buffer.slice();
+    compositeOver(lower.buffer, upper.buffer, this.imageWidth, this.imageHeight, upper.opacity);
+    const diff = computeImageDiff(base, lower.buffer, this.imageWidth, this.imageHeight);
+    const snapshot: GnumarusMergedLayerSnapshot = {
+      id: upper.id,
+      name: upper.name,
+      visible: upper.visible,
+      opacity: upper.opacity,
+      stackIndex: index,
+      buffer: upper.buffer.slice(),
+    };
+    this.removeLayerSilent(id);
+    this.activeLayerId = lower.id;
+    this.history.push({
+      type: "merge",
+      merge: { lowerLayerId: lower.id, lowerDiff: diff, upper: snapshot },
+    });
+    lower.texture.needsUpdate = true;
     this.refreshLayerStacking();
     this.render();
     this.emitStats();
@@ -543,7 +612,7 @@ export class GnumarusCanvasEngine {
     clearPixelBuffer(layer.buffer);
     const diff = computeImageDiff(base, layer.buffer, this.imageWidth, this.imageHeight);
     if (diff !== null) {
-      this.history.push({ layerId: layer.id, diff });
+      this.history.push({ type: "stroke", layerId: layer.id, diff });
     }
     layer.texture.needsUpdate = true;
     this.render();
@@ -607,25 +676,35 @@ export class GnumarusCanvasEngine {
   }
 
   undo(): boolean {
-    const applied = this.history.undo((layerId) => this.historyLayerFor(layerId));
+    const applied = this.history.undo(
+      (layerId) => this.historyLayerFor(layerId),
+      (snapshot) => this.insertLayerSnapshot(snapshot),
+    );
     if (!applied) {
       return false;
     }
     this.markLayersDirty();
+    this.refreshLayerStacking();
     this.render();
     this.onPixelsChanged();
+    this.onLayersChanged?.();
     this.emitStats();
     return true;
   }
 
   redo(): boolean {
-    const applied = this.history.redo((layerId) => this.historyLayerFor(layerId));
+    const applied = this.history.redo(
+      (layerId) => this.historyLayerFor(layerId),
+      (layerId) => this.removeLayerSilent(layerId),
+    );
     if (!applied) {
       return false;
     }
     this.markLayersDirty();
+    this.refreshLayerStacking();
     this.render();
     this.onPixelsChanged();
+    this.onLayersChanged?.();
     this.emitStats();
     return true;
   }
@@ -837,7 +916,7 @@ export class GnumarusCanvasEngine {
         if (layer !== null) {
           const diff = computeImageDiff(this.strokeBase, layer.buffer, this.imageWidth, this.imageHeight);
           if (diff !== null) {
-            this.history.push({ layerId: layer.id, diff });
+            this.history.push({ type: "stroke", layerId: layer.id, diff });
           }
         }
         this.strokeBase = null;

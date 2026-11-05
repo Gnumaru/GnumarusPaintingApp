@@ -48,20 +48,20 @@ describe("GnumarusHistory", () => {
       throw new Error("expected a diff");
     }
     buffer.set(stroke);
-    history.push({ layerId: "layer0", diff });
+    history.push({ type: "stroke", layerId: "layer0", diff });
     expect(history.canUndo()).toBe(true);
 
-    expect(history.undo(() => layerOf(buffer))).toBe(true);
+    expect(history.undo(() => layerOf(buffer), () => {})).toBe(true);
     expect(computeImageDiff(buffer, createPixelBuffer(8, 8), 8, 8)).toBeNull();
     expect(history.canUndo()).toBe(false);
     expect(history.canRedo()).toBe(true);
 
-    expect(history.redo(() => layerOf(buffer))).toBe(true);
+    expect(history.redo(() => layerOf(buffer), () => {})).toBe(true);
     expect(computeImageDiff(buffer, stroke, 8, 8)).toBeNull();
     expect(history.canUndo()).toBe(true);
     expect(history.canRedo()).toBe(false);
 
-    expect(history.redo(() => layerOf(buffer))).toBe(false);
+    expect(history.redo(() => layerOf(buffer), () => {})).toBe(false);
   });
 
   it("skips entries whose layer no longer exists", () => {
@@ -73,8 +73,8 @@ describe("GnumarusHistory", () => {
     if (diff === null) {
       throw new Error("expected a diff");
     }
-    history.push({ layerId: "gone", diff });
-    expect(history.undo(() => null)).toBe(false);
+    history.push({ type: "stroke", layerId: "gone", diff });
+    expect(history.undo(() => null, () => {})).toBe(false);
     expect(history.canUndo()).toBe(false);
   });
 
@@ -92,10 +92,10 @@ describe("GnumarusHistory", () => {
     if (diffA === null || diffB === null) {
       throw new Error("expected diffs");
     }
-    history.push({ layerId: "layer0", diff: diffA });
-    history.undo(() => layerOf4(buffer));
+    history.push({ type: "stroke", layerId: "layer0", diff: diffA });
+    history.undo(() => layerOf4(buffer), () => {});
     buffer.set(first);
-    history.push({ layerId: "layer0", diff: diffB });
+    history.push({ type: "stroke", layerId: "layer0", diff: diffB });
     expect(history.canRedo()).toBe(false);
   });
 
@@ -109,13 +109,13 @@ describe("GnumarusHistory", () => {
       if (diff === null) {
         throw new Error("expected a diff");
       }
-      history.push({ layerId: "layer0", diff });
+      history.push({ type: "stroke", layerId: "layer0", diff });
     }
     const buffer = createPixelBuffer(4, 4);
-    expect(history.undo(() => layerOf4(buffer))).toBe(true);
-    expect(history.undo(() => layerOf4(buffer))).toBe(true);
-    expect(history.undo(() => layerOf4(buffer))).toBe(true);
-    expect(history.undo(() => layerOf4(buffer))).toBe(false);
+    expect(history.undo(() => layerOf4(buffer), () => {})).toBe(true);
+    expect(history.undo(() => layerOf4(buffer), () => {})).toBe(true);
+    expect(history.undo(() => layerOf4(buffer), () => {})).toBe(true);
+    expect(history.undo(() => layerOf4(buffer), () => {})).toBe(false);
   });
 
   it("applies diff sides directly", () => {
@@ -131,5 +131,46 @@ describe("GnumarusHistory", () => {
     expect(computeImageDiff(buffer, after, 4, 4)).toBeNull();
     applyImageDiff(buffer, 4, diff, "before");
     expect(computeImageDiff(buffer, before, 4, 4)).toBeNull();
+  });
+
+  it("undoes and redoes a merge", () => {
+    const layers = new Map<string, Uint8ClampedArray>();
+    layers.set("lower", createPixelBuffer(4, 4));
+    const upperBuffer = createPixelBuffer(4, 4);
+    setPixel(upperBuffer, 4, 4, 1, 1, BLACK);
+    const find = (id: string) => {
+      const buffer = layers.get(id);
+      return buffer === undefined ? null : { buffer, width: 4 };
+    };
+    const history = new GnumarusHistory();
+    const lowerDiff = computeImageDiff(
+      layers.get("lower") ?? createPixelBuffer(4, 4),
+      upperBuffer,
+      4,
+      4,
+    );
+    history.push({
+      type: "merge",
+      merge: {
+        lowerLayerId: "lower",
+        lowerDiff,
+        upper: { id: "upper", name: "Upper", visible: true, opacity: 1, stackIndex: 1, buffer: upperBuffer },
+      },
+    });
+    layers.get("lower")?.set(upperBuffer);
+    layers.delete("upper");
+
+    expect(history.undo(find, (snapshot) => layers.set(snapshot.id, snapshot.buffer))).toBe(true);
+    expect(layers.has("upper")).toBe(true);
+    expect(computeImageDiff(layers.get("lower") ?? createPixelBuffer(4, 4), createPixelBuffer(4, 4), 4, 4)).toBeNull();
+
+    expect(history.canRedo()).toBe(true);
+    expect(
+      history.redo(find, (id) => {
+        layers.delete(id);
+      }),
+    ).toBe(true);
+    expect(layers.has("upper")).toBe(false);
+    expect(computeImageDiff(layers.get("lower") ?? createPixelBuffer(4, 4), upperBuffer, 4, 4)).toBeNull();
   });
 });

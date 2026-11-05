@@ -81,6 +81,34 @@ export function drawPixelLine(
   }
 }
 
+/** Source-over composite of `src` onto `dst` in place, both same-size straight-alpha buffers. */
+export function compositeOver(
+  dst: Uint8ClampedArray,
+  src: Uint8ClampedArray,
+  width: number,
+  height: number,
+  opacity: number,
+): void {
+  const count = width * height * 4;
+  for (let i = 0; i < count; i += 4) {
+    const srcA = (src[i + 3] / 255) * opacity;
+    const dstA = dst[i + 3] / 255;
+    const outA = srcA + dstA * (1 - srcA);
+    if (outA <= 0) {
+      dst[i] = 0;
+      dst[i + 1] = 0;
+      dst[i + 2] = 0;
+      dst[i + 3] = 0;
+      continue;
+    }
+    const inv = dstA * (1 - srcA);
+    dst[i] = Math.round((src[i] * srcA + dst[i] * inv) / outA);
+    dst[i + 1] = Math.round((src[i + 1] * srcA + dst[i + 1] * inv) / outA);
+    dst[i + 2] = Math.round((src[i + 2] * srcA + dst[i + 2] * inv) / outA);
+    dst[i + 3] = Math.round(outA * 255);
+  }
+}
+
 export function parseHexColor(hex: string): GnumarusRgba | null {
   const normalized = hex.trim().toLowerCase();
   const shortMatch = /^#([0-9a-f]{3})$/.exec(normalized);

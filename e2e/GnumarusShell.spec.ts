@@ -395,12 +395,52 @@ test("undo restores pixels on the correct layer", async ({ page }) => {
   await page.keyboard.press("Control+z");
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
 
-  await page.locator('gnumarus-shell [data-layer-id="layer0"]').click();
+  await page.locator('gnumarus-shell [data-layer-id="layer0"] .layer-name').click();
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
 
   await page.keyboard.press("Control+y");
-  await page.locator('gnumarus-shell [data-layer-id="layer1"]').click();
+  await page.locator('gnumarus-shell [data-layer-id="layer1"] .layer-name').click();
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+});
+
+test("layer context menu merges down with opacity", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await page.mouse.click(cx, cy);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await page.locator('gnumarus-shell input#pencilColor').fill("#ff0000");
+  await page.mouse.click(cx, cy);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+
+  const row1 = page.locator('gnumarus-shell [data-layer-id="layer1"]');
+  await row1.click({ button: "right" });
+  await page.getByRole("button", { name: "Merge Down" }).click();
+  expect(await getLayers(page)).toMatchObject({ layers: [{ id: "layer0" }] });
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+
+  const row0 = page.locator('gnumarus-shell [data-layer-id="layer0"]');
+  await row0.click({ button: "right" });
+  await expect(page.getByRole("button", { name: "Merge Down" })).toBeDisabled();
+  await page.mouse.click(cx, cy + 200);
+
+  await page.keyboard.press("Control+z");
+  const afterUndo = await getLayers(page);
+  expect(afterUndo.layers.map((layer) => layer.id)).toEqual(["layer0", "layer1"]);
+  await page.locator('gnumarus-shell [data-layer-id="layer0"] .layer-name').click();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+
+  await page.keyboard.press("Control+y");
+  expect(await getLayers(page)).toMatchObject({ layers: [{ id: "layer0" }] });
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
 test("pencil paints the right pixel while the canvas is rotated", async ({ page }) => {
