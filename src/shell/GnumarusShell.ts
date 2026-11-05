@@ -479,6 +479,11 @@ export class GnumarusShell extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
+      cursor: grab;
+      touch-action: none;
+    }
+    .preview-body:active {
+      cursor: grabbing;
     }
     .preview-body canvas {
       image-rendering: pixelated;
@@ -772,6 +777,15 @@ export class GnumarusShell extends LitElement {
                     @wheel=${(event: WheelEvent): void => {
                       event.preventDefault();
                       this.zoomPreview(event.deltaY < 0 ? 1.25 : 0.8);
+                    }}
+                    @pointerdown=${(event: PointerEvent): void => this.onPreviewPanStart(event)}
+                    @mousedown=${(event: MouseEvent): void => {
+                      if (event.button === 1) {
+                        event.preventDefault();
+                      }
+                    }}
+                    @contextmenu=${(event: Event): void => {
+                      event.preventDefault();
                     }}
                   >
                     <canvas id="previewCanvas"></canvas>
@@ -1683,6 +1697,49 @@ export class GnumarusShell extends LitElement {
   }
 
   private previewDragState: { startX: number; startY: number; originX: number; originY: number } | null = null;
+
+  private previewPanState: {
+    startX: number;
+    startY: number;
+    startLeft: number;
+    startTop: number;
+    body: HTMLElement;
+  } | null = null;
+
+  /** Pan the preview content with a drag of any mouse button (left, right or middle). */
+  private onPreviewPanStart(event: PointerEvent): void {
+    if (event.button !== 0 && event.button !== 1 && event.button !== 2) {
+      return;
+    }
+    const body = event.currentTarget as HTMLElement | null;
+    if (body === null) {
+      return;
+    }
+    event.preventDefault();
+    this.previewPanState = {
+      startX: event.clientX,
+      startY: event.clientY,
+      startLeft: body.scrollLeft,
+      startTop: body.scrollTop,
+      body,
+    };
+    const move = (moveEvent: PointerEvent): void => {
+      if (this.previewPanState === null) {
+        return;
+      }
+      this.previewPanState.body.scrollLeft = this.previewPanState.startLeft - (moveEvent.clientX - this.previewPanState.startX);
+      this.previewPanState.body.scrollTop = this.previewPanState.startTop - (moveEvent.clientY - this.previewPanState.startY);
+    };
+    const up = (): void => {
+      this.previewPanState = null;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  }
 
   private onPreviewDragStart(event: PointerEvent): void {
     const target = event.target as HTMLElement | null;

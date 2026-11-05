@@ -1072,6 +1072,45 @@ test("final preview shows flattened render with zoom and pan", async ({ page }) 
   await expect(preview).toHaveCount(0);
 });
 
+test("final preview pans with left, right and middle mouse drags", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Final preview" }).click();
+  const preview = page.locator('gnumarus-shell [data-testid="final-preview"]');
+  await expect(preview).toBeVisible();
+  await preview.getByRole("button", { name: "Zoom in preview" }).click();
+  await preview.getByRole("button", { name: "Zoom in preview" }).click();
+  const body = preview.locator(".preview-body");
+  const scrolled = (): Promise<{ left: number; top: number }> =>
+    body.evaluate((element: HTMLElement) => ({ left: element.scrollLeft, top: element.scrollTop }));
+  const start = await scrolled();
+  expect(start.left).toBe(0);
+  expect(start.top).toBe(0);
+  const center = await body.boundingBox();
+  if (center === null) {
+    throw new Error("preview body has no bounding box");
+  }
+  const cx = center.x + center.width / 2;
+  const cy = center.y + center.height / 2;
+  const drag = async (button: "left" | "right" | "middle"): Promise<{ left: number; top: number }> => {
+    const before = await scrolled();
+    await page.mouse.move(cx, cy);
+    await page.mouse.down({ button });
+    await page.mouse.move(cx - 60, cy - 40, { steps: 5 });
+    await page.mouse.up({ button });
+    return { left: (await scrolled()).left - before.left, top: (await scrolled()).top - before.top };
+  };
+  const leftDrag = await drag("left");
+  expect(leftDrag.left).toBeGreaterThan(0);
+  expect(leftDrag.top).toBeGreaterThan(0);
+  const rightDrag = await drag("right");
+  expect(rightDrag.left).toBeGreaterThan(0);
+  expect(rightDrag.top).toBeGreaterThan(0);
+  const middleDrag = await drag("middle");
+  expect(middleDrag.left).toBeGreaterThan(0);
+  expect(middleDrag.top).toBeGreaterThan(0);
+});
+
 test("custom picker edits pencil color through models and inputs", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
