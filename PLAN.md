@@ -115,6 +115,12 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Live preview while drawing: curve path, control-point markers and thin handle lines (endpoint to its control); all auxiliaries destroyed after commit/cancel (`Escape` cancels).
 - Curve options like line/pencil: width 0.1..64 (rounded when AA off, float when on), square/circle ends, anti-aliasing checkbox.
 
+## 21. Shortcuts, UI hide, layer nav, insert, merge-down (implemented)
+- Loupe shortcut moves from `L` to `Z` (no-modifier `z`; `Ctrl+Z` undo unaffected).
+- `Tab` toggles all chrome (menu/tool-options/toolbar/layers/matrix/status) leaving only the canvas; `preventDefault` everywhere except open modal dialogs and text fields (focus-trap and focus navigation preserved).
+- `PageUp`/`PageDown` select the layer above/below with wrap-around (top+Up→bottom, bottom+Down→top); a canvas-overlay toast `pos/total: name` (1 = bottom) shows even when the UI is hidden, auto-hiding after ~2s.
+- `Insert` inserts a new layer immediately above the current one and selects it; `Ctrl+E` merges the active layer down exactly like the context-menu item (which already samples through the lower layer transform).
+
 ## 11. Custom color picker (implemented)
 - Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).
 - Every model carries an alpha axis; RGBA axes span 0..255. ARD Diagonal spans 0..360 and Ratio 0..255.

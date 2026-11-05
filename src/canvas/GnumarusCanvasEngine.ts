@@ -1105,6 +1105,17 @@ export class GnumarusCanvasEngine {
   }
 
   addLayer(): string {
+    return this.insertLayerAt(this.layers.length);
+  }
+
+  /** Insert a new layer immediately above the active layer and select it. */
+  insertLayerAboveActive(): string {
+    const index = this.layers.findIndex((layer) => layer.id === this.activeLayerId);
+    const at = index < 0 ? this.layers.length : index + 1;
+    return this.insertLayerAt(at);
+  }
+
+  private insertLayerAt(at: number): string {
     const id = `layer${this.layerCounter}`;
     const name = `Layer ${this.layerCounter}`;
     this.layerCounter += 1;
@@ -1118,7 +1129,8 @@ export class GnumarusCanvasEngine {
       this.imageHeight,
       { ...IDENTITY_LAYER_TRANSFORM },
     );
-    this.layers.push(layer);
+    const clamped = Math.min(Math.max(0, Math.floor(at)), this.layers.length);
+    this.layers.splice(clamped, 0, layer);
     this.textures.set(id, {
       id,
       name: `${name} pixels`,
@@ -3185,7 +3197,7 @@ export class GnumarusCanvasEngine {
           this.setTool("curve");
           return;
         }
-        if (event.key === "l" || event.key === "L") {
+        if (event.key === "z" || event.key === "Z") {
           this.setTool("loupe");
           return;
         }

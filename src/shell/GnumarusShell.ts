@@ -72,6 +72,9 @@ export class GnumarusShell extends LitElement {
       font-size: 13px;
       user-select: none;
     }
+    [hidden] {
+      display: none !important;
+    }
     .menubar {
       display: flex;
       align-items: center;
@@ -656,6 +659,20 @@ export class GnumarusShell extends LitElement {
       flex: 0 0 auto;
       margin: auto;
     }
+    .toast {
+      position: absolute;
+      left: 50%;
+      bottom: 12px;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.85);
+      color: #fff;
+      padding: 6px 14px;
+      border-radius: 12px;
+      font-size: 13px;
+      z-index: 20;
+      pointer-events: none;
+      white-space: nowrap;
+    }
     .dialog-actions {
       display: flex;
       gap: 8px;
@@ -722,6 +739,8 @@ export class GnumarusShell extends LitElement {
     durationTargetFrame: { type: Number },
     durationValue: { type: Number },
     playing: { type: Boolean },
+    uiHidden: { type: Boolean },
+    toastMessage: { type: String },
     brushSize: { type: Number },
     brushShape: { type: String },
     pencilAntialias: { type: Boolean },
@@ -782,6 +801,8 @@ export class GnumarusShell extends LitElement {
   declare durationTargetFrame: number | null;
   declare durationValue: number | null;
   declare playing: boolean;
+  declare uiHidden: boolean;
+  declare toastMessage: string;
   declare brushSize: number;
   declare brushShape: GnumarusBrushShape;
   declare pencilAntialias: boolean;
@@ -795,6 +816,7 @@ export class GnumarusShell extends LitElement {
   private engine: GnumarusCanvasEngine | null = null;
   private directoryHandle: GnumarusDirectoryHandle | null = null;
   private playTimer: number | null = null;
+  private toastTimer: number | null = null;
 
   constructor() {
     super();
@@ -845,6 +867,8 @@ export class GnumarusShell extends LitElement {
     this.durationValue = null;
     this.playing = false;
     this.playTimer = null;
+    this.uiHidden = false;
+    this.toastMessage = "";
     this.brushSize = 1;
     this.brushShape = "square";
     this.pencilAntialias = false;
@@ -858,7 +882,7 @@ export class GnumarusShell extends LitElement {
 
   render() {
     return html`
-      <div class="menubar">
+      <div class="menubar" ?hidden=${this.uiHidden}>
         <div class="menu">
           <button
             class=${this.fileMenuOpen ? "active" : ""}
@@ -904,7 +928,7 @@ export class GnumarusShell extends LitElement {
       </div>
       ${this.renderToolOptions()}
       <div class="body">
-        <div class="toolbar">
+        <div class="toolbar" ?hidden=${this.uiHidden}>
           <button
             class=${this.tool === "pencil" ? "active" : ""}
             title="Pencil (pixel-art solid brush, size and shape in the options bar)"
@@ -1060,8 +1084,11 @@ export class GnumarusShell extends LitElement {
                 </div>
               `
             : html``}
+          ${this.toastMessage !== ""
+            ? html`<div class="toast" data-testid="toast">${this.toastMessage}</div>`
+            : html``}
         </div>
-        <aside class="layers-panel" aria-label="Layers">
+        <aside class="layers-panel" aria-label="Layers" ?hidden=${this.uiHidden}>
           <div class="layers-header">
             <span>Layers</span>
             <button aria-label="Add layer" title="Add layer" @click=${(): void => this.onAddLayer()}>+</button>
@@ -1257,7 +1284,7 @@ export class GnumarusShell extends LitElement {
       </div>
       ${this.renderAnimationMatrix()}
       ${this.renderMatrixMenu()}
-      <div class="statusbar">
+      <div class="statusbar" ?hidden=${this.uiHidden}>
         <span>${this.tool}</span>
         <span>${this.colorValue}</span>
         <span>${this.cursorText}</span>
@@ -1545,7 +1572,7 @@ export class GnumarusShell extends LitElement {
   private renderToolOptions() {
     if (this.tool === "pencil") {
       return html`
-        <div class="tool-options" data-testid="tool-options" aria-label="Pencil options">
+        <div class="tool-options" data-testid="tool-options" aria-label="Pencil options" ?hidden=${this.uiHidden}>
           <label
             >Brush size
             <input
@@ -1579,7 +1606,7 @@ export class GnumarusShell extends LitElement {
     }
     if (this.tool === "line") {
       return html`
-        <div class="tool-options" data-testid="tool-options" aria-label="Line options">
+        <div class="tool-options" data-testid="tool-options" aria-label="Line options" ?hidden=${this.uiHidden}>
           <label
             >Line width
             <input
@@ -1613,7 +1640,7 @@ export class GnumarusShell extends LitElement {
     }
     if (this.tool === "curve") {
       return html`
-        <div class="tool-options" data-testid="tool-options" aria-label="Curve options">
+        <div class="tool-options" data-testid="tool-options" aria-label="Curve options" ?hidden=${this.uiHidden}>
           <label
             >Curve width
             <input
@@ -1646,7 +1673,7 @@ export class GnumarusShell extends LitElement {
       `;
     }
     return html`
-      <div class="tool-options" data-testid="tool-options" aria-label="${this.tool} options">
+      <div class="tool-options" data-testid="tool-options" aria-label="${this.tool} options" ?hidden=${this.uiHidden}>
         <span class="tool-options-empty">the ${this.tool} tool does not have any setting or helper button</span>
       </div>
     `;
@@ -1659,7 +1686,7 @@ export class GnumarusShell extends LitElement {
     const matrix = this.engine.getAnimationMatrix();
     const columns = `120px repeat(${matrix.frameCount}, 76px)`;
     return html`
-      <div class="anim-matrix" data-testid="animation-matrix" aria-label="Animation matrix">
+      <div class="anim-matrix" data-testid="animation-matrix" aria-label="Animation matrix" ?hidden=${this.uiHidden}>
         <div class="anim-scroll">
           <div class="anim-grid" style="grid-template-columns: ${columns};">
             <div class="anim-corner">
@@ -1886,6 +1913,19 @@ export class GnumarusShell extends LitElement {
       void this.saveProject();
       return;
     }
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && key === "e") {
+      event.preventDefault();
+      this.mergeActiveLayerDown();
+      return;
+    }
+    if (event.key === "Tab") {
+      if (this.shadowRoot?.querySelector("dialog[open]") !== null || this.eventInField(event)) {
+        return;
+      }
+      event.preventDefault();
+      this.uiHidden = !this.uiHidden;
+      return;
+    }
     if (event.key === "Escape") {
       if (this.matrixMenu !== null) {
         this.matrixMenu = null;
@@ -1893,8 +1933,106 @@ export class GnumarusShell extends LitElement {
       if (this.contextMenuLayerId !== null) {
         this.closeLayerMenu();
       }
+      return;
+    }
+    if (event.ctrlKey || event.altKey || event.metaKey) {
+      return;
+    }
+    if (this.shadowRoot?.querySelector("dialog[open]") !== null) {
+      return;
+    }
+    if (this.eventInField(event)) {
+      return;
+    }
+    if (event.key === "PageUp") {
+      event.preventDefault();
+      this.selectLayerRelative(1);
+      return;
+    }
+    if (event.key === "PageDown") {
+      event.preventDefault();
+      this.selectLayerRelative(-1);
+      return;
+    }
+    if (event.key === "Insert") {
+      event.preventDefault();
+      this.insertLayerAboveActive();
     }
   };
+
+  /** Detect text editing focus, piercing shadow DOM retargeting via composedPath. */
+  private eventInField(event: KeyboardEvent): boolean {
+    if (typeof event.composedPath === "function") {
+      for (const node of event.composedPath()) {
+        if (
+          node instanceof HTMLInputElement ||
+          node instanceof HTMLTextAreaElement ||
+          node instanceof HTMLSelectElement
+        ) {
+          return true;
+        }
+        if (node instanceof HTMLElement && node.isContentEditable) {
+          return true;
+        }
+      }
+    }
+    const target = event.target;
+    return (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement
+    );
+  }
+
+  private showToast(message: string): void {
+    this.toastMessage = message;
+    if (this.toastTimer !== null) {
+      window.clearTimeout(this.toastTimer);
+    }
+    this.toastTimer = window.setTimeout(() => {
+      this.toastMessage = "";
+      this.toastTimer = null;
+    }, 2000);
+  }
+
+  /** Select the layer above (direction 1) or below (direction -1), wrapping around. */
+  private selectLayerRelative(direction: 1 | -1): void {
+    if (this.engine === null || this.layers.length === 0) {
+      return;
+    }
+    const active = this.layers.findIndex((layer) => layer.id === this.activeLayerId);
+    const current = active < 0 ? this.layers.length - 1 : active;
+    const next = (current + direction + this.layers.length) % this.layers.length;
+    const target = this.layers[next];
+    if (target === undefined || !this.engine.setActiveLayer(target.id)) {
+      return;
+    }
+    this.refreshLayers();
+    this.showToast(`${next + 1}/${this.layers.length}: ${target.name}`);
+  }
+
+  private insertLayerAboveActive(): void {
+    if (this.engine === null) {
+      return;
+    }
+    this.engine.insertLayerAboveActive();
+    this.refreshLayers();
+    this.dirty = true;
+    this.statusMessage = "Layer added";
+  }
+
+  private mergeActiveLayerDown(): void {
+    if (this.engine === null) {
+      return;
+    }
+    if (this.engine.mergeDown(this.engine.getActiveLayerId())) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = "Layers merged";
+    } else {
+      this.statusMessage = "Nothing below to merge with";
+    }
+  }
 
   private openNewDialog(): void {
     this.fileMenuOpen = false;

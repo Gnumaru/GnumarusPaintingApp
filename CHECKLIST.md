@@ -69,6 +69,10 @@
 - [x] Float widths: unit + e2e tests, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
 - [x] Bezier curve tool (drag endpoints + two control clicks, live path/handles/points preview, width/shape/AA)
 - [x] Curve tool: unit + e2e tests, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
+- [x] Loupe shortcut L→Z; Tab hides/shows UI; PageUp/Down wrap layer select + toast; Insert layer above; Ctrl+E merge down
+- [x] Shortcuts/UI/layers: unit + e2e tests, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
+- [x] Unit tests (vitest): pixel buffer, color models, animation model, channel lock, layer resize, grid settings, pixel grid shader, background settings, final render, project format, mapping, checker, history — 102 passed
+- [x] E2E test (Playwright): shell + menu + New + pencil + bucket + brush + line + curve + layers + merge + channel locks + layer resize + pixel grid + settings reset + background + final preview + pan + scroll limits + toolbar icons + custom picker + animation matrix + frame durations + playback + save shortcut + tool options + previews + pencil AA + Delete + float widths + loupe Z + Tab hide + PageUp/Down + Insert + Ctrl+E — 62 passed
 - [x] Unit tests (vitest): pixel buffer, color models, animation model, channel lock, layer resize, grid settings, pixel grid shader, background settings, final render, project format, mapping, checker, history — 102 passed
 - [x] E2E test (Playwright): shell + menu + New + pencil + bucket + brush + line + curve + layers + merge + channel locks + layer resize + pixel grid + settings reset + background + final preview + pan + scroll limits + toolbar icons + custom picker + animation matrix + frame durations + playback + save shortcut + tool options + previews + pencil AA + Delete + float widths — 58 passed
 - [x] Unit tests (vitest): pixel buffer, color models, animation model, channel lock, layer resize, grid settings, pixel grid shader, background settings, final render, project format, mapping, checker, history — 101 passed
