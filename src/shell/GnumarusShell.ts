@@ -48,6 +48,11 @@ import {
 import { compositeFinalImage } from "../preview/GnumarusFinalRender";
 import { decodePngToBuffer, encodeBufferToPngBlob } from "../project/GnumarusPngCodec";
 import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
+import {
+  clampBrushSize,
+  parseBrushShape,
+  type GnumarusBrushShape,
+} from "../canvas/GnumarusPixelBuffer";
 import { parseHexToRgbaBytes, rgbaBytesToHex } from "../color/GnumarusColorModels";
 import { type GnumarusTexturePixels } from "../animation/GnumarusAnimationModel";
 import {
@@ -143,6 +148,42 @@ export class GnumarusShell extends LitElement {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    .tool-options {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 30px;
+      background: #2b2b2b;
+      border-bottom: 1px solid #111;
+      padding: 2px 10px;
+      flex: 0 0 auto;
+      font-size: 12px;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+    .tool-options label {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .tool-options input[type="number"] {
+      width: 64px;
+      background: #1e1e1e;
+      color: #e6e6e6;
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 2px 6px;
+    }
+    .tool-options select {
+      background: #1e1e1e;
+      color: #e6e6e6;
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 2px 6px;
+    }
+    .tool-options .tool-options-empty {
+      color: #9a9a9a;
     }
     .body {
       display: flex;
@@ -678,6 +719,8 @@ export class GnumarusShell extends LitElement {
     durationTargetFrame: { type: Number },
     durationValue: { type: Number },
     playing: { type: Boolean },
+    brushSize: { type: Number },
+    brushShape: { type: String },
   };
 
   declare tool: GnumarusCanvasTool;
@@ -729,6 +772,8 @@ export class GnumarusShell extends LitElement {
   declare durationTargetFrame: number | null;
   declare durationValue: number | null;
   declare playing: boolean;
+  declare brushSize: number;
+  declare brushShape: GnumarusBrushShape;
 
   private engine: GnumarusCanvasEngine | null = null;
   private directoryHandle: GnumarusDirectoryHandle | null = null;
@@ -783,6 +828,8 @@ export class GnumarusShell extends LitElement {
     this.durationValue = null;
     this.playing = false;
     this.playTimer = null;
+    this.brushSize = 1;
+    this.brushShape = "square";
   }
 
   render() {
@@ -831,11 +878,12 @@ export class GnumarusShell extends LitElement {
         </div>
         <span class="app-title">Gnumaru's Painting and Animation App${this.dirty ? " — *modified*" : ""}</span>
       </div>
+      ${this.renderToolOptions()}
       <div class="body">
         <div class="toolbar">
           <button
             class=${this.tool === "pencil" ? "active" : ""}
-            title="Pencil (pixel-art, 1px solid)"
+            title="Pencil (pixel-art solid brush, size and shape in the options bar)"
             aria-label="Pencil"
             @click=${(): void => {
               this.tool = "pencil";
@@ -864,7 +912,7 @@ export class GnumarusShell extends LitElement {
               this.engine?.setTool("bucket");
             }}
           >
-            <span class="tool-icon">🪣</span>
+            <span class="tool-icon">◼</span>
           </button>
           <button
             class=${this.tool === "transform" ? "active" : ""}
@@ -1432,6 +1480,39 @@ export class GnumarusShell extends LitElement {
     `;
   }
 
+  private renderToolOptions() {
+    if (this.tool === "pencil") {
+      return html`
+        <div class="tool-options" data-testid="tool-options" aria-label="Pencil options">
+          <label
+            >Brush size
+            <input
+              type="number"
+              id="brushSize"
+              min="1"
+              max="64"
+              step="1"
+              .value=${String(this.brushSize)}
+              @input=${(): void => this.applyBrushSizeFromDialog()}
+            />
+          </label>
+          <label
+            >Brush shape
+            <select id="brushShape" .value=${this.brushShape} @change=${(): void => this.applyBrushShapeFromDialog()}>
+              <option value="square">Square</option>
+              <option value="circle">Circle</option>
+            </select>
+          </label>
+        </div>
+      `;
+    }
+    return html`
+      <div class="tool-options" data-testid="tool-options" aria-label="${this.tool} options">
+        <span class="tool-options-empty">the ${this.tool} tool does not have any setting or helper button</span>
+      </div>
+    `;
+  }
+
   private renderAnimationMatrix() {
     if (this.engine === null) {
       return html``;
@@ -1954,6 +2035,46 @@ export class GnumarusShell extends LitElement {
     }
     this.colorValue = rgbaBytesToHex(parsed);
     this.engine?.setColor(this.colorValue);
+  }
+
+  /** Test hook: set the brush size (integers 1..64, clamped). */
+  setBrushSize(size: number): void {
+    const clamped = clampBrushSize(size);
+    this.brushSize = clamped;
+    this.engine?.setBrushSize(clamped);
+    this.statusMessage = `Brush size: ${clamped}`;
+  }
+
+  /** Test hook: set the brush shape (square/circle, defaults to square). */
+  setBrushShape(shape: GnumarusBrushShape): void {
+    const parsed = parseBrushShape(shape);
+    this.brushShape = parsed;
+    this.engine?.setBrushShape(parsed);
+    this.statusMessage = `Brush shape: ${parsed}`;
+  }
+
+  private currentDialogBrushSize(): number {
+    const input = this.shadowRoot?.getElementById("brushSize") as HTMLInputElement | null;
+    return clampBrushSize(Number(input?.value ?? "1") || 1);
+  }
+
+  private currentDialogBrushShape(): GnumarusBrushShape {
+    const select = this.shadowRoot?.getElementById("brushShape") as HTMLSelectElement | null;
+    return parseBrushShape(select?.value ?? "square");
+  }
+
+  private applyBrushSizeFromDialog(): void {
+    const size = this.currentDialogBrushSize();
+    this.brushSize = size;
+    this.engine?.setBrushSize(size);
+    this.statusMessage = `Brush size: ${size}`;
+  }
+
+  private applyBrushShapeFromDialog(): void {
+    const shape = this.currentDialogBrushShape();
+    this.brushShape = shape;
+    this.engine?.setBrushShape(shape);
+    this.statusMessage = `Brush shape: ${shape}`;
   }
 
   /** Test and picker hook: set checker color A (opaque hex only). */

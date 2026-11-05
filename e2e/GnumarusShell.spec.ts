@@ -1323,7 +1323,7 @@ test("toolbar icons fill buttons without growing them", async ({ page }) => {
   const expected: Record<string, { w: number; h: number }> = {
     Pencil: { w: 33, h: 25 },
     Loupe: { w: 30, h: 25 },
-    "Bucket fill": { w: 38, h: 25 },
+    "Bucket fill": { w: 33, h: 25 },
     Transform: { w: 31, h: 29 },
     "Final preview": { w: 32, h: 29 },
   };
@@ -1758,6 +1758,120 @@ test("bucket fill fills a contiguous region without crossing barriers", async ({
   await expect(page.locator("gnumarus-shell")).toContainText("bucket");
   await page.keyboard.press("p");
   await expect(page.locator("gnumarus-shell")).toContainText("pencil");
+});
+
+test("tool options bar shows pencil brush settings and empty labels otherwise", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const options = page.locator('gnumarus-shell [data-testid="tool-options"]');
+  await expect(options).toBeVisible();
+  await expect(options).toContainText("Brush size");
+  await expect(options).toContainText("Brush shape");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await expect(options).toContainText("the bucket tool does not have any setting or helper button");
+  await page.getByRole("button", { name: "Loupe" }).click();
+  await expect(options).toContainText("the loupe tool does not have any setting or helper button");
+  await page.getByRole("button", { name: "Transform" }).click();
+  await expect(options).toContainText("the transform tool does not have any setting or helper button");
+  await page.getByRole("button", { name: "Pencil" }).click();
+  await expect(options).toContainText("Brush size");
+  const icon = await page.evaluate(() => {
+    const root = document.querySelector("gnumarus-shell")?.shadowRoot;
+    const button = Array.from(root?.querySelectorAll('button[aria-label="Bucket fill"]') ?? [])[0];
+    return button?.querySelector(".tool-icon")?.textContent ?? "";
+  });
+  expect(icon).not.toContain("🪣");
+  expect(icon.trim().length).toBeGreaterThan(0);
+});
+
+test("pencil brush size and shape paint thick strokes", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          loadProject(
+            width: number,
+            height: number,
+            inputs: Array<{
+              id: string;
+              name: string;
+              visible: boolean;
+              opacity: number;
+              width: number;
+              height: number;
+              buffer: Uint8ClampedArray;
+              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
+            }>,
+          ): void;
+        };
+      };
+    };
+    root.__gnumarus?.engine?.loadProject(64, 64, [
+      {
+        id: "tiny",
+        name: "Tiny",
+        visible: true,
+        opacity: 1,
+        width: 8,
+        height: 8,
+        buffer: new Uint8ClampedArray(8 * 8 * 4),
+        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+      },
+    ]);
+  });
+  const brushOf = (): Promise<{ size: number; shape: string }> =>
+    page.evaluate(() => {
+      const root = window as unknown as {
+        __gnumarus?: { engine?: { getBrushSize(): number; getBrushShape(): string } };
+      };
+      return {
+        size: root.__gnumarus?.engine?.getBrushSize() ?? 0,
+        shape: root.__gnumarus?.engine?.getBrushShape() ?? "",
+      };
+    });
+  await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toContainText("Brush size");
+  await page.locator("gnumarus-shell input#brushSize").fill("3");
+  await expect(page.locator("gnumarus-shell")).toContainText("Brush size: 3");
+  expect(await brushOf()).toEqual({ size: 3, shape: "square" });
+  await page.locator("gnumarus-shell select#brushShape").selectOption("circle");
+  await expect(page.locator("gnumarus-shell")).toContainText("Brush shape: circle");
+  expect(await brushOf()).toEqual({ size: 3, shape: "circle" });
+  await page.locator("gnumarus-shell input#brushSize").fill("99");
+  expect(await brushOf()).toEqual({ size: 64, shape: "circle" });
+  await page.locator("gnumarus-shell input#brushSize").fill("3");
+  await page.locator("gnumarus-shell select#brushShape").selectOption("square");
+  await setPencil(page, "#ff0000");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const paintAt = async (lx: number, ly: number): Promise<void> => {
+    const state = await getViewState(page);
+    const target = layerPixelToScreen(
+      lx,
+      ly,
+      { left: box.x, top: box.y, width: box.width, height: box.height },
+      8,
+      8,
+      { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false },
+      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+    );
+    await page.mouse.click(target.x, target.y);
+  };
+  await paintAt(4, 4);
+  expect(await readPixel(page, 4, 4)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 3, 3)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 5, 5)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 4, 4)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  await page.locator("gnumarus-shell select#brushShape").selectOption("circle");
+  await paintAt(4, 4);
+  expect(await readPixel(page, 4, 4)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 3, 3)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 4, 3)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
 async function getMatrixFrame(page: import("@playwright/test").Page): Promise<number> {

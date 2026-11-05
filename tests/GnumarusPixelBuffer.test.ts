@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  clampBrushSize,
   clearPixelBuffer,
   compositeOver,
   createPixelBuffer,
+  drawBrushLine,
+  drawBrushStamp,
   drawPixelLine,
   floodFill,
   getPixel,
+  parseBrushShape,
   parseHexColor,
   setPixel,
 } from "../src/canvas/GnumarusPixelBuffer";
@@ -131,5 +135,54 @@ describe("GnumarusPixelBuffer", () => {
     const filled = floodFill(buffer, 2, 2, 0, 0, fill, { r: true, g: false, b: false, a: false });
     expect(filled).toBe(4);
     expect(getPixel(buffer, 2, 2, 1, 1)).toEqual({ r: 10, g: 210, b: 220, a: 230 });
+  });
+
+  it("clamps brush size and parses brush shape", () => {
+    expect(clampBrushSize(1)).toBe(1);
+    expect(clampBrushSize(64)).toBe(64);
+    expect(clampBrushSize(0)).toBe(1);
+    expect(clampBrushSize(65)).toBe(64);
+    expect(clampBrushSize(3.9)).toBe(3);
+    expect(clampBrushSize(Number.NaN)).toBe(1);
+    expect(parseBrushShape("circle")).toBe("circle");
+    expect(parseBrushShape("square")).toBe("square");
+    expect(parseBrushShape("triangle")).toBe("square");
+    expect(parseBrushShape(undefined)).toBe("square");
+  });
+
+  it("stamps square and circle tips", () => {
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    const square = createPixelBuffer(5, 5);
+    drawBrushStamp(square, 5, 5, 2, 2, 3, "square", red);
+    for (let y = 1; y <= 3; y += 1) {
+      for (let x = 1; x <= 3; x += 1) {
+        expect(getPixel(square, 5, 5, x, y)).toEqual(red);
+      }
+    }
+    expect(getPixel(square, 5, 5, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    const circle = createPixelBuffer(5, 5);
+    drawBrushStamp(circle, 5, 5, 2, 2, 3, "circle", red);
+    expect(getPixel(circle, 5, 5, 2, 2)).toEqual(red);
+    expect(getPixel(circle, 5, 5, 2, 1)).toEqual(red);
+    expect(getPixel(circle, 5, 5, 1, 1)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    expect(getPixel(circle, 5, 5, 3, 3)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  });
+
+  it("draws brush lines with thickness and locks", () => {
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    const thick = createPixelBuffer(8, 8);
+    drawBrushLine(thick, 8, 8, 1, 1, 5, 1, 3, "square", red);
+    expect(getPixel(thick, 8, 8, 3, 0)).toEqual(red);
+    expect(getPixel(thick, 8, 8, 3, 2)).toEqual(red);
+    expect(getPixel(thick, 8, 8, 3, 3)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    const masked = createPixelBuffer(4, 4);
+    const target = { r: 10, g: 20, b: 30, a: 40 };
+    for (let y = 0; y < 4; y += 1) {
+      for (let x = 0; x < 4; x += 1) {
+        setPixel(masked, 4, 4, x, y, target);
+      }
+    }
+    drawBrushStamp(masked, 4, 4, 1, 1, 2, "square", red, { r: true, g: false, b: false, a: false });
+    expect(getPixel(masked, 4, 4, 1, 1)).toEqual({ r: 10, g: 0, b: 0, a: 255 });
   });
 });

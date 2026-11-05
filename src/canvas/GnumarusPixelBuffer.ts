@@ -266,6 +266,112 @@ export function floodFill(
   return filled;
 }
 
+export type GnumarusBrushShape = "square" | "circle";
+
+export const GNUMARUS_MIN_BRUSH_SIZE = 1;
+export const GNUMARUS_MAX_BRUSH_SIZE = 64;
+
+/** Clamp a brush size to the supported integer range 1..64. */
+export function clampBrushSize(value: number): number {
+  if (!Number.isFinite(value)) {
+    return GNUMARUS_MIN_BRUSH_SIZE;
+  }
+  return Math.min(GNUMARUS_MAX_BRUSH_SIZE, Math.max(GNUMARUS_MIN_BRUSH_SIZE, Math.floor(value)));
+}
+
+/** Parse a brush shape, defaulting to square for missing or invalid input. */
+export function parseBrushShape(value: unknown): GnumarusBrushShape {
+  return value === "circle" ? "circle" : "square";
+}
+
+/**
+ * Stamp a solid brush tip centered near (centerX, centerY).
+ * Square paints the full size x size box; circle paints the disk mask
+ * (squared distance from the box center within (size/2)^2 - 0.5, floored at 0,
+ * so 1px is one pixel, 2px is 2x2, 3px is a plus, 4px cuts corners, and so on).
+ * The box top-left is (center - floor((size-1)/2)). Out-of-bounds pixels are skipped.
+ */
+export function drawBrushStamp(
+  buffer: Uint8ClampedArray,
+  width: number,
+  height: number,
+  centerX: number,
+  centerY: number,
+  size: number,
+  shape: GnumarusBrushShape,
+  color: GnumarusRgba,
+  locked: GnumarusChannelLock | undefined = undefined,
+): void {
+  const tip = clampBrushSize(size);
+  const anchor = Math.floor((tip - 1) / 2);
+  const left = centerX - anchor;
+  const top = centerY - anchor;
+  if (shape === "square") {
+    for (let dy = 0; dy < tip; dy += 1) {
+      for (let dx = 0; dx < tip; dx += 1) {
+        setPixel(buffer, width, height, left + dx, top + dy, color, locked);
+      }
+    }
+    return;
+  }
+  const center = (tip - 1) / 2;
+  const threshold = Math.max(0, (tip * tip) / 4 - 0.5);
+  for (let dy = 0; dy < tip; dy += 1) {
+    for (let dx = 0; dx < tip; dx += 1) {
+      const distSquared = (dx - center) * (dx - center) + (dy - center) * (dy - center);
+      if (distSquared <= threshold + 1e-9) {
+        setPixel(buffer, width, height, left + dx, top + dy, color, locked);
+      }
+    }
+  }
+}
+
+/**
+ * Brush stroke along a Bresenham path, stamping the tip at every path pixel.
+ * Preserves the 1px pencil path exactly when size is 1 (either shape).
+ */
+export function drawBrushLine(
+  buffer: Uint8ClampedArray,
+  width: number,
+  height: number,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  size: number,
+  shape: GnumarusBrushShape,
+  color: GnumarusRgba,
+  locked: GnumarusChannelLock | undefined = undefined,
+): void {
+  const tip = clampBrushSize(size);
+  if (tip <= 1) {
+    drawPixelLine(buffer, width, height, x0, y0, x1, y1, color, locked);
+    return;
+  }
+  let x = x0;
+  let y = y0;
+  const dx = Math.abs(x1 - x0);
+  const dy = Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy;
+  for (;;) {
+    drawBrushStamp(buffer, width, height, x, y, tip, shape, color, locked);
+    if (x === x1 && y === y1) {
+      break;
+    }
+    const e2 = 2 * err;
+    if (e2 > -dy) {
+      err -= dy;
+      x += sx;
+    }
+    if (e2 < dx) {
+      err += dx;
+      y += sy;
+    }
+  }
+}
+
 /** Per-pixel straight-alpha source-over: src[srcIndex..] over dst[dstIndex..]. */
 export function compositePixelOver(
   dst: Uint8ClampedArray,

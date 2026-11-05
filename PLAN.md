@@ -91,6 +91,12 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - New toolbar tool fills contiguous regions of identical RGBA color in the active cell texture with the current solid color (4-way flood fill, exact match on all four channels).
 - Respects channel locks like the pencil (locked channels keep old values); fully-locked or same-color fills are no-ops with no history entry.
 - Single click fills; undoable via the same region-diff history as strokes; empty cells materialize first; shortcut `B`.
+- Bucket toolbar glyph is a monochrome geometric mark in the same style as pencil/loupe/transform (no color emoji).
+
+## 16. Tool options bar + brush size/shape (implemented)
+- A tool options bar sits immediately below the menu bar for the active tool. Tools without settings show exactly `the <tool-name> tool does not have any setting or helper button`.
+- Pencil options: brush size integer 1..64 (clamped) and shape square/circle (disk mask for circle); stamping along the stroke path; same channel-lock masking; undoable.
+- Bucket toolbar glyph is a monochrome geometric mark in the same style as pencil/loupe/transform (no color emoji).
 
 ## 11. Custom color picker (implemented)
 - Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).

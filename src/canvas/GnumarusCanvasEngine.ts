@@ -1,16 +1,19 @@
 import * as THREE from "three";
 import {
   clearPixelBuffer,
+  clampBrushSize,
   clampLayerDim,
   compositePixelOver,
   createPixelBuffer,
-  drawPixelLine,
+  drawBrushLine,
+  drawBrushStamp,
   floodFill,
   getPixel,
+  parseBrushShape,
   parseChannelLock,
   parseHexColor,
   resizePixelBuffer,
-  setPixel,
+  type GnumarusBrushShape,
   type GnumarusChannelLock,
   type GnumarusRgba,
 } from "./GnumarusPixelBuffer";
@@ -305,6 +308,8 @@ export class GnumarusCanvasEngine {
   private transformRotating = false;
   private transformLastAngle: number | null = null;
   private color: GnumarusRgba = { r: 0, g: 0, b: 0, a: 255 };
+  private brushSize = 1;
+  private brushShape: GnumarusBrushShape = "square";
   private drawing = false;
   private panning = false;
   private spaceDown = false;
@@ -1764,6 +1769,34 @@ export class GnumarusCanvasEngine {
     }
   }
 
+  getBrushSize(): number {
+    return this.brushSize;
+  }
+
+  getBrushShape(): GnumarusBrushShape {
+    return this.brushShape;
+  }
+
+  setBrushSize(size: number): boolean {
+    const clamped = clampBrushSize(size);
+    if (clamped === this.brushSize) {
+      return false;
+    }
+    this.brushSize = clamped;
+    this.emitStats();
+    return true;
+  }
+
+  setBrushShape(shape: GnumarusBrushShape): boolean {
+    const parsed = parseBrushShape(shape);
+    if (parsed === this.brushShape) {
+      return false;
+    }
+    this.brushShape = parsed;
+    this.emitStats();
+    return true;
+  }
+
   clear(): void {
     const layer = this.activeLayer();
     if (layer === null) {
@@ -2232,7 +2265,17 @@ export class GnumarusCanvasEngine {
       this.lastPixel = pixel;
       this.strokeBase = tex.buffer.slice();
       this.strokeLayerId = tex.id;
-      setPixel(tex.buffer, tex.width, tex.height, pixel.x, pixel.y, this.color, layer.lockedChannels);
+      drawBrushStamp(
+        tex.buffer,
+        tex.width,
+        tex.height,
+        pixel.x,
+        pixel.y,
+        this.brushSize,
+        this.brushShape,
+        this.color,
+        layer.lockedChannels,
+      );
       this.markTextureViewsDirty(tex.id);
       this.render();
       this.onPixelsChanged();
@@ -2314,7 +2357,7 @@ export class GnumarusCanvasEngine {
         if (tex === undefined) {
           return;
         }
-        drawPixelLine(
+        drawBrushLine(
           tex.buffer,
           tex.width,
           tex.height,
@@ -2322,6 +2365,8 @@ export class GnumarusCanvasEngine {
           this.lastPixel.y,
           pixel.x,
           pixel.y,
+          this.brushSize,
+          this.brushShape,
           this.color,
           layer.lockedChannels,
         );
