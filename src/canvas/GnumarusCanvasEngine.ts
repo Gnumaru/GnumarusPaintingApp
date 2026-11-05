@@ -105,7 +105,8 @@ export class GnumarusCanvasEngine {
     this.material = new THREE.ShaderMaterial({
       uniforms: {
         uMap: { value: this.texture },
-        uCheckerPx: { value: 12 },
+        uImageW: { value: this.imageWidth },
+        uImageH: { value: this.imageHeight },
       },
       vertexShader: [
         "varying vec2 vUv;",
@@ -118,10 +119,12 @@ export class GnumarusCanvasEngine {
         "precision mediump float;",
         "varying vec2 vUv;",
         "uniform sampler2D uMap;",
-        "uniform float uCheckerPx;",
+        "uniform float uImageW;",
+        "uniform float uImageH;",
         "void main() {",
         "  vec4 tex = texture2D(uMap, vUv);",
-        "  vec2 grid = floor(gl_FragCoord.xy / uCheckerPx);",
+        "  vec2 ipos = vec2(vUv.x * uImageW, vUv.y * uImageH);",
+        "  vec2 grid = floor(ipos / 16.0);",
         "  float c = mod(grid.x + grid.y, 2.0);",
         "  vec3 check = mix(vec3(0.78), vec3(0.58), c);",
         "  vec3 rgb = mix(check, tex.rgb, tex.a);",
@@ -151,12 +154,24 @@ export class GnumarusCanvasEngine {
     return this.buffer;
   }
 
+  private syncImageUniforms(): void {
+    const w = this.material.uniforms["uImageW"];
+    const h = this.material.uniforms["uImageH"];
+    if (w !== undefined) {
+      w.value = this.imageWidth;
+    }
+    if (h !== undefined) {
+      h.value = this.imageHeight;
+    }
+  }
+
   newProject(width: number, height: number): void {
     this.imageWidth = width;
     this.imageHeight = height;
     this.buffer = createPixelBuffer(width, height);
     this.texture.image = { data: this.buffer, width, height };
     this.texture.needsUpdate = true;
+    this.syncImageUniforms();
     this.resetView();
     this.render();
     this.emitStats();
@@ -170,6 +185,7 @@ export class GnumarusCanvasEngine {
     this.buffer = copy;
     this.texture.image = { data: this.buffer, width, height };
     this.texture.needsUpdate = true;
+    this.syncImageUniforms();
     this.resetView();
     this.render();
     this.emitStats();
@@ -365,7 +381,6 @@ export class GnumarusCanvasEngine {
     const height = Math.max(1, Math.floor(rect.height));
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     this.renderer.setPixelRatio(dpr);
-    this.material.uniforms["uCheckerPx"]!.value = 12 * dpr;
     this.renderer.setSize(width, height, false);
     this.layoutScene();
     this.render();
