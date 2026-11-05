@@ -724,6 +724,7 @@ export class GnumarusShell extends LitElement {
     playing: { type: Boolean },
     brushSize: { type: Number },
     brushShape: { type: String },
+    pencilAntialias: { type: Boolean },
     lineWidth: { type: Number },
     lineShape: { type: String },
     lineAntialias: { type: Boolean },
@@ -780,6 +781,7 @@ export class GnumarusShell extends LitElement {
   declare playing: boolean;
   declare brushSize: number;
   declare brushShape: GnumarusBrushShape;
+  declare pencilAntialias: boolean;
   declare lineWidth: number;
   declare lineShape: GnumarusBrushShape;
   declare lineAntialias: boolean;
@@ -839,6 +841,7 @@ export class GnumarusShell extends LitElement {
     this.playTimer = null;
     this.brushSize = 1;
     this.brushShape = "square";
+    this.pencilAntialias = false;
     this.lineWidth = 1;
     this.lineShape = "square";
     this.lineAntialias = false;
@@ -1542,6 +1545,15 @@ export class GnumarusShell extends LitElement {
               <option value="circle">Circle</option>
             </select>
           </label>
+          <label
+            ><input
+              type="checkbox"
+              id="pencilAntialias"
+              .checked=${this.pencilAntialias}
+              @change=${(): void => this.applyPencilAntialiasFromDialog()}
+            />
+            Anti-aliasing
+          </label>
         </div>
       `;
     }
@@ -2148,6 +2160,26 @@ export class GnumarusShell extends LitElement {
     this.brushShape = shape;
     this.engine?.setBrushShape(shape);
     this.statusMessage = `Brush shape: ${shape}`;
+  }
+
+  /** Test hook: enable or disable pencil anti-aliasing. */
+  setPencilAntialias(enabled: boolean): void {
+    const next = enabled === true;
+    this.pencilAntialias = next;
+    this.engine?.setPencilAntialias(next);
+    this.statusMessage = `Pencil anti-aliasing: ${next ? "on" : "off"}`;
+  }
+
+  private currentDialogPencilAntialias(): boolean {
+    const input = this.shadowRoot?.getElementById("pencilAntialias") as HTMLInputElement | null;
+    return input?.checked === true;
+  }
+
+  private applyPencilAntialiasFromDialog(): void {
+    const enabled = this.currentDialogPencilAntialias();
+    this.pencilAntialias = enabled;
+    this.engine?.setPencilAntialias(enabled);
+    this.statusMessage = `Pencil anti-aliasing: ${enabled ? "on" : "off"}`;
   }
 
   /** Test hook: set the line width (integers 1..64, clamped). */

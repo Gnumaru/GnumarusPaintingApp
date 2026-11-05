@@ -1,7 +1,7 @@
 # FEATURES_SUMMARY — Gnumaru's Painting and Animation App (v1 MVP)
 
 - Desktop app shell: top menu bar (File > New/Open/Save, Edit > Undo/Redo/Settings/Reset Canvas Transform), left toolbar, central canvas, right layers panel, bottom status bar.
-- Pixel-art pencil: solid color (including alpha), no anti-aliasing, brush size 1..64 with square/circle tip set in the tool options bar, live tip preview following the mouse.
+- Pixel-art pencil: solid color (including alpha), brush size 1..64 with square/circle tip plus anti-aliasing toggle in the tool options bar, live tip preview following the mouse.
 - Bucket fill: click fills the contiguous region of identical RGBA color with the current solid color (4-way, channel-lock aware, undoable, shortcut `B`); monochrome line-bucket toolbar glyph matching the other tools.
 - Line tool: two clicks define a segment with width 1..64, square/circle ends and optional anti-aliasing; tip preview plus rubber-band preview; undoable; shortcut `N`.
 - Tool options bar immediately below the menu bar: pencil shows brush size/shape; line shows width/shape/anti-aliasing; every other tool shows exactly `the <tool-name> tool does not have any setting or helper button`.
@@ -12,7 +12,7 @@
 - Final preview: floating resizable window with internal zoom and any-button drag pan of the flattened PNG-like render.
 - Animation matrix above the status bar: rows are project layers, columns are animation frames; each cell holds zero or one shareable cell content (texture plus transform settings). New frames start empty; cell menu creates/associates/dissociates contents and texture links.
 - Frame durations and playback: each frame may carry an explicit duration in milliseconds (frame header menu, Set/Clear dialog, 1..60000 ms, empty means project default); project default 100 ms in Edit > Settings Animation section with per-setting reset arrow, stored in `project.json`; play/stop transport in the matrix corner starts from the currently selected frame, each frame shows for its own duration or the project default, looping until stopped.
-- Layers: add, delete, reorder, rename, visibility, opacity, right-click Merge Down (undoable); Transform tool edits the active cell content; painting and clear target the active cell content at the current frame (empty cells materialize on first use).
+- Layers: add, delete, reorder, rename, visibility, opacity, right-click Merge Down (undoable); Transform tool edits the active cell content; painting and clear target the active cell content at the current frame (empty cells materialize on first use). `Delete` resets the current cell texture to transparent zeros in all channels (ignoring locks, undoable).
 - Layer resize: per-layer width/height 1..1024 via Resize button + dialog; expand fills transparent right and below, shrink crops right and below, top-left preserved; undoable.
 - Channel lock: per-layer R/G/B/A lock toggles; paint, clear and Merge Down write only unlocked channels (locked channels keep old values).
 - Undo/redo for image edits and layer resizes (`Ctrl+Z` / `Ctrl+Y`), region-based history tagged per texture.

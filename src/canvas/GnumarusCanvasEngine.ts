@@ -5,8 +5,6 @@ import {
   clampLayerDim,
   compositePixelOver,
   createPixelBuffer,
-  drawBrushLine,
-  drawBrushStamp,
   drawLineSegment,
   floodFill,
   getPixel,
@@ -311,6 +309,7 @@ export class GnumarusCanvasEngine {
   private color: GnumarusRgba = { r: 0, g: 0, b: 0, a: 255 };
   private brushSize = 1;
   private brushShape: GnumarusBrushShape = "square";
+  private pencilAntialias = false;
   private lineWidth = 1;
   private lineShape: GnumarusBrushShape = "square";
   private lineAntialias = false;
@@ -1836,6 +1835,21 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
+  getPencilAntialias(): boolean {
+    return this.pencilAntialias;
+  }
+
+  setPencilAntialias(enabled: boolean): boolean {
+    const next = enabled === true;
+    if (next === this.pencilAntialias) {
+      return false;
+    }
+    this.pencilAntialias = next;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
   getLineWidth(): number {
     return this.lineWidth;
   }
@@ -2029,6 +2043,45 @@ export class GnumarusCanvasEngine {
     this.onPixelsChanged();
     this.onLayersChanged?.();
     this.emitStats();
+  }
+
+  /**
+   * Reset the current cell texture to zeros in all RGBA channels, ignoring
+   * channel locks. Does not materialize empty cells. Returns true when pixels
+   * changed (undoable via the same region-diff history as strokes).
+   */
+  clearCurrentCellTexture(): boolean {
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return false;
+    }
+    const contentId = this.getCellContentId(layer.id, this.currentFrame);
+    if (contentId === null) {
+      return false;
+    }
+    const content = this.contents.get(contentId);
+    if (content === undefined || content.textureId === null) {
+      return false;
+    }
+    const tex = this.textures.get(content.textureId);
+    if (tex === undefined) {
+      return false;
+    }
+    const base = tex.buffer.slice();
+    tex.buffer.fill(0);
+    const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
+    if (diff === null) {
+      return false;
+    }
+    this.history.push({ type: "stroke", layerId: tex.id, diff });
+    this.syncAllLayerRenders();
+    this.markTextureViewsDirty(tex.id);
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return true;
   }
 
   /**
@@ -2511,14 +2564,17 @@ export class GnumarusCanvasEngine {
       this.lastPixel = pixel;
       this.strokeBase = tex.buffer.slice();
       this.strokeLayerId = tex.id;
-      drawBrushStamp(
+      drawLineSegment(
         tex.buffer,
         tex.width,
         tex.height,
         pixel.x,
         pixel.y,
+        pixel.x,
+        pixel.y,
         this.brushSize,
         this.brushShape,
+        this.pencilAntialias,
         this.color,
         layer.lockedChannels,
       );
@@ -2605,7 +2661,7 @@ export class GnumarusCanvasEngine {
         if (tex === undefined) {
           return;
         }
-        drawBrushLine(
+        drawLineSegment(
           tex.buffer,
           tex.width,
           tex.height,
@@ -2615,6 +2671,7 @@ export class GnumarusCanvasEngine {
           pixel.y,
           this.brushSize,
           this.brushShape,
+          this.pencilAntialias,
           this.color,
           layer.lockedChannels,
         );
@@ -2673,11 +2730,30 @@ export class GnumarusCanvasEngine {
         this.spaceDown = true;
         return;
       }
-      const target = event.target;
-      const inField =
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLSelectElement;
+      // Keyboard events from inside shadow DOM retarget `target` to the host,
+      // so inspect the composed path to reliably detect text fields.
+      const inField = ((): boolean => {
+        if (typeof event.composedPath === "function") {
+          for (const node of event.composedPath()) {
+            if (
+              node instanceof HTMLInputElement ||
+              node instanceof HTMLTextAreaElement ||
+              node instanceof HTMLSelectElement
+            ) {
+              return true;
+            }
+            if (node instanceof HTMLElement && node.isContentEditable) {
+              return true;
+            }
+          }
+        }
+        const target = event.target;
+        return (
+          target instanceof HTMLInputElement ||
+          target instanceof HTMLTextAreaElement ||
+          target instanceof HTMLSelectElement
+        );
+      })();
       if (!event.ctrlKey && !event.altKey && !event.metaKey && !inField) {
         if (event.key === "p" || event.key === "P") {
           this.setTool("pencil");
@@ -2702,6 +2778,11 @@ export class GnumarusCanvasEngine {
         if (event.key === "Escape" && this.tool === "line" && this.lineAnchor !== null) {
           this.lineAnchor = null;
           this.updatePreviews();
+          return;
+        }
+        if (event.key === "Delete") {
+          event.preventDefault();
+          this.clearCurrentCellTexture();
           return;
         }
       }

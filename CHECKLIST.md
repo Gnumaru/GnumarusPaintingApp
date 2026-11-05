@@ -63,6 +63,10 @@
 - [x] Better bucket icon (monochrome line style matching other tools)
 - [x] Pencil tip preview + line tool (two-click segment, width/shape/aliasing, tip + rubber-band previews)
 - [x] Line/preview: unit + e2e tests, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
+- [x] Pencil anti-aliasing checkbox + Delete resets current cell texture to zeros
+- [x] Pencil AA + Delete: unit + e2e tests, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
+- [x] Unit tests (vitest): pixel buffer, color models, animation model, channel lock, layer resize, grid settings, pixel grid shader, background settings, final render, project format, mapping, checker, history — 100 passed
+- [x] E2E test (Playwright): shell + menu + New + pencil + bucket + brush + line + layers + merge + channel locks + layer resize + pixel grid + settings reset + background + final preview + pan + scroll limits + toolbar icons + custom picker + animation matrix + frame durations + playback + save shortcut + tool options + previews + pencil AA + Delete — 56 passed
 - [x] Unit tests (vitest): pixel buffer, color models, animation model, channel lock, layer resize, grid settings, pixel grid shader, background settings, final render, project format, mapping, checker, history — 100 passed
 - [x] E2E test (Playwright): shell + menu + New + pencil + bucket + brush + line + layers + merge + channel locks + layer resize + pixel grid + settings reset + background + final preview + pan + scroll limits + toolbar icons + custom picker + animation matrix + frame durations + playback + save shortcut + tool options + previews — 54 passed
 - [x] Unit tests (vitest): pixel buffer, color models, animation model, channel lock, layer resize, grid settings, pixel grid shader, background settings, final render, project format, mapping, checker, history — 98 passed
