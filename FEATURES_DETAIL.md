@@ -4,7 +4,7 @@
 
 - `gnumarus-shell` Lit component: menu bar, toolbar, canvas host, status bar, New-canvas dialog, Settings dialog.
 - File menu items: New (width/height dialog, 1..1024, default 64x64), Open (directory picker), Save (writes to picked directory, reuses the handle afterwards).
-- Edit menu items: Settings (checkerboard mode image-space/screen-space, independent square width/height 1..128 default 16x16, colors A/B with Reset defaults; applied live and persisted to `localStorage`).
+- Edit menu items: Settings (checkerboard mode image-space/screen-space, independent square width/height 1..128 default 16x16, colors A/B with Reset defaults; applied live and persisted to `localStorage`) and Reset Canvas Transform (restores fit zoom, rotation, flips).
 - Toolbar: pencil tool (pixel-art) and loupe tool (zoom/rotate/flip) plus a color input.
 - Status bar shows tool, rotation degrees, flip state, hex color, cursor pixel coordinates, canvas dimensions, zoom percentage, project name, modified marker, WebGL2/FS-API messages.
 - All UI strings in American English.
@@ -14,7 +14,7 @@
 - Single `THREE.WebGLRenderer` (WebGL2-only, no fallback). Throws `GnumarusWebGlError` with a user-facing message when WebGL2 is unavailable.
 - One `THREE.DataTexture` (`NearestFilter`, no mipmaps) over a CPU `Uint8ClampedArray` RGBA buffer; orthographic camera; a custom `ShaderMaterial` composites the layer over a configurable transparency checker (image-space squares that pan/zoom with the canvas, or fixed screen-space squares; size and both colors editable in Edit > Settings, persisted to `localStorage`), while the scene clear color (`#333333`) fills everything outside the drawable area.
 - View transform (view-only, buffer stays canonical): zoom 0.5x..64x, arbitrary rotation (clockwise-positive), horizontal/vertical mirror. The plane scale/rotation renders it; pointer mapping inverts the full transform so painting works while transformed.
-- Tools: pencil (1px solid, Bresenham, draws through the current transform) and loupe — left-drag zooms (up/right in, down/left out, anchored at drag start), right-drag rotates around the image center, middle-click flips X (Shift+middle-click flips Y).
+- Tools: pencil (`P`, 1px solid, Bresenham, draws through the current transform) and loupe (`L`) — left-drag zooms (up/right in, down/left out, anchored at drag start), right-drag rotates around the image center, middle-click flips X (Shift+middle-click flips Y, Ctrl+middle-click resets the transform).
 - Zoom (wheel with zoom-to-cursor even while rotated, keyboard shortcuts `Ctrl+Alt+=` / `Ctrl+Alt++` zoom in and `Ctrl+Alt+-` zooms out), pan (middle-drag or Space+drag).
 - Pencil strokes: pointer capture, Bresenham line interpolation between events, out-of-bounds pixels ignored.
 

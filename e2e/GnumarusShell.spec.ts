@@ -181,6 +181,66 @@ test("loupe middle-click flips the canvas", async ({ page }) => {
   await expect(page.locator("gnumarus-shell")).toContainText("Flip XY");
 });
 
+test("P and L switch between pencil and loupe", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await expect(page.locator("gnumarus-shell")).toContainText("pencil");
+  await page.keyboard.press("l");
+  await expect(page.locator("gnumarus-shell")).toContainText("loupe");
+  await page.keyboard.press("p");
+  await expect(page.locator("gnumarus-shell")).toContainText("pencil");
+});
+
+test("Edit > Reset Canvas Transform restores the default view", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const fit = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          setRotation(r: number): void;
+          setFlip(x: boolean, y: boolean): void;
+          setZoom(z: number): void;
+          getViewState(): GnumarusViewState;
+        };
+      };
+    };
+    const engine = root.__gnumarus?.engine;
+    const fitZoom = engine?.getViewState().zoom ?? 0;
+    engine?.setRotation(1);
+    engine?.setFlip(true, true);
+    engine?.setZoom(30);
+    return fitZoom;
+  });
+  const transformed = await getViewState(page);
+  expect(transformed.rotation).toBeCloseTo(1, 5);
+  expect(transformed).toMatchObject({ flipX: true, flipY: true });
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Reset Canvas Transform" }).click();
+  expect(await getViewState(page)).toEqual({ zoom: fit, rotation: 0, flipX: false, flipY: false });
+});
+
+test("loupe Ctrl+middle-click resets the transform", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Loupe" }).click();
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { setRotation(r: number): void } };
+    };
+    root.__gnumarus?.engine?.setRotation(1.2);
+  });
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.keyboard.down("Control");
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "middle" });
+  await page.keyboard.up("Control");
+  expect((await getViewState(page)).rotation).toBeCloseTo(0, 5);
+});
+
 test("pencil paints the right pixel while the canvas is rotated", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

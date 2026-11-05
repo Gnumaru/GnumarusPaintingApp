@@ -32,6 +32,7 @@ export type GnumarusCanvasTool = "pencil" | "loupe";
 export interface GnumarusEngineOptions {
   onStats: (stats: GnumarusEngineStats) => void;
   onPixelsChanged: () => void;
+  onToolChanged?: (tool: GnumarusCanvasTool) => void;
   checker?: GnumarusCheckerSettings;
 }
 
@@ -90,11 +91,13 @@ export class GnumarusCanvasEngine {
   private readonly checkerColorBVec: THREE.Vector3;
   private readonly onStats: (stats: GnumarusEngineStats) => void;
   private readonly onPixelsChanged: () => void;
+  private readonly onToolChanged: ((tool: GnumarusCanvasTool) => void) | undefined;
 
   constructor(container: HTMLElement, options: GnumarusEngineOptions) {
     this.container = container;
     this.onStats = options.onStats;
     this.onPixelsChanged = options.onPixelsChanged;
+    this.onToolChanged = options.onToolChanged;
     const initialChecker = options.checker ?? DEFAULT_CHECKER_SETTINGS;
     this.checkerMode = initialChecker.mode;
     this.checkerSizeX = clampCheckerSize(initialChecker.sizeX);
@@ -311,6 +314,7 @@ export class GnumarusCanvasEngine {
 
   setTool(tool: GnumarusCanvasTool): void {
     this.tool = tool;
+    this.onToolChanged?.(tool);
   }
 
   getViewState(): { zoom: number; rotation: number; flipX: boolean; flipY: boolean } {
@@ -357,9 +361,17 @@ export class GnumarusCanvasEngine {
     }
     this.panX = 0;
     this.panY = 0;
+    this.rotation = 0;
+    this.flipX = false;
+    this.flipY = false;
     this.layoutScene();
     this.render();
     this.emitStats();
+  }
+
+  /** Reset zoom, pan, rotation and flips to the default view. */
+  resetViewTransform(): void {
+    this.resetView();
   }
 
   dispose(): void {
@@ -379,8 +391,12 @@ export class GnumarusCanvasEngine {
     const canvas = this.renderer.domElement;
     canvas.addEventListener("pointerdown", (event: PointerEvent) => {
       if (event.button === 1 && this.tool === "loupe") {
-        // Middle click with the loupe tool flips the canvas view.
-        if (event.shiftKey) {
+        event.preventDefault();
+        if (event.ctrlKey) {
+          // Ctrl+middle-click with the loupe tool resets the transform.
+          this.resetViewTransform();
+        } else if (event.shiftKey) {
+          // Middle click with the loupe tool flips the canvas view.
           this.setFlip(this.flipX, !this.flipY);
         } else {
           this.setFlip(!this.flipX, this.flipY);
@@ -507,13 +523,23 @@ export class GnumarusCanvasEngine {
         this.spaceDown = true;
         return;
       }
+      const target = event.target;
+      const inField =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement;
+      if (!event.ctrlKey && !event.altKey && !event.metaKey && !inField) {
+        if (event.key === "p" || event.key === "P") {
+          this.setTool("pencil");
+          return;
+        }
+        if (event.key === "l" || event.key === "L") {
+          this.setTool("loupe");
+          return;
+        }
+      }
       if (event.ctrlKey && event.altKey && !event.metaKey) {
-        const target = event.target;
-        if (
-          target instanceof HTMLInputElement ||
-          target instanceof HTMLTextAreaElement ||
-          target instanceof HTMLSelectElement
-        ) {
+        if (inField) {
           return;
         }
         if (event.key === "+" || event.key === "=" || event.code === "Equal" || event.code === "NumpadAdd") {

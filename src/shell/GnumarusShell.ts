@@ -317,6 +317,7 @@ export class GnumarusShell extends LitElement {
             ? html`
                 <div class="dropdown">
                   <button @click=${(): void => this.openSettingsDialog()}>Settings</button>
+                  <button @click=${(): void => this.resetCanvasTransform()}>Reset Canvas Transform</button>
                 </div>
               `
             : html``}
@@ -432,6 +433,9 @@ export class GnumarusShell extends LitElement {
     }
     try {
       this.engine = new GnumarusCanvasEngine(host, {
+        onToolChanged: (tool): void => {
+          this.tool = tool;
+        },
         checker: storedChecker,
         onStats: (stats): void => {
           this.zoomText = `${Math.round(stats.zoom * 100)}%`;
@@ -472,6 +476,13 @@ export class GnumarusShell extends LitElement {
   private closeNewDialog(): void {
     const dialog = this.shadowRoot?.getElementById("newDialog") as HTMLDialogElement | null;
     dialog?.close();
+  }
+
+  private resetCanvasTransform(): void {
+    this.editMenuOpen = false;
+    this.fileMenuOpen = false;
+    this.engine?.resetViewTransform();
+    this.statusMessage = "Canvas transform reset";
   }
 
   private openSettingsDialog(): void {
