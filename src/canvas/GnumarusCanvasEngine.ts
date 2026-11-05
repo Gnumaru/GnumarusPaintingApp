@@ -9,6 +9,12 @@ import {
   type GnumarusRgba,
 } from "./GnumarusPixelBuffer";
 import { clampZoom, screenToImagePixel } from "./GnumarusViewportMath";
+import {
+  clampCheckerSize,
+  DEFAULT_CHECKER_SETTINGS,
+  type GnumarusCheckerMode,
+  type GnumarusCheckerSettings,
+} from "../settings/GnumarusCheckerSettings";
 
 export interface GnumarusEngineStats {
   width: number;
@@ -16,6 +22,17 @@ export interface GnumarusEngineStats {
   zoom: number;
   cursorX: number | null;
   cursorY: number | null;
+}
+
+export interface GnumarusEngineOptions {
+  onStats: (stats: GnumarusEngineStats) => void;
+  onPixelsChanged: () => void;
+  checker?: GnumarusCheckerSettings;
+}
+
+function checkerHexToVec(hex: string): THREE.Vector3 {
+  const parsed = parseHexColor(hex) ?? { r: 199, g: 199, b: 199, a: 255 };
+  return new THREE.Vector3(parsed.r / 255, parsed.g / 255, parsed.b / 255);
 }
 
 export class GnumarusWebGlError extends Error {
@@ -51,16 +68,26 @@ export class GnumarusCanvasEngine {
   private lastPixel: { x: number; y: number } | null = null;
   private cursor: { x: number; y: number } | null = null;
   private disposed = false;
+  private checkerMode: GnumarusCheckerMode;
+  private checkerSize: number;
+  private checkerColorA: string;
+  private checkerColorB: string;
+  private readonly checkerColorAVec: THREE.Vector3;
+  private readonly checkerColorBVec: THREE.Vector3;
   private readonly onStats: (stats: GnumarusEngineStats) => void;
   private readonly onPixelsChanged: () => void;
 
-  constructor(
-    container: HTMLElement,
-    options: { onStats: (stats: GnumarusEngineStats) => void; onPixelsChanged: () => void },
-  ) {
+  constructor(container: HTMLElement, options: GnumarusEngineOptions) {
     this.container = container;
     this.onStats = options.onStats;
     this.onPixelsChanged = options.onPixelsChanged;
+    const initialChecker = options.checker ?? DEFAULT_CHECKER_SETTINGS;
+    this.checkerMode = initialChecker.mode;
+    this.checkerSize = clampCheckerSize(initialChecker.size);
+    this.checkerColorA = initialChecker.colorA;
+    this.checkerColorB = initialChecker.colorB;
+    this.checkerColorAVec = checkerHexToVec(initialChecker.colorA);
+    this.checkerColorBVec = checkerHexToVec(initialChecker.colorB);
     this.imageWidth = 64;
     this.imageHeight = 64;
     this.zoom = 8;
@@ -107,6 +134,11 @@ export class GnumarusCanvasEngine {
         uMap: { value: this.texture },
         uImageW: { value: this.imageWidth },
         uImageH: { value: this.imageHeight },
+        uMode: { value: this.checkerMode === "screen" ? 1 : 0 },
+        uSize: { value: this.checkerSize },
+        uPixelRatio: { value: 1 },
+        uColorA: { value: this.checkerColorAVec },
+        uColorB: { value: this.checkerColorBVec },
       },
       vertexShader: [
         "varying vec2 vUv;",
@@ -121,12 +153,18 @@ export class GnumarusCanvasEngine {
         "uniform sampler2D uMap;",
         "uniform float uImageW;",
         "uniform float uImageH;",
+        "uniform float uMode;",
+        "uniform float uSize;",
+        "uniform float uPixelRatio;",
+        "uniform vec3 uColorA;",
+        "uniform vec3 uColorB;",
         "void main() {",
         "  vec4 tex = texture2D(uMap, vUv);",
-        "  vec2 ipos = vec2(vUv.x * uImageW, vUv.y * uImageH);",
-        "  vec2 grid = floor(ipos / 16.0);",
+        "  vec2 grid = uMode < 0.5",
+        "    ? floor(vec2(vUv.x * uImageW, vUv.y * uImageH) / max(uSize, 1.0))",
+        "    : floor(gl_FragCoord.xy / max(uSize * uPixelRatio, 1.0));",
         "  float c = mod(grid.x + grid.y, 2.0);",
-        "  vec3 check = mix(vec3(0.78), vec3(0.58), c);",
+        "  vec3 check = mix(uColorA, uColorB, c);",
         "  vec3 rgb = mix(check, tex.rgb, tex.a);",
         "  gl_FragColor = vec4(rgb, 1.0);",
         "}",
@@ -215,6 +253,33 @@ export class GnumarusCanvasEngine {
 
   zoomBy(factor: number): void {
     this.setZoom(this.zoom * factor);
+  }
+
+  applyCheckerSettings(settings: GnumarusCheckerSettings): void {
+    this.checkerMode = settings.mode;
+    this.checkerSize = clampCheckerSize(settings.size);
+    const colorA = parseHexColor(settings.colorA);
+    const colorB = parseHexColor(settings.colorB);
+    if (colorA !== null) {
+      this.checkerColorA = settings.colorA;
+      this.checkerColorAVec.set(colorA.r / 255, colorA.g / 255, colorA.b / 255);
+    }
+    if (colorB !== null) {
+      this.checkerColorB = settings.colorB;
+      this.checkerColorBVec.set(colorB.r / 255, colorB.g / 255, colorB.b / 255);
+    }
+    this.material.uniforms["uMode"]!.value = this.checkerMode === "screen" ? 1 : 0;
+    this.material.uniforms["uSize"]!.value = this.checkerSize;
+    this.render();
+  }
+
+  getCheckerSettings(): GnumarusCheckerSettings {
+    return {
+      mode: this.checkerMode,
+      size: this.checkerSize,
+      colorA: this.checkerColorA,
+      colorB: this.checkerColorB,
+    };
   }
 
   resetView(): void {
@@ -381,6 +446,7 @@ export class GnumarusCanvasEngine {
     const height = Math.max(1, Math.floor(rect.height));
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     this.renderer.setPixelRatio(dpr);
+    this.material.uniforms["uPixelRatio"]!.value = dpr;
     this.renderer.setSize(width, height, false);
     this.layoutScene();
     this.render();

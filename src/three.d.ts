@@ -56,7 +56,7 @@ declare module "three" {
   }
 
   export interface ShaderUniform {
-    value: number | boolean | DataTexture;
+    value: number | boolean | DataTexture | Vector3;
   }
 
   export class ShaderMaterial {

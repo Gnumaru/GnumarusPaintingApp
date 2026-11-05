@@ -85,3 +85,26 @@ test("keyboard shortcuts zoom in and out", async ({ page }) => {
   await page.keyboard.press("Control+Alt+NumpadSubtract");
   expect(await zoomOf()).toBeCloseTo(before, 4);
 });
+
+test("Edit > Settings changes the checkerboard", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Checkerboard mode");
+  await page.locator("gnumarus-shell select#checkerMode").selectOption("screen");
+  await page.locator("gnumarus-shell input#checkerSize").fill("8");
+  await page.locator("gnumarus-shell input#checkerColorA").fill("#ff0000");
+  const settings = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          getCheckerSettings(): { mode: string; size: number; colorA: string; colorB: string };
+        };
+      };
+    };
+    return root.__gnumarus?.engine?.getCheckerSettings() ?? null;
+  });
+  expect(settings).toEqual({ mode: "screen", size: 8, colorA: "#ff0000", colorB: "#949494" });
+  await expect(page.locator("gnumarus-shell")).toContainText("screen-space, 8px");
+});

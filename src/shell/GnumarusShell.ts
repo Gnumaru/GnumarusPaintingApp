@@ -8,6 +8,15 @@ import {
   type GnumarusDirectoryHandle,
 } from "../project/GnumarusFileSystem";
 import { createDefaultProject } from "../project/GnumarusProjectFormat";
+import {
+  CHECKER_SETTINGS_STORAGE_KEY,
+  DEFAULT_CHECKER_SETTINGS,
+  clampCheckerSize,
+  parseCheckerSettings,
+  serializeCheckerSettings,
+  type GnumarusCheckerMode,
+  type GnumarusCheckerSettings,
+} from "../settings/GnumarusCheckerSettings";
 import { decodePngToBuffer, encodeBufferToPngBlob } from "../project/GnumarusPngCodec";
 
 export class GnumarusShell extends LitElement {
@@ -160,6 +169,20 @@ export class GnumarusShell extends LitElement {
       border-radius: 4px;
       padding: 4px 6px;
     }
+    dialog input[type="color"] {
+      width: 48px;
+      height: 28px;
+      padding: 0;
+      cursor: pointer;
+    }
+    dialog select {
+      background: #1e1e1e;
+      color: #e6e6e6;
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 4px 6px;
+      max-width: 260px;
+    }
     .dialog-actions {
       display: flex;
       gap: 8px;
@@ -189,10 +212,15 @@ export class GnumarusShell extends LitElement {
     dirty: { type: Boolean },
     statusMessage: { type: String },
     fileMenuOpen: { type: Boolean },
+    editMenuOpen: { type: Boolean },
     webglError: { type: String },
     fsSupported: { type: Boolean },
     newWidth: { type: Number },
     newHeight: { type: Number },
+    checkerMode: { type: String },
+    checkerSize: { type: Number },
+    checkerColorA: { type: String },
+    checkerColorB: { type: String },
   };
 
   declare tool: string;
@@ -204,10 +232,15 @@ export class GnumarusShell extends LitElement {
   declare dirty: boolean;
   declare statusMessage: string;
   declare fileMenuOpen: boolean;
+  declare editMenuOpen: boolean;
   declare webglError: string;
   declare fsSupported: boolean;
   declare newWidth: number;
   declare newHeight: number;
+  declare checkerMode: GnumarusCheckerMode;
+  declare checkerSize: number;
+  declare checkerColorA: string;
+  declare checkerColorB: string;
 
   private engine: GnumarusCanvasEngine | null = null;
   private directoryHandle: GnumarusDirectoryHandle | null = null;
@@ -223,10 +256,15 @@ export class GnumarusShell extends LitElement {
     this.dirty = false;
     this.statusMessage = "Ready";
     this.fileMenuOpen = false;
+    this.editMenuOpen = false;
     this.webglError = "";
     this.fsSupported = true;
     this.newWidth = 64;
     this.newHeight = 64;
+    this.checkerMode = DEFAULT_CHECKER_SETTINGS.mode;
+    this.checkerSize = DEFAULT_CHECKER_SETTINGS.size;
+    this.checkerColorA = DEFAULT_CHECKER_SETTINGS.colorA;
+    this.checkerColorB = DEFAULT_CHECKER_SETTINGS.colorB;
   }
 
   render() {
@@ -237,6 +275,7 @@ export class GnumarusShell extends LitElement {
             class=${this.fileMenuOpen ? "active" : ""}
             @click=${(): void => {
               this.fileMenuOpen = !this.fileMenuOpen;
+              this.editMenuOpen = false;
             }}
           >
             File
@@ -247,6 +286,24 @@ export class GnumarusShell extends LitElement {
                   <button @click=${(): void => void this.openNewDialog()}>New</button>
                   <button @click=${(): void => void this.openProject()}>Open</button>
                   <button @click=${(): void => void this.saveProject()}>Save</button>
+                </div>
+              `
+            : html``}
+        </div>
+        <div class="menu">
+          <button
+            class=${this.editMenuOpen ? "active" : ""}
+            @click=${(): void => {
+              this.editMenuOpen = !this.editMenuOpen;
+              this.fileMenuOpen = false;
+            }}
+          >
+            Edit
+          </button>
+          ${this.editMenuOpen
+            ? html`
+                <div class="dropdown">
+                  <button @click=${(): void => this.openSettingsDialog()}>Settings</button>
                 </div>
               `
             : html``}
@@ -299,11 +356,42 @@ export class GnumarusShell extends LitElement {
           <button @click=${(): void => void this.createNew()}>Create</button>
         </div>
       </dialog>
+      <dialog id="settingsDialog">
+        <h3>Settings</h3>
+        <label
+          >Checkerboard mode
+          <select id="checkerMode" .value=${this.checkerMode} @change=${(): void => this.applyCheckerFromDialog()}>
+            <option value="image">Image-space (moves and zooms with the canvas)</option>
+            <option value="screen">Screen-space (fixed on screen)</option>
+          </select>
+        </label>
+        <label
+          >Checker size <input type="number" id="checkerSize" min="1" max="128" .value=${String(this.checkerSize)} @input=${(): void =>
+            this.applyCheckerFromDialog()} />
+        </label>
+        <label
+          >Checker color A <input type="color" id="checkerColorA" .value=${this.checkerColorA} @input=${(): void =>
+            this.applyCheckerFromDialog()} />
+        </label>
+        <label
+          >Checker color B <input type="color" id="checkerColorB" .value=${this.checkerColorB} @input=${(): void =>
+            this.applyCheckerFromDialog()} />
+        </label>
+        <div class="dialog-actions">
+          <button @click=${(): void => this.resetCheckerDefaults()}>Reset defaults</button>
+          <button @click=${(): void => this.closeSettingsDialog()}>Close</button>
+        </div>
+      </dialog>
     `;
   }
 
   firstUpdated(): void {
     this.fsSupported = isFileSystemAccessSupported();
+    const storedChecker = this.loadCheckerSettings();
+    this.checkerMode = storedChecker.mode;
+    this.checkerSize = storedChecker.size;
+    this.checkerColorA = storedChecker.colorA;
+    this.checkerColorB = storedChecker.colorB;
     const host = this.shadowRoot?.getElementById("canvasHost") ?? null;
     if (host === null) {
       this.webglError = "Canvas host is missing.";
@@ -311,6 +399,7 @@ export class GnumarusShell extends LitElement {
     }
     try {
       this.engine = new GnumarusCanvasEngine(host, {
+        checker: storedChecker,
         onStats: (stats): void => {
           this.zoomText = `${Math.round(stats.zoom * 100)}%`;
           this.cursorText =
@@ -347,6 +436,74 @@ export class GnumarusShell extends LitElement {
   private closeNewDialog(): void {
     const dialog = this.shadowRoot?.getElementById("newDialog") as HTMLDialogElement | null;
     dialog?.close();
+  }
+
+  private openSettingsDialog(): void {
+    this.editMenuOpen = false;
+    this.fileMenuOpen = false;
+    const dialog = this.shadowRoot?.getElementById("settingsDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+  }
+
+  private closeSettingsDialog(): void {
+    const dialog = this.shadowRoot?.getElementById("settingsDialog") as HTMLDialogElement | null;
+    dialog?.close();
+  }
+
+  private loadCheckerSettings(): GnumarusCheckerSettings {
+    try {
+      const stored = window.localStorage.getItem(CHECKER_SETTINGS_STORAGE_KEY);
+      if (stored !== null) {
+        return parseCheckerSettings(stored);
+      }
+    } catch {
+      // Corrupt or unavailable storage falls back to defaults.
+    }
+    return { ...DEFAULT_CHECKER_SETTINGS };
+  }
+
+  private currentDialogChecker(): GnumarusCheckerSettings {
+    const modeInput = this.shadowRoot?.getElementById("checkerMode") as HTMLSelectElement | null;
+    const sizeInput = this.shadowRoot?.getElementById("checkerSize") as HTMLInputElement | null;
+    const colorAInput = this.shadowRoot?.getElementById("checkerColorA") as HTMLInputElement | null;
+    const colorBInput = this.shadowRoot?.getElementById("checkerColorB") as HTMLInputElement | null;
+    const mode: GnumarusCheckerMode = modeInput?.value === "screen" ? "screen" : "image";
+    return {
+      mode,
+      size: clampCheckerSize(Number(sizeInput?.value ?? "16") || 16),
+      colorA: colorAInput?.value ?? this.checkerColorA,
+      colorB: colorBInput?.value ?? this.checkerColorB,
+    };
+  }
+
+  private applyCheckerFromDialog(): void {
+    const settings = this.currentDialogChecker();
+    this.checkerMode = settings.mode;
+    this.checkerSize = settings.size;
+    this.checkerColorA = settings.colorA;
+    this.checkerColorB = settings.colorB;
+    this.engine?.applyCheckerSettings(settings);
+    try {
+      window.localStorage.setItem(CHECKER_SETTINGS_STORAGE_KEY, serializeCheckerSettings(settings));
+    } catch {
+      // Storage failures must not break the settings flow.
+    }
+    this.statusMessage = `Checkerboard: ${settings.mode}-space, ${settings.size}px`;
+  }
+
+  private resetCheckerDefaults(): void {
+    const settings = { ...DEFAULT_CHECKER_SETTINGS };
+    this.checkerMode = settings.mode;
+    this.checkerSize = settings.size;
+    this.checkerColorA = settings.colorA;
+    this.checkerColorB = settings.colorB;
+    this.engine?.applyCheckerSettings(settings);
+    try {
+      window.localStorage.setItem(CHECKER_SETTINGS_STORAGE_KEY, serializeCheckerSettings(settings));
+    } catch {
+      // Storage failures must not break the settings flow.
+    }
+    this.statusMessage = "Checkerboard settings reset to defaults";
   }
 
   private async createNew(): Promise<void> {

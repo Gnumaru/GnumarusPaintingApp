@@ -2,8 +2,9 @@
 
 ## 1. Desktop shell (`src/shell/GnumarusShell.ts`)
 
-- `gnumarus-shell` Lit component: menu bar, toolbar, canvas host, status bar, New-canvas dialog.
+- `gnumarus-shell` Lit component: menu bar, toolbar, canvas host, status bar, New-canvas dialog, Settings dialog.
 - File menu items: New (width/height dialog, 1..1024, default 64x64), Open (directory picker), Save (writes to picked directory, reuses the handle afterwards).
+- Edit menu items: Settings (checkerboard mode image-space/screen-space, square size 1..128 default 16, colors A/B with Reset defaults; applied live and persisted to `localStorage`).
 - Toolbar: pencil tool (only tool, always active) and a color input.
 - Status bar shows tool, hex color, cursor pixel coordinates, canvas dimensions, zoom percentage, project name, modified marker, WebGL2/FS-API messages.
 - All UI strings in American English.
@@ -11,7 +12,7 @@
 ## 2. WebGL2 canvas engine (`src/canvas/GnumarusCanvasEngine.ts`)
 
 - Single `THREE.WebGLRenderer` (WebGL2-only, no fallback). Throws `GnumarusWebGlError` with a user-facing message when WebGL2 is unavailable.
-- One `THREE.DataTexture` (`NearestFilter`, no mipmaps) over a CPU `Uint8ClampedArray` RGBA buffer; orthographic camera; a custom `ShaderMaterial` composites the layer over an image-space transparency checker (16x16 image pixels per square at 100% zoom) so the checker pans and zooms together with the canvas, while the scene clear color (`#333333`) fills everything outside the drawable area.
+- One `THREE.DataTexture` (`NearestFilter`, no mipmaps) over a CPU `Uint8ClampedArray` RGBA buffer; orthographic camera; a custom `ShaderMaterial` composites the layer over a configurable transparency checker (image-space squares that pan/zoom with the canvas, or fixed screen-space squares; size and both colors editable in Edit > Settings, persisted to `localStorage`), while the scene clear color (`#333333`) fills everything outside the drawable area.
 - On-demand rendering (resize, view change, stroke), DPR capped at 2.
 - Zoom (wheel, 0.5x..64x, zoom-to-cursor), keyboard shortcuts `Ctrl+Alt+=` / `Ctrl+Alt++` (zoom in) and `Ctrl+Alt+-` (zoom out, main keyboard and keypad), pan (middle-drag or Space+drag).
 - Pencil strokes: pointer capture, Bresenham line interpolation between events, out-of-bounds pixels ignored.
