@@ -49,7 +49,7 @@ import { compositeFinalImage } from "../preview/GnumarusFinalRender";
 import { decodePngToBuffer, encodeBufferToPngBlob } from "../project/GnumarusPngCodec";
 import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
 import {
-  clampBrushSize,
+  clampBrushSizeFloat,
   parseBrushShape,
   type GnumarusBrushShape,
 } from "../canvas/GnumarusPixelBuffer";
@@ -1531,9 +1531,9 @@ export class GnumarusShell extends LitElement {
             <input
               type="number"
               id="brushSize"
-              min="1"
+              min="0.1"
               max="64"
-              step="1"
+              step="0.1"
               .value=${String(this.brushSize)}
               @input=${(): void => this.applyBrushSizeFromDialog()}
             />
@@ -1565,9 +1565,9 @@ export class GnumarusShell extends LitElement {
             <input
               type="number"
               id="lineWidth"
-              min="1"
+              min="0.1"
               max="64"
-              step="1"
+              step="0.1"
               .value=${String(this.lineWidth)}
               @input=${(): void => this.applyLineWidthFromDialog()}
             />
@@ -2122,9 +2122,9 @@ export class GnumarusShell extends LitElement {
     this.engine?.setColor(this.colorValue);
   }
 
-  /** Test hook: set the brush size (integers 1..64, clamped). */
+  /** Test hook: set the brush size (floats 0.1..64, clamped). */
   setBrushSize(size: number): void {
-    const clamped = clampBrushSize(size);
+    const clamped = clampBrushSizeFloat(size);
     this.brushSize = clamped;
     this.engine?.setBrushSize(clamped);
     this.statusMessage = `Brush size: ${clamped}`;
@@ -2140,7 +2140,8 @@ export class GnumarusShell extends LitElement {
 
   private currentDialogBrushSize(): number {
     const input = this.shadowRoot?.getElementById("brushSize") as HTMLInputElement | null;
-    return clampBrushSize(Number(input?.value ?? "1") || 1);
+    const parsed = Number(input?.value ?? "1");
+    return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1);
   }
 
   private currentDialogBrushShape(): GnumarusBrushShape {
@@ -2182,9 +2183,9 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = `Pencil anti-aliasing: ${enabled ? "on" : "off"}`;
   }
 
-  /** Test hook: set the line width (integers 1..64, clamped). */
+  /** Test hook: set the line width (floats 0.1..64, clamped). */
   setLineWidth(size: number): void {
-    const clamped = clampBrushSize(size);
+    const clamped = clampBrushSizeFloat(size);
     this.lineWidth = clamped;
     this.engine?.setLineWidth(clamped);
     this.statusMessage = `Line width: ${clamped}`;
@@ -2208,7 +2209,8 @@ export class GnumarusShell extends LitElement {
 
   private currentDialogLineWidth(): number {
     const input = this.shadowRoot?.getElementById("lineWidth") as HTMLInputElement | null;
-    return clampBrushSize(Number(input?.value ?? "1") || 1);
+    const parsed = Number(input?.value ?? "1");
+    return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1);
   }
 
   private currentDialogLineShape(): GnumarusBrushShape {

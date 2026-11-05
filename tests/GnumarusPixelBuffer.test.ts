@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clampBrushSize,
+  clampBrushSizeFloat,
   clearPixelBuffer,
   compositeOver,
   createPixelBuffer,
@@ -12,6 +13,7 @@ import {
   getPixel,
   parseBrushShape,
   parseHexColor,
+  roundBrushSizeForAliased,
   setPixel,
 } from "../src/canvas/GnumarusPixelBuffer";
 
@@ -145,6 +147,16 @@ describe("GnumarusPixelBuffer", () => {
     expect(clampBrushSize(65)).toBe(64);
     expect(clampBrushSize(3.9)).toBe(3);
     expect(clampBrushSize(Number.NaN)).toBe(1);
+    expect(clampBrushSizeFloat(0.1)).toBeCloseTo(0.1, 5);
+    expect(clampBrushSizeFloat(1.5)).toBeCloseTo(1.5, 5);
+    expect(clampBrushSizeFloat(0)).toBeCloseTo(0.1, 5);
+    expect(clampBrushSizeFloat(99)).toBe(64);
+    expect(clampBrushSizeFloat(Number.NaN)).toBe(1);
+    expect(roundBrushSizeForAliased(1.4)).toBe(1);
+    expect(roundBrushSizeForAliased(1.5)).toBe(2);
+    expect(roundBrushSizeForAliased(0.1)).toBe(1);
+    expect(roundBrushSizeForAliased(0)).toBe(1);
+    expect(roundBrushSizeForAliased(99)).toBe(64);
     expect(parseBrushShape("circle")).toBe("circle");
     expect(parseBrushShape("square")).toBe("square");
     expect(parseBrushShape("triangle")).toBe("square");
@@ -224,5 +236,34 @@ describe("GnumarusPixelBuffer", () => {
       a: false,
     });
     expect(getPixel(masked, 4, 4, 1, 0)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  });
+
+  it("rounds float widths when anti-aliasing is off and uses floats when on", () => {
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    const rounded = createPixelBuffer(8, 8);
+    drawLineSegment(rounded, 8, 8, 0, 3, 7, 3, 1.5, "square", false, red);
+    expect(getPixel(rounded, 8, 8, 3, 3)).toEqual(red);
+    expect(getPixel(rounded, 8, 8, 3, 4)).toEqual(red);
+    expect(getPixel(rounded, 8, 8, 3, 5)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    const thin = createPixelBuffer(8, 8);
+    drawLineSegment(thin, 8, 8, 0, 3, 7, 3, 1.4, "square", false, red);
+    expect(getPixel(thin, 8, 8, 3, 3)).toEqual(red);
+    expect(getPixel(thin, 8, 8, 3, 2)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    expect(getPixel(thin, 8, 8, 3, 4)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    const mid = createPixelBuffer(8, 8);
+    drawLineSegment(mid, 8, 8, 0, 3, 7, 3, 1.5, "square", true, red);
+    const midEdge = getPixel(mid, 8, 8, 3, 2);
+    expect(midEdge).not.toBeNull();
+    expect(midEdge!.r).toBeGreaterThan(0);
+    expect(midEdge!.r).toBeLessThan(255);
+    const narrow = createPixelBuffer(8, 8);
+    drawLineSegment(narrow, 8, 8, 0, 3, 7, 3, 1, "square", true, red);
+    expect(getPixel(narrow, 8, 8, 3, 2)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    const wide = createPixelBuffer(8, 8);
+    drawLineSegment(wide, 8, 8, 0, 3, 7, 3, 2, "square", true, red);
+    const wideEdge = getPixel(wide, 8, 8, 3, 2);
+    expect(wideEdge).not.toBeNull();
+    expect(wideEdge!.r).toBeGreaterThan(midEdge!.r);
+    expect(wideEdge!.r).toBeLessThan(255);
   });
 });

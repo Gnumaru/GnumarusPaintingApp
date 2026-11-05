@@ -2118,6 +2118,95 @@ test("Delete resets the current cell texture to zeros", async ({ page }) => {
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
 });
 
+test("brush and line widths accept floats with AA-dependent rounding", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          loadProject(
+            width: number,
+            height: number,
+            inputs: Array<{
+              id: string;
+              name: string;
+              visible: boolean;
+              opacity: number;
+              width: number;
+              height: number;
+              buffer: Uint8ClampedArray;
+              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
+            }>,
+          ): void;
+        };
+      };
+    };
+    root.__gnumarus?.engine?.loadProject(64, 64, [
+      {
+        id: "tiny",
+        name: "Tiny",
+        visible: true,
+        opacity: 1,
+        width: 8,
+        height: 8,
+        buffer: new Uint8ClampedArray(8 * 8 * 4),
+        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+      },
+    ]);
+  });
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Pencil" }).click();
+  const brushOf = (): Promise<number> =>
+    page.evaluate(() => {
+      const root = window as unknown as { __gnumarus?: { engine?: { getBrushSize(): number } } };
+      return root.__gnumarus?.engine?.getBrushSize() ?? 0;
+    });
+  await page.locator("gnumarus-shell input#brushSize").fill("0");
+  expect(await brushOf()).toBeCloseTo(0.1, 5);
+  await expect(page.locator("gnumarus-shell")).toContainText("Brush size: 0.1");
+  await page.locator("gnumarus-shell input#brushSize").fill("1.5");
+  expect(await brushOf()).toBeCloseTo(1.5, 5);
+  await expect(page.locator("gnumarus-shell")).toContainText("Brush size: 1.5");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const clickAt = async (lx: number, ly: number): Promise<void> => {
+    const state = await getViewState(page);
+    const target = layerPixelToScreen(
+      lx,
+      ly,
+      { left: box.x, top: box.y, width: box.width, height: box.height },
+      8,
+      8,
+      { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false },
+      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+    );
+    await page.mouse.click(target.x, target.y);
+  };
+  await expect(page.locator("gnumarus-shell input#pencilAntialias")).not.toBeChecked();
+  await clickAt(4, 4);
+  expect(await readPixel(page, 5, 5)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.keyboard.press("Delete");
+  await page.locator("gnumarus-shell input#pencilAntialias").check();
+  await clickAt(4, 4);
+  const soft = await readPixel(page, 5, 5);
+  expect(soft).not.toBeNull();
+  expect(soft!.r).toBeGreaterThan(0);
+  expect(soft!.r).toBeLessThan(255);
+  await page.getByRole("button", { name: "Line" }).click();
+  const lineOf = (): Promise<number> =>
+    page.evaluate(() => {
+      const root = window as unknown as { __gnumarus?: { engine?: { getLineWidth(): number } } };
+      return root.__gnumarus?.engine?.getLineWidth() ?? 0;
+    });
+  await page.locator("gnumarus-shell input#lineWidth").fill("1.5");
+  expect(await lineOf()).toBeCloseTo(1.5, 5);
+  await expect(page.locator("gnumarus-shell")).toContainText("Line width: 1.5");
+});
+
 async function getMatrixFrame(page: import("@playwright/test").Page): Promise<number> {
   return page.evaluate(() => {
     const root = window as unknown as { __gnumarus?: { engine?: { getCurrentFrame(): number } } };

@@ -270,6 +270,7 @@ export type GnumarusBrushShape = "square" | "circle";
 
 export const GNUMARUS_MIN_BRUSH_SIZE = 1;
 export const GNUMARUS_MAX_BRUSH_SIZE = 64;
+export const GNUMARUS_MIN_BRUSH_SIZE_FLOAT = 0.1;
 
 /** Clamp a brush size to the supported integer range 1..64. */
 export function clampBrushSize(value: number): number {
@@ -277,6 +278,22 @@ export function clampBrushSize(value: number): number {
     return GNUMARUS_MIN_BRUSH_SIZE;
   }
   return Math.min(GNUMARUS_MAX_BRUSH_SIZE, Math.max(GNUMARUS_MIN_BRUSH_SIZE, Math.floor(value)));
+}
+
+/** Clamp a brush/line width to the supported float range 0.1..64 (no rounding). */
+export function clampBrushSizeFloat(value: number): number {
+  if (!Number.isFinite(value)) {
+    return GNUMARUS_MIN_BRUSH_SIZE;
+  }
+  return Math.min(GNUMARUS_MAX_BRUSH_SIZE, Math.max(GNUMARUS_MIN_BRUSH_SIZE_FLOAT, value));
+}
+
+/** Round a float width to the nearest integer for non-anti-aliased painting (min 1, max 64). */
+export function roundBrushSizeForAliased(value: number): number {
+  if (!Number.isFinite(value)) {
+    return GNUMARUS_MIN_BRUSH_SIZE;
+  }
+  return Math.min(GNUMARUS_MAX_BRUSH_SIZE, Math.max(GNUMARUS_MIN_BRUSH_SIZE, Math.round(value)));
 }
 
 /** Parse a brush shape, defaulting to square for missing or invalid input. */
@@ -440,7 +457,7 @@ export function drawLineSegment(
   color: GnumarusRgba,
   locked: GnumarusChannelLock | undefined = undefined,
 ): void {
-  const thick = clampBrushSize(lineWidth);
+  const thick = antialiased ? clampBrushSizeFloat(lineWidth) : roundBrushSizeForAliased(lineWidth);
   if (!antialiased) {
     if (thick <= 1) {
       drawPixelLine(buffer, width, height, x0, y0, x1, y1, color, locked);

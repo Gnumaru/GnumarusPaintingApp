@@ -106,6 +106,10 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Pencil options gain an anti-aliasing checkbox (same smoothing as the line tool); strokes blend edge pixels honoring channel locks.
 - `Delete` (no modifiers, outside text fields, shadow-DOM aware via composed path) resets the current cell texture to zeros in all RGBA channels, ignoring channel locks; undoable; no-op on empty/already-empty cells.
 
+## 19. Float brush/line widths (implemented)
+- Brush size and line width accept floats 0.1..64 (number inputs min 0.1 step 0.1).
+- Anti-aliasing off uses the value rounded to the nearest integer (min 1); anti-aliasing on uses the real float value, so 1.5 renders between 1 and 2.
+
 ## 11. Custom color picker (implemented)
 - Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).
 - Every model carries an alpha axis; RGBA axes span 0..255. ARD Diagonal spans 0..360 and Ratio 0..255.

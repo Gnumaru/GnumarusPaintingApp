@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import {
   clearPixelBuffer,
-  clampBrushSize,
+  clampBrushSizeFloat,
   clampLayerDim,
   compositePixelOver,
   createPixelBuffer,
@@ -1814,7 +1814,7 @@ export class GnumarusCanvasEngine {
   }
 
   setBrushSize(size: number): boolean {
-    const clamped = clampBrushSize(size);
+    const clamped = clampBrushSizeFloat(size);
     if (clamped === this.brushSize) {
       return false;
     }
@@ -1863,7 +1863,7 @@ export class GnumarusCanvasEngine {
   }
 
   setLineWidth(size: number): boolean {
-    const clamped = clampBrushSize(size);
+    const clamped = clampBrushSizeFloat(size);
     if (clamped === this.lineWidth) {
       return false;
     }
