@@ -14,11 +14,12 @@ Frontend-only single page web app for digital painting, pixel art, vector art an
 - No `twgl.js` / `gl-matrix` / `earcut` direct deps in v1 (covered by Three). No WASM in v1. No `paper.js` / `resvg` in v1. Vector stays as future work; SVG renders natively in-browser for UI/overlay only.
 - RAM conservative: one `Uint8Array` RGBA pixel buffer per layer, one `THREE.DataTexture` (`NearestFilter`) per layer, lazy `import()` of `three/addons` loaders only when 3D is added (v2).
 
-## 3. MVP scope (v1 + layers + channel lock)
+## 3. MVP scope (v1 + layers + channel lock + layer resize)
 - Shell: top menu bar (File > New, Open, Save), left toolbar (pencil + color + zoom readout), central WebGL2 canvas, right layers panel, bottom status bar (tool, color, cursor pixel, canvas size, zoom, project name, dirty flag, FS API support).
-- Canvas engine (`src/canvas/GnumarusCanvasEngine.ts`): Three WebGL2 renderer, `NearestFilter`, fullscreen textured quads, integer zoom (wheel) + pan (middle-drag / space-drag), DPR-aware, per-layer transform, channel-locked painting.
+- Canvas engine (`src/canvas/GnumarusCanvasEngine.ts`): Three WebGL2 renderer, `NearestFilter`, fullscreen textured quads, integer zoom (wheel) + pan (middle-drag / space-drag), DPR-aware, per-layer transform, channel-locked painting, per-layer resize with texture realloc.
 - Pencil: 1px solid color, no anti-aliasing, Bresenham line interpolation between pointer events, draws into CPU buffer then `texture.needsUpdate`, masked by `lockedChannels`.
 - Channel lock: per-layer `{ r, g, b, a }`, any combination; paint/clear/merge write only unlocked channels; persisted in `project.json`; legacy defaults to unlocked.
+- Layer resize: per-layer width/height 1..1024; expand right/down transparent, shrink crops right/below, top-left preserved; undoable.
 - New: dialog for width/height (default 64x64, clamp 1..1024), clears buffer.
 - Open/Save: `showDirectoryPicker()` (Chromium). Project directory format (forward-compatible with future animation, multi-layer with locks):
   - `project.json`: `{ app, version, width, height, layers: [{ id, name, visible, opacity, width, height, transform, lockedChannels, cells: [{ frame, file }] }] }`
@@ -31,10 +32,9 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 
 ## 5. Verification
 - `npm run build` passes (tsc strict + vite, relative `./assets/` output verified for nested hosting).
-- `npm run test`: 43/43 Vitest unit tests pass (pixel buffer, channel lock, viewport, project format, checker, history).
-- `npm run test:e2e`: 21/21 Playwright/Chromium tests pass (boot+menu, New dialog, real pencil stroke, layers, channel lock paint/merge/undo).
-- Fixed during implementation: Lit class-field shadowing (reactive fields use `declare` + constructor init), local minimal `src/three.d.ts` so no new `@types/three` dependency was needed; fixed `historyLayerFor` to use layer width (was project width) and layer-panel click bubbling so row selection works with lock toggles.
-- `npm run deploy` = `rm -rf /var/www/html/GnumarusPaintingAndAnimationApp; npm run build; cp -r dist /var/www/html/GnumarusPaintingAndAnimationApp` (needs write access to `/var/www/html`).
+- `npm run test`: 49/49 Vitest unit tests pass (pixel buffer, channel lock, layer resize, viewport, project format, checker, history).
+- `npm run test:e2e`: 23/23 Playwright/Chromium tests pass (boot+menu, New dialog, real pencil stroke, layers, channel lock paint/merge/undo, layer resize dialog/undo).
+- Fixed during implementation: Lit class-field shadowing (reactive fields use `declare` + constructor init), local minimal `src/three.d.ts` so no new `@types/three` dependency was needed; fixed `historyLayerFor` to use layer width (was project width) and layer-panel click bubbling so row selection works with lock toggles; layer resize recreates `DataTexture` and restores it on undo/redo.
 
 ## 6. Channel lock (implemented)
 - Goal: allow locking any combination of the 4 RGBA channels per layer.
@@ -42,3 +42,12 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Storage: `lockedChannels: { r, g, b, a }` per layer in `project.json`, backward compatible (missing defaults to all unlocked).
 - UI: per-layer R/G/B/A toggles in the layers panel, persisted, marked dirty, not undoable (like other structural ops); merge snapshot restores the removed layer lock on undo.
 - Tests: unit tests for masked `setPixel`/`drawPixelLine`/`clear`/`composite`, project round-trip with locks, plus Playwright e2e for toggle + paint + persistence.
+
+## 7. Layer resize (implemented)
+- Goal: allow setting new dimensions per layer. Larger expands right and down with transparent pixels. Smaller crops excess right and below.
+- Semantics: top-left content preserved verbatim (all channels, locks ignored). Expand fills new right/bottom area with `(0,0,0,0)`. Shrink discards right/bottom pixels. Same dimensions is a no-op (no history).
+- Validation: integer dimensions clamped to 1..1024. Invalid layer or out-of-range input rejected.
+- Engine: `resizeLayer(id, w, h)` reallocates `Uint8ClampedArray`, recreates `THREE.DataTexture`, relayouts planes, marks dirty, pushes undoable history entry with before/after buffers.
+- History: new `resize` entry `{ layerId, beforeWidth/Height/Buffer, afterWidth/Height/Buffer }` with apply-resize callback in undo/redo. Skips missing layers like other entries.
+- UI: per-row Resize button opens a dialog with width/height inputs (prefilled), Resize/Cancel actions. Marked dirty, status message, panel refresh.
+- Tests: unit tests for `resizePixelBuffer` (expand/shrink/no-op/transparent fill) and history resize undo/redo, plus Playwright e2e for dialog + expand paint + shrink crop + undo/redo.

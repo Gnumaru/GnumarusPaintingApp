@@ -16,3 +16,9 @@
 - [x] Channel lock: per-layer lock state in engine + `project.json` round-trip (backward compatible)
 - [x] Channel lock: layers panel R/G/B/A toggles + save/load + undo of merge restores locks
 - [x] Channel lock: unit + e2e tests, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
+- [x] Layer resize: `resizePixelBuffer` top-left preserve, expand transparent right/bottom, crop right/bottom
+- [x] Layer resize: engine `resizeLayer` with texture realloc + undoable history `resize` entry
+- [x] Layer resize: layers panel Resize button + dialog + save/load + status/dirty handling
+- [x] Layer resize: unit + e2e tests, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
+- [x] Unit tests (vitest): pixel buffer, channel lock, layer resize, project format, mapping, checker, history — 49 passed
+- [x] E2E test (Playwright): shell + menu + New + pencil + layers + merge + channel locks + layer resize — 23 passed

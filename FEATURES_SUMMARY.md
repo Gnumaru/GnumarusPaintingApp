@@ -3,9 +3,9 @@
 - Desktop app shell: top menu bar (File > New/Open/Save, Edit > Undo/Redo/Settings/Reset Canvas Transform), left toolbar, central canvas, right layers panel, bottom status bar.
 - Pixel-art pencil: 1px solid color, no anti-aliasing.
 - Layers: add, delete, reorder, rename, visibility, opacity, right-click Merge Down (undoable); independent per-layer size and transform (position/rotation/flips); Transform tool; painting targets the active layer.
+- Layer resize: per-layer width/height 1..1024 via Resize button + dialog; expand fills transparent right and below, shrink crops right and below, top-left preserved; undoable.
 - Channel lock: per-layer R/G/B/A lock toggles; paint, clear and Merge Down write only unlocked channels (locked channels keep old values).
-- Undo/redo for image edits (`Ctrl+Z` / `Ctrl+Y`), region-based history tagged per layer.
-- Undo/redo for image edits (`Ctrl+Z` / `Ctrl+Y`), region-based history tagged per layer.
+- Undo/redo for image edits and layer resizes (`Ctrl+Z` / `Ctrl+Y`), region-based history tagged per layer.
 - Single cell per layer for now (no animation UI yet; project format already supports cells/frames).
 - WebGL2-only canvas (Three.js) with nearest-neighbor scaling, zoom, rotation + mirror view transform, and pan.
 - Toolbar with pencil and loupe (zoom/rotate/flip) tools.

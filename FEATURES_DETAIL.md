@@ -2,11 +2,11 @@
 
 ## 1. Desktop shell (`src/shell/GnumarusShell.ts`)
 
-- `gnumarus-shell` Lit component: menu bar, toolbar, canvas host, status bar, New-canvas dialog, Settings dialog.
+- `gnumarus-shell` Lit component: menu bar, toolbar, canvas host, status bar, New-canvas dialog, Resize-layer dialog, Settings dialog.
 - File menu items: New (width/height dialog, 1..1024, default 64x64), Open (directory picker), Save (writes to picked directory, reuses the handle afterwards).
-- Edit menu items: Undo/Redo (image edits only, with disabled state), Settings (checkerboard mode image-space/screen-space, independent square width/height 1..128 default 16x16, colors A/B with Reset defaults; applied live and persisted to `localStorage`) and Reset Canvas Transform (restores fit zoom, rotation, flips).
-- Undo/redo: per-stroke bounding-box diffs (max 100 entries), view transforms and settings never recorded; shortcuts `Ctrl+Z` undo, `Ctrl+Y` or `Shift+Ctrl+Z` redo; history cleared on New/Open.
-- Toolbar: pencil tool (pixel-art) and loupe tool (zoom/rotate/flip) plus a color input.
+- Edit menu items: Undo/Redo (image edits and layer resizes, with disabled state), Settings (checkerboard mode image-space/screen-space, independent square width/height 1..128 default 16x16, colors A/B with Reset defaults; applied live and persisted to `localStorage`) and Reset Canvas Transform (restores fit zoom, rotation, flips).
+- Undo/redo: per-stroke bounding-box diffs plus resize before/after snapshots (max 100 entries), view transforms and settings never recorded; shortcuts `Ctrl+Z` undo, `Ctrl+Y` or `Shift+Ctrl+Z` redo; history cleared on New/Open.
+- Toolbar: pencil tool (pixel-art), loupe tool (zoom/rotate/flip) and transform tool plus a color input.
 - Status bar shows tool, rotation degrees, flip state, hex color, cursor pixel coordinates, canvas dimensions, zoom percentage, project name, modified marker, WebGL2/FS-API messages.
 - All UI strings in American English.
 
@@ -21,8 +21,9 @@
 
 ## 3. Layers
 
-- Layers panel (right dock): add, delete (never the last one), reorder up/down, rename (double-click, Enter/blur commits, Escape cancels), per-layer visibility checkbox, opacity slider and R/G/B/A channel lock toggles, click to activate; right-click a row for the context menu (Merge Down, disabled on the bottom layer); status bar shows active layer name and stack position; each row shows its pixel dimensions.
-- Layer model: `{ id, name, visible, opacity, width, height, transform, lockedChannels: { r, g, b, a } }` with stable filename-safe ids; layers may differ in size from the project (e.g. 4x4 or 128x128 on a 64x64 project); each layer stores its own position offset, rotation, flips and channel locks; bottom-to-top stack order; painting, clear and undo/redo target the active layer; structural ops (including lock toggles) are not undoable.
+- Layers panel (right dock): add, delete (never the last one), reorder up/down, rename (double-click, Enter/blur commits, Escape cancels), per-layer visibility checkbox, opacity slider, R/G/B/A channel lock toggles and Resize button with dialog, click to activate; right-click a row for the context menu (Merge Down, disabled on the bottom layer); status bar shows active layer name and stack position; each row shows its pixel dimensions.
+- Layer model: `{ id, name, visible, opacity, width, height, transform, lockedChannels: { r, g, b, a } }` with stable filename-safe ids; layers may differ in size from the project (e.g. 4x4 or 128x128 on a 64x64 project); each layer stores its own position offset, rotation, flips and channel locks; bottom-to-top stack order; painting, clear, resize and undo/redo target the active layer; structural ops (except resize/merge/stroke) are not undoable.
+- Layer resize: `resizeLayer(id, w, h)` with `resizePixelBuffer` top-left preserve; expand fills transparent right and below, shrink crops right and below; 1..1024 clamped integers; same size is a no-op; texture recreated; undoable via `resize` history entry (restores dimensions, pixels and texture).
 - Channel lock semantics: `setPixel`, `drawPixelLine`, `clearPixelBuffer` and `compositePixelOver` write only unlocked channels. Alpha lock + paint keeps old alpha; green lock + cyan (`#00ffff`) paint yields blue; fully-locked paint is a no-op (still hit-tests in bounds, produces no history entry).
 - Transform tool (`T`): left-drag moves the active layer, right-drag rotates it around its own center, middle-click flips X (Shift+middle-click flips Y, Ctrl+middle-click resets the layer transform); layer transforms are view-independent and not undoable.
 - Rendering positions every plane from the same pure project-space math used for picking, so display and editing always agree.
@@ -31,9 +32,9 @@
 
 ## 4. Pure logic modules (fully unit-tested)
 
-- `src/canvas/GnumarusPixelBuffer.ts`: buffer create/clear/get/set, Bresenham line, `#rgb`/`#rrggbb` parsing, `GnumarusChannelLock` (`{ r, g, b, a }`), `parseChannelLock`, masked `setPixel`/`drawPixelLine`/`clearPixelBuffer`/`compositePixelOver`.
+- `src/canvas/GnumarusPixelBuffer.ts`: buffer create/clear/get/set, Bresenham line, `#rgb`/`#rrggbb` parsing, `GnumarusChannelLock` (`{ r, g, b, a }`), `parseChannelLock`, masked `setPixel`/`drawPixelLine`/`clearPixelBuffer`/`compositePixelOver`, `clampLayerDim` + `resizePixelBuffer` (top-left preserve, transparent expand, crop).
 - `src/canvas/GnumarusViewportMath.ts`: screen<->pixel mapping with pan/zoom/rotation/flip (exact inverses), zoom clamping, rotation normalization.
-- `src/history/GnumarusHistory.ts`: bounding-box image diffs tagged by layer, capped undo/redo stacks; merge snapshot carries `lockedChannels`.
+- `src/history/GnumarusHistory.ts`: bounding-box image diffs tagged by layer plus `resize` before/after snapshots, capped undo/redo stacks; merge snapshot carries `lockedChannels`.
 - `src/project/GnumarusProjectFormat.ts`: `project.json` build/serialize/strict-parse with `lockedChannels` (legacy defaults to unlocked), `cells/<layer>_frame<frame>.png` paths (multi-layer).
 - `src/settings/GnumarusCheckerSettings.ts`: checkerboard settings parse/serialize/validate with legacy migration.
 
@@ -50,8 +51,8 @@
 
 ## 6. Tests
 
-- Vitest unit tests (`tests/`): pixel buffer, channel locks, viewport math, project format, checker settings, layer-tagged history — 43 tests.
-- Playwright E2E (`e2e/`, Chromium): shell, menus, dialogs, pencil, zoom shortcuts, checker settings, loupe gestures, P/L tools, transform reset, undo/redo, full layer management, channel lock toggles + masked paint + merge/undo — 21 tests.
+- Vitest unit tests (`tests/`): pixel buffer, channel locks, layer resize, viewport math, project format, checker settings, layer-tagged history — 49 tests.
+- Playwright E2E (`e2e/`, Chromium): shell, menus, dialogs, pencil, zoom shortcuts, checker settings, loupe gestures, P/L tools, transform reset, undo/redo, full layer management, channel lock toggles + masked paint + merge/undo, layer resize dialog + undo — 23 tests.
 
 ## 7. Build and deploy
 

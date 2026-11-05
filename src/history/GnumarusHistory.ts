@@ -96,9 +96,20 @@ export interface GnumarusMergeRecord {
   upper: GnumarusMergedLayerSnapshot;
 }
 
+export interface GnumarusResizeRecord {
+  layerId: string;
+  beforeWidth: number;
+  beforeHeight: number;
+  beforeBuffer: Uint8ClampedArray;
+  afterWidth: number;
+  afterHeight: number;
+  afterBuffer: Uint8ClampedArray;
+}
+
 export type GnumarusHistoryEntry =
   | { type: "stroke"; layerId: string; diff: GnumarusImageDiff }
-  | { type: "merge"; merge: GnumarusMergeRecord };
+  | { type: "merge"; merge: GnumarusMergeRecord }
+  | { type: "resize"; resize: GnumarusResizeRecord };
 
 export interface GnumarusHistoryLayer {
   buffer: Uint8ClampedArray;
@@ -133,6 +144,7 @@ export class GnumarusHistory {
   undo(
     findLayer: (layerId: string) => GnumarusHistoryLayer | null,
     restoreLayer: (snapshot: GnumarusMergedLayerSnapshot) => void,
+    applyResize?: (layerId: string, width: number, height: number, buffer: Uint8ClampedArray) => boolean,
   ): boolean {
     for (;;) {
       const entry = this.undoStack.pop();
@@ -145,6 +157,22 @@ export class GnumarusHistory {
           continue;
         }
         applyImageDiff(layer.buffer, layer.width, entry.diff, "before");
+        this.redoStack.push(entry);
+        return true;
+      }
+      if (entry.type === "resize") {
+        if (applyResize === undefined) {
+          continue;
+        }
+        const ok = applyResize(
+          entry.resize.layerId,
+          entry.resize.beforeWidth,
+          entry.resize.beforeHeight,
+          entry.resize.beforeBuffer,
+        );
+        if (!ok) {
+          continue;
+        }
         this.redoStack.push(entry);
         return true;
       }
@@ -164,6 +192,7 @@ export class GnumarusHistory {
   redo(
     findLayer: (layerId: string) => GnumarusHistoryLayer | null,
     removeLayer: (layerId: string) => void,
+    applyResize?: (layerId: string, width: number, height: number, buffer: Uint8ClampedArray) => boolean,
   ): boolean {
     for (;;) {
       const entry = this.redoStack.pop();
@@ -176,6 +205,22 @@ export class GnumarusHistory {
           continue;
         }
         applyImageDiff(layer.buffer, layer.width, entry.diff, "after");
+        this.undoStack.push(entry);
+        return true;
+      }
+      if (entry.type === "resize") {
+        if (applyResize === undefined) {
+          continue;
+        }
+        const ok = applyResize(
+          entry.resize.layerId,
+          entry.resize.afterWidth,
+          entry.resize.afterHeight,
+          entry.resize.afterBuffer,
+        );
+        if (!ok) {
+          continue;
+        }
         this.undoStack.push(entry);
         return true;
       }

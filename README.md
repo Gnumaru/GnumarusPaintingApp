@@ -10,7 +10,7 @@ Classic desktop-like painting app (top menu bar, central canvas, bottom status b
 
 - Desktop shell: File menu (New, Open, Save), Edit menu (Undo/Redo, Settings, Reset Canvas Transform), pencil/loupe/transform toolbar with color picker, WebGL2 canvas, layers panel, status bar.
 - Pixel-art pencil: 1px solid color, no anti-aliasing, Bresenham strokes, nearest-neighbor display, wheel zoom + pan + rotation + flips.
-- Layers: add, delete, reorder, rename, visibility, opacity, right-click Merge Down (undoable); independent size and transform.
+- Layers: add, delete, reorder, rename, visibility, opacity, right-click Merge Down (undoable); independent size and transform; per-layer resize (expand right/down transparent, shrink crops right/below, undoable).
 - Channel lock: per-layer R/G/B/A toggles; paint, clear and Merge Down write only unlocked channels. Example: alpha locked + paint keeps old alpha; green locked + cyan paint yields blue.
 - Directory projects via the File System Access API (Chromium derivatives): `project.json` metadata plus `cells/<layer>_frame<frame>.png` cell images (format already supports future animation; locks persist in `project.json`).
 - WebGL2-only rendering with an explicit error message when unavailable. No WebGL1 fallback.

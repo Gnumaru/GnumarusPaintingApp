@@ -1,12 +1,14 @@
 import * as THREE from "three";
 import {
   clearPixelBuffer,
+  clampLayerDim,
   compositePixelOver,
   createPixelBuffer,
   drawPixelLine,
   getPixel,
   parseChannelLock,
   parseHexColor,
+  resizePixelBuffer,
   setPixel,
   type GnumarusChannelLock,
   type GnumarusRgba,
@@ -661,6 +663,88 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
+  private replaceLayerBuffer(layerId: string, width: number, height: number, buffer: Uint8ClampedArray): boolean {
+    const layer = this.findLayer(layerId);
+    if (layer === null) {
+      return false;
+    }
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
+      return false;
+    }
+    if (buffer.length !== width * height * 4) {
+      return false;
+    }
+    layer.texture.dispose();
+    const texture = new THREE.DataTexture(buffer, width, height);
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.NearestFilter;
+    texture.generateMipmaps = false;
+    texture.flipY = true;
+    texture.needsUpdate = true;
+    layer.texture = texture;
+    layer.material.uniforms["uMap"]!.value = texture;
+    layer.width = width;
+    layer.height = height;
+    layer.buffer = buffer;
+    return true;
+  }
+
+  private applyLayerResize(layerId: string, width: number, height: number, buffer: Uint8ClampedArray): boolean {
+    const copy = new Uint8ClampedArray(buffer);
+    if (!this.replaceLayerBuffer(layerId, width, height, copy)) {
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Resize a layer, preserving top-left pixels.
+   * Larger dimensions expand right and down with transparent pixels.
+   * Smaller dimensions crop excess right and below.
+   * Returns false for unknown layers, invalid dimensions or no-op resizes.
+   * Successful resizes are undoable.
+   */
+  resizeLayer(id: string, newWidth: number, newHeight: number): boolean {
+    const layer = this.findLayer(id);
+    if (layer === null) {
+      return false;
+    }
+    if (!Number.isFinite(newWidth) || !Number.isFinite(newHeight)) {
+      return false;
+    }
+    const clampedWidth = clampLayerDim(newWidth);
+    const clampedHeight = clampLayerDim(newHeight);
+    if (clampedWidth === layer.width && clampedHeight === layer.height) {
+      return false;
+    }
+    const beforeWidth = layer.width;
+    const beforeHeight = layer.height;
+    const beforeBuffer = layer.buffer.slice();
+    const nextBuffer = resizePixelBuffer(layer.buffer, layer.width, layer.height, clampedWidth, clampedHeight);
+    const afterBuffer = nextBuffer.slice();
+    if (!this.replaceLayerBuffer(id, clampedWidth, clampedHeight, nextBuffer)) {
+      return false;
+    }
+    this.history.push({
+      type: "resize",
+      resize: {
+        layerId: id,
+        beforeWidth,
+        beforeHeight,
+        beforeBuffer,
+        afterWidth: clampedWidth,
+        afterHeight: clampedHeight,
+        afterBuffer,
+      },
+    });
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return true;
+  }
+
   loadProject(projectWidth: number, projectHeight: number, inputs: GnumarusProjectLayerInput[]): void {
     if (inputs.length === 0) {
       throw new Error("Project has no layers.");
@@ -839,6 +923,7 @@ export class GnumarusCanvasEngine {
     const applied = this.history.undo(
       (layerId) => this.historyLayerFor(layerId),
       (snapshot) => this.insertLayerSnapshot(snapshot),
+      (layerId, width, height, buffer) => this.applyLayerResize(layerId, width, height, buffer),
     );
     if (!applied) {
       return false;
@@ -856,6 +941,7 @@ export class GnumarusCanvasEngine {
     const applied = this.history.redo(
       (layerId) => this.historyLayerFor(layerId),
       (layerId) => this.removeLayerSilent(layerId),
+      (layerId, width, height, buffer) => this.applyLayerResize(layerId, width, height, buffer),
     );
     if (!applied) {
       return false;

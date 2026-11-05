@@ -44,6 +44,39 @@ export function createPixelBuffer(width: number, height: number): Uint8ClampedAr
   return new Uint8ClampedArray(width * height * 4);
 }
 
+export const GNUMARUS_MIN_LAYER_DIM = 1;
+export const GNUMARUS_MAX_LAYER_DIM = 1024;
+
+export function clampLayerDim(value: number): number {
+  if (!Number.isFinite(value)) {
+    return GNUMARUS_MIN_LAYER_DIM;
+  }
+  return Math.min(GNUMARUS_MAX_LAYER_DIM, Math.max(GNUMARUS_MIN_LAYER_DIM, Math.floor(value)));
+}
+
+/**
+ * Resize a pixel buffer preserving the top-left content.
+ * Larger dimensions expand right and down with transparent pixels.
+ * Smaller dimensions crop excess right and below.
+ */
+export function resizePixelBuffer(
+  buffer: Uint8ClampedArray,
+  oldWidth: number,
+  oldHeight: number,
+  newWidth: number,
+  newHeight: number,
+): Uint8ClampedArray {
+  const next = new Uint8ClampedArray(newWidth * newHeight * 4);
+  const copyWidth = Math.min(oldWidth, newWidth);
+  const copyHeight = Math.min(oldHeight, newHeight);
+  for (let y = 0; y < copyHeight; y += 1) {
+    const src = (y * oldWidth) * 4;
+    const dst = (y * newWidth) * 4;
+    next.set(buffer.subarray(src, src + copyWidth * 4), dst);
+  }
+  return next;
+}
+
 export function clearPixelBuffer(buffer: Uint8ClampedArray, locked: GnumarusChannelLock | undefined = undefined): void {
   if (locked === undefined || areAllChannelsUnlocked(locked)) {
     buffer.fill(0);

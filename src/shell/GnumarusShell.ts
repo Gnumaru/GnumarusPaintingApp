@@ -266,6 +266,17 @@ export class GnumarusShell extends LitElement {
       background: #b56600;
       border-color: #b56600;
     }
+    .layer-resize {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 4px;
+      font-size: 11px;
+      color: #9a9a9a;
+    }
+    .layer-resize button {
+      flex: 0 0 auto;
+    }
     .context-blocker {
       position: fixed;
       inset: 0;
@@ -390,6 +401,9 @@ export class GnumarusShell extends LitElement {
     fsSupported: { type: Boolean },
     newWidth: { type: Number },
     newHeight: { type: Number },
+    resizeWidth: { type: Number },
+    resizeHeight: { type: Number },
+    resizingLayerId: { type: String },
     checkerMode: { type: String },
     checkerSizeX: { type: Number },
     checkerSizeY: { type: Number },
@@ -421,6 +435,9 @@ export class GnumarusShell extends LitElement {
   declare fsSupported: boolean;
   declare newWidth: number;
   declare newHeight: number;
+  declare resizeWidth: number;
+  declare resizeHeight: number;
+  declare resizingLayerId: string | null;
   declare checkerMode: GnumarusCheckerMode;
   declare checkerSizeX: number;
   declare checkerSizeY: number;
@@ -457,6 +474,9 @@ export class GnumarusShell extends LitElement {
     this.fsSupported = true;
     this.newWidth = 64;
     this.newHeight = 64;
+    this.resizeWidth = 64;
+    this.resizeHeight = 64;
+    this.resizingLayerId = null;
     this.checkerMode = DEFAULT_CHECKER_SETTINGS.mode;
     this.checkerSizeX = DEFAULT_CHECKER_SETTINGS.sizeX;
     this.checkerSizeY = DEFAULT_CHECKER_SETTINGS.sizeY;
@@ -719,6 +739,19 @@ export class GnumarusShell extends LitElement {
                       A
                     </button>
                   </div>
+                  <div class="layer-resize">
+                    <span>Size</span>
+                    <button
+                      aria-label="Resize layer"
+                      title="Resize layer (expand right and down, crop right and below)"
+                      @click=${(event: Event): void => {
+                        event.stopPropagation();
+                        this.openResizeDialog(layer.id);
+                      }}
+                    >
+                      ${layer.width}×${layer.height} Resize
+                    </button>
+                  </div>
                 </div>
               `,
             )}
@@ -771,6 +804,16 @@ export class GnumarusShell extends LitElement {
         <div class="dialog-actions">
           <button @click=${(): void => this.closeNewDialog()}>Cancel</button>
           <button @click=${(): void => void this.createNew()}>Create</button>
+        </div>
+      </dialog>
+      <dialog id="resizeDialog">
+        <h3>Resize layer</h3>
+        <p>Expanding adds transparent pixels right and below. Shrinking crops right and below.</p>
+        <label>Width <input type="number" id="resizeWidth" min="1" max="1024" .value=${String(this.resizeWidth)} /></label>
+        <label>Height <input type="number" id="resizeHeight" min="1" max="1024" .value=${String(this.resizeHeight)} /></label>
+        <div class="dialog-actions">
+          <button @click=${(): void => this.closeResizeDialog()}>Cancel</button>
+          <button @click=${(): void => this.confirmResize()}>Resize</button>
         </div>
       </dialog>
       <dialog id="settingsDialog">
@@ -870,6 +913,47 @@ export class GnumarusShell extends LitElement {
   private closeNewDialog(): void {
     const dialog = this.shadowRoot?.getElementById("newDialog") as HTMLDialogElement | null;
     dialog?.close();
+  }
+
+  private openResizeDialog(id: string): void {
+    const layer = this.layers.find((entry) => entry.id === id);
+    if (layer === undefined) {
+      return;
+    }
+    this.resizingLayerId = id;
+    this.resizeWidth = layer.width;
+    this.resizeHeight = layer.height;
+    this.requestUpdate();
+    const dialog = this.shadowRoot?.getElementById("resizeDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+  }
+
+  private closeResizeDialog(): void {
+    const dialog = this.shadowRoot?.getElementById("resizeDialog") as HTMLDialogElement | null;
+    dialog?.close();
+    this.resizingLayerId = null;
+  }
+
+  private confirmResize(): void {
+    const targetId = this.resizingLayerId;
+    if (targetId === null || this.engine === null) {
+      this.closeResizeDialog();
+      return;
+    }
+    const widthInput = this.shadowRoot?.getElementById("resizeWidth") as HTMLInputElement | null;
+    const heightInput = this.shadowRoot?.getElementById("resizeHeight") as HTMLInputElement | null;
+    const width = Math.min(1024, Math.max(1, Math.floor(Number(widthInput?.value ?? "1") || 1)));
+    const height = Math.min(1024, Math.max(1, Math.floor(Number(heightInput?.value ?? "1") || 1)));
+    this.resizeWidth = width;
+    this.resizeHeight = height;
+    if (this.engine.resizeLayer(targetId, width, height)) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = `Layer resized to ${width} x ${height}`;
+    } else {
+      this.statusMessage = "Layer size unchanged";
+    }
+    this.closeResizeDialog();
   }
 
   private resetCanvasTransform(): void {

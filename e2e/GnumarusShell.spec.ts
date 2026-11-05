@@ -712,3 +712,76 @@ test("merge down respects destination locks and undo restores the upper lock", a
     { id: "layer1", locked: { r: false, g: true, b: false, a: false } },
   ]);
 });
+
+test("layer resize expands right and down and crops right and below", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const row0 = page.locator('gnumarus-shell [data-layer-id="layer0"]');
+  await expect(row0).toContainText("64×64");
+
+  await row0.getByRole("button", { name: "Resize layer" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Resize layer");
+  await page.locator("gnumarus-shell input#resizeWidth").fill("4");
+  await page.locator("gnumarus-shell input#resizeHeight").fill("4");
+  await page.getByRole("button", { name: "Resize", exact: true }).click();
+  await expect(row0).toContainText("4×4");
+
+  const dims = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getLayers(): Array<{ width: number; height: number }> } };
+    };
+    return root.__gnumarus?.engine?.getLayers()[0] ?? null;
+  });
+  expect(dims).toMatchObject({ width: 4, height: 4 });
+
+  await row0.getByRole("button", { name: "Resize layer" }).click();
+  await page.locator("gnumarus-shell input#resizeWidth").fill("8");
+  await page.locator("gnumarus-shell input#resizeHeight").fill("6");
+  await page.getByRole("button", { name: "Resize", exact: true }).click();
+  await expect(row0).toContainText("8×6");
+});
+
+test("layer resize is undoable and preserves top-left pixels", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await page.mouse.click(cx, cy);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+
+  const resized = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { resizeLayer(id: string, w: number, h: number): boolean } };
+    };
+    return root.__gnumarus?.engine?.resizeLayer("layer0", 4, 4);
+  });
+  expect(resized).toBe(true);
+  expect(await readPixel(page, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 2, 2)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 32, 32)).toBeNull();
+
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  const afterUndo = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getLayers(): Array<{ width: number; height: number }> } };
+    };
+    return root.__gnumarus?.engine?.getLayers()[0] ?? null;
+  });
+  expect(afterUndo).toMatchObject({ width: 64, height: 64 });
+
+  await page.keyboard.press("Control+y");
+  expect(await readPixel(page, 32, 32)).toBeNull();
+  const afterRedo = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getLayers(): Array<{ width: number; height: number }> } };
+    };
+    return root.__gnumarus?.engine?.getLayers()[0] ?? null;
+  });
+  expect(afterRedo).toMatchObject({ width: 4, height: 4 });
+});
