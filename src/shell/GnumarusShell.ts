@@ -856,6 +856,17 @@ export class GnumarusShell extends LitElement {
             <span class="tool-icon">⌕</span>
           </button>
           <button
+            class=${this.tool === "bucket" ? "active" : ""}
+            title="Bucket fill (click fills contiguous same-color region)"
+            aria-label="Bucket fill"
+            @click=${(): void => {
+              this.tool = "bucket";
+              this.engine?.setTool("bucket");
+            }}
+          >
+            <span class="tool-icon">🪣</span>
+          </button>
+          <button
             class=${this.tool === "transform" ? "active" : ""}
             title="Transform (left-drag move, right-drag rotate, middle-click flip layer)"
             aria-label="Transform"

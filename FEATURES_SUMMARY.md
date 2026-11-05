@@ -2,6 +2,7 @@
 
 - Desktop app shell: top menu bar (File > New/Open/Save, Edit > Undo/Redo/Settings/Reset Canvas Transform), left toolbar, central canvas, right layers panel, bottom status bar.
 - Pixel-art pencil: 1px solid color (including alpha), no anti-aliasing.
+- Bucket fill: click fills the contiguous region of identical RGBA color with the current solid color (4-way, channel-lock aware, undoable, shortcut `B`).
 - Custom color picker (no browser picker): models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV (Oklab-based) and ARD; alpha axis on every model (0..255); hue axes 0..360; ARD Diagonal 0..360 and Ratio 0..255; every other axis is a percentage with one decimal. Each axis has a draggable gradient bar showing its own 0..max gradient plus an editable numeric input beside it.
 - Pixel grid over the active layer, following its transform; hidden below 200 percent zoom; minimum zoom configurable 200..6400 percent, default 1000 percent, in Edit > Settings.
 - Canvas background: checkerboard (default, configurable) or solid color (configurable) in Edit > Settings.
@@ -15,7 +16,7 @@
 - Undo/redo for image edits and layer resizes (`Ctrl+Z` / `Ctrl+Y`), region-based history tagged per texture.
 - Project directory holds `project.json` (layers, frames, contents, textures, cells) plus `textures/*.png` (legacy `cells/*.png` opens via automatic migration).
 - WebGL2-only canvas (Three.js) with nearest-neighbor scaling, zoom, rotation + mirror view transform, and pan.
-- Toolbar with pencil and loupe (zoom/rotate/flip) tools.
+- Toolbar with pencil, bucket fill and loupe (zoom/rotate/flip) tools.
 - Configurable transparency checkerboard: image-space or screen-space, independent width/height (default 16x16, asymmetric like 8x16 supported), two colors, persisted in the browser.
 - Directory projects over File System Access API: `project.json` + `textures/*.png`. File > Save reuses the chosen folder; `Ctrl+S` (`Cmd+S` on macOS) triggers the same save (picker only when no folder chosen yet).
 - Status bar: tool, color, cursor pixel, canvas size, layer, frame, zoom, rotation, flip state, project name, dirty flag, messages.

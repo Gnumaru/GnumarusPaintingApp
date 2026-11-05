@@ -4,6 +4,7 @@ import {
   compositeOver,
   createPixelBuffer,
   drawPixelLine,
+  floodFill,
   getPixel,
   parseHexColor,
   setPixel,
@@ -80,5 +81,55 @@ describe("GnumarusPixelBuffer", () => {
     const emptySrc = createPixelBuffer(2, 2);
     compositeOver(empty, emptySrc, 2, 2, 1);
     expect(getPixel(empty, 2, 2, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  });
+
+  it("flood fills a contiguous region without leaking through barriers", () => {
+    const buffer = createPixelBuffer(5, 5);
+    const white = { r: 255, g: 255, b: 255, a: 255 };
+    const black = { r: 0, g: 0, b: 0, a: 255 };
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    for (let x = 0; x < 5; x += 1) {
+      setPixel(buffer, 5, 5, x, 2, black);
+    }
+    const filled = floodFill(buffer, 5, 5, 0, 0, white);
+    expect(filled).toBe(10);
+    for (let y = 0; y < 2; y += 1) {
+      for (let x = 0; x < 5; x += 1) {
+        expect(getPixel(buffer, 5, 5, x, y)).toEqual(white);
+      }
+    }
+    expect(getPixel(buffer, 5, 5, 0, 2)).toEqual(black);
+    for (let y = 3; y < 5; y += 1) {
+      for (let x = 0; x < 5; x += 1) {
+        expect(getPixel(buffer, 5, 5, x, y)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+      }
+    }
+    const second = floodFill(buffer, 5, 5, 0, 4, red);
+    expect(second).toBe(10);
+    expect(getPixel(buffer, 5, 5, 4, 4)).toEqual(red);
+  });
+
+  it("flood fill is a no-op for same color or out of bounds", () => {
+    const buffer = createPixelBuffer(3, 3);
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    setPixel(buffer, 3, 3, 1, 1, red);
+    expect(floodFill(buffer, 3, 3, 1, 1, red)).toBe(0);
+    expect(floodFill(buffer, 3, 3, -1, 0, red)).toBe(0);
+    expect(floodFill(buffer, 3, 3, 9, 9, red)).toBe(0);
+    expect(getPixel(buffer, 3, 3, 1, 1)).toEqual(red);
+  });
+
+  it("flood fill respects channel locks", () => {
+    const buffer = createPixelBuffer(2, 2);
+    const target = { r: 10, g: 20, b: 30, a: 40 };
+    const fill = { r: 200, g: 210, b: 220, a: 230 };
+    for (let y = 0; y < 2; y += 1) {
+      for (let x = 0; x < 2; x += 1) {
+        setPixel(buffer, 2, 2, x, y, target);
+      }
+    }
+    const filled = floodFill(buffer, 2, 2, 0, 0, fill, { r: true, g: false, b: false, a: false });
+    expect(filled).toBe(4);
+    expect(getPixel(buffer, 2, 2, 1, 1)).toEqual({ r: 10, g: 210, b: 220, a: 230 });
   });
 });

@@ -87,6 +87,11 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - `Ctrl+S` (plus `Cmd+S` on macOS for the same physical shortcut) triggers the same save flow as File > Save: if a project folder was already chosen it saves there without prompting, otherwise the OS directory picker is shown.
 - Browser default save dialog is suppressed with `preventDefault`; shortcut works even when focus is inside inputs.
 
+## 15. Bucket fill tool (implemented)
+- New toolbar tool fills contiguous regions of identical RGBA color in the active cell texture with the current solid color (4-way flood fill, exact match on all four channels).
+- Respects channel locks like the pencil (locked channels keep old values); fully-locked or same-color fills are no-ops with no history entry.
+- Single click fills; undoable via the same region-diff history as strokes; empty cells materialize first; shortcut `B`.
+
 ## 11. Custom color picker (implemented)
 - Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).
 - Every model carries an alpha axis; RGBA axes span 0..255. ARD Diagonal spans 0..360 and Ratio 0..255.

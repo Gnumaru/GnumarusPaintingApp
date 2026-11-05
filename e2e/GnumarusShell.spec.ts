@@ -1319,10 +1319,11 @@ test("toolbar icons fill buttons without growing them", async ({ page }) => {
       };
     });
   });
-  expect(boxes).toHaveLength(4);
+  expect(boxes).toHaveLength(5);
   const expected: Record<string, { w: number; h: number }> = {
     Pencil: { w: 33, h: 25 },
     Loupe: { w: 30, h: 25 },
+    "Bucket fill": { w: 38, h: 25 },
     Transform: { w: 31, h: 29 },
     "Final preview": { w: 32, h: 29 },
   };
@@ -1681,6 +1682,82 @@ test("Control+S saves to the chosen folder without prompting again", async ({ pa
   await page.keyboard.press("Control+s");
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockDir");
   expect(await pickCalls()).toBe(1);
+});
+
+test("bucket fill fills a contiguous region without crossing barriers", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          loadProject(
+            width: number,
+            height: number,
+            inputs: Array<{
+              id: string;
+              name: string;
+              visible: boolean;
+              opacity: number;
+              width: number;
+              height: number;
+              buffer: Uint8ClampedArray;
+              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
+            }>,
+          ): void;
+        };
+      };
+    };
+    const barrier = new Uint8ClampedArray(8 * 8 * 4);
+    for (let y = 0; y < 8; y += 1) {
+      const i = (y * 8 + 4) * 4;
+      barrier[i] = 0;
+      barrier[i + 1] = 0;
+      barrier[i + 2] = 0;
+      barrier[i + 3] = 255;
+    }
+    root.__gnumarus?.engine?.loadProject(64, 64, [
+      {
+        id: "tiny",
+        name: "Tiny",
+        visible: true,
+        opacity: 1,
+        width: 8,
+        height: 8,
+        buffer: barrier,
+        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+      },
+    ]);
+  });
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("bucket");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const state = await getViewState(page);
+  const target = layerPixelToScreen(
+    1,
+    4,
+    { left: box.x, top: box.y, width: box.width, height: box.height },
+    8,
+    8,
+    { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false },
+    { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+  );
+  await page.mouse.click(target.x, target.y);
+  expect(await readPixel(page, 1, 4)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 0, 0)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 4, 4)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 6, 4)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 1, 4)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  await page.keyboard.press("b");
+  await expect(page.locator("gnumarus-shell")).toContainText("bucket");
+  await page.keyboard.press("p");
+  await expect(page.locator("gnumarus-shell")).toContainText("pencil");
 });
 
 async function getMatrixFrame(page: import("@playwright/test").Page): Promise<number> {

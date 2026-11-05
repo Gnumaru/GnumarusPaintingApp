@@ -4,12 +4,13 @@ Frontend-only single page web application for digital painting, pixel art, vecto
 
 ## Intended use
 
-Classic desktop-like painting app (top menu bar, central canvas, bottom status bar) in the spirit of Photoshop, Krita and GIMP. Current version supports pixel-art sketching with a 1px solid pencil, multi-layer editing with per-layer transforms and per-channel locks, frame-by-frame animation over a layer x frame cell matrix, and directory-based projects.
+Classic desktop-like painting app (top menu bar, central canvas, bottom status bar) in the spirit of Photoshop, Krita and GIMP. Current version supports pixel-art sketching with a 1px solid pencil and a contiguous-region bucket fill, multi-layer editing with per-layer transforms and per-channel locks, frame-by-frame animation over a layer x frame cell matrix, and directory-based projects.
 
 ## Features (v1)
 
-- Desktop shell: File menu (New, Open, Save), Edit menu (Undo/Redo, Settings, Reset Canvas Transform), pencil/loupe/transform toolbar with color picker, WebGL2 canvas, layers panel, status bar. `Ctrl+S` (`Cmd+S` on macOS) saves like File > Save (reuses the chosen folder, otherwise shows the OS folder picker).
+- Desktop shell: File menu (New, Open, Save), Edit menu (Undo/Redo, Settings, Reset Canvas Transform), pencil/bucket/loupe/transform toolbar with color picker, WebGL2 canvas, layers panel, status bar. `Ctrl+S` (`Cmd+S` on macOS) saves like File > Save (reuses the chosen folder, otherwise shows the OS folder picker).
 - Pixel-art pencil: 1px solid color, no anti-aliasing, Bresenham strokes, nearest-neighbor display, wheel zoom + pan + rotation + flips.
+- Bucket fill: click fills the contiguous region of identical color with the current solid color (4-way flood fill, channel-lock aware, undoable, shortcut `B`).
 - Pixel grid over the active layer (follows rotation/transform), hidden below 200 percent zoom; minimum zoom 200..6400 percent, default 1000 percent, in Edit > Settings.
 - Canvas background: checkerboard (default) or solid color in Edit > Settings; every setting has a per-setting reset arrow when non-default.
 - Final preview window (floating, resizable) with internal zoom/pan (drag with left, right or middle button) of the flattened image as a single PNG export would look.

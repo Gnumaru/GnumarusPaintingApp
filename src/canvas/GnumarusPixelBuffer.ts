@@ -183,6 +183,89 @@ export function drawPixelLine(
   }
 }
 
+/**
+ * 4-way flood fill of the contiguous region holding the exact start pixel
+ * RGBA value. Writes `color` with the same channel-lock masking as `setPixel`.
+ * Returns the number of region pixels visited (0 when out of bounds or when
+ * the region already holds `color`). Uses a `Uint8Array` visited mask plus an
+ * explicit stack so large fills never recurse and RAM stays proportional to
+ * the image (one byte per pixel plus frontier).
+ */
+export function floodFill(
+  buffer: Uint8ClampedArray,
+  width: number,
+  height: number,
+  startX: number,
+  startY: number,
+  color: GnumarusRgba,
+  locked: GnumarusChannelLock | undefined = undefined,
+): number {
+  if (!Number.isInteger(startX) || !Number.isInteger(startY)) {
+    return 0;
+  }
+  if (startX < 0 || startY < 0 || startX >= width || startY >= height) {
+    return 0;
+  }
+  if (width < 1 || height < 1) {
+    return 0;
+  }
+  const startIndex = (startY * width + startX) * 4;
+  const targetR = buffer[startIndex];
+  const targetG = buffer[startIndex + 1];
+  const targetB = buffer[startIndex + 2];
+  const targetA = buffer[startIndex + 3];
+  if (targetR === color.r && targetG === color.g && targetB === color.b && targetA === color.a) {
+    return 0;
+  }
+  const visited = new Uint8Array(width * height);
+  const stack: number[] = [startY * width + startX];
+  visited[startY * width + startX] = 1;
+  let filled = 0;
+  while (stack.length > 0) {
+    const index = stack.pop();
+    if (index === undefined) {
+      break;
+    }
+    const x = index % width;
+    const y = Math.floor(index / width);
+    const i = index * 4;
+    if (buffer[i] !== targetR || buffer[i + 1] !== targetG || buffer[i + 2] !== targetB || buffer[i + 3] !== targetA) {
+      continue;
+    }
+    setPixel(buffer, width, height, x, y, color, locked);
+    filled += 1;
+    if (x > 0) {
+      const neighbor = index - 1;
+      if (visited[neighbor] !== 1) {
+        visited[neighbor] = 1;
+        stack.push(neighbor);
+      }
+    }
+    if (x + 1 < width) {
+      const neighbor = index + 1;
+      if (visited[neighbor] !== 1) {
+        visited[neighbor] = 1;
+        stack.push(neighbor);
+      }
+    }
+    if (y > 0) {
+      const neighbor = index - width;
+      if (visited[neighbor] !== 1) {
+        visited[neighbor] = 1;
+        stack.push(neighbor);
+      }
+    }
+    if (y + 1 < height) {
+      const neighbor = index + width;
+      if (visited[neighbor] !== 1) {
+        visited[neighbor] = 1;
+        stack.push(neighbor);
+      }
+    }
+  }
+  return filled;
+}
+
 /** Per-pixel straight-alpha source-over: src[srcIndex..] over dst[dstIndex..]. */
 export function compositePixelOver(
   dst: Uint8ClampedArray,

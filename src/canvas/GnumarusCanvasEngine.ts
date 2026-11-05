@@ -5,6 +5,7 @@ import {
   compositePixelOver,
   createPixelBuffer,
   drawPixelLine,
+  floodFill,
   getPixel,
   parseChannelLock,
   parseHexColor,
@@ -72,7 +73,7 @@ export interface GnumarusEngineStats {
   cursorY: number | null;
 }
 
-export type GnumarusCanvasTool = "pencil" | "loupe" | "transform";
+export type GnumarusCanvasTool = "pencil" | "loupe" | "transform" | "bucket";
 
 export interface GnumarusLayerInfo {
   id: string;
@@ -1788,6 +1789,53 @@ export class GnumarusCanvasEngine {
     this.emitStats();
   }
 
+  /**
+   * Fill the contiguous same-RGBA region at texture pixel (x, y) with the
+   * current color, honoring the active layer channel locks. Materializes an
+   * empty cell first. Returns the filled pixel count (0 = no-op).
+   */
+  bucketFillAt(x: number, y: number): number {
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return 0;
+    }
+    const ensured = this.ensureCellContent(layer.id, this.currentFrame);
+    if (ensured === null) {
+      return 0;
+    }
+    const tex = ensured.texture;
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= tex.width || y >= tex.height) {
+      return 0;
+    }
+    const base = tex.buffer.slice();
+    const filled = floodFill(tex.buffer, tex.width, tex.height, x, y, this.color, layer.lockedChannels);
+    if (filled === 0) {
+      return 0;
+    }
+    const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
+    if (diff === null) {
+      return 0;
+    }
+    this.history.push({ type: "stroke", layerId: tex.id, diff });
+    this.syncAllLayerRenders();
+    this.markTextureViewsDirty(tex.id);
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return filled;
+  }
+
+  /** Fill at a client point (maps through view + layer transforms). */
+  bucketFillAtClient(clientX: number, clientY: number): number {
+    const pixel = this.toImagePixel(clientX, clientY);
+    if (pixel === null) {
+      return 0;
+    }
+    return this.bucketFillAt(pixel.x, pixel.y);
+  }
+
   setZoom(zoom: number): void {
     this.zoom = clampZoom(zoom);
     this.layoutScene();
@@ -2145,6 +2193,25 @@ export class GnumarusCanvasEngine {
         canvas.setPointerCapture(event.pointerId);
         return;
       }
+      if (this.tool === "bucket") {
+        // Single click with the bucket tool fills the contiguous same-color region.
+        const layer = this.activeLayer();
+        if (layer === null) {
+          return;
+        }
+        const ensured = this.ensureCellContent(layer.id, this.currentFrame);
+        if (ensured === null) {
+          return;
+        }
+        this.syncLayerRender(layer);
+        this.refreshLayerStacking();
+        const pixel = this.toImagePixel(event.clientX, event.clientY);
+        if (pixel === null) {
+          return;
+        }
+        this.bucketFillAt(pixel.x, pixel.y);
+        return;
+      }
       const layer = this.activeLayer();
       if (layer === null) {
         return;
@@ -2319,6 +2386,10 @@ export class GnumarusCanvasEngine {
       if (!event.ctrlKey && !event.altKey && !event.metaKey && !inField) {
         if (event.key === "p" || event.key === "P") {
           this.setTool("pencil");
+          return;
+        }
+        if (event.key === "b" || event.key === "B") {
+          this.setTool("bucket");
           return;
         }
         if (event.key === "l" || event.key === "L") {
