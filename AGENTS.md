@@ -1,0 +1,31 @@
+
+- We are working in a Linux Ubuntu 26.04 graphical environment with Wayland and GNOME, using a Bash terminal without root privileges
+- If you need me to install anything using apt, provide the `apt install` command for me to execute
+- If you need me to execute any command as root, provide the command for me to execute
+- If you have any questions or doubts, ask before proceeding
+- Write everything exclusively in American English. Talk to me using american english
+- Never use the root `/tmp` directory. Instead, if you need to create temporary files or directories, use the local `./tmp` directory
+- Always document your plan in a `PLAN.md` file and create a task list in `CHECKLIST.md`. Keep both files continuously updated as you work. update them before and after implementing things
+- Always keep the `FEATURES_SUMMARY.md` file, containing a summarized list of all implemented features, and the `FEATURES_DETAIL.md` file, containing detailed explanations of all implemented features, up to date. update them before and after implementing things
+- always keep up to date a README.md file with a complete but succinct explanation of what the project is, what it's intended use is and what the project features and use cases are
+- Use any means or technology necessary, whether for testing purposes or as an intermediate step toward achieving the final objectives
+- Never use Git commands that could alter the state of files on disk or the staging area, such as `stash`, `checkout`, `pull`, `commit`, or `push`. Only use read-only operations, such as `log` and `status`
+- The code must be testable. Tests must be written for every implemented feature and must always be executed to prevent regressions. Both the build, the tests (and the deploy whenever applicable) must always be done at the end of each batch of changes
+- We cannot use GPL-licensed code or code under any other "viral" license that would require our own code to be GPL-licensed. We must only use code under other free licenses, such as MIT, BSD, Apache, public domain, or any other free license that does not require us to change the license of our entire codebase
+- RAM usage must be conservative. Only load into memory what is really necessary
+- always optimize for performance except where it whould lead to significantly more ram consumption unless told otherwise
+- never copy or use any source code from anywhere within my file system outside our project directory unless I say otherwise
+- if nothing exists yet, start implementing from scratch
+- always ask me explicitly for aproval before adding any dependency to the project, be it through a package manager or by directly downloading the dependency code in the project directory
+- be thorough and meticulous while thinking about what actually needs to be implemented. always test what you have implemented and test for regressions, not only using unit tests but using end to end testing.
+- the name of this app is "Gnumaru's Painting and Animation App". Things like the build artifact (jar, exe, dll), the java package name, the dotnet/c++ namespace etc should be named like 'GnumarusXxxYyy'
+
+- We are creating a frontend-only single page web application for digital painting, pixel art, vector art and frame-by-frame animation acelerated with webgl2
+
+- This application must use TypeScript with the strictest possible type checking (enable `"strict"` in `tsconfig` and never use the `any` type unless it is impossible or impractical to avoid it), Vite+ (VitePlus), and any other library, framework, or technology appropriate for its purpose. Dependencies should preferably be installed from npm, but downloading and directly adding dependencies to the project is also allowed when they are not available on npm
+- If necessary, use headless Chrome, Selenium with Chromium ChromeDriver, Playwright, WebdriverIO or any other similar thing to perform tests involving graphical user interface interactions
+- There must be automated commands, that can be executed with "npm run" or "vpr", that build the application and copy the `dist` directory to `/var/www/html`, equivalent to `rm -rf /var/www/html/AppNameInPascalCase; npm run build; cp -r dist /var/www/html/AppNameInPascalCase`
+- If you need to take screenshots and cannot do so using the standard browser API, use a gdbus command such as `gdbus call --session --dest org.gnome.Shell.Screenshot --object-path /org/gnome/Shell/Screenshot --method org.gnome.Shell.Screenshot.Screenshot true false "screenshot.png"`. If taking a screenshot fails, ask me to enable GNOME Shell's unsafe mode (`Alt+F2 > lg > global.context.unsafe_mode = true`)
+- if you have no vision capabilities and are unable do inspect images by yourself, you can create a python script using PIL to inspect the pixels content
+- since we are in wayland, If you need to interact with GUIs, use `ydotool` instead of `xdotool`
+- This application must work when hosted at any location on the web server, whether at the domain root (`http://localhost/`) or at a nested path (`http://localhost/my/web/app/path`)
