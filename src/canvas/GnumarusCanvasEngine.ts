@@ -5,8 +5,10 @@ import {
   createPixelBuffer,
   drawPixelLine,
   getPixel,
+  parseChannelLock,
   parseHexColor,
   setPixel,
+  type GnumarusChannelLock,
   type GnumarusRgba,
 } from "./GnumarusPixelBuffer";
 import {
@@ -59,6 +61,7 @@ export interface GnumarusLayerInfo {
   width: number;
   height: number;
   transform: GnumarusLayerTransform;
+  lockedChannels: GnumarusChannelLock;
 }
 
 export interface GnumarusLayerPixels {
@@ -84,6 +87,7 @@ export interface GnumarusProjectLayerInput {
   height: number;
   buffer: Uint8ClampedArray;
   transform: GnumarusLayerTransform;
+  lockedChannels: GnumarusChannelLock;
 }
 
 const LAYER_VERTEX_SHADER = [
@@ -304,6 +308,7 @@ export class GnumarusCanvasEngine {
     width: number,
     height: number,
     transform: GnumarusLayerTransform,
+    lockedChannels: GnumarusChannelLock | undefined = undefined,
   ): GnumarusLayer {
     const texture = new THREE.DataTexture(buffer, width, height);
     texture.magFilter = THREE.NearestFilter;
@@ -329,6 +334,7 @@ export class GnumarusCanvasEngine {
     plane.renderOrder = stackIndex;
     plane.visible = visible;
     this.scene.add(plane);
+    const parsedLock = lockedChannels === undefined ? { r: false, g: false, b: false, a: false } : parseChannelLock(lockedChannels);
     return {
       id,
       name,
@@ -337,6 +343,7 @@ export class GnumarusCanvasEngine {
       width,
       height,
       transform: { ...transform },
+      lockedChannels: parsedLock,
       buffer,
       texture,
       material,
@@ -377,6 +384,7 @@ export class GnumarusCanvasEngine {
       width: layer.width,
       height: layer.height,
       transform: { ...layer.transform },
+      lockedChannels: { ...layer.lockedChannels },
     }));
   }
 
@@ -459,6 +467,7 @@ export class GnumarusCanvasEngine {
       snapshot.width,
       snapshot.height,
       { ...snapshot.transform },
+      { ...snapshot.lockedChannels },
     );
     const at = Math.min(Math.max(0, snapshot.stackIndex), this.layers.length);
     this.layers.splice(at, 0, layer);
@@ -501,6 +510,7 @@ export class GnumarusCanvasEngine {
           upper.buffer,
           (sample.y * upper.width + sample.x) * 4,
           upper.opacity,
+          lower.lockedChannels,
         );
       }
     }
@@ -513,6 +523,7 @@ export class GnumarusCanvasEngine {
       width: upper.width,
       height: upper.height,
       transform: { ...upper.transform },
+      lockedChannels: { ...upper.lockedChannels },
       stackIndex: index,
       buffer: upper.buffer.slice(),
     };
@@ -561,6 +572,26 @@ export class GnumarusCanvasEngine {
     layer.opacity = clamped;
     layer.material.uniforms["uOpacity"]!.value = clamped;
     this.render();
+    return true;
+  }
+
+  setLayerLockedChannels(id: string, locked: GnumarusChannelLock): boolean {
+    const layer = this.findLayer(id);
+    if (layer === null) {
+      return false;
+    }
+    layer.lockedChannels = parseChannelLock(locked);
+    this.emitStats();
+    return true;
+  }
+
+  setLayerChannelLocked(id: string, channel: "r" | "g" | "b" | "a", locked: boolean): boolean {
+    const layer = this.findLayer(id);
+    if (layer === null) {
+      return false;
+    }
+    layer.lockedChannels[channel] = locked === true;
+    this.emitStats();
     return true;
   }
 
@@ -658,10 +689,20 @@ export class GnumarusCanvasEngine {
       }
       const copy = new Uint8ClampedArray(input.buffer);
       this.layers.push(
-        this.createLayerInternal(input.id, input.name, input.visible, input.opacity, copy, input.width, input.height, {
-          ...input.transform,
-          rotation: normalizeRotation(input.transform.rotation),
-        }),
+        this.createLayerInternal(
+          input.id,
+          input.name,
+          input.visible,
+          input.opacity,
+          copy,
+          input.width,
+          input.height,
+          {
+            ...input.transform,
+            rotation: normalizeRotation(input.transform.rotation),
+          },
+          parseChannelLock(input.lockedChannels),
+        ),
       );
     }
     const top = this.layers[this.layers.length - 1];
@@ -728,7 +769,7 @@ export class GnumarusCanvasEngine {
       return;
     }
     const base = layer.buffer.slice();
-    clearPixelBuffer(layer.buffer);
+    clearPixelBuffer(layer.buffer, layer.lockedChannels);
     const diff = computeImageDiff(base, layer.buffer, layer.width, layer.height);
     if (diff !== null) {
       this.history.push({ type: "stroke", layerId: layer.id, diff });
@@ -833,7 +874,7 @@ export class GnumarusCanvasEngine {
     if (layer === null) {
       return null;
     }
-    return { buffer: layer.buffer, width: this.imageWidth };
+    return { buffer: layer.buffer, width: layer.width };
   }
 
   private markLayersDirty(): void {
@@ -1012,7 +1053,7 @@ export class GnumarusCanvasEngine {
       this.lastPixel = pixel;
       this.strokeBase = layer.buffer.slice();
       this.strokeLayerId = layer.id;
-      setPixel(layer.buffer, layer.width, layer.height, pixel.x, pixel.y, this.color);
+      setPixel(layer.buffer, layer.width, layer.height, pixel.x, pixel.y, this.color, layer.lockedChannels);
       layer.texture.needsUpdate = true;
       this.render();
       this.onPixelsChanged();
@@ -1098,6 +1139,7 @@ export class GnumarusCanvasEngine {
           pixel.x,
           pixel.y,
           this.color,
+          layer.lockedChannels,
         );
         this.lastPixel = pixel;
         layer.texture.needsUpdate = true;

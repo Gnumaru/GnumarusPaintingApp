@@ -162,6 +162,7 @@ describe("GnumarusHistory", () => {
           width: 4,
           height: 4,
           transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+          lockedChannels: { r: false, g: false, b: false, a: false },
           stackIndex: 1,
           buffer: upperBuffer,
         },

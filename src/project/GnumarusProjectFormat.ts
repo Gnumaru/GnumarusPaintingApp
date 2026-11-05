@@ -1,5 +1,6 @@
 import type { GnumarusLayerTransform } from "../canvas/GnumarusViewportMath";
 import { IDENTITY_LAYER_TRANSFORM } from "../canvas/GnumarusViewportMath";
+import { parseChannelLock, type GnumarusChannelLock } from "../canvas/GnumarusPixelBuffer";
 
 export interface GnumarusCellRef {
   frame: number;
@@ -14,6 +15,7 @@ export interface GnumarusLayerMeta {
   width: number;
   height: number;
   transform: GnumarusLayerTransform;
+  lockedChannels: GnumarusChannelLock;
   cells: GnumarusCellRef[];
 }
 
@@ -54,6 +56,7 @@ export function createDefaultProject(width: number, height: number): GnumarusPro
         width,
         height,
         transform: { ...IDENTITY_LAYER_TRANSFORM },
+        lockedChannels: { r: false, g: false, b: false, a: false },
         cells: [{ frame: 0, file: cellFilePath("layer0", 0) }],
       },
     ],
@@ -111,7 +114,7 @@ export function parseProject(jsonText: string): GnumarusProjectMeta {
     if (!isRecord(entry)) {
       throw new GnumarusProjectError("project.json has an invalid layer");
     }
-    const { id, name, visible, opacity, width, height, transform, cells } = entry;
+    const { id, name, visible, opacity, width, height, transform, lockedChannels, cells } = entry;
     if (typeof id !== "string" || typeof name !== "string") {
       throw new GnumarusProjectError("project.json has a layer with invalid id/name");
     }
@@ -135,6 +138,7 @@ export function parseProject(jsonText: string): GnumarusProjectMeta {
       width: typeof width === "number" && width >= 1 ? Math.floor(width) : Math.floor(widthDim),
       height: typeof height === "number" && height >= 1 ? Math.floor(height) : Math.floor(heightDim),
       transform: parseLayerTransform(transform),
+      lockedChannels: parseChannelLock(lockedChannels),
       cells: checkedCells,
     };
   });

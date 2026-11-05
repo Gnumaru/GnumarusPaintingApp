@@ -21,36 +21,37 @@
 
 ## 3. Layers
 
-- Layers panel (right dock): add, delete (never the last one), reorder up/down, rename (double-click, Enter/blur commits, Escape cancels), per-layer visibility checkbox and opacity slider, click to activate; right-click a row for the context menu (Merge Down, disabled on the bottom layer); status bar shows active layer name and stack position; each row shows its pixel dimensions.
-- Layer model: `{ id, name, visible, opacity, width, height, transform }` with stable filename-safe ids; layers may differ in size from the project (e.g. 4x4 or 128x128 on a 64x64 project); each layer stores its own position offset, rotation, and flips; bottom-to-top stack order; painting, clear and undo/redo target the active layer; structural ops are not undoable.
+- Layers panel (right dock): add, delete (never the last one), reorder up/down, rename (double-click, Enter/blur commits, Escape cancels), per-layer visibility checkbox, opacity slider and R/G/B/A channel lock toggles, click to activate; right-click a row for the context menu (Merge Down, disabled on the bottom layer); status bar shows active layer name and stack position; each row shows its pixel dimensions.
+- Layer model: `{ id, name, visible, opacity, width, height, transform, lockedChannels: { r, g, b, a } }` with stable filename-safe ids; layers may differ in size from the project (e.g. 4x4 or 128x128 on a 64x64 project); each layer stores its own position offset, rotation, flips and channel locks; bottom-to-top stack order; painting, clear and undo/redo target the active layer; structural ops (including lock toggles) are not undoable.
+- Channel lock semantics: `setPixel`, `drawPixelLine`, `clearPixelBuffer` and `compositePixelOver` write only unlocked channels. Alpha lock + paint keeps old alpha; green lock + cyan (`#00ffff`) paint yields blue; fully-locked paint is a no-op (still hit-tests in bounds, produces no history entry).
 - Transform tool (`T`): left-drag moves the active layer, right-drag rotates it around its own center, middle-click flips X (Shift+middle-click flips Y, Ctrl+middle-click resets the layer transform); layer transforms are view-independent and not undoable.
 - Rendering positions every plane from the same pure project-space math used for picking, so display and editing always agree.
-- Merge Down composites the upper layer over the one below in project space (nearest sampling) using the upper layer's opacity and is fully undoable (restores the removed layer with its pixels); undo/redo resync the panel via `onLayersChanged`.
-- Save writes every layer at its own size as `cells/<layerId>_frame0.png` plus dimensions and transform in `project.json`; Open loads every layer at any size and validates cell dimensions; old single-layer/size-less projects open unchanged (size defaults to project, transform to identity).
+- Merge Down composites the upper layer over the one below in project space (nearest sampling) using the upper layer's opacity, masked by the lower layer's `lockedChannels`, and is fully undoable (restores the removed layer with its pixels and lock); undo/redo resync the panel via `onLayersChanged`.
+- Save writes every layer at its own size as `cells/<layerId>_frame0.png` plus dimensions, transform and `lockedChannels` in `project.json`; Open loads every layer at any size and validates cell dimensions; old lock-less projects open unchanged (locks default to all unlocked).
 
 ## 4. Pure logic modules (fully unit-tested)
 
-- `src/canvas/GnumarusPixelBuffer.ts`: buffer create/clear/get/set, Bresenham line, `#rgb`/`#rrggbb` parsing.
+- `src/canvas/GnumarusPixelBuffer.ts`: buffer create/clear/get/set, Bresenham line, `#rgb`/`#rrggbb` parsing, `GnumarusChannelLock` (`{ r, g, b, a }`), `parseChannelLock`, masked `setPixel`/`drawPixelLine`/`clearPixelBuffer`/`compositePixelOver`.
 - `src/canvas/GnumarusViewportMath.ts`: screen<->pixel mapping with pan/zoom/rotation/flip (exact inverses), zoom clamping, rotation normalization.
-- `src/history/GnumarusHistory.ts`: bounding-box image diffs tagged by layer, capped undo/redo stacks.
-- `src/project/GnumarusProjectFormat.ts`: `project.json` build/serialize/strict-parse, `cells/<layer>_frame<frame>.png` paths (multi-layer).
+- `src/history/GnumarusHistory.ts`: bounding-box image diffs tagged by layer, capped undo/redo stacks; merge snapshot carries `lockedChannels`.
+- `src/project/GnumarusProjectFormat.ts`: `project.json` build/serialize/strict-parse with `lockedChannels` (legacy defaults to unlocked), `cells/<layer>_frame<frame>.png` paths (multi-layer).
 - `src/settings/GnumarusCheckerSettings.ts`: checkerboard settings parse/serialize/validate with legacy migration.
 
 ## 4. Project format and file access
 
-- Directory layout: `project.json` (`{ app, version: 1, width, height, layers: [{ id, name, visible, opacity, cells: [{ frame, file }] }] }`) plus cell PNGs.
+- Directory layout: `project.json` (`{ app, version: 1, width, height, layers: [{ id, name, visible, opacity, width, height, transform, lockedChannels, cells: [{ frame, file }] }] }`) plus cell PNGs.
 - `src/project/GnumarusFileSystem.ts`: File System Access API wrappers with feature detection and Chromium-only messaging.
 ## 5. Project format and file access
 
-- Directory layout: `project.json` (`{ app, version: 1, width, height, layers: [{ id, name, visible, opacity, cells: [{ frame, file }] }] }`) plus cell PNGs.
+- Directory layout: `project.json` (`{ app, version: 1, width, height, layers: [{ id, name, visible, opacity, width, height, transform, lockedChannels, cells: [{ frame, file }] }] }`) plus cell PNGs.
 - `src/project/GnumarusFileSystem.ts`: File System Access API wrappers with feature detection and Chromium-only messaging.
 - `src/project/GnumarusPngCodec.ts`: RGBA buffer <-> PNG Blob via 2D canvas (encode on save, `createImageBitmap` decode on open).
-- Save writes all layers; Open loads all layers (first cell each); animation fields in the format are reserved for frame-by-frame support.
+- Save writes all layers with locks; Open loads all layers with locks (first cell each, legacy lock-less defaults to unlocked); animation fields in the format are reserved for frame-by-frame support.
 
 ## 6. Tests
 
-- Vitest unit tests (`tests/`): pixel buffer, viewport math, project format, checker settings, layer-tagged history — 28 tests.
-- Playwright E2E (`e2e/`, Chromium): shell, menus, dialogs, pencil, zoom shortcuts, checker settings, loupe gestures, P/L tools, transform reset, undo/redo, full layer management — 15 tests.
+- Vitest unit tests (`tests/`): pixel buffer, channel locks, viewport math, project format, checker settings, layer-tagged history — 43 tests.
+- Playwright E2E (`e2e/`, Chromium): shell, menus, dialogs, pencil, zoom shortcuts, checker settings, loupe gestures, P/L tools, transform reset, undo/redo, full layer management, channel lock toggles + masked paint + merge/undo — 21 tests.
 
 ## 7. Build and deploy
 

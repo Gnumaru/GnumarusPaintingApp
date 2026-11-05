@@ -584,3 +584,131 @@ test("pencil paints the right pixel while the canvas is rotated", async ({ page 
   expect(await readPixel(page, 63, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
 });
+
+test("channel locks toggle in the panel and mask pencil strokes", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const row0 = page.locator('gnumarus-shell [data-layer-id="layer0"]');
+  await expect(row0.getByRole("button", { name: "Lock green channel" })).toBeVisible();
+  await expect(row0.getByRole("button", { name: "Lock alpha channel" })).toHaveAttribute("aria-pressed", "false");
+
+  await row0.getByRole("button", { name: "Lock green channel" }).click();
+  await expect(row0.getByRole("button", { name: "Lock green channel" })).toHaveAttribute("aria-pressed", "true");
+  const locked = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getLayers(): Array<{ lockedChannels: { r: boolean; g: boolean; b: boolean; a: boolean } }> } };
+    };
+    return root.__gnumarus?.engine?.getLayers()[0]?.lockedChannels ?? null;
+  });
+  expect(locked).toEqual({ r: false, g: true, b: false, a: false });
+
+  await page.locator("gnumarus-shell input#pencilColor").fill("#00ffff");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+
+  await row0.getByRole("button", { name: "Lock green channel" }).click();
+  await expect(row0.getByRole("button", { name: "Lock green channel" })).toHaveAttribute("aria-pressed", "false");
+});
+
+test("alpha lock preserves alpha while painting", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          loadProject(
+            width: number,
+            height: number,
+            inputs: Array<{
+              id: string;
+              name: string;
+              visible: boolean;
+              opacity: number;
+              width: number;
+              height: number;
+              buffer: Uint8ClampedArray;
+              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
+              lockedChannels: { r: boolean; g: boolean; b: boolean; a: boolean };
+            }>,
+          ): void;
+          setLayerChannelLocked(id: string, channel: "r" | "g" | "b" | "a", locked: boolean): boolean;
+        };
+      };
+    };
+    const buffer = new Uint8ClampedArray(64 * 64 * 4);
+    const i = (32 * 64 + 32) * 4;
+    buffer[i] = 10;
+    buffer[i + 1] = 20;
+    buffer[i + 2] = 30;
+    buffer[i + 3] = 40;
+    root.__gnumarus?.engine?.loadProject(64, 64, [
+      {
+        id: "layer0",
+        name: "Layer 0",
+        visible: true,
+        opacity: 1,
+        width: 64,
+        height: 64,
+        buffer,
+        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+        lockedChannels: { r: false, g: false, b: false, a: true },
+      },
+    ]);
+  });
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 40 });
+});
+
+test("merge down respects destination locks and undo restores the upper lock", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await page.mouse.click(cx, cy);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await page.locator("gnumarus-shell input#pencilColor").fill("#ff0000");
+  await page.mouse.click(cx, cy);
+
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { setLayerChannelLocked(id: string, channel: "r" | "g" | "b" | "a", locked: boolean): boolean } };
+    };
+    root.__gnumarus?.engine?.setLayerChannelLocked("layer0", "r", true);
+    root.__gnumarus?.engine?.setLayerChannelLocked("layer1", "g", true);
+  });
+
+  const row1 = page.locator('gnumarus-shell [data-layer-id="layer1"]');
+  await row1.click({ button: "right" });
+  await page.getByRole("button", { name: "Merge Down" }).click();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+
+  await page.keyboard.press("Control+z");
+  const locks = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getLayers(): Array<{ id: string; lockedChannels: { r: boolean; g: boolean; b: boolean; a: boolean } }> } };
+    };
+    return root.__gnumarus?.engine?.getLayers().map((layer) => ({ id: layer.id, locked: layer.lockedChannels })) ?? [];
+  });
+  expect(locks).toEqual([
+    { id: "layer0", locked: { r: true, g: false, b: false, a: false } },
+    { id: "layer1", locked: { r: false, g: true, b: false, a: false } },
+  ]);
+});

@@ -247,6 +247,25 @@ export class GnumarusShell extends LitElement {
       flex: 1 1 auto;
       min-width: 0;
     }
+    .layer-channels {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 4px;
+      font-size: 11px;
+      color: #9a9a9a;
+    }
+    .layer-channels button {
+      flex: 1 1 auto;
+      min-width: 0;
+      padding: 2px 0;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .layer-channels button.active {
+      background: #b56600;
+      border-color: #b56600;
+    }
     .context-blocker {
       position: fixed;
       inset: 0;
@@ -637,7 +656,7 @@ export class GnumarusShell extends LitElement {
                       ×
                     </button>
                   </div>
-                  <div class="layer-opacity" @click=${(event: Event): void => event.stopPropagation()}>
+                  <div class="layer-opacity">
                     <span>Opacity</span>
                     <input
                       type="range"
@@ -652,6 +671,53 @@ export class GnumarusShell extends LitElement {
                         }
                       }}
                     />
+                  </div>
+                  <div class="layer-channels">
+                    <span>Lock</span>
+                    <button
+                      class=${layer.lockedChannels.r ? "active" : ""}
+                      title=${layer.lockedChannels.r ? "Unlock red channel" : "Lock red channel"}
+                      aria-label="Lock red channel"
+                      aria-pressed=${layer.lockedChannels.r ? "true" : "false"}
+                      @click=${(): void => {
+                        this.onToggleChannelLock(layer.id, "r");
+                      }}
+                    >
+                      R
+                    </button>
+                    <button
+                      class=${layer.lockedChannels.g ? "active" : ""}
+                      title=${layer.lockedChannels.g ? "Unlock green channel" : "Lock green channel"}
+                      aria-label="Lock green channel"
+                      aria-pressed=${layer.lockedChannels.g ? "true" : "false"}
+                      @click=${(): void => {
+                        this.onToggleChannelLock(layer.id, "g");
+                      }}
+                    >
+                      G
+                    </button>
+                    <button
+                      class=${layer.lockedChannels.b ? "active" : ""}
+                      title=${layer.lockedChannels.b ? "Unlock blue channel" : "Lock blue channel"}
+                      aria-label="Lock blue channel"
+                      aria-pressed=${layer.lockedChannels.b ? "true" : "false"}
+                      @click=${(): void => {
+                        this.onToggleChannelLock(layer.id, "b");
+                      }}
+                    >
+                      B
+                    </button>
+                    <button
+                      class=${layer.lockedChannels.a ? "active" : ""}
+                      title=${layer.lockedChannels.a ? "Unlock alpha channel" : "Lock alpha channel"}
+                      aria-label="Lock alpha channel"
+                      aria-pressed=${layer.lockedChannels.a ? "true" : "false"}
+                      @click=${(): void => {
+                        this.onToggleChannelLock(layer.id, "a");
+                      }}
+                    >
+                      A
+                    </button>
                   </div>
                 </div>
               `,
@@ -955,6 +1021,22 @@ export class GnumarusShell extends LitElement {
     this.dirty = true;
   }
 
+  private onToggleChannelLock(id: string, channel: "r" | "g" | "b" | "a"): void {
+    if (this.engine === null) {
+      return;
+    }
+    const current = this.engine.getLayers().find((layer) => layer.id === id)?.lockedChannels;
+    if (current === undefined) {
+      return;
+    }
+    const next = !current[channel];
+    if (this.engine.setLayerChannelLocked(id, channel, next)) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = next ? `${channel.toUpperCase()} channel locked` : `${channel.toUpperCase()} channel unlocked`;
+    }
+  }
+
   private onMoveLayer(id: string, direction: "up" | "down"): void {
     if (this.engine?.moveLayer(id, direction) === true) {
       this.statusMessage = `Layer moved ${direction}`;
@@ -1045,6 +1127,7 @@ export class GnumarusShell extends LitElement {
         height: number;
         buffer: Uint8ClampedArray;
         transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
+        lockedChannels: { r: boolean; g: boolean; b: boolean; a: boolean };
       }> = [];
       for (const layer of project.layers) {
         const cell = layer.cells[0];
@@ -1068,6 +1151,7 @@ export class GnumarusShell extends LitElement {
           height: decoded.height,
           buffer: decoded.buffer,
           transform: layer.transform,
+          lockedChannels: { ...layer.lockedChannels },
         });
       }
       this.engine?.loadProject(project.width, project.height, inputs);
@@ -1112,6 +1196,7 @@ export class GnumarusShell extends LitElement {
           width: info.width,
           height: info.height,
           transform: { ...info.transform },
+          lockedChannels: { ...info.lockedChannels },
           cells: [{ frame: 0, file }],
         });
         cells.set(file, await encodeBufferToPngBlob(rendered.buffer, rendered.width, rendered.height));

@@ -1,3 +1,4 @@
+import type { GnumarusChannelLock } from "../canvas/GnumarusPixelBuffer";
 import type { GnumarusLayerTransform } from "../canvas/GnumarusViewportMath";
 
 export interface GnumarusImageDiff {
@@ -84,6 +85,7 @@ export interface GnumarusMergedLayerSnapshot {
   width: number;
   height: number;
   transform: GnumarusLayerTransform;
+  lockedChannels: GnumarusChannelLock;
   stackIndex: number;
   buffer: Uint8ClampedArray;
 }

@@ -5,12 +5,64 @@ export interface GnumarusRgba {
   a: number;
 }
 
+export interface GnumarusChannelLock {
+  r: boolean;
+  g: boolean;
+  b: boolean;
+  a: boolean;
+}
+
+export const GNUMARUS_UNLOCKED_CHANNELS: GnumarusChannelLock = {
+  r: false,
+  g: false,
+  b: false,
+  a: false,
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Parse a channel lock, defaulting to all unlocked for missing or invalid input. */
+export function parseChannelLock(value: unknown): GnumarusChannelLock {
+  if (!isRecord(value)) {
+    return { ...GNUMARUS_UNLOCKED_CHANNELS };
+  }
+  return {
+    r: value["r"] === true,
+    g: value["g"] === true,
+    b: value["b"] === true,
+    a: value["a"] === true,
+  };
+}
+
+export function areAllChannelsUnlocked(locked: GnumarusChannelLock): boolean {
+  return locked.r !== true && locked.g !== true && locked.b !== true && locked.a !== true;
+}
+
 export function createPixelBuffer(width: number, height: number): Uint8ClampedArray {
   return new Uint8ClampedArray(width * height * 4);
 }
 
-export function clearPixelBuffer(buffer: Uint8ClampedArray): void {
-  buffer.fill(0);
+export function clearPixelBuffer(buffer: Uint8ClampedArray, locked: GnumarusChannelLock | undefined = undefined): void {
+  if (locked === undefined || areAllChannelsUnlocked(locked)) {
+    buffer.fill(0);
+    return;
+  }
+  for (let i = 0; i < buffer.length; i += 4) {
+    if (locked.r !== true) {
+      buffer[i] = 0;
+    }
+    if (locked.g !== true) {
+      buffer[i + 1] = 0;
+    }
+    if (locked.b !== true) {
+      buffer[i + 2] = 0;
+    }
+    if (locked.a !== true) {
+      buffer[i + 3] = 0;
+    }
+  }
 }
 
 export function setPixel(
@@ -20,15 +72,31 @@ export function setPixel(
   x: number,
   y: number,
   color: GnumarusRgba,
+  locked: GnumarusChannelLock | undefined = undefined,
 ): boolean {
   if (x < 0 || y < 0 || x >= width || y >= height) {
     return false;
   }
   const i = (y * width + x) * 4;
-  buffer[i] = color.r;
-  buffer[i + 1] = color.g;
-  buffer[i + 2] = color.b;
-  buffer[i + 3] = color.a;
+  if (locked === undefined || areAllChannelsUnlocked(locked)) {
+    buffer[i] = color.r;
+    buffer[i + 1] = color.g;
+    buffer[i + 2] = color.b;
+    buffer[i + 3] = color.a;
+    return true;
+  }
+  if (locked.r !== true) {
+    buffer[i] = color.r;
+  }
+  if (locked.g !== true) {
+    buffer[i + 1] = color.g;
+  }
+  if (locked.b !== true) {
+    buffer[i + 2] = color.b;
+  }
+  if (locked.a !== true) {
+    buffer[i + 3] = color.a;
+  }
   return true;
 }
 
@@ -56,6 +124,7 @@ export function drawPixelLine(
   x1: number,
   y1: number,
   color: GnumarusRgba,
+  locked: GnumarusChannelLock | undefined = undefined,
 ): void {
   let x = x0;
   let y = y0;
@@ -65,7 +134,7 @@ export function drawPixelLine(
   const sy = y0 < y1 ? 1 : -1;
   let err = dx - dy;
   for (;;) {
-    setPixel(buffer, width, height, x, y, color);
+    setPixel(buffer, width, height, x, y, color, locked);
     if (x === x1 && y === y1) {
       break;
     }
@@ -88,6 +157,7 @@ export function compositePixelOver(
   src: Uint8ClampedArray,
   srcIndex: number,
   opacity: number,
+  dstLocked: GnumarusChannelLock | undefined = undefined,
 ): void {
   const srcA = (src[srcIndex + 3] / 255) * opacity;
   if (srcA <= 0) {
@@ -96,10 +166,29 @@ export function compositePixelOver(
   const dstA = dst[dstIndex + 3] / 255;
   const outA = srcA + dstA * (1 - srcA);
   const inv = dstA * (1 - srcA);
-  dst[dstIndex] = Math.round((src[srcIndex] * srcA + dst[dstIndex] * inv) / outA);
-  dst[dstIndex + 1] = Math.round((src[srcIndex + 1] * srcA + dst[dstIndex + 1] * inv) / outA);
-  dst[dstIndex + 2] = Math.round((src[srcIndex + 2] * srcA + dst[dstIndex + 2] * inv) / outA);
-  dst[dstIndex + 3] = Math.round(outA * 255);
+  if (dstLocked === undefined || areAllChannelsUnlocked(dstLocked)) {
+    dst[dstIndex] = Math.round((src[srcIndex] * srcA + dst[dstIndex] * inv) / outA);
+    dst[dstIndex + 1] = Math.round((src[srcIndex + 1] * srcA + dst[dstIndex + 1] * inv) / outA);
+    dst[dstIndex + 2] = Math.round((src[srcIndex + 2] * srcA + dst[dstIndex + 2] * inv) / outA);
+    dst[dstIndex + 3] = Math.round(outA * 255);
+    return;
+  }
+  const outR = Math.round((src[srcIndex] * srcA + dst[dstIndex] * inv) / outA);
+  const outG = Math.round((src[srcIndex + 1] * srcA + dst[dstIndex + 1] * inv) / outA);
+  const outB = Math.round((src[srcIndex + 2] * srcA + dst[dstIndex + 2] * inv) / outA);
+  const outAlpha = Math.round(outA * 255);
+  if (dstLocked.r !== true) {
+    dst[dstIndex] = outR;
+  }
+  if (dstLocked.g !== true) {
+    dst[dstIndex + 1] = outG;
+  }
+  if (dstLocked.b !== true) {
+    dst[dstIndex + 2] = outB;
+  }
+  if (dstLocked.a !== true) {
+    dst[dstIndex + 3] = outAlpha;
+  }
 }
 
 /** Source-over composite of `src` onto `dst` in place, both same-size straight-alpha buffers. */
@@ -109,10 +198,11 @@ export function compositeOver(
   width: number,
   height: number,
   opacity: number,
+  dstLocked: GnumarusChannelLock | undefined = undefined,
 ): void {
   const count = width * height;
   for (let i = 0; i < count; i += 1) {
-    compositePixelOver(dst, i * 4, src, i * 4, opacity);
+    compositePixelOver(dst, i * 4, src, i * 4, opacity, dstLocked);
   }
 }
 

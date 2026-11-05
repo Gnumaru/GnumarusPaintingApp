@@ -4,13 +4,15 @@ Frontend-only single page web application for digital painting, pixel art, vecto
 
 ## Intended use
 
-Classic desktop-like painting app (top menu bar, central canvas, bottom status bar) in the spirit of Photoshop, Krita and GIMP. This initial version (v1 MVP) targets pixel-art sketching with a single 1px solid pencil, single layer, and directory-based projects.
+Classic desktop-like painting app (top menu bar, central canvas, bottom status bar) in the spirit of Photoshop, Krita and GIMP. Current version supports pixel-art sketching with a 1px solid pencil, multi-layer editing with per-layer transforms and per-channel locks, and directory-based projects.
 
 ## Features (v1)
 
-- Desktop shell: File menu (New, Open, Save), pencil toolbar with color picker, WebGL2 canvas, status bar.
-- Pixel-art pencil: 1px solid color, no anti-aliasing, Bresenham strokes, nearest-neighbor display, wheel zoom + pan.
-- Directory projects via the File System Access API (Chromium derivatives): `project.json` metadata plus `cells/<layer>_frame<frame>.png` cell images (format already supports future layers/animation, v1 writes a single layer with a single cell).
+- Desktop shell: File menu (New, Open, Save), Edit menu (Undo/Redo, Settings, Reset Canvas Transform), pencil/loupe/transform toolbar with color picker, WebGL2 canvas, layers panel, status bar.
+- Pixel-art pencil: 1px solid color, no anti-aliasing, Bresenham strokes, nearest-neighbor display, wheel zoom + pan + rotation + flips.
+- Layers: add, delete, reorder, rename, visibility, opacity, right-click Merge Down (undoable); independent size and transform.
+- Channel lock: per-layer R/G/B/A toggles; paint, clear and Merge Down write only unlocked channels. Example: alpha locked + paint keeps old alpha; green locked + cyan paint yields blue.
+- Directory projects via the File System Access API (Chromium derivatives): `project.json` metadata plus `cells/<layer>_frame<frame>.png` cell images (format already supports future animation; locks persist in `project.json`).
 - WebGL2-only rendering with an explicit error message when unavailable. No WebGL1 fallback.
 
 ## Requirements
