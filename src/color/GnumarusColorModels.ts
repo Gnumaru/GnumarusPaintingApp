@@ -12,7 +12,7 @@
 
 export type GnumarusColorModelId = "rgb" | "cmyk" | "hsv" | "hsl" | "okhsl" | "okhsv" | "ard";
 
-export type GnumarusAxisUnit = "percent" | "degrees" | "byte";
+export type GnumarusAxisUnit = "percent" | "degrees" | "byte" | "scalar";
 
 export interface GnumarusColorAxis {
   key: string;
@@ -73,32 +73,43 @@ export const GNUMARUS_COLOR_MODELS: GnumarusColorModelDef[] = [
   {
     id: "cmyk",
     label: "CMYK",
-    axes: [PERCENT_AXIS("c", "Cyan"), PERCENT_AXIS("m", "Magenta"), PERCENT_AXIS("y", "Yellow"), PERCENT_AXIS("k", "Black")],
+    axes: [
+      PERCENT_AXIS("c", "Cyan"),
+      PERCENT_AXIS("m", "Magenta"),
+      PERCENT_AXIS("y", "Yellow"),
+      PERCENT_AXIS("k", "Black"),
+      BYTE_AXIS("a", "Alpha"),
+    ],
   },
   {
     id: "hsv",
     label: "HSV",
-    axes: [HUE_AXIS("h", "Hue"), PERCENT_AXIS("s", "Saturation"), PERCENT_AXIS("v", "Value")],
+    axes: [HUE_AXIS("h", "Hue"), PERCENT_AXIS("s", "Saturation"), PERCENT_AXIS("v", "Value"), BYTE_AXIS("a", "Alpha")],
   },
   {
     id: "hsl",
     label: "HSL",
-    axes: [HUE_AXIS("h", "Hue"), PERCENT_AXIS("s", "Saturation"), PERCENT_AXIS("l", "Lightness")],
+    axes: [HUE_AXIS("h", "Hue"), PERCENT_AXIS("s", "Saturation"), PERCENT_AXIS("l", "Lightness"), BYTE_AXIS("a", "Alpha")],
   },
   {
     id: "okhsl",
     label: "OKHSL",
-    axes: [HUE_AXIS("h", "Hue"), PERCENT_AXIS("s", "Saturation"), PERCENT_AXIS("l", "Lightness")],
+    axes: [HUE_AXIS("h", "Hue"), PERCENT_AXIS("s", "Saturation"), PERCENT_AXIS("l", "Lightness"), BYTE_AXIS("a", "Alpha")],
   },
   {
     id: "okhsv",
     label: "OKHSV",
-    axes: [HUE_AXIS("h", "Hue"), PERCENT_AXIS("s", "Saturation"), PERCENT_AXIS("v", "Value")],
+    axes: [HUE_AXIS("h", "Hue"), PERCENT_AXIS("s", "Saturation"), PERCENT_AXIS("v", "Value"), BYTE_AXIS("a", "Alpha")],
   },
   {
     id: "ard",
     label: "ARD",
-    axes: [HUE_AXIS("a", "Angle"), PERCENT_AXIS("r", "Ratio"), PERCENT_AXIS("d", "Diagonal")],
+    axes: [
+      HUE_AXIS("a", "Angle"),
+      { key: "r", label: "Ratio", min: 0, max: 255, decimals: 0, unit: "byte" },
+      { key: "d", label: "Diagonal", min: 0, max: 360, decimals: 1, unit: "scalar" },
+      BYTE_AXIS("alpha", "Alpha"),
+    ],
   },
 ];
 
@@ -163,6 +174,11 @@ export function parseAxisInput(text: string, axis: GnumarusColorAxis): number | 
   }
   if (axis.unit === "degrees") {
     return clampHue(parsed);
+  }
+  if (axis.unit === "scalar") {
+    const factor = 10 ** axis.decimals;
+    const rounded = Math.round(clamp(parsed, axis.min, axis.max) * factor) / factor;
+    return clamp(rounded, axis.min, axis.max);
   }
   const rounded =
     axis.decimals <= 0 ? Math.round(parsed) : Math.round(parsed * 10 ** axis.decimals) / 10 ** axis.decimals;
@@ -869,29 +885,29 @@ export function rgbBytesToModelAxes(color: GnumarusRgbaBytes, model: GnumarusCol
       return [color.r, color.g, color.b, clampByte(color.a)];
     case "cmyk": {
       const cmyk = rgb01ToCmyk(r, g, b);
-      return [cmyk.c * 100, cmyk.m * 100, cmyk.y * 100, cmyk.k * 100];
+      return [cmyk.c * 100, cmyk.m * 100, cmyk.y * 100, cmyk.k * 100, clampByte(color.a)];
     }
     case "hsv": {
       const hsv = rgb01ToHsv(r, g, b);
-      return [hsv.h, hsv.s * 100, hsv.v * 100];
+      return [hsv.h, hsv.s * 100, hsv.v * 100, clampByte(color.a)];
     }
     case "hsl": {
       const hsl = rgb01ToHsl(r, g, b);
-      return [hsl.h, hsl.s * 100, hsl.l * 100];
+      return [hsl.h, hsl.s * 100, hsl.l * 100, clampByte(color.a)];
     }
     case "okhsl": {
       const lin = { r: srgbByteToLinear(color.r), g: srgbByteToLinear(color.g), b: srgbByteToLinear(color.b) };
       const ok = linearSrgbToOkhsl(lin.r, lin.g, lin.b);
-      return [clampHue(ok.h), clampPercent(ok.s * 100), clampPercent(ok.l * 100)];
+      return [clampHue(ok.h), clampPercent(ok.s * 100), clampPercent(ok.l * 100), clampByte(color.a)];
     }
     case "okhsv": {
       const lin = { r: srgbByteToLinear(color.r), g: srgbByteToLinear(color.g), b: srgbByteToLinear(color.b) };
       const ok = linearSrgbToOkhsv(lin.r, lin.g, lin.b);
-      return [clampHue(ok.h), clampPercent(ok.s * 100), clampPercent(ok.v * 100)];
+      return [clampHue(ok.h), clampPercent(ok.s * 100), clampPercent(ok.v * 100), clampByte(color.a)];
     }
     case "ard": {
       const ard = rgb01ToArd(r, g, b);
-      return [clampHue(ard.a), clampPercent(ard.r * 100), clampPercent(ard.d * 100)];
+      return [clampHue(ard.a), clamp(ard.r * 255, 0, 255), clamp(ard.d * 360, 0, 360), clampByte(color.a)];
     }
   }
 }
@@ -945,10 +961,21 @@ export function modelAxesToRgbBytes(model: GnumarusColorModelId, values: number[
       };
     }
     case "ard": {
-      const rgb = ardToRgb01(v[0] ?? 0, (v[1] ?? 0) / 100, (v[2] ?? 0) / 100);
+      const rgb = ardToRgb01(v[0] ?? 0, (v[1] ?? 0) / 255, (v[2] ?? 0) / 360);
       return { r: clampByte(rgb.r * 255), g: clampByte(rgb.g * 255), b: clampByte(rgb.b * 255) };
     }
   }
+}
+
+/** Read the Alpha axis value of any model (all models carry alpha). */
+export function modelAlphaFromValues(model: GnumarusColorModelId, values: number[], fallback = 255): number {
+  const def = getColorModelDef(model);
+  const index = def.axes.findIndex((axis) => axis.label === "Alpha");
+  if (index < 0) {
+    return clampByte(fallback);
+  }
+  const raw = values[index];
+  return typeof raw === "number" && Number.isFinite(raw) ? clampByte(raw) : clampByte(fallback);
 }
 
 /**
@@ -963,12 +990,20 @@ export function modelAxisGradientCss(model: GnumarusColorModelId, axisIndex: num
   }
   const count = Math.max(2, Math.floor(stops));
   const parts: string[] = [];
+  const isAlpha = axis.label === "Alpha";
+  // Alpha is orthogonal to every model: hold the current color, fade its opacity.
+  const alphaBase = isAlpha ? modelAxesToRgbBytes(model, currentValues) : null;
   for (let i = 0; i < count; i += 1) {
     const t = count === 1 ? 0 : i / (count - 1);
     const sample = [...currentValues];
     sample[axisIndex] = axis.min + t * (axis.max - axis.min);
-    const rgb = modelAxesToRgbBytes(model, sample);
     const percent = Math.round(t * 1000) / 10;
+    if (isAlpha && alphaBase !== null) {
+      const alpha = Math.round((axis.min + t * (axis.max - axis.min)) * 10) / 10 / 255;
+      parts.push(`rgba(${alphaBase.r}, ${alphaBase.g}, ${alphaBase.b}, ${Math.min(1, Math.max(0, alpha))}) ${percent}%`);
+      continue;
+    }
+    const rgb = modelAxesToRgbBytes(model, sample);
     parts.push(`rgb(${rgb.r}, ${rgb.g}, ${rgb.b}) ${percent}%`);
   }
   return `linear-gradient(to right, ${parts.join(", ")})`;
@@ -986,7 +1021,8 @@ export function normalizeModelValues(model: GnumarusColorModelId, values: number
     if (axis.unit === "byte") {
       return clampByte(raw);
     }
-    const rounded = Math.round(clamp(raw, axis.min, axis.max) * 10) / 10;
+    const factor = 10 ** axis.decimals;
+    const rounded = Math.round(clamp(raw, axis.min, axis.max) * factor) / factor;
     return clamp(rounded, axis.min, axis.max);
   });
 }

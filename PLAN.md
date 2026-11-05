@@ -71,6 +71,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - New final render preview: small floating resizable window with internal zoom and pan rendering the flattened image as a single PNG export would look.
 
 ## 11. Custom color picker (implemented)
-- Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL, OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).
-- Every axis gets a draggable gradient bar plus an editable numeric input beside it. All axes are percentages with one decimal, except hue axes (0..360) and RGBA axes (0..255). Each bar renders the gradient of its own axis from minimum to maximum (e.g. HSL hue bar runs red 0 through the spectrum back to red 360).
-- OKHSL/OKHSV use our own Oklab-based implementation (no new dependencies). RGB model carries an alpha axis; other models preserve alpha.
+- Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).
+- Every model carries an alpha axis; RGBA axes span 0..255. ARD Diagonal spans 0..360 and Ratio 0..255.
+- Every axis gets a draggable gradient bar plus an editable numeric input beside it. Non-RGBA, non-hue axes are percentages with one decimal; hue axes span 0..360. Each bar renders the gradient of its own axis from minimum to maximum (e.g. HSL hue bar runs red 0 through the spectrum back to red 360).
+- OKHSL/OKHSV use our own Oklab-based implementation (no new dependencies). Other models preserve the current alpha.
+- Fixed frozen sliders: axis edits force a re-render even when the output hex is unchanged (e.g. editing hue/saturation while value is zero), so thumbs and inputs always follow the edited values.

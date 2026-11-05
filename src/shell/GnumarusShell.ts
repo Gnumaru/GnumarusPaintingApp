@@ -723,7 +723,7 @@ export class GnumarusShell extends LitElement {
           <gnumarus-color-picker
             id="pencilColor"
             .value=${this.colorValue}
-            model="hsv"
+            model="hsl"
             @gnumarus-color-change=${(event: Event): void => {
               const detail = (event as CustomEvent<{ value?: unknown }>).detail;
               if (typeof detail?.value === "string") {
@@ -1050,7 +1050,7 @@ export class GnumarusShell extends LitElement {
                 <gnumarus-color-picker
                   id="backgroundColor"
                   .value=${this.backgroundColor}
-                  model="hsv"
+                  model="hsl"
                   @gnumarus-color-change=${(event: Event): void => {
                     const detail = (event as CustomEvent<{ value?: unknown }>).detail;
                     if (typeof detail?.value === "string") {
@@ -1148,7 +1148,7 @@ export class GnumarusShell extends LitElement {
                 <gnumarus-color-picker
                   id="checkerColorA"
                   .value=${this.checkerColorA}
-                  model="hsv"
+                  model="hsl"
                   @gnumarus-color-change=${(event: Event): void => {
                     const detail = (event as CustomEvent<{ value?: unknown }>).detail;
                     if (typeof detail?.value === "string") {
@@ -1172,7 +1172,7 @@ export class GnumarusShell extends LitElement {
                 <gnumarus-color-picker
                   id="checkerColorB"
                   .value=${this.checkerColorB}
-                  model="hsv"
+                  model="hsl"
                   @gnumarus-color-change=${(event: Event): void => {
                     const detail = (event as CustomEvent<{ value?: unknown }>).detail;
                     if (typeof detail?.value === "string") {

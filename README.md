@@ -13,7 +13,7 @@ Classic desktop-like painting app (top menu bar, central canvas, bottom status b
 - Pixel grid over the active layer (follows rotation/transform), hidden below 200 percent zoom; minimum zoom 200..6400 percent, default 1000 percent, in Edit > Settings.
 - Canvas background: checkerboard (default) or solid color in Edit > Settings; every setting has a per-setting reset arrow when non-default.
 - Final preview window (floating, resizable) with internal zoom/pan (drag with left, right or middle button) of the flattened image as a single PNG export would look.
-- Custom color picker: RGB/CMYK/HSV/HSL/OKHSL/OKHSV/ARD with per-axis gradient bars and editable inputs; no browser color picker is used anywhere.
+- Custom color picker: RGB/CMYK/HSV/HSL (default)/OKHSL/OKHSV/ARD with per-axis gradient bars and editable inputs; alpha axis on every model; no browser color picker is used anywhere.
 - Layers: add, delete, reorder, rename, visibility, opacity, right-click Merge Down (undoable); independent size and transform; per-layer resize (expand right/down transparent, shrink crops right/below, undoable).
 - Channel lock: per-layer R/G/B/A toggles; paint, clear and Merge Down write only unlocked channels. Example: alpha locked + paint keeps old alpha; green locked + cyan paint yields blue.
 - Directory projects via the File System Access API (Chromium derivatives): `project.json` metadata plus `cells/<layer>_frame<frame>.png` cell images (format already supports future animation; locks persist in `project.json`).

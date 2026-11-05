@@ -2,6 +2,7 @@ import { LitElement, css, html } from "lit";
 import {
   getColorModelDef,
   isColorModelId,
+  modelAlphaFromValues,
   modelAxesToRgbBytes,
   modelAxisGradientCss,
   parseAxisInput,
@@ -162,9 +163,9 @@ export class GnumarusColorPicker extends LitElement {
   constructor() {
     super();
     this.value = "#000000";
-    this.model = "hsv";
+    this.model = "hsl";
     this.open = false;
-    this.syncFromValue(this.value, "hsv");
+    this.syncFromValue(this.value, "hsl");
   }
 
   private get def(): GnumarusColorModelDef {
@@ -183,7 +184,7 @@ export class GnumarusColorPicker extends LitElement {
   protected willUpdate(changed: Map<string, unknown>): void {
     if (changed.has("model")) {
       if (!isColorModelId(this.model)) {
-        this.model = "hsv";
+        this.model = "hsl";
       }
     }
     if (changed.has("value") || changed.has("model")) {
@@ -213,19 +214,13 @@ export class GnumarusColorPicker extends LitElement {
 
   private applyModelValues(values: number[]): void {
     const rgb = modelAxesToRgbBytes(this.model, values);
-    if (this.model === "rgb") {
-      const alpha = values[3];
-      this.rgba = {
-        r: rgb.r,
-        g: rgb.g,
-        b: rgb.b,
-        a: typeof alpha === "number" && Number.isFinite(alpha) ? Math.max(0, Math.min(255, Math.round(alpha))) : this.rgba.a,
-      };
-    } else {
-      this.rgba = { r: rgb.r, g: rgb.g, b: rgb.b, a: this.rgba.a };
-    }
+    this.rgba = { r: rgb.r, g: rgb.g, b: rgb.b, a: modelAlphaFromValues(this.model, values, this.rgba.a) };
     this.modelValues = [...values];
     this.emitChange();
+    // Re-render even when the hex output did not change (e.g. editing hue
+    // or saturation while value/lightness is zero), so thumbs and inputs
+    // always reflect the edited model values.
+    this.requestUpdate();
   }
 
   private onModelSelect(event: Event): void {

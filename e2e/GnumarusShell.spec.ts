@@ -1204,3 +1204,56 @@ test("custom picker supports alpha and clamps manual input", async ({ page }) =>
   await picker.getByLabel("Hue", { exact: true }).press("Tab");
   await expect(picker.getByLabel("Hue", { exact: true })).toHaveValue(hueBefore);
 });
+
+test("custom picker defaults to hsl and exposes alpha in every model", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const picker = await openPicker(page, "pencilColor");
+  await expect(picker.locator("select#modelSelect")).toHaveValue("hsl");
+  for (const id of ["rgb", "cmyk", "hsv", "hsl", "okhsl", "okhsv", "ard"]) {
+    await picker.locator("select#modelSelect").selectOption(id);
+    await expect(picker.getByLabel("Alpha", { exact: true })).toBeVisible();
+  }
+  await picker.locator("select#modelSelect").selectOption("hsv");
+  await picker.getByLabel("Hue", { exact: true }).fill("0");
+  await picker.getByLabel("Saturation", { exact: true }).fill("100");
+  await picker.getByLabel("Value", { exact: true }).fill("100");
+  await picker.getByLabel("Alpha", { exact: true }).fill("128");
+  await expect(page.locator("gnumarus-shell")).toContainText("#ff000080");
+});
+
+test("custom picker ard uses diagonal 0-360 and ratio 0-255", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const picker = await openPicker(page, "pencilColor");
+  await picker.locator("select#modelSelect").selectOption("ard");
+  await expect(picker.getByLabel("Angle", { exact: true })).toHaveAttribute("max", "360");
+  await expect(picker.getByLabel("Ratio", { exact: true })).toHaveAttribute("max", "255");
+  await expect(picker.getByLabel("Diagonal", { exact: true })).toHaveAttribute("max", "360");
+  await picker.getByLabel("Angle", { exact: true }).fill("30");
+  await picker.getByLabel("Ratio", { exact: true }).fill("255");
+  await picker.getByLabel("Diagonal", { exact: true }).fill("120");
+  await expect(page.locator("gnumarus-shell")).toContainText("#ff0000");
+});
+
+test("custom picker sliders and inputs work while value is zero", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const picker = await openPicker(page, "pencilColor");
+  await picker.locator("select#modelSelect").selectOption("hsv");
+  await picker.getByLabel("Value", { exact: true }).fill("0");
+  const hueBar = picker.locator('[data-testid="axis-bar-h"]');
+  const hueBox = await hueBar.boundingBox();
+  if (hueBox === null) {
+    throw new Error("hue bar has no bounding box");
+  }
+  await page.mouse.move(hueBox.x + hueBox.width * 0.75, hueBox.y + hueBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(hueBox.x + hueBox.width * 0.25, hueBox.y + hueBox.height / 2, { steps: 5 });
+  await page.mouse.up();
+  await expect(picker.getByLabel("Hue", { exact: true })).not.toHaveValue("0.0");
+  await picker.getByLabel("Saturation", { exact: true }).fill("50");
+  await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("50.0");
+  await picker.getByLabel("Value", { exact: true }).fill("100");
+  await expect(page.locator("gnumarus-shell")).not.toContainText("#000000");
+});

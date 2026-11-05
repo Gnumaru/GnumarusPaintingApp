@@ -2,7 +2,7 @@
 
 - Desktop app shell: top menu bar (File > New/Open/Save, Edit > Undo/Redo/Settings/Reset Canvas Transform), left toolbar, central canvas, right layers panel, bottom status bar.
 - Pixel-art pencil: 1px solid color (including alpha), no anti-aliasing.
-- Custom color picker (no browser picker): models RGB (with alpha 0..255), CMYK, HSV, HSL, OKHSL, OKHSV (Oklab-based) and ARD (angle 0..360, ratio/diagonal percent); every other axis is a percentage with one decimal. Each axis has a draggable gradient bar showing its own 0..max gradient plus an editable numeric input beside it.
+- Custom color picker (no browser picker): models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV (Oklab-based) and ARD; alpha axis on every model (0..255); hue axes 0..360; ARD Diagonal 0..360 and Ratio 0..255; every other axis is a percentage with one decimal. Each axis has a draggable gradient bar showing its own 0..max gradient plus an editable numeric input beside it.
 - Pixel grid over the active layer, following its transform; hidden below 200 percent zoom; minimum zoom configurable 200..6400 percent, default 1000 percent, in Edit > Settings.
 - Canvas background: checkerboard (default, configurable) or solid color (configurable) in Edit > Settings.
 - Settings with per-setting reset arrows shown only when non-default.

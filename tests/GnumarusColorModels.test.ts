@@ -9,6 +9,7 @@ import {
   isColorModelId,
   linearSrgbToOkhsl,
   linearSrgbToOkhsv,
+  modelAlphaFromValues,
   modelAxesToRgbBytes,
   modelAxisGradientCss,
   normalizeModelValues,
@@ -54,7 +55,7 @@ describe("GnumarusColorModels axes", () => {
     expect(isColorModelId("rgb")).toBe(true);
     expect(isColorModelId("ard")).toBe(true);
     expect(isColorModelId("xyz")).toBe(false);
-    expect(getColorModelDef("hsv").axes.map((axis) => axis.key)).toEqual(["h", "s", "v"]);
+    expect(getColorModelDef("hsv").axes.map((axis) => axis.key)).toEqual(["h", "s", "v", "a"]);
     expect(getColorModelDef("rgb").axes).toHaveLength(4);
     for (const def of [getColorModelDef("cmyk"), getColorModelDef("hsv"), getColorModelDef("hsl"), getColorModelDef("okhsl"), getColorModelDef("okhsv"), getColorModelDef("ard")]) {
       expect(def.axes.length).toBeGreaterThanOrEqual(3);
@@ -208,7 +209,7 @@ describe("GnumarusColorModels ard", () => {
 
 describe("GnumarusColorModels gradients", () => {
   it("builds hue gradients that start and end at red", () => {
-    const css = modelAxisGradientCss("hsl", 0, [0, 100, 50]);
+    const css = modelAxisGradientCss("hsl", 0, [0, 100, 50, 255]);
     expect(css.startsWith("linear-gradient(to right, ")).toBe(true);
     expect(css).toContain("rgb(255, 0, 0) 0%");
     expect(css).toContain("100%");
@@ -216,8 +217,49 @@ describe("GnumarusColorModels gradients", () => {
     expect(stops).toBeGreaterThanOrEqual(5);
   });
 
+  it("builds alpha gradients with fading opacity", () => {
+    const css = modelAxisGradientCss("hsv", 3, [0, 100, 100, 255]);
+    expect(css.startsWith("linear-gradient(to right, ")).toBe(true);
+    expect(css).toContain("rgba(255, 0, 0, 0) 0%");
+    expect(css).toContain("rgba(255, 0, 0, 1) 100%");
+  });
+
   it("normalizes model values to axis precision", () => {
-    expect(normalizeModelValues("hsv", [370, 62.54, 50])).toEqual([10, 62.5, 50]);
+    expect(normalizeModelValues("hsv", [370, 62.54, 50, 300])).toEqual([10, 62.5, 50, 255]);
     expect(normalizeModelValues("rgb", [300, -5, 12.7, 255])).toEqual([255, 0, 13, 255]);
+    expect(normalizeModelValues("ard", [370, 300, 400.04, -5])).toEqual([10, 255, 360, 0]);
+  });
+});
+
+describe("GnumarusColorModels alpha axes", () => {
+  it("exposes an alpha axis on every model", () => {
+    for (const def of [
+      getColorModelDef("rgb"),
+      getColorModelDef("cmyk"),
+      getColorModelDef("hsv"),
+      getColorModelDef("hsl"),
+      getColorModelDef("okhsl"),
+      getColorModelDef("okhsv"),
+      getColorModelDef("ard"),
+    ]) {
+      expect(def.axes[def.axes.length - 1]).toMatchObject({ label: "Alpha", min: 0, max: 255 });
+    }
+  });
+
+  it("round-trips alpha through every model", () => {
+    const models = ["rgb", "cmyk", "hsv", "hsl", "okhsl", "okhsv", "ard"] as const;
+    for (const model of models) {
+      const axes = rgbBytesToModelAxes({ r: 10, g: 20, b: 30, a: 128 }, model);
+      expect(modelAlphaFromValues(model, axes, 255)).toBe(128);
+      expect(modelAlphaFromValues(model, [], 255)).toBe(255);
+    }
+  });
+
+  it("uses the new ard display ranges", () => {
+    expect(rgbBytesToModelAxes({ r: 255, g: 0, b: 0, a: 255 }, "ard")).toEqual([expect.any(Number), 255, 120, 255]);
+    expect(rgbBytesToModelAxes({ r: 0, g: 0, b: 0, a: 255 }, "ard")).toEqual([0, 0, 0, 255]);
+    expect(rgbBytesToModelAxes({ r: 255, g: 255, b: 255, a: 255 }, "ard")).toEqual([0, 0, 360, 255]);
+    const round = modelAxesToRgbBytes("ard", [30, 255, 120, 255]);
+    expect(round).toMatchObject({ r: 255, g: 0, b: 0 });
   });
 });
