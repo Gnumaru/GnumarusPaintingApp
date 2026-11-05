@@ -63,6 +63,7 @@ describe("GnumarusChannelLock", () => {
       0,
       { r: 100, g: 110, b: 120, a: 130 },
       { r: true, g: false, b: true, a: false },
+      "copy",
     );
     expect(getPixel(buffer, 1, 1, 0, 0)).toEqual({ r: 1, g: 110, b: 3, a: 130 });
 

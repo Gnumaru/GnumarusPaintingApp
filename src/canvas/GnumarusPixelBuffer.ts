@@ -12,12 +12,18 @@ export interface GnumarusChannelLock {
   a: boolean;
 }
 
-/** How painted colors combine with existing pixels: replace or add (clamped). */
-export type GnumarusBlendMode = "replace" | "additive";
+/** How painted colors combine with existing pixels. */
+export type GnumarusBlendMode = "normal" | "copy" | "eraser";
 
-/** Parse a blend mode, defaulting to replace for missing or invalid input. */
+/** Parse a blend mode, defaulting to normal for missing or invalid input. */
 export function parseBlendMode(value: unknown): GnumarusBlendMode {
-  return value === "additive" ? "additive" : "replace";
+  if (value === "copy") {
+    return "copy";
+  }
+  if (value === "eraser") {
+    return "eraser";
+  }
+  return "normal";
 }
 
 export const GNUMARUS_UNLOCKED_CHANNELS: GnumarusChannelLock = {
@@ -46,6 +52,54 @@ export function parseChannelLock(value: unknown): GnumarusChannelLock {
 
 export function areAllChannelsUnlocked(locked: GnumarusChannelLock): boolean {
   return locked.r !== true && locked.g !== true && locked.b !== true && locked.a !== true;
+}
+
+/**
+ * Straight-alpha source-over composite of a flat color onto `buffer[i..i+3]`
+ * with the given coverage used as opacity. Honors channel locks. Returns
+ * false when nothing could be written (transparent source).
+ */
+function compositeNormal(
+  buffer: Uint8ClampedArray,
+  i: number,
+  color: GnumarusRgba,
+  coverage: number,
+  locked: GnumarusChannelLock | undefined,
+): boolean {
+  const srcA = (color.a / 255) * coverage;
+  if (!(srcA > 0)) {
+    return false;
+  }
+  const dstA = buffer[i + 3] / 255;
+  const outA = srcA + dstA * (1 - srcA);
+  if (!(outA > 0)) {
+    return false;
+  }
+  const inv = dstA * (1 - srcA);
+  const outR = Math.round((color.r * srcA + buffer[i] * inv) / outA);
+  const outG = Math.round((color.g * srcA + buffer[i + 1] * inv) / outA);
+  const outB = Math.round((color.b * srcA + buffer[i + 2] * inv) / outA);
+  const outAlpha = Math.round(outA * 255);
+  if (locked === undefined || areAllChannelsUnlocked(locked)) {
+    buffer[i] = outR;
+    buffer[i + 1] = outG;
+    buffer[i + 2] = outB;
+    buffer[i + 3] = outAlpha;
+    return true;
+  }
+  if (locked.r !== true) {
+    buffer[i] = outR;
+  }
+  if (locked.g !== true) {
+    buffer[i + 1] = outG;
+  }
+  if (locked.b !== true) {
+    buffer[i + 2] = outB;
+  }
+  if (locked.a !== true) {
+    buffer[i + 3] = outAlpha;
+  }
+  return true;
 }
 
 export function createPixelBuffer(width: number, height: number): Uint8ClampedArray {
@@ -114,46 +168,43 @@ export function setPixel(
   y: number,
   color: GnumarusRgba,
   locked: GnumarusChannelLock | undefined = undefined,
-  blend: GnumarusBlendMode = "replace",
+  blend: GnumarusBlendMode = "normal",
 ): boolean {
   if (x < 0 || y < 0 || x >= width || y >= height) {
     return false;
   }
   const i = (y * width + x) * 4;
-  if (blend === "additive") {
-    if (locked?.r !== true) {
-      buffer[i] = buffer[i] + color.r;
-    }
-    if (locked?.g !== true) {
-      buffer[i + 1] = buffer[i + 1] + color.g;
-    }
-    if (locked?.b !== true) {
-      buffer[i + 2] = buffer[i + 2] + color.b;
-    }
+  if (blend === "eraser") {
+    // Eraser ignores RGB and subtracts the paint alpha from the pixel alpha.
     if (locked?.a !== true) {
-      buffer[i + 3] = buffer[i + 3] + color.a;
+      buffer[i + 3] = Math.max(0, Math.round(buffer[i + 3] - color.a));
     }
     return true;
   }
-  if (locked === undefined || areAllChannelsUnlocked(locked)) {
-    buffer[i] = color.r;
-    buffer[i + 1] = color.g;
-    buffer[i + 2] = color.b;
-    buffer[i + 3] = color.a;
+  if (blend === "copy") {
+    if (locked === undefined || areAllChannelsUnlocked(locked)) {
+      buffer[i] = color.r;
+      buffer[i + 1] = color.g;
+      buffer[i + 2] = color.b;
+      buffer[i + 3] = color.a;
+      return true;
+    }
+    if (locked.r !== true) {
+      buffer[i] = color.r;
+    }
+    if (locked.g !== true) {
+      buffer[i + 1] = color.g;
+    }
+    if (locked.b !== true) {
+      buffer[i + 2] = color.b;
+    }
+    if (locked.a !== true) {
+      buffer[i + 3] = color.a;
+    }
     return true;
   }
-  if (locked.r !== true) {
-    buffer[i] = color.r;
-  }
-  if (locked.g !== true) {
-    buffer[i + 1] = color.g;
-  }
-  if (locked.b !== true) {
-    buffer[i + 2] = color.b;
-  }
-  if (locked.a !== true) {
-    buffer[i + 3] = color.a;
-  }
+  // Normal painting: straight-alpha source-over composite.
+  compositeNormal(buffer, i, color, 1, locked);
   return true;
 }
 
@@ -182,7 +233,7 @@ export function drawPixelLine(
   y1: number,
   color: GnumarusRgba,
   locked: GnumarusChannelLock | undefined = undefined,
-  blend: GnumarusBlendMode = "replace",
+  blend: GnumarusBlendMode = "normal",
 ): void {
   let x = x0;
   let y = y0;
@@ -212,11 +263,11 @@ export function drawPixelLine(
  * 4-way flood fill of the contiguous region holding the exact start pixel
  * RGBA value. Writes `color` with the same channel-lock masking as `setPixel`.
  * Returns the number of region pixels visited (0 when out of bounds or, in
- * replace mode, when the region already holds `color`). In additive mode the
- * same-color early exit is skipped because summing still changes the pixels
- * (until they saturate). Uses a `Uint8Array` visited mask plus an
- * explicit stack so large fills never recurse and RAM stays proportional to
- * the image (one byte per pixel plus frontier).
+ * copy mode, when the region already holds `color`). In other modes the
+ * same-color early exit is skipped because the fill can still change pixels
+ * (normal translucent blends, eraser subtraction). Uses a `Uint8Array`
+ * visited mask plus an explicit stack so large fills never recurse and RAM
+ * stays proportional to the image (one byte per pixel plus frontier).
  */
 export function floodFill(
   buffer: Uint8ClampedArray,
@@ -226,7 +277,7 @@ export function floodFill(
   startY: number,
   color: GnumarusRgba,
   locked: GnumarusChannelLock | undefined = undefined,
-  blend: GnumarusBlendMode = "replace",
+  blend: GnumarusBlendMode = "normal",
 ): number {
   if (!Number.isInteger(startX) || !Number.isInteger(startY)) {
     return 0;
@@ -243,7 +294,7 @@ export function floodFill(
   const targetB = buffer[startIndex + 2];
   const targetA = buffer[startIndex + 3];
   if (
-    blend !== "additive" &&
+    blend === "copy" &&
     targetR === color.r &&
     targetG === color.g &&
     targetB === color.b &&
@@ -352,7 +403,7 @@ export function drawBrushStamp(
   shape: GnumarusBrushShape,
   color: GnumarusRgba,
   locked: GnumarusChannelLock | undefined = undefined,
-  blend: GnumarusBlendMode = "replace",
+  blend: GnumarusBlendMode = "normal",
 ): void {
   const tip = clampBrushSize(size);
   const anchor = Math.floor((tip - 1) / 2);
@@ -394,7 +445,7 @@ export function drawBrushLine(
   shape: GnumarusBrushShape,
   color: GnumarusRgba,
   locked: GnumarusChannelLock | undefined = undefined,
-  blend: GnumarusBlendMode = "replace",
+  blend: GnumarusBlendMode = "normal",
 ): void {
   const tip = clampBrushSize(size);
   if (tip <= 1) {
@@ -435,7 +486,7 @@ function blendPixelCoverage(
   color: GnumarusRgba,
   coverage: number,
   locked: GnumarusChannelLock | undefined = undefined,
-  blend: GnumarusBlendMode = "replace",
+  blend: GnumarusBlendMode = "normal",
 ): void {
   if (!(coverage > 0)) {
     return;
@@ -444,47 +495,43 @@ function blendPixelCoverage(
     return;
   }
   const clamped = Math.min(1, Math.max(0, coverage));
-  if (blend === "additive") {
-    const i = (y * width + x) * 4;
-    if (locked?.r !== true) {
-      buffer[i] = Math.round(buffer[i] + color.r * clamped);
-    }
-    if (locked?.g !== true) {
-      buffer[i + 1] = Math.round(buffer[i + 1] + color.g * clamped);
-    }
-    if (locked?.b !== true) {
-      buffer[i + 2] = Math.round(buffer[i + 2] + color.b * clamped);
-    }
+  if (blend === "eraser") {
     if (locked?.a !== true) {
-      buffer[i + 3] = Math.round(buffer[i + 3] + color.a * clamped);
+      const i = (y * width + x) * 4;
+      buffer[i + 3] = Math.max(0, Math.round(buffer[i + 3] - color.a * clamped));
     }
     return;
   }
-  if (clamped >= 1) {
-    setPixel(buffer, width, height, x, y, color, locked);
+  if (blend === "copy") {
+    if (clamped >= 1) {
+      setPixel(buffer, width, height, x, y, color, locked, blend);
+      return;
+    }
+    const i = (y * width + x) * 4;
+    const inv = 1 - clamped;
+    if (locked === undefined || areAllChannelsUnlocked(locked)) {
+      buffer[i] = Math.round(buffer[i] * inv + color.r * clamped);
+      buffer[i + 1] = Math.round(buffer[i + 1] * inv + color.g * clamped);
+      buffer[i + 2] = Math.round(buffer[i + 2] * inv + color.b * clamped);
+      buffer[i + 3] = Math.round(buffer[i + 3] * inv + color.a * clamped);
+      return;
+    }
+    if (locked.r !== true) {
+      buffer[i] = Math.round(buffer[i] * inv + color.r * clamped);
+    }
+    if (locked.g !== true) {
+      buffer[i + 1] = Math.round(buffer[i + 1] * inv + color.g * clamped);
+    }
+    if (locked.b !== true) {
+      buffer[i + 2] = Math.round(buffer[i + 2] * inv + color.b * clamped);
+    }
+    if (locked.a !== true) {
+      buffer[i + 3] = Math.round(buffer[i + 3] * inv + color.a * clamped);
+    }
     return;
   }
-  const i = (y * width + x) * 4;
-  const inv = 1 - clamped;
-  if (locked === undefined || areAllChannelsUnlocked(locked)) {
-    buffer[i] = Math.round(buffer[i] * inv + color.r * clamped);
-    buffer[i + 1] = Math.round(buffer[i + 1] * inv + color.g * clamped);
-    buffer[i + 2] = Math.round(buffer[i + 2] * inv + color.b * clamped);
-    buffer[i + 3] = Math.round(buffer[i + 3] * inv + color.a * clamped);
-    return;
-  }
-  if (locked.r !== true) {
-    buffer[i] = Math.round(buffer[i] * inv + color.r * clamped);
-  }
-  if (locked.g !== true) {
-    buffer[i + 1] = Math.round(buffer[i + 1] * inv + color.g * clamped);
-  }
-  if (locked.b !== true) {
-    buffer[i + 2] = Math.round(buffer[i + 2] * inv + color.b * clamped);
-  }
-  if (locked.a !== true) {
-    buffer[i + 3] = Math.round(buffer[i + 3] * inv + color.a * clamped);
-  }
+  // Normal painting: straight-alpha source-over with the coverage as opacity.
+  compositeNormal(buffer, (y * width + x) * 4, color, clamped, locked);
 }
 
 /**
@@ -509,7 +556,7 @@ export function drawLineSegment(
   antialiased: boolean,
   color: GnumarusRgba,
   locked: GnumarusChannelLock | undefined = undefined,
-  blend: GnumarusBlendMode = "replace",
+  blend: GnumarusBlendMode = "normal",
 ): void {
   const thick = antialiased ? clampBrushSizeFloat(lineWidth) : roundBrushSizeForAliased(lineWidth);
   if (!antialiased) {
@@ -619,7 +666,7 @@ export function drawCubicBezier(
   antialiased: boolean,
   color: GnumarusRgba,
   locked: GnumarusChannelLock | undefined = undefined,
-  blend: GnumarusBlendMode = "replace",
+  blend: GnumarusBlendMode = "normal",
 ): void {
   const chord = (a: GnumarusBezierPoint, b: GnumarusBezierPoint): number =>
     Math.sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));

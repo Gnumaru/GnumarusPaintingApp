@@ -121,9 +121,9 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - `PageUp`/`PageDown` select the layer above/below with wrap-around (top+Up→bottom, bottom+Down→top); a canvas-overlay toast `pos/total: name` (1 = bottom) shows even when the UI is hidden, auto-hiding after ~2s.
 - `Insert` inserts a new layer immediately above the current one and selects it; `Ctrl+E` merges the active layer down exactly like the context-menu item (which already samples through the lower layer transform).
 
-## 22. Pencil on B, additive blend mode (implemented)
-- Pencil shortcut moves from `P` to `B`; bucket moves from `B` to `G` (Photoshop-style; no-modifier keys; `Ctrl` combos unaffected).
-- New shared paint blend mode `replace` (current behavior) / `additive` (painted channels are summed onto the pixel, clamped; translucent repeats accumulate opacity), selectable in pencil/bucket/line/curve options; honored by every color-paint path including anti-aliased edge blending and flood fill (same-color regions still fill in additive mode).
+## 22. Pencil on B, blend modes normal/copy/eraser (implemented)
+- Pencil shortcut moves from `P` to `B`; bucket moves from `B` to `G` (no-modifier keys; `Ctrl` combos unaffected).
+- Shared paint blend mode: `normal` (default; straight-alpha source-over, so translucent black darkens progressively like Krita/Photoshop), `copy` (old direct replacement, ignores alpha blending), `eraser` (ignores RGB, subtracts paint alpha from pixel alpha down to 0; honors alpha locks), selectable in pencil/bucket/line/curve options; honored by every color-paint path including anti-aliased edge blending and flood fill.
 
 ## 23. Always-visible HSV triangle + hue ring (implemented)
 - Color picker popup gains an HSV section that is always visible regardless of the selected model: a triangle (white corner, black corner, full-saturation corner, full-area gradient) inside a hue ring.

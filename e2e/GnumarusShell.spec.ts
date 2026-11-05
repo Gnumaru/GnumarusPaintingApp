@@ -1962,8 +1962,9 @@ test("line tool draws two-click segments with width, shape and aliasing", async 
   expect(await readPixel(page, 3, 3)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   const edge = await readPixel(page, 3, 4);
   expect(edge).not.toBeNull();
-  expect(edge!.r).toBeGreaterThan(0);
-  expect(edge!.r).toBeLessThan(255);
+  expect(edge!.r).toBe(255);
+  expect(edge!.a).toBeGreaterThan(0);
+  expect(edge!.a).toBeLessThan(255);
   await page.keyboard.press("n");
   await expect(page.locator("gnumarus-shell")).toContainText("line");
 });
@@ -2090,8 +2091,9 @@ test("pencil anti-aliasing smooths diagonal edges", async ({ page }) => {
   expect(await readPixel(page, 1, 1)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   const soft = await readPixel(page, 2, 1);
   expect(soft).not.toBeNull();
-  expect(soft!.r).toBeGreaterThan(0);
-  expect(soft!.r).toBeLessThan(255);
+  expect(soft!.r).toBe(255);
+  expect(soft!.a).toBeGreaterThan(0);
+  expect(soft!.a).toBeLessThan(255);
   await page.keyboard.press("n");
   await expect(page.locator("gnumarus-shell")).toContainText("line");
 });
@@ -2309,8 +2311,9 @@ test("brush and line widths accept floats with AA-dependent rounding", async ({ 
   await clickAt(4, 4);
   const soft = await readPixel(page, 5, 5);
   expect(soft).not.toBeNull();
-  expect(soft!.r).toBeGreaterThan(0);
-  expect(soft!.r).toBeLessThan(255);
+  expect(soft!.r).toBe(255);
+  expect(soft!.a).toBeGreaterThan(0);
+  expect(soft!.a).toBeLessThan(255);
   await page.getByRole("button", { name: "Line" }).click();
   const lineOf = (): Promise<number> =>
     page.evaluate(() => {
@@ -2391,7 +2394,7 @@ test("hsv triangle and hue ring edit the color in any model", async ({ page }) =
   await expect(picker.locator("#hexInput")).toHaveValue("#100707");
 });
 
-test("additive blend accumulates translucent paint", async ({ page }) => {
+test("normal blend accumulates translucent paint and eraser subtracts alpha", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.evaluate(() => {
@@ -2428,11 +2431,11 @@ test("additive blend accumulates translucent paint", async ({ page }) => {
       },
     ]);
   });
-  await setPencil(page, "#ff000080");
+  await setPencil(page, "#00000080");
   await page.getByRole("button", { name: "Pencil" }).click();
   await page.locator("gnumarus-shell input#brushSize").fill("1");
-  await page.locator("gnumarus-shell select#blendMode").selectOption("additive");
-  await expect(page.locator("gnumarus-shell")).toContainText("Blend mode: additive");
+  await page.locator("gnumarus-shell select#blendMode").selectOption("normal");
+  await expect(page.locator("gnumarus-shell")).toContainText("Blend mode: normal");
   const canvas = page.locator("gnumarus-shell canvas");
   const box = await canvas.boundingBox();
   if (box === null) {
@@ -2452,15 +2455,26 @@ test("additive blend accumulates translucent paint", async ({ page }) => {
     await page.mouse.click(target.x, target.y);
   };
   await clickAt(4, 4);
-  expect(await readPixel(page, 4, 4)).toEqual({ r: 255, g: 0, b: 0, a: 128 });
+  expect(await readPixel(page, 4, 4)).toEqual({ r: 0, g: 0, b: 0, a: 128 });
   await clickAt(4, 4);
-  expect(await readPixel(page, 4, 4)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 4, 4)).toEqual({ r: 0, g: 0, b: 0, a: 192 });
   await page.keyboard.press("Delete");
   expect(await readPixel(page, 4, 4)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
-  await page.locator("gnumarus-shell select#blendMode").selectOption("replace");
+  await page.locator("gnumarus-shell select#blendMode").selectOption("copy");
   await clickAt(4, 4);
   await clickAt(4, 4);
-  expect(await readPixel(page, 4, 4)).toEqual({ r: 255, g: 0, b: 0, a: 128 });
+  expect(await readPixel(page, 4, 4)).toEqual({ r: 0, g: 0, b: 0, a: 128 });
+  await page.locator("gnumarus-shell select#blendMode").selectOption("eraser");
+  await expect(page.locator("gnumarus-shell")).toContainText("Blend mode: eraser");
+  await clickAt(4, 4);
+  expect(await readPixel(page, 4, 4)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  await setPencil(page, "#00000020");
+  await page.locator("gnumarus-shell select#blendMode").selectOption("copy");
+  await clickAt(2, 2);
+  expect(await readPixel(page, 2, 2)).toEqual({ r: 0, g: 0, b: 0, a: 32 });
+  await page.locator("gnumarus-shell select#blendMode").selectOption("eraser");
+  await clickAt(2, 2);
+  expect(await readPixel(page, 2, 2)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toContainText("Blend mode");
 });

@@ -876,7 +876,7 @@ export class GnumarusShell extends LitElement {
     this.brushSize = 1;
     this.brushShape = "square";
     this.pencilAntialias = false;
-    this.blendMode = "replace";
+    this.blendMode = "normal";
     this.lineWidth = 1;
     this.lineShape = "square";
     this.lineAntialias = false;
@@ -1579,8 +1579,9 @@ export class GnumarusShell extends LitElement {
       <label
         >Blend mode
         <select id="blendMode" .value=${this.blendMode} @change=${(): void => this.applyBlendModeFromDialog()}>
-          <option value="replace">Replace</option>
-          <option value="additive">Additive</option>
+          <option value="normal">Normal</option>
+          <option value="copy">Copy</option>
+          <option value="eraser">Eraser</option>
         </select>
       </label>
     `;
@@ -2402,7 +2403,7 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = `Pencil anti-aliasing: ${enabled ? "on" : "off"}`;
   }
 
-  /** Test hook: set the shared paint blend mode (replace/additive, defaults to replace). */
+  /** Test hook: set the shared paint blend mode (normal/copy/eraser, defaults to normal). */
   setBlendMode(mode: GnumarusBlendMode): void {
     const parsed = parseBlendMode(mode);
     this.blendMode = parsed;
@@ -2412,7 +2413,7 @@ export class GnumarusShell extends LitElement {
 
   private currentDialogBlendMode(): GnumarusBlendMode {
     const select = this.shadowRoot?.getElementById("blendMode") as HTMLSelectElement | null;
-    return parseBlendMode(select?.value ?? "replace");
+    return parseBlendMode(select?.value ?? "normal");
   }
 
   private applyBlendModeFromDialog(): void {

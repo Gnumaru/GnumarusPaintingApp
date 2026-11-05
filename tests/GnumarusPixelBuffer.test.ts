@@ -121,7 +121,7 @@ describe("GnumarusPixelBuffer", () => {
     const buffer = createPixelBuffer(3, 3);
     const red = { r: 255, g: 0, b: 0, a: 255 };
     setPixel(buffer, 3, 3, 1, 1, red);
-    expect(floodFill(buffer, 3, 3, 1, 1, red)).toBe(0);
+    expect(floodFill(buffer, 3, 3, 1, 1, red, undefined, "copy")).toBe(0);
     expect(floodFill(buffer, 3, 3, -1, 0, red)).toBe(0);
     expect(floodFill(buffer, 3, 3, 9, 9, red)).toBe(0);
     expect(getPixel(buffer, 3, 3, 1, 1)).toEqual(red);
@@ -136,7 +136,7 @@ describe("GnumarusPixelBuffer", () => {
         setPixel(buffer, 2, 2, x, y, target);
       }
     }
-    const filled = floodFill(buffer, 2, 2, 0, 0, fill, { r: true, g: false, b: false, a: false });
+    const filled = floodFill(buffer, 2, 2, 0, 0, fill, { r: true, g: false, b: false, a: false }, "copy");
     expect(filled).toBe(4);
     expect(getPixel(buffer, 2, 2, 1, 1)).toEqual({ r: 10, g: 210, b: 220, a: 230 });
   });
@@ -219,44 +219,81 @@ describe("GnumarusPixelBuffer", () => {
     expect(getPixel(dot, 4, 4, 1, 1)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   });
 
-  it("adds channel values in additive blend mode with clamping", () => {
+  it("composites translucent paint over the background in normal mode", () => {
     const buffer = createPixelBuffer(2, 2);
-    const half = { r: 200, g: 10, b: 10, a: 100 };
-    expect(setPixel(buffer, 2, 2, 0, 0, half, undefined, "additive")).toBe(true);
-    expect(getPixel(buffer, 2, 2, 0, 0)).toEqual(half);
-    expect(setPixel(buffer, 2, 2, 0, 0, half, undefined, "additive")).toBe(true);
-    expect(getPixel(buffer, 2, 2, 0, 0)).toEqual({ r: 255, g: 20, b: 20, a: 200 });
+    const halfBlack = { r: 0, g: 0, b: 0, a: 128 };
+    expect(setPixel(buffer, 2, 2, 0, 0, halfBlack, undefined, "normal")).toBe(true);
+    expect(getPixel(buffer, 2, 2, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 128 });
+    // Painting again darkens/accumulates toward opaque, like Krita/Photoshop.
+    expect(setPixel(buffer, 2, 2, 0, 0, halfBlack, undefined, "normal")).toBe(true);
+    expect(getPixel(buffer, 2, 2, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 192 });
+    // Fully transparent paint is a no-op in normal mode.
+    expect(setPixel(buffer, 2, 2, 1, 1, { r: 255, g: 0, b: 0, a: 0 }, undefined, "normal")).toBe(true);
+    expect(getPixel(buffer, 2, 2, 1, 1)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    // Opaque paint matches copy mode exactly.
+    const opaque = createPixelBuffer(1, 1);
+    setPixel(opaque, 1, 1, 0, 0, { r: 10, g: 20, b: 30, a: 40 });
+    setPixel(opaque, 1, 1, 0, 0, { r: 200, g: 210, b: 220, a: 255 }, undefined, "normal");
+    expect(getPixel(opaque, 1, 1, 0, 0)).toEqual({ r: 200, g: 210, b: 220, a: 255 });
+    // Locks still mask the composite write.
     const masked = createPixelBuffer(1, 1);
-    setPixel(masked, 1, 1, 0, 0, { r: 50, g: 50, b: 50, a: 50 });
+    setPixel(masked, 1, 1, 0, 0, { r: 0, g: 0, b: 255, a: 255 });
     setPixel(
       masked,
       1,
       1,
       0,
       0,
-      { r: 100, g: 100, b: 100, a: 100 },
-      { r: true, g: false, b: true, a: false },
-      "additive",
+      { r: 255, g: 0, b: 0, a: 128 },
+      { r: false, g: false, b: true, a: false },
+      "normal",
     );
-    expect(getPixel(masked, 1, 1, 0, 0)).toEqual({ r: 50, g: 150, b: 50, a: 150 });
+    expect(getPixel(masked, 1, 1, 0, 0)).toEqual({ r: 128, g: 0, b: 255, a: 255 });
   });
 
-  it("flood fills additively even when the region matches the fill color", () => {
+  it("erases only alpha, subtracting the paint alpha down to zero", () => {
+    const buffer = createPixelBuffer(1, 1);
+    setPixel(buffer, 1, 1, 0, 0, { r: 10, g: 20, b: 30, a: 100 });
+    expect(setPixel(buffer, 1, 1, 0, 0, { r: 255, g: 255, b: 255, a: 255 }, undefined, "eraser")).toBe(true);
+    expect(getPixel(buffer, 1, 1, 0, 0)).toEqual({ r: 10, g: 20, b: 30, a: 0 });
+    setPixel(buffer, 1, 1, 0, 0, { r: 10, g: 20, b: 30, a: 100 });
+    expect(setPixel(buffer, 1, 1, 0, 0, { r: 0, g: 0, b: 0, a: 32 }, undefined, "eraser")).toBe(true);
+    expect(getPixel(buffer, 1, 1, 0, 0)).toEqual({ r: 10, g: 20, b: 30, a: 68 });
+    expect(setPixel(buffer, 1, 1, 0, 0, { r: 0, g: 0, b: 0, a: 32 }, undefined, "eraser")).toBe(true);
+    expect(getPixel(buffer, 1, 1, 0, 0)).toEqual({ r: 10, g: 20, b: 30, a: 36 });
+    // A locked alpha channel blocks the eraser.
+    setPixel(
+      buffer,
+      1,
+      1,
+      0,
+      0,
+      { r: 0, g: 0, b: 0, a: 255 },
+      { r: false, g: false, b: false, a: true },
+      "eraser",
+    );
+    expect(getPixel(buffer, 1, 1, 0, 0)).toEqual({ r: 10, g: 20, b: 30, a: 36 });
+  });
+
+  it("flood fills in copy mode only for new colors and always otherwise", () => {
     const red = { r: 255, g: 0, b: 0, a: 200 };
     const buffer = createPixelBuffer(3, 3);
     setPixel(buffer, 3, 3, 1, 1, red);
-    expect(floodFill(buffer, 3, 3, 1, 1, red)).toBe(0);
-    expect(floodFill(buffer, 3, 3, 1, 1, red, undefined, "additive")).toBe(1);
-    expect(getPixel(buffer, 3, 3, 1, 1)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+    expect(floodFill(buffer, 3, 3, 1, 1, red, undefined, "copy")).toBe(0);
+    expect(floodFill(buffer, 3, 3, 1, 1, red, undefined, "copy")).toBe(0);
+    expect(floodFill(buffer, 3, 3, 1, 1, red, undefined, "normal")).toBe(1);
+    expect(getPixel(buffer, 3, 3, 1, 1)).toEqual({ r: 255, g: 0, b: 0, a: 243 });
+    expect(floodFill(buffer, 3, 3, 1, 1, red, undefined, "eraser")).toBe(1);
+    expect(getPixel(buffer, 3, 3, 1, 1)).toEqual({ r: 255, g: 0, b: 0, a: 43 });
   });
 
-  it("accumulates repeated strokes in additive blend mode", () => {
+  it("accumulates repeated strokes in normal blend mode", () => {
     const translucent = { r: 0, g: 0, b: 0, a: 100 };
     const buffer = createPixelBuffer(4, 4);
-    drawLineSegment(buffer, 4, 4, 0, 0, 3, 0, 1, "square", false, translucent, undefined, "replace");
+    drawLineSegment(buffer, 4, 4, 0, 0, 3, 0, 1, "square", false, translucent, undefined, "copy");
     expect(getPixel(buffer, 4, 4, 1, 0)).toEqual({ r: 0, g: 0, b: 0, a: 100 });
-    drawLineSegment(buffer, 4, 4, 0, 0, 3, 0, 1, "square", false, translucent, undefined, "additive");
-    expect(getPixel(buffer, 4, 4, 1, 0)).toEqual({ r: 0, g: 0, b: 0, a: 200 });
+    drawLineSegment(buffer, 4, 4, 0, 0, 3, 0, 1, "square", false, translucent, undefined, "normal");
+    expect(getPixel(buffer, 4, 4, 1, 0)).toEqual({ r: 0, g: 0, b: 0, a: 161 });
     const smooth = createPixelBuffer(8, 8);
     drawLineSegment(
       smooth,
@@ -271,12 +308,13 @@ describe("GnumarusPixelBuffer", () => {
       true,
       { r: 255, g: 0, b: 0, a: 255 },
       undefined,
-      "additive",
+      "normal",
     );
     const edge = getPixel(smooth, 8, 8, 3, 4);
     expect(edge).not.toBeNull();
-    expect(edge!.r).toBeGreaterThan(0);
-    expect(edge!.r).toBeLessThan(255);
+    expect(edge!.r).toBe(255);
+    expect(edge!.a).toBeGreaterThan(0);
+    expect(edge!.a).toBeLessThan(255);
   });
 
   it("draws anti-aliased lines with soft edges", () => {
@@ -286,8 +324,9 @@ describe("GnumarusPixelBuffer", () => {
     expect(getPixel(smooth, 8, 8, 3, 3)).toEqual(red);
     const edge = getPixel(smooth, 8, 8, 3, 4);
     expect(edge).not.toBeNull();
-    expect(edge!.r).toBeGreaterThan(0);
-    expect(edge!.r).toBeLessThan(255);
+    expect(edge!.r).toBe(255);
+    expect(edge!.a).toBeGreaterThan(0);
+    expect(edge!.a).toBeLessThan(255);
     expect(getPixel(smooth, 8, 8, 3, 6)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
     const masked = createPixelBuffer(4, 4);
     drawLineSegment(masked, 4, 4, 0, 0, 3, 0, 1, "square", true, red, {
@@ -315,8 +354,8 @@ describe("GnumarusPixelBuffer", () => {
     drawLineSegment(mid, 8, 8, 0, 3, 7, 3, 1.5, "square", true, red);
     const midEdge = getPixel(mid, 8, 8, 3, 2);
     expect(midEdge).not.toBeNull();
-    expect(midEdge!.r).toBeGreaterThan(0);
-    expect(midEdge!.r).toBeLessThan(255);
+    expect(midEdge!.r).toBe(255);
+    expect(midEdge!.a).toBe(64);
     const narrow = createPixelBuffer(8, 8);
     drawLineSegment(narrow, 8, 8, 0, 3, 7, 3, 1, "square", true, red);
     expect(getPixel(narrow, 8, 8, 3, 2)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
@@ -324,8 +363,9 @@ describe("GnumarusPixelBuffer", () => {
     drawLineSegment(wide, 8, 8, 0, 3, 7, 3, 2, "square", true, red);
     const wideEdge = getPixel(wide, 8, 8, 3, 2);
     expect(wideEdge).not.toBeNull();
-    expect(wideEdge!.r).toBeGreaterThan(midEdge!.r);
-    expect(wideEdge!.r).toBeLessThan(255);
+    expect(wideEdge!.r).toBe(255);
+    expect(wideEdge!.a).toBe(128);
+    expect(wideEdge!.a).toBeGreaterThan(midEdge!.a);
   });
 
   it("draws cubic beziers through endpoints with control influence", () => {

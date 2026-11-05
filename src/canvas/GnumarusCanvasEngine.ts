@@ -10,6 +10,7 @@ import {
   floodFill,
   getPixel,
   parseBrushShape,
+  parseBlendMode,
   parseChannelLock,
   parseHexColor,
   resizePixelBuffer,
@@ -310,7 +311,7 @@ export class GnumarusCanvasEngine {
   private transformRotating = false;
   private transformLastAngle: number | null = null;
   private color: GnumarusRgba = { r: 0, g: 0, b: 0, a: 255 };
-  private blendMode: GnumarusBlendMode = "replace";
+  private blendMode: GnumarusBlendMode = "normal";
   private brushSize = 1;
   private brushShape: GnumarusBrushShape = "square";
   private pencilAntialias = false;
@@ -1867,7 +1868,7 @@ export class GnumarusCanvasEngine {
   }
 
   setBlendMode(mode: GnumarusBlendMode): boolean {
-    const parsed = mode === "additive" ? "additive" : "replace";
+    const parsed = parseBlendMode(mode);
     if (parsed === this.blendMode) {
       return false;
     }
