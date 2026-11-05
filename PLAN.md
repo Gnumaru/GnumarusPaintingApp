@@ -69,3 +69,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Every setting gets a per-setting reset to factory default: a circular arrow appears only when the value differs from default; clicking resets that setting and the arrow disappears.
 - New background setting: canvas background is checkerboard (default) or solid color. Solid mode shows a color picker; checkerboard mode keeps all previous checker options.
 - New final render preview: small floating resizable window with internal zoom and pan rendering the flattened image as a single PNG export would look.
+
+## 11. Custom color picker (implemented)
+- Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL, OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).
+- Every axis gets a draggable gradient bar plus an editable numeric input beside it. All axes are percentages with one decimal, except hue axes (0..360) and RGBA axes (0..255). Each bar renders the gradient of its own axis from minimum to maximum (e.g. HSL hue bar runs red 0 through the spectrum back to red 360).
+- OKHSL/OKHSV use our own Oklab-based implementation (no new dependencies). RGB model carries an alpha axis; other models preserve alpha.

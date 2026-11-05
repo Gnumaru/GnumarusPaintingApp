@@ -19,6 +19,40 @@ async function readPixel(page: import("@playwright/test").Page, x: number, y: nu
   }, [x, y]);
 }
 
+async function setPencil(page: import("@playwright/test").Page, hex: string): Promise<void> {
+  await page.evaluate((value: string) => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setPencilColor(hex: string): void } };
+    };
+    root.__gnumarus?.shell?.setPencilColor(value);
+  }, hex);
+}
+
+async function setChecker(page: import("@playwright/test").Page, which: "A" | "B", hex: string): Promise<void> {
+  await page.evaluate(
+    ([side, value]: [string, string]) => {
+      const root = window as unknown as {
+        __gnumarus?: {
+          shell?: { setCheckerColorA(hex: string): void; setCheckerColorB(hex: string): void };
+        };
+      };
+      if (side === "A") {
+        root.__gnumarus?.shell?.setCheckerColorA(value);
+      } else {
+        root.__gnumarus?.shell?.setCheckerColorB(value);
+      }
+    },
+    [which, hex] as [string, string],
+  );
+}
+
+async function openPicker(page: import("@playwright/test").Page, pickerId: string): Promise<import("@playwright/test").Locator> {
+  const picker = page.locator(`gnumarus-shell #${pickerId}`);
+  await picker.getByRole("button", { name: "Pick color" }).click();
+  await expect(picker.getByRole("dialog", { name: "Color picker" })).toBeVisible();
+  return picker;
+}
+
 test("shell boots with menu, toolbar, canvas host and status bar", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error: Error) => {
@@ -96,7 +130,12 @@ test("Edit > Settings changes the checkerboard", async ({ page }) => {
   await page.locator("gnumarus-shell select#checkerMode").selectOption("screen");
   await page.locator("gnumarus-shell input#checkerSizeX").fill("8");
   await page.locator("gnumarus-shell input#checkerSizeY").fill("16");
-  await page.locator("gnumarus-shell input#checkerColorA").fill("#ff0000");
+  const checkerPicker = await openPicker(page, "checkerColorA");
+  await checkerPicker.locator("select#modelSelect").selectOption("rgb");
+  await checkerPicker.getByLabel("Red", { exact: true }).fill("255");
+  await checkerPicker.getByLabel("Green", { exact: true }).fill("0");
+  await checkerPicker.getByLabel("Blue", { exact: true }).fill("0");
+  await page.keyboard.press("Escape");
   const settings = await page.evaluate(() => {
     const root = window as unknown as {
       __gnumarus?: {
@@ -108,7 +147,7 @@ test("Edit > Settings changes the checkerboard", async ({ page }) => {
     return root.__gnumarus?.engine?.getCheckerSettings() ?? null;
   });
   expect(settings).toEqual({ mode: "screen", sizeX: 8, sizeY: 16, colorA: "#ff0000", colorB: "#949494" });
-  await expect(page.locator("gnumarus-shell")).toContainText("screen-space, 8x16px");
+  await expect(page.locator("gnumarus-shell")).toContainText("Checker color A: #ff0000");
 });
 
 interface GnumarusViewState {
@@ -420,7 +459,7 @@ test("layer context menu merges down with opacity", async ({ page }) => {
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
 
   await page.getByRole("button", { name: "Add layer" }).click();
-  await page.locator('gnumarus-shell input#pencilColor').fill("#ff0000");
+  await setPencil(page, "#ff0000");
   await page.mouse.click(cx, cy);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 
@@ -602,7 +641,7 @@ test("channel locks toggle in the panel and mask pencil strokes", async ({ page 
   });
   expect(locked).toEqual({ r: false, g: true, b: false, a: false });
 
-  await page.locator("gnumarus-shell input#pencilColor").fill("#00ffff");
+  await setPencil(page, "#00ffff");
   const canvas = page.locator("gnumarus-shell canvas");
   const box = await canvas.boundingBox();
   if (box === null) {
@@ -684,7 +723,7 @@ test("merge down respects destination locks and undo restores the upper lock", a
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
 
   await page.getByRole("button", { name: "Add layer" }).click();
-  await page.locator("gnumarus-shell input#pencilColor").fill("#ff0000");
+  await setPencil(page, "#ff0000");
   await page.mouse.click(cx, cy);
 
   await page.evaluate(() => {
@@ -921,8 +960,8 @@ test("pixel grid stays visible across max zoom out/in with black checkerboard", 
   await page.waitForSelector("gnumarus-shell canvas");
   await page.getByRole("button", { name: "Edit" }).click();
   await page.getByRole("button", { name: "Settings" }).click();
-  await page.locator("gnumarus-shell input#checkerColorA").fill("#000000");
-  await page.locator("gnumarus-shell input#checkerColorB").fill("#000000");
+  await setChecker(page, "A", "#000000");
+  await setChecker(page, "B", "#000000");
   await page.getByRole("button", { name: "Close" }).click();
   const setZoom = (zoom: number): Promise<void> =>
     page.evaluate((value: number) => {
@@ -984,9 +1023,13 @@ test("canvas background can switch between checkerboard and solid color", async 
   await expect(page.locator("gnumarus-shell")).toContainText("Background mode");
   await expect(page.locator("gnumarus-shell input#checkerSizeX")).toBeVisible();
   await page.locator("gnumarus-shell select#backgroundMode").selectOption("solid");
-  await expect(page.locator("gnumarus-shell input#backgroundColor")).toBeVisible();
   await expect(page.locator("gnumarus-shell input#checkerSizeX")).toHaveCount(0);
-  await page.locator("gnumarus-shell input#backgroundColor").fill("#ff0000");
+  const backgroundPicker = await openPicker(page, "backgroundColor");
+  await backgroundPicker.locator("select#modelSelect").selectOption("rgb");
+  await backgroundPicker.getByLabel("Red", { exact: true }).fill("255");
+  await backgroundPicker.getByLabel("Green", { exact: true }).fill("0");
+  await backgroundPicker.getByLabel("Blue", { exact: true }).fill("0");
+  await backgroundPicker.getByRole("button", { name: "Pick color" }).click();
   const background = await page.evaluate(() => {
     const root = window as unknown as {
       __gnumarus?: { engine?: { getBackgroundSettings(): { mode: string; color: string } } };
@@ -998,7 +1041,7 @@ test("canvas background can switch between checkerboard and solid color", async 
   expect(persisted).toContain("solid");
   await page.locator("gnumarus-shell select#backgroundMode").selectOption("checkerboard");
   await expect(page.locator("gnumarus-shell input#checkerSizeX")).toBeVisible();
-  await expect(page.locator("gnumarus-shell input#backgroundColor")).toHaveCount(0);
+  await expect(page.locator("gnumarus-shell #backgroundColor")).toHaveCount(0);
 });
 
 test("final preview shows flattened render with zoom and pan", async ({ page }) => {
@@ -1027,4 +1070,98 @@ test("final preview shows flattened render with zoom and pan", async ({ page }) 
   await expect(preview).toContainText("400%");
   await preview.getByRole("button", { name: "Close preview" }).click();
   await expect(preview).toHaveCount(0);
+});
+
+test("custom picker edits pencil color through models and inputs", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const picker = await openPicker(page, "pencilColor");
+  const modelSelect = picker.locator("select#modelSelect");
+  await expect(modelSelect.locator("option")).toHaveCount(7);
+  for (const id of ["rgb", "cmyk", "hsv", "hsl", "okhsl", "okhsv", "ard"]) {
+    await expect(modelSelect.locator(`option[value="${id}"]`)).toHaveCount(1);
+  }
+  await modelSelect.selectOption("rgb");
+  await picker.getByLabel("Red", { exact: true }).fill("255");
+  await picker.getByLabel("Green", { exact: true }).fill("0");
+  await picker.getByLabel("Blue", { exact: true }).fill("0");
+  await picker.getByLabel("Alpha", { exact: true }).fill("255");
+  await expect(page.locator("gnumarus-shell")).toContainText("#ff0000");
+  await modelSelect.selectOption("cmyk");
+  await expect(picker.getByLabel("Cyan", { exact: true })).toHaveValue("0.0");
+  await expect(picker.getByLabel("Magenta", { exact: true })).toHaveValue("100.0");
+  await picker.getByLabel("Yellow", { exact: true }).fill("0");
+  await picker.getByLabel("Magenta", { exact: true }).fill("0");
+  await picker.getByLabel("Cyan", { exact: true }).fill("100");
+  await picker.getByLabel("Black", { exact: true }).fill("0");
+  await expect(page.locator("gnumarus-shell")).toContainText("#00ffff");
+  await modelSelect.selectOption("hsl");
+  await expect(picker.getByLabel("Hue", { exact: true })).toHaveValue("180.0");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.keyboard.press("Escape");
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 255, b: 255, a: 255 });
+});
+
+test("custom picker bars render gradients and drag to change color", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  const picker = await openPicker(page, "pencilColor");
+  await picker.locator("select#modelSelect").selectOption("hsl");
+  const hueBar = picker.locator('[data-testid="axis-bar-h"]');
+  const style = await hueBar.getAttribute("style");
+  expect(style).toContain("linear-gradient(to right");
+  expect(style).toContain("rgb(255, 0, 0) 0%");
+  expect(style).toContain("100%");
+  const before = await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { colorValue: string } } };
+    return root.__gnumarus?.shell?.colorValue ?? "";
+  });
+  const barBox = await hueBar.boundingBox();
+  if (barBox === null) {
+    throw new Error("hue bar has no bounding box");
+  }
+  await page.mouse.move(barBox.x + barBox.width * 0.9, barBox.y + barBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(barBox.x + barBox.width * 0.1, barBox.y + barBox.height / 2, { steps: 5 });
+  await page.mouse.up();
+  const after = await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { colorValue: string } } };
+    return root.__gnumarus?.shell?.colorValue ?? "";
+  });
+  expect(after).not.toBe(before);
+  await expect(picker.getByLabel("Hue", { exact: true })).not.toHaveValue("0.0");
+});
+
+test("custom picker supports alpha and clamps manual input", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const picker = await openPicker(page, "pencilColor");
+  await picker.locator("select#modelSelect").selectOption("rgb");
+  await picker.getByLabel("Red", { exact: true }).fill("10");
+  await picker.getByLabel("Green", { exact: true }).fill("20");
+  await picker.getByLabel("Blue", { exact: true }).fill("30");
+  await picker.getByLabel("Alpha", { exact: true }).fill("128");
+  await expect(page.locator("gnumarus-shell")).toContainText("#0a141e80");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.keyboard.press("Escape");
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 10, g: 20, b: 30, a: 128 });
+  await picker.getByRole("button", { name: "Pick color" }).click();
+  await picker.locator("select#modelSelect").selectOption("hsv");
+  await picker.getByLabel("Saturation", { exact: true }).fill("999");
+  await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("100.0");
+  const hueBefore = await picker.getByLabel("Hue", { exact: true }).inputValue();
+  await picker.getByLabel("Hue", { exact: true }).fill("");
+  await picker.getByLabel("Hue", { exact: true }).press("Tab");
+  await expect(picker.getByLabel("Hue", { exact: true })).toHaveValue(hueBefore);
 });

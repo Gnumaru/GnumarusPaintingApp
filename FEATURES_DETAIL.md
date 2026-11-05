@@ -6,7 +6,8 @@
 - File menu items: New (width/height dialog, 1..1024, default 64x64), Open (directory picker), Save (writes to picked directory, reuses the handle afterwards).
 - Edit menu items: Undo/Redo (image edits and layer resizes, with disabled state), Settings (canvas background checkerboard/solid, checkerboard mode image-space/screen-space, independent square width/height 1..128 default 16x16, colors A/B, pixel grid minimum zoom 200..6400 percent default 1000 percent; every setting has a per-setting reset arrow shown only when non-default plus Reset defaults; applied live and persisted to `localStorage`) and Reset Canvas Transform (restores fit zoom, rotation, flips).
 - Undo/redo: per-stroke bounding-box diffs plus resize before/after snapshots (max 100 entries), view transforms, settings and preview never recorded; shortcuts `Ctrl+Z` undo, `Ctrl+Y` or `Shift+Ctrl+Z` redo; history cleared on New/Open.
-- Toolbar: pencil tool (pixel-art), loupe tool (zoom/rotate/flip) and transform tool plus a color input plus a Final preview toggle.
+- Toolbar: pencil tool (pixel-art), loupe tool (zoom/rotate/flip) and transform tool, custom color picker popup plus a Final preview toggle.
+- Color: custom `gnumarus-color-picker` (`src/color/`) with models RGB (alpha 0..255), CMYK, HSV, HSL, OKHSL, OKHSV and ARD; hue axes 0..360, RGBA axes 0..255, every other axis percent with one decimal; per-axis draggable gradient bars (own 0..max gradient) with editable numeric inputs, model selector and hex field; no native `<input type="color">` remains. Pencil, checker colors and solid background all use it; 8-digit hex carries alpha into the engine (`parseHexColor` extended).
 - Status bar shows tool, rotation degrees, flip state, hex color, cursor pixel coordinates, canvas dimensions, zoom percentage, project name, modified marker, WebGL2/FS-API messages.
 - All UI strings in American English.
 
@@ -42,6 +43,8 @@
 - `src/settings/GnumarusCheckerSettings.ts`: checkerboard settings parse/serialize/validate with legacy migration.
 - `src/settings/GnumarusGridSettings.ts`: pixel grid minimum zoom parse/serialize/validate, clamp 200..6400 percent, default 1000 percent, `shouldShowPixelGrid` (never below 200 percent).
 - `src/settings/GnumarusBackgroundSettings.ts`: canvas background mode checkerboard/solid plus solid color parse/serialize/validate, default checkerboard `#808080`.
+- `src/color/GnumarusColorModels.ts`: RGB/CMYK/HSV/HSL/OKHSL/OKHSV/ARD conversions, axis metadata, gradient CSS, hex with alpha.
+- `src/color/GnumarusColorPicker.ts`: `gnumarus-color-picker` Lit component (swatch + popup, model select, gradient bars with keyboard support, numeric + hex inputs, `gnumarus-color-change` event).
 - `src/preview/GnumarusFinalRender.ts`: `compositeFinalImage` flattening visible layers with opacity and transform (precomputed trig), transparent background.
 
 ## 4. Project format and file access
@@ -57,8 +60,8 @@
 
 ## 6. Tests
 
-- Vitest unit tests (`tests/`): pixel buffer, channel locks, layer resize, grid settings, pixel grid shader, background settings, final render, viewport math, project format, checker settings, layer-tagged history — 64 tests.
-- Playwright E2E (`e2e/`, Chromium): shell, menus, dialogs, pencil, zoom shortcuts, checker settings, loupe gestures, P/L tools, transform reset, undo/redo, full layer management, channel lock toggles + masked paint + merge/undo, layer resize dialog + undo, pixel grid visibility + threshold + rotation + max zoom cycle, settings reset arrows, background mode, final preview zoom — 30 tests.
+- Vitest unit tests (`tests/`): pixel buffer (incl. 8-digit hex), color models (all seven incl. Oklab round-trips and ARD), channel locks, layer resize, grid settings, pixel grid shader, background settings, final render, viewport math, project format, checker settings, layer-tagged history — 79 tests.
+- Playwright E2E (`e2e/`, Chromium): shell, menus, dialogs, pencil, zoom shortcuts, checker settings (via custom picker), loupe gestures, P/L tools, transform reset, undo/redo, full layer management, channel lock toggles + masked paint + merge/undo, layer resize dialog + undo, pixel grid visibility + threshold + rotation + max zoom cycle, settings reset arrows, background mode (via custom picker), final preview zoom, custom picker models/inputs/bar-drag/alpha/clamping — 33 tests.
 
 ## 7. Build and deploy
 

@@ -251,14 +251,18 @@ export function parseHexColor(hex: string): GnumarusRgba | null {
       a: 255,
     };
   }
-  const longMatch = /^#([0-9a-f]{6})$/.exec(normalized);
+  const longMatch = /^#([0-9a-f]{6})([0-9a-f]{2})?$/.exec(normalized);
   if (longMatch !== null) {
     const digits = longMatch[1];
+    const alphaPair = longMatch[2];
+    if (digits === undefined) {
+      return null;
+    }
     return {
       r: Number.parseInt(digits.slice(0, 2), 16),
       g: Number.parseInt(digits.slice(2, 4), 16),
       b: Number.parseInt(digits.slice(4, 6), 16),
-      a: 255,
+      a: alphaPair === undefined ? 255 : Number.parseInt(alphaPair, 16),
     };
   }
   return null;

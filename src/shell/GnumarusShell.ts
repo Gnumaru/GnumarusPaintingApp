@@ -46,6 +46,9 @@ import {
 } from "../settings/GnumarusGridSettings";
 import { compositeFinalImage } from "../preview/GnumarusFinalRender";
 import { decodePngToBuffer, encodeBufferToPngBlob } from "../project/GnumarusPngCodec";
+import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
+import { parseHexToRgbaBytes, rgbaBytesToHex } from "../color/GnumarusColorModels";
+import "../color/GnumarusColorPicker";
 
 export class GnumarusShell extends LitElement {
   static styles = css`
@@ -148,13 +151,9 @@ export class GnumarusShell extends LitElement {
       gap: 8px;
       flex: 0 0 auto;
     }
-    .toolbar input[type="color"] {
-      width: 36px;
-      height: 28px;
-      border: none;
-      background: transparent;
-      padding: 0;
-      cursor: pointer;
+    .toolbar gnumarus-color-picker {
+      --gnumarus-swatch-width: 36px;
+      --gnumarus-swatch-height: 28px;
     }
     .canvas-host {
       flex: 1 1 auto;
@@ -371,12 +370,6 @@ export class GnumarusShell extends LitElement {
       border: 1px solid #555;
       border-radius: 4px;
       padding: 4px 6px;
-    }
-    dialog input[type="color"] {
-      width: 48px;
-      height: 28px;
-      padding: 0;
-      cursor: pointer;
     }
     dialog select {
       background: #1e1e1e;
@@ -722,19 +715,17 @@ export class GnumarusShell extends LitElement {
           >
             ⤢
           </button>
-          <input
-            type="color"
+          <gnumarus-color-picker
             id="pencilColor"
             .value=${this.colorValue}
-            title="Pencil color"
-            @input=${(event: Event): void => {
-              const target = event.target as HTMLInputElement | null;
-              if (target !== null) {
-                this.colorValue = target.value;
-                this.engine?.setColor(target.value);
+            model="hsv"
+            @gnumarus-color-change=${(event: Event): void => {
+              const detail = (event as CustomEvent<{ value?: unknown }>).detail;
+              if (typeof detail?.value === "string") {
+                this.setPencilColor(detail.value);
               }
             }}
-          />
+          ></gnumarus-color-picker>
           <button
             class=${this.previewOpen ? "active" : ""}
             title="Final preview (flattened image)"
@@ -1041,15 +1032,18 @@ export class GnumarusShell extends LitElement {
         ${this.backgroundMode === "solid"
           ? html`
               <div class="setting-row">
-                <label
-                  >Solid color
-                  <input
-                    type="color"
-                    id="backgroundColor"
-                    .value=${this.backgroundColor}
-                    @input=${(): void => this.applyBackgroundFromDialog()}
-                  />
-                </label>
+                <span>Solid color</span>
+                <gnumarus-color-picker
+                  id="backgroundColor"
+                  .value=${this.backgroundColor}
+                  model="hsv"
+                  @gnumarus-color-change=${(event: Event): void => {
+                    const detail = (event as CustomEvent<{ value?: unknown }>).detail;
+                    if (typeof detail?.value === "string") {
+                      this.setBackgroundColor(detail.value);
+                    }
+                  }}
+                ></gnumarus-color-picker>
                 ${this.backgroundColor.toLowerCase() !== DEFAULT_BACKGROUND_SETTINGS.color.toLowerCase()
                   ? html`<button
                       class="reset-btn"
@@ -1136,15 +1130,18 @@ export class GnumarusShell extends LitElement {
                   : html``}
               </div>
               <div class="setting-row">
-                <label
-                  >Checker color A
-                  <input
-                    type="color"
-                    id="checkerColorA"
-                    .value=${this.checkerColorA}
-                    @input=${(): void => this.applyCheckerFromDialog()}
-                  />
-                </label>
+                <span>Checker color A</span>
+                <gnumarus-color-picker
+                  id="checkerColorA"
+                  .value=${this.checkerColorA}
+                  model="hsv"
+                  @gnumarus-color-change=${(event: Event): void => {
+                    const detail = (event as CustomEvent<{ value?: unknown }>).detail;
+                    if (typeof detail?.value === "string") {
+                      this.setCheckerColorA(detail.value);
+                    }
+                  }}
+                ></gnumarus-color-picker>
                 ${this.checkerColorA.toLowerCase() !== DEFAULT_CHECKER_SETTINGS.colorA.toLowerCase()
                   ? html`<button
                       class="reset-btn"
@@ -1157,15 +1154,18 @@ export class GnumarusShell extends LitElement {
                   : html``}
               </div>
               <div class="setting-row">
-                <label
-                  >Checker color B
-                  <input
-                    type="color"
-                    id="checkerColorB"
-                    .value=${this.checkerColorB}
-                    @input=${(): void => this.applyCheckerFromDialog()}
-                  />
-                </label>
+                <span>Checker color B</span>
+                <gnumarus-color-picker
+                  id="checkerColorB"
+                  .value=${this.checkerColorB}
+                  model="hsv"
+                  @gnumarus-color-change=${(event: Event): void => {
+                    const detail = (event as CustomEvent<{ value?: unknown }>).detail;
+                    if (typeof detail?.value === "string") {
+                      this.setCheckerColorB(detail.value);
+                    }
+                  }}
+                ></gnumarus-color-picker>
                 ${this.checkerColorB.toLowerCase() !== DEFAULT_CHECKER_SETTINGS.colorB.toLowerCase()
                   ? html`<button
                       class="reset-btn"
@@ -1452,7 +1452,8 @@ export class GnumarusShell extends LitElement {
     const modeInput = this.shadowRoot?.getElementById("backgroundMode") as HTMLSelectElement | null;
     const colorInput = this.shadowRoot?.getElementById("backgroundColor") as HTMLInputElement | null;
     const mode: GnumarusBackgroundMode = modeInput?.value === "solid" ? "solid" : "checkerboard";
-    return { mode, color: colorInput?.value ?? this.backgroundColor };
+    const raw = colorInput?.value ?? this.backgroundColor;
+    return { mode, color: typeof raw === "string" ? raw.slice(0, 7) : this.backgroundColor };
   }
 
   private applyBackgroundFromDialog(): void {
@@ -1544,6 +1545,64 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = "Checker color B reset to default";
   }
 
+  /** Test and picker hook: set the pencil color from any parseable hex. */
+  setPencilColor(hex: string): void {
+    const parsed = parseHexToRgbaBytes(hex);
+    if (parsed === null) {
+      return;
+    }
+    this.colorValue = rgbaBytesToHex(parsed);
+    this.engine?.setColor(this.colorValue);
+  }
+
+  /** Test and picker hook: set checker color A (opaque hex only). */
+  setCheckerColorA(hex: string): void {
+    const six = hex.trim().toLowerCase().slice(0, 7);
+    if (parseHexColor(six) === null || six.length !== 7) {
+      return;
+    }
+    this.checkerColorA = six;
+    this.engine?.applyCheckerSettings({
+      mode: this.checkerMode,
+      sizeX: this.checkerSizeX,
+      sizeY: this.checkerSizeY,
+      colorA: this.checkerColorA,
+      colorB: this.checkerColorB,
+    });
+    this.persistChecker();
+    this.statusMessage = `Checker color A: ${six}`;
+  }
+
+  /** Test and picker hook: set checker color B (opaque hex only). */
+  setCheckerColorB(hex: string): void {
+    const six = hex.trim().toLowerCase().slice(0, 7);
+    if (parseHexColor(six) === null || six.length !== 7) {
+      return;
+    }
+    this.checkerColorB = six;
+    this.engine?.applyCheckerSettings({
+      mode: this.checkerMode,
+      sizeX: this.checkerSizeX,
+      sizeY: this.checkerSizeY,
+      colorA: this.checkerColorA,
+      colorB: this.checkerColorB,
+    });
+    this.persistChecker();
+    this.statusMessage = `Checker color B: ${six}`;
+  }
+
+  /** Test and picker hook: set the solid background color (opaque hex only). */
+  setBackgroundColor(hex: string): void {
+    const six = hex.trim().toLowerCase().slice(0, 7);
+    if (parseHexColor(six) === null || six.length !== 7) {
+      return;
+    }
+    this.backgroundColor = six;
+    this.engine?.applyBackgroundSettings({ mode: this.backgroundMode, color: this.backgroundColor });
+    this.persistBackground();
+    this.statusMessage = `Canvas background: ${this.backgroundMode === "solid" ? `solid ${six}` : "checkerboard"}`;
+  }
+
   private resetGridMinZoomToDefault(): void {
     this.gridMinZoom = DEFAULT_GRID_SETTINGS.minZoom;
     this.engine?.setGridMinZoom(this.gridMinZoom);
@@ -1558,12 +1617,14 @@ export class GnumarusShell extends LitElement {
     const colorAInput = this.shadowRoot?.getElementById("checkerColorA") as HTMLInputElement | null;
     const colorBInput = this.shadowRoot?.getElementById("checkerColorB") as HTMLInputElement | null;
     const mode: GnumarusCheckerMode = modeInput?.value === "screen" ? "screen" : "image";
+    const rawA = colorAInput?.value ?? this.checkerColorA;
+    const rawB = colorBInput?.value ?? this.checkerColorB;
     return {
       mode,
       sizeX: clampCheckerSize(Number(sizeXInput?.value ?? "16") || 16),
       sizeY: clampCheckerSize(Number(sizeYInput?.value ?? "16") || 16),
-      colorA: colorAInput?.value ?? this.checkerColorA,
-      colorB: colorBInput?.value ?? this.checkerColorB,
+      colorA: typeof rawA === "string" ? rawA.slice(0, 7) : this.checkerColorA,
+      colorB: typeof rawB === "string" ? rawB.slice(0, 7) : this.checkerColorB,
     };
   }
 

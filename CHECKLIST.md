@@ -37,3 +37,8 @@
 - [x] Settings + preview: unit + e2e tests, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
 - [x] Unit tests (vitest): pixel buffer, channel lock, layer resize, grid settings, pixel grid shader, background settings, final render, project format, mapping, checker, history — 64 passed
 - [x] E2E test (Playwright): shell + menu + New + pencil + layers + merge + channel locks + layer resize + pixel grid + settings reset + background + final preview — 30 passed
+- [x] Custom color picker: RGB/CMYK/HSV/HSL/OKHSL/OKHSV/ARD models, draggable gradient bars + editable inputs
+- [x] Custom color picker: replace every browser color input, wire pencil/checker/background, keep E2E green
+- [x] Custom color picker: unit + e2e tests, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
+- [x] Unit tests (vitest): pixel buffer, color models, channel lock, layer resize, grid settings, pixel grid shader, background settings, final render, project format, mapping, checker, history — 79 passed
+- [x] E2E test (Playwright): shell + menu + New + pencil + layers + merge + channel locks + layer resize + pixel grid + settings reset + background + final preview + custom picker — 33 passed
