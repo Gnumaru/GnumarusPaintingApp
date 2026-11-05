@@ -35,6 +35,11 @@ import {
   type GnumarusCheckerSettings,
 } from "../settings/GnumarusCheckerSettings";
 import {
+  clampGridMinZoom,
+  DEFAULT_GRID_SETTINGS,
+  shouldShowPixelGrid,
+} from "../settings/GnumarusGridSettings";
+import {
   computeImageDiff,
   GnumarusHistory,
   type GnumarusMergedLayerSnapshot,
@@ -133,12 +138,32 @@ const LAYER_FRAGMENT_SHADER = [
   "}",
 ].join("\n");
 
+const GRID_FRAGMENT_SHADER = [
+  "precision mediump float;",
+  "varying vec2 vUv;",
+  "uniform float uLayerW;",
+  "uniform float uLayerH;",
+  "uniform float uZoom;",
+  "void main() {",
+  "  if (uLayerW < 1.0 || uLayerH < 1.0 || uZoom < 0.01) { discard; }",
+  "  vec2 coord = vec2(vUv.x * uLayerW, vUv.y * uLayerH);",
+  "  vec2 f = fract(coord);",
+  "  vec2 d = min(f, 1.0 - f);",
+  "  float dist = min(d.x, d.y);",
+  "  float halfW = 0.5 / max(uZoom, 0.01);",
+  "  float line = 1.0 - smoothstep(0.0, halfW, dist);",
+  "  if (line < 0.01) { discard; }",
+  "  gl_FragColor = vec4(1.0, 1.0, 1.0, line * 0.4);",
+  "}",
+].join("\n");
+
 export interface GnumarusEngineOptions {
   onStats: (stats: GnumarusEngineStats) => void;
   onPixelsChanged: () => void;
   onToolChanged?: (tool: GnumarusCanvasTool) => void;
   onLayersChanged?: () => void;
   checker?: GnumarusCheckerSettings;
+  gridMinZoom?: number;
 }
 
 function checkerHexToVec(hex: string): THREE.Vector3 {
@@ -203,6 +228,9 @@ export class GnumarusCanvasEngine {
   private checkerColorB: string;
   private readonly checkerColorAVec: THREE.Vector3;
   private readonly checkerColorBVec: THREE.Vector3;
+  private gridMinZoom: number;
+  private readonly gridMaterial: THREE.ShaderMaterial;
+  private readonly gridPlane: THREE.Mesh;
   private readonly onStats: (stats: GnumarusEngineStats) => void;
   private readonly onPixelsChanged: () => void;
   private readonly onToolChanged: ((tool: GnumarusCanvasTool) => void) | undefined;
@@ -222,6 +250,7 @@ export class GnumarusCanvasEngine {
     this.checkerColorB = initialChecker.colorB;
     this.checkerColorAVec = checkerHexToVec(initialChecker.colorA);
     this.checkerColorBVec = checkerHexToVec(initialChecker.colorB);
+    this.gridMinZoom = clampGridMinZoom(options.gridMinZoom ?? DEFAULT_GRID_SETTINGS.minZoom);
     this.imageWidth = 64;
     this.imageHeight = 64;
     this.zoom = 8;
@@ -275,6 +304,23 @@ export class GnumarusCanvasEngine {
     this.backgroundPlane.matrixAutoUpdate = false;
     this.backgroundPlane.renderOrder = -1;
     this.scene.add(this.backgroundPlane);
+    this.gridMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        uLayerW: { value: 64 },
+        uLayerH: { value: 64 },
+        uZoom: { value: this.zoom },
+      },
+      vertexShader: LAYER_VERTEX_SHADER,
+      fragmentShader: GRID_FRAGMENT_SHADER,
+      side: THREE.DoubleSide,
+      transparent: true,
+      depthWrite: false,
+    });
+    this.gridPlane = new THREE.Mesh(this.sharedGeometry, this.gridMaterial);
+    this.gridPlane.matrixAutoUpdate = false;
+    this.gridPlane.renderOrder = 1000;
+    this.gridPlane.visible = false;
+    this.scene.add(this.gridPlane);
     const first = this.createLayerInternal("layer0", "Layer 0", true, 1, createPixelBuffer(64, 64), 64, 64, {
       ...IDENTITY_LAYER_TRANSFORM,
     });
@@ -399,6 +445,8 @@ export class GnumarusCanvasEngine {
       return false;
     }
     this.activeLayerId = id;
+    this.updateGrid();
+    this.render();
     this.emitStats();
     return true;
   }
@@ -999,6 +1047,66 @@ export class GnumarusCanvasEngine {
     };
   }
 
+  getGridMinZoom(): number {
+    return this.gridMinZoom;
+  }
+
+  setGridMinZoom(value: number): void {
+    this.gridMinZoom = clampGridMinZoom(value);
+    this.updateGrid();
+    this.render();
+  }
+
+  applyGridMinZoom(value: number): void {
+    this.setGridMinZoom(value);
+  }
+
+  isPixelGridVisible(): boolean {
+    return this.gridPlane.visible === true;
+  }
+
+  getGridPlaneMatrix(): number[] {
+    return Array.from(this.gridPlane.matrix.elements);
+  }
+
+  getLayerPlaneMatrix(id: string): number[] | null {
+    const layer = this.findLayer(id);
+    if (layer === null) {
+      return null;
+    }
+    return Array.from(layer.plane.matrix.elements);
+  }
+
+  getGridState(): { visible: boolean; minZoom: number; layerId: string | null; width: number; height: number } {
+    const active = this.activeLayer();
+    return {
+      visible: this.gridPlane.visible === true,
+      minZoom: this.gridMinZoom,
+      layerId: active === null ? null : active.id,
+      width: active === null ? 0 : active.width,
+      height: active === null ? 0 : active.height,
+    };
+  }
+
+  private updateGrid(): void {
+    if (this.disposed) {
+      return;
+    }
+    const active = this.activeLayer();
+    if (active === null) {
+      this.gridPlane.visible = false;
+      return;
+    }
+    const visible = shouldShowPixelGrid(this.zoom, this.gridMinZoom);
+    this.gridMaterial.uniforms["uLayerW"]!.value = active.width;
+    this.gridMaterial.uniforms["uLayerH"]!.value = active.height;
+    this.gridMaterial.uniforms["uZoom"]!.value = this.zoom;
+    this.gridPlane.visible = visible;
+    if (visible) {
+      this.writePlaneMatrix(this.gridPlane, active.width, active.height, active.transform, this.layers.length * 0.01 + 0.02);
+    }
+  }
+
   resetView(): void {
     const rect = this.container.getBoundingClientRect();
     if (rect.width > 0 && rect.height > 0) {
@@ -1034,6 +1142,8 @@ export class GnumarusCanvasEngine {
       layer.texture.dispose();
     }
     this.layers = [];
+    this.scene.remove(this.gridPlane);
+    this.gridMaterial.dispose();
     this.scene.remove(this.backgroundPlane);
     this.backgroundMaterial.dispose();
     this.sharedGeometry.dispose();
@@ -1476,6 +1586,7 @@ export class GnumarusCanvasEngine {
       IDENTITY_LAYER_TRANSFORM,
       -0.02,
     );
+    this.updateGrid();
   }
 
   private render(): void {

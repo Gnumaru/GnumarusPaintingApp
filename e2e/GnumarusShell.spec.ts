@@ -785,3 +785,123 @@ test("layer resize is undoable and preserves top-left pixels", async ({ page }) 
   });
   expect(afterRedo).toMatchObject({ width: 4, height: 4 });
 });
+
+async function getGrid(page: import("@playwright/test").Page): Promise<{
+  visible: boolean;
+  minZoom: number;
+  layerId: string | null;
+  width: number;
+  height: number;
+}> {
+  return page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          getGridState(): { visible: boolean; minZoom: number; layerId: string | null; width: number; height: number };
+        };
+      };
+    };
+    const state = root.__gnumarus?.engine?.getGridState();
+    if (state === undefined) {
+      throw new Error("grid state is unavailable");
+    }
+    return state;
+  });
+}
+
+test("pixel grid hides below 200 percent and shows above", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  expect((await getGrid(page)).visible).toBe(true);
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { setZoom(z: number): void } };
+    };
+    root.__gnumarus?.engine?.setZoom(1);
+  });
+  expect((await getGrid(page)).visible).toBe(false);
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { setZoom(z: number): void } };
+    };
+    root.__gnumarus?.engine?.setZoom(8);
+  });
+  const state = await getGrid(page);
+  expect(state.visible).toBe(true);
+  expect(state.minZoom).toBeCloseTo(2, 5);
+  expect(state.layerId).toBe("layer0");
+  expect(state.width).toBe(64);
+});
+
+test("pixel grid threshold is configurable in Edit > Settings", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Pixel grid minimum zoom");
+  await page.locator("gnumarus-shell input#gridMinZoom").fill("400");
+  const grid = await getGrid(page);
+  expect(grid.minZoom).toBeCloseTo(4, 5);
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { setZoom(z: number): void } };
+    };
+    root.__gnumarus?.engine?.setZoom(2);
+  });
+  expect((await getGrid(page)).visible).toBe(false);
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { setZoom(z: number): void } };
+    };
+    root.__gnumarus?.engine?.setZoom(4);
+  });
+  expect((await getGrid(page)).visible).toBe(true);
+  const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.grid.v1"));
+  expect(persisted).toContain("4");
+  await page.locator("gnumarus-shell input#gridMinZoom").fill("100");
+  expect((await getGrid(page)).minZoom).toBeCloseTo(2, 5);
+  await page.locator("gnumarus-shell input#gridMinZoom").fill("99999");
+  expect((await getGrid(page)).minZoom).toBeCloseTo(64, 5);
+});
+
+test("pixel grid follows the active layer transform", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Add layer" }).click();
+  let grid = await getGrid(page);
+  expect(grid.layerId).toBe("layer1");
+  await page.locator('gnumarus-shell [data-layer-id="layer0"] .layer-name').click();
+  grid = await getGrid(page);
+  expect(grid.layerId).toBe("layer0");
+  const matrices = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          setLayerTransform(id: string, t: { rotation: number }): boolean;
+          getGridPlaneMatrix(): number[];
+          getLayerPlaneMatrix(id: string): number[] | null;
+          getActiveLayerId(): string;
+        };
+      };
+    };
+    const engine = root.__gnumarus?.engine;
+    if (engine === undefined) {
+      throw new Error("engine is unavailable");
+    }
+    engine.setLayerTransform(engine.getActiveLayerId(), { rotation: Math.PI / 4 });
+    return { grid: engine.getGridPlaneMatrix(), layer: engine.getLayerPlaneMatrix(engine.getActiveLayerId()) };
+  });
+  expect(matrices.layer).not.toBeNull();
+  if (matrices.layer === null) {
+    throw new Error("layer matrix is missing");
+  }
+  for (const index of [0, 1, 4, 5, 12, 13]) {
+    expect(matrices.grid[index]).toBeCloseTo(matrices.layer[index] ?? 0, 4);
+  }
+  expect(await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { isPixelGridVisible(): boolean } };
+    };
+    return root.__gnumarus?.engine?.isPixelGridVisible() ?? false;
+  })).toBe(true);
+});

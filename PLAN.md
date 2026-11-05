@@ -51,3 +51,10 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - History: new `resize` entry `{ layerId, beforeWidth/Height/Buffer, afterWidth/Height/Buffer }` with apply-resize callback in undo/redo. Skips missing layers like other entries.
 - UI: per-row Resize button opens a dialog with width/height inputs (prefilled), Resize/Cancel actions. Marked dirty, status message, panel refresh.
 - Tests: unit tests for `resizePixelBuffer` (expand/shrink/no-op/transparent fill) and history resize undo/redo, plus Playwright e2e for dialog + expand paint + shrink crop + undo/redo.
+
+## 8. Pixel grid (implemented)
+- Goal: overlay grid over the currently edited layer, following its transform, visible only at high zoom.
+- Semantics: grid lines at pixel boundaries of the active layer, same project-space math as painting so display and editing agree. Hidden when zoom is below the configured threshold. Default threshold 200 percent, never below 200 percent.
+- Engine: dedicated grid plane with shader, same matrix as the active layer, z slightly above. Visibility = zoom >= gridMinZoom. Grid dimensions follow active layer size.
+- Settings: `Edit > Settings` numeric input in percent, min 200, max 6400 (editor max zoom 64x). Clamped, persisted to `localStorage`, applied live. Invalid or missing storage falls back to default 200 percent.
+- Tests: unit tests for grid settings parse/clamp/serialize and visibility rule, plus Playwright e2e for hidden below threshold, visible above, threshold change via Settings, and rotation following.

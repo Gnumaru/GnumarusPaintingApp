@@ -22,3 +22,9 @@
 - [x] Layer resize: unit + e2e tests, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
 - [x] Unit tests (vitest): pixel buffer, channel lock, layer resize, project format, mapping, checker, history — 49 passed
 - [x] E2E test (Playwright): shell + menu + New + pencil + layers + merge + channel locks + layer resize — 23 passed
+- [x] Pixel grid: overlay over active layer following its transform, hidden below threshold
+- [x] Pixel grid: engine grid plane + visibility rule + `gridMinZoom` 200 percent to 6400 percent
+- [x] Pixel grid: `Edit > Settings` threshold input + `localStorage` persistence
+- [x] Pixel grid: unit + e2e tests, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
+- [x] Unit tests (vitest): pixel buffer, channel lock, layer resize, grid settings, project format, mapping, checker, history — 55 passed
+- [x] E2E test (Playwright): shell + menu + New + pencil + layers + merge + channel locks + layer resize + pixel grid — 26 passed

@@ -27,6 +27,15 @@ import {
   type GnumarusCheckerMode,
   type GnumarusCheckerSettings,
 } from "../settings/GnumarusCheckerSettings";
+import {
+  DEFAULT_GRID_SETTINGS,
+  GRID_SETTINGS_STORAGE_KEY,
+  GNUMARUS_GRID_MAX_ZOOM,
+  GNUMARUS_GRID_MIN_ZOOM,
+  clampGridMinZoom,
+  parseGridSettings,
+  serializeGridSettings,
+} from "../settings/GnumarusGridSettings";
 import { decodePngToBuffer, encodeBufferToPngBlob } from "../project/GnumarusPngCodec";
 
 export class GnumarusShell extends LitElement {
@@ -407,6 +416,7 @@ export class GnumarusShell extends LitElement {
     checkerMode: { type: String },
     checkerSizeX: { type: Number },
     checkerSizeY: { type: Number },
+    gridMinZoom: { type: Number },
     canUndo: { type: Boolean },
     canRedo: { type: Boolean },
     layers: { type: Array },
@@ -441,6 +451,7 @@ export class GnumarusShell extends LitElement {
   declare checkerMode: GnumarusCheckerMode;
   declare checkerSizeX: number;
   declare checkerSizeY: number;
+  declare gridMinZoom: number;
   declare canUndo: boolean;
   declare canRedo: boolean;
   declare layers: GnumarusLayerInfo[];
@@ -480,6 +491,7 @@ export class GnumarusShell extends LitElement {
     this.checkerMode = DEFAULT_CHECKER_SETTINGS.mode;
     this.checkerSizeX = DEFAULT_CHECKER_SETTINGS.sizeX;
     this.checkerSizeY = DEFAULT_CHECKER_SETTINGS.sizeY;
+    this.gridMinZoom = DEFAULT_GRID_SETTINGS.minZoom;
     this.canUndo = false;
     this.canRedo = false;
     this.layers = [];
@@ -841,6 +853,18 @@ export class GnumarusShell extends LitElement {
           >Checker color B <input type="color" id="checkerColorB" .value=${this.checkerColorB} @input=${(): void =>
             this.applyCheckerFromDialog()} />
         </label>
+        <label
+          >Pixel grid minimum zoom (percent)
+          <input
+            type="number"
+            id="gridMinZoom"
+            min="200"
+            max="6400"
+            step="50"
+            .value=${String(Math.round(this.gridMinZoom * 100))}
+            @input=${(): void => this.applyGridFromDialog()}
+          />
+        </label>
         <div class="dialog-actions">
           <button @click=${(): void => this.resetCheckerDefaults()}>Reset defaults</button>
           <button @click=${(): void => this.closeSettingsDialog()}>Close</button>
@@ -857,6 +881,8 @@ export class GnumarusShell extends LitElement {
     this.checkerSizeY = storedChecker.sizeY;
     this.checkerColorA = storedChecker.colorA;
     this.checkerColorB = storedChecker.colorB;
+    const storedGrid = this.loadGridSettings();
+    this.gridMinZoom = storedGrid.minZoom;
     const host = this.shadowRoot?.getElementById("canvasHost") ?? null;
     if (host === null) {
       this.webglError = "Canvas host is missing.";
@@ -871,6 +897,7 @@ export class GnumarusShell extends LitElement {
           this.refreshLayers();
         },
         checker: storedChecker,
+        gridMinZoom: storedGrid.minZoom,
         onStats: (stats): void => {
           this.zoomText = `${Math.round(stats.zoom * 100)}%`;
           this.canUndo = stats.canUndo;
@@ -999,6 +1026,40 @@ export class GnumarusShell extends LitElement {
     return { ...DEFAULT_CHECKER_SETTINGS };
   }
 
+  private loadGridSettings(): { minZoom: number } {
+    try {
+      const stored = window.localStorage.getItem(GRID_SETTINGS_STORAGE_KEY);
+      if (stored !== null) {
+        return parseGridSettings(stored);
+      }
+    } catch {
+      // Corrupt or unavailable storage falls back to defaults.
+    }
+    return { ...DEFAULT_GRID_SETTINGS };
+  }
+
+  private currentDialogGridMinZoom(): number {
+    const input = this.shadowRoot?.getElementById("gridMinZoom") as HTMLInputElement | null;
+    const percent = Number(input?.value ?? "200") || 200;
+    const clampedPercent = Math.min(
+      GNUMARUS_GRID_MAX_ZOOM * 100,
+      Math.max(GNUMARUS_GRID_MIN_ZOOM * 100, Math.floor(percent)),
+    );
+    return clampGridMinZoom(clampedPercent / 100);
+  }
+
+  private applyGridFromDialog(): void {
+    const minZoom = this.currentDialogGridMinZoom();
+    this.gridMinZoom = minZoom;
+    this.engine?.setGridMinZoom(minZoom);
+    try {
+      window.localStorage.setItem(GRID_SETTINGS_STORAGE_KEY, serializeGridSettings({ minZoom }));
+    } catch {
+      // Storage failures must not break the settings flow.
+    }
+    this.statusMessage = `Pixel grid minimum zoom: ${Math.round(minZoom * 100)}%`;
+  }
+
   private currentDialogChecker(): GnumarusCheckerSettings {
     const modeInput = this.shadowRoot?.getElementById("checkerMode") as HTMLSelectElement | null;
     const sizeXInput = this.shadowRoot?.getElementById("checkerSizeX") as HTMLInputElement | null;
@@ -1044,7 +1105,15 @@ export class GnumarusShell extends LitElement {
     } catch {
       // Storage failures must not break the settings flow.
     }
-    this.statusMessage = "Checkerboard settings reset to defaults";
+    const gridSettings = { ...DEFAULT_GRID_SETTINGS };
+    this.gridMinZoom = gridSettings.minZoom;
+    this.engine?.setGridMinZoom(gridSettings.minZoom);
+    try {
+      window.localStorage.setItem(GRID_SETTINGS_STORAGE_KEY, serializeGridSettings(gridSettings));
+    } catch {
+      // Storage failures must not break the settings flow.
+    }
+    this.statusMessage = "Settings reset to defaults";
   }
 
   private refreshLayers(): void {

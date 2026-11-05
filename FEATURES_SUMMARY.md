@@ -2,6 +2,7 @@
 
 - Desktop app shell: top menu bar (File > New/Open/Save, Edit > Undo/Redo/Settings/Reset Canvas Transform), left toolbar, central canvas, right layers panel, bottom status bar.
 - Pixel-art pencil: 1px solid color, no anti-aliasing.
+- Pixel grid over the active layer, following its transform; hidden below 200 percent zoom; minimum zoom configurable 200..6400 percent in Edit > Settings.
 - Layers: add, delete, reorder, rename, visibility, opacity, right-click Merge Down (undoable); independent per-layer size and transform (position/rotation/flips); Transform tool; painting targets the active layer.
 - Layer resize: per-layer width/height 1..1024 via Resize button + dialog; expand fills transparent right and below, shrink crops right and below, top-left preserved; undoable.
 - Channel lock: per-layer R/G/B/A lock toggles; paint, clear and Merge Down write only unlocked channels (locked channels keep old values).
