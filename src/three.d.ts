@@ -55,6 +55,20 @@ declare module "three" {
     dispose(): void;
   }
 
+  export interface ShaderUniform {
+    value: number | boolean | DataTexture;
+  }
+
+  export class ShaderMaterial {
+    readonly uniforms: Record<string, ShaderUniform>;
+    constructor(options: {
+      uniforms: Record<string, ShaderUniform>;
+      vertexShader: string;
+      fragmentShader: string;
+    });
+    dispose(): void;
+  }
+
   export class PlaneGeometry {
     constructor(width: number, height: number);
     dispose(): void;
@@ -64,7 +78,7 @@ declare module "three" {
     readonly geometry: PlaneGeometry;
     readonly scale: Vector3;
     readonly position: Vector3;
-    constructor(geometry: PlaneGeometry, material: MeshBasicMaterial);
+    constructor(geometry: PlaneGeometry, material: MeshBasicMaterial | ShaderMaterial);
   }
 
   export interface WebGLRendererOptions {
@@ -79,6 +93,7 @@ declare module "three" {
     readonly domElement: HTMLCanvasElement;
     constructor(options?: WebGLRendererOptions);
     getContext(): WebGLRenderingContext | WebGL2RenderingContext;
+    getPixelRatio(): number;
     setClearColor(color: number, alpha: number): void;
     setPixelRatio(ratio: number): void;
     setSize(width: number, height: number, updateStyle?: boolean): void;

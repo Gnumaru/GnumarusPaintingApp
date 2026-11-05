@@ -35,7 +35,7 @@ export class GnumarusCanvasEngine {
   private readonly scene: THREE.Scene;
   private readonly camera: THREE.OrthographicCamera;
   private readonly texture: THREE.DataTexture;
-  private readonly material: THREE.MeshBasicMaterial;
+  private readonly material: THREE.ShaderMaterial;
   private readonly plane: THREE.Mesh;
   private readonly resizeObserver: ResizeObserver;
   private buffer: Uint8ClampedArray;
@@ -83,7 +83,7 @@ export class GnumarusCanvasEngine {
       throw new GnumarusWebGlError("WebGL2 is unavailable in this browser.");
     }
     this.renderer = renderer;
-    this.renderer.setClearColor(0x000000, 0);
+    this.renderer.setClearColor(0x333333, 1);
     this.renderer.domElement.style.display = "block";
     this.renderer.domElement.style.width = "100%";
     this.renderer.domElement.style.height = "100%";
@@ -102,7 +102,33 @@ export class GnumarusCanvasEngine {
     this.texture.flipY = true;
     this.texture.needsUpdate = true;
 
-    this.material = new THREE.MeshBasicMaterial({ map: this.texture, transparent: true });
+    this.material = new THREE.ShaderMaterial({
+      uniforms: {
+        uMap: { value: this.texture },
+        uCheckerPx: { value: 12 },
+      },
+      vertexShader: [
+        "varying vec2 vUv;",
+        "void main() {",
+        "  vUv = uv;",
+        "  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);",
+        "}",
+      ].join("\n"),
+      fragmentShader: [
+        "precision mediump float;",
+        "varying vec2 vUv;",
+        "uniform sampler2D uMap;",
+        "uniform float uCheckerPx;",
+        "void main() {",
+        "  vec4 tex = texture2D(uMap, vUv);",
+        "  vec2 grid = floor(gl_FragCoord.xy / uCheckerPx);",
+        "  float c = mod(grid.x + grid.y, 2.0);",
+        "  vec3 check = mix(vec3(0.78), vec3(0.58), c);",
+        "  vec3 rgb = mix(check, tex.rgb, tex.a);",
+        "  gl_FragColor = vec4(rgb, 1.0);",
+        "}",
+      ].join("\n"),
+    });
     this.plane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.material);
     this.scene.add(this.plane);
 
@@ -317,6 +343,7 @@ export class GnumarusCanvasEngine {
     const height = Math.max(1, Math.floor(rect.height));
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     this.renderer.setPixelRatio(dpr);
+    this.material.uniforms["uCheckerPx"]!.value = 12 * dpr;
     this.renderer.setSize(width, height, false);
     this.layoutScene();
     this.render();

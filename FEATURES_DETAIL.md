@@ -11,7 +11,7 @@
 ## 2. WebGL2 canvas engine (`src/canvas/GnumarusCanvasEngine.ts`)
 
 - Single `THREE.WebGLRenderer` (WebGL2-only, no fallback). Throws `GnumarusWebGlError` with a user-facing message when WebGL2 is unavailable.
-- One `THREE.DataTexture` (`NearestFilter`, no mipmaps) over a CPU `Uint8ClampedArray` RGBA buffer; orthographic camera; checkerboard transparency shown through `alpha: true` clear.
+- One `THREE.DataTexture` (`NearestFilter`, no mipmaps) over a CPU `Uint8ClampedArray` RGBA buffer; orthographic camera; a custom `ShaderMaterial` composites the layer over a fixed screen-space transparency checker (12px squares) so the checker appears only inside the drawable area, while the scene clear color (`#333333`) fills everything outside it.
 - On-demand rendering (resize, view change, stroke), DPR capped at 2.
 - Zoom (wheel, 0.5x..64x, zoom-to-cursor), pan (middle-drag or Space+drag).
 - Pencil strokes: pointer capture, Bresenham line interpolation between events, out-of-bounds pixels ignored.

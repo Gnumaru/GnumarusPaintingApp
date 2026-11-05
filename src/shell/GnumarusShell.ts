@@ -117,7 +117,7 @@ export class GnumarusShell extends LitElement {
       position: relative;
       min-width: 0;
       min-height: 0;
-      background: repeating-conic-gradient(#2a2a2a 0% 25%, #242424 0% 50%) 0 0 / 24px 24px;
+      background: #333333;
     }
     .canvas-host canvas {
       position: absolute;
