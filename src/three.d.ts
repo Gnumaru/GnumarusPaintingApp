@@ -6,7 +6,7 @@
  */
 declare module "three" {
   export const NearestFilter: number;
-  export const BackSide: number;
+  export const DoubleSide: number;
 
   export class Vector3 {
     x: number;
@@ -65,6 +65,7 @@ declare module "three" {
       uniforms: Record<string, ShaderUniform>;
       vertexShader: string;
       fragmentShader: string;
+      side?: number;
     });
     dispose(): void;
   }
@@ -78,6 +79,7 @@ declare module "three" {
     readonly geometry: PlaneGeometry;
     readonly scale: Vector3;
     readonly position: Vector3;
+    readonly rotation: Vector3;
     constructor(geometry: PlaneGeometry, material: MeshBasicMaterial | ShaderMaterial);
   }
 

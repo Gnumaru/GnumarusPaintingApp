@@ -1,5 +1,9 @@
 import { LitElement, css, html } from "lit";
-import { GnumarusCanvasEngine, GnumarusWebGlError } from "../canvas/GnumarusCanvasEngine";
+import {
+  GnumarusCanvasEngine,
+  GnumarusWebGlError,
+  type GnumarusCanvasTool,
+} from "../canvas/GnumarusCanvasEngine";
 import {
   isFileSystemAccessSupported,
   pickProjectDirectory,
@@ -206,6 +210,8 @@ export class GnumarusShell extends LitElement {
     tool: { type: String },
     colorValue: { type: String },
     zoomText: { type: String },
+    rotText: { type: String },
+    flipText: { type: String },
     cursorText: { type: String },
     canvasText: { type: String },
     projectName: { type: String },
@@ -224,7 +230,9 @@ export class GnumarusShell extends LitElement {
     checkerColorB: { type: String },
   };
 
-  declare tool: string;
+  declare tool: GnumarusCanvasTool;
+  declare rotText: string;
+  declare flipText: string;
   declare colorValue: string;
   declare zoomText: string;
   declare cursorText: string;
@@ -252,6 +260,8 @@ export class GnumarusShell extends LitElement {
     this.tool = "pencil";
     this.colorValue = "#000000";
     this.zoomText = "800%";
+    this.rotText = "0°";
+    this.flipText = "";
     this.cursorText = "-";
     this.canvasText = "64 x 64";
     this.projectName = "Untitled";
@@ -318,11 +328,24 @@ export class GnumarusShell extends LitElement {
           <button
             class=${this.tool === "pencil" ? "active" : ""}
             title="Pencil (pixel-art, 1px solid)"
+            aria-label="Pencil"
             @click=${(): void => {
               this.tool = "pencil";
+              this.engine?.setTool("pencil");
             }}
           >
             ✎
+          </button>
+          <button
+            class=${this.tool === "loupe" ? "active" : ""}
+            title="Loupe (left-drag zoom, right-drag rotate, middle-click flip)"
+            aria-label="Loupe"
+            @click=${(): void => {
+              this.tool = "loupe";
+              this.engine?.setTool("loupe");
+            }}
+          >
+            ⌕
           </button>
           <input
             type="color"
@@ -345,6 +368,8 @@ export class GnumarusShell extends LitElement {
         <span>${this.cursorText}</span>
         <span>${this.canvasText}</span>
         <span>${this.zoomText}</span>
+        <span>${this.rotText}</span>
+        <span>${this.flipText}</span>
         <span>${this.projectName}</span>
         <span class="spacer"></span>
         ${this.webglError !== "" ? html`<span class="error">${this.webglError}</span>` : html``}
@@ -410,6 +435,9 @@ export class GnumarusShell extends LitElement {
         checker: storedChecker,
         onStats: (stats): void => {
           this.zoomText = `${Math.round(stats.zoom * 100)}%`;
+          this.rotText = `${Math.round(stats.rotationDeg)}°`;
+          this.flipText =
+            stats.flipX && stats.flipY ? "Flip XY" : stats.flipX ? "Flip X" : stats.flipY ? "Flip Y" : "";
           this.cursorText =
             stats.cursorX === null || stats.cursorY === null ? "-" : `${stats.cursorX}, ${stats.cursorY}`;
           this.canvasText = `${stats.width} x ${stats.height}`;

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { imageToScreenPixel } from "../src/canvas/GnumarusViewportMath";
 
 interface GnumarusPixel {
   r: number;
@@ -108,4 +109,109 @@ test("Edit > Settings changes the checkerboard", async ({ page }) => {
   });
   expect(settings).toEqual({ mode: "screen", sizeX: 8, sizeY: 16, colorA: "#ff0000", colorB: "#949494" });
   await expect(page.locator("gnumarus-shell")).toContainText("screen-space, 8x16px");
+});
+
+interface GnumarusViewState {
+  zoom: number;
+  rotation: number;
+  flipX: boolean;
+  flipY: boolean;
+}
+
+async function getViewState(page: import("@playwright/test").Page): Promise<GnumarusViewState> {
+  return page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getViewState(): GnumarusViewState } };
+    };
+    const state = root.__gnumarus?.engine?.getViewState();
+    if (state === undefined) {
+      throw new Error("engine view state is unavailable");
+    }
+    return state;
+  });
+}
+
+test("loupe left-drag zooms and right-drag rotates", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Loupe" }).click();
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+
+  const beforeZoom = (await getViewState(page)).zoom;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx + 40, cy - 60, { steps: 5 });
+  await page.mouse.up();
+  expect((await getViewState(page)).zoom).toBeGreaterThan(beforeZoom);
+
+  await page.mouse.move(cx + 60, cy);
+  await page.mouse.down({ button: "right" });
+  await page.mouse.move(cx, cy + 60, { steps: 5 });
+  await page.mouse.up({ button: "right" });
+  const rotation = (await getViewState(page)).rotation;
+  expect(rotation).toBeGreaterThan(Math.PI / 3);
+  expect(rotation).toBeLessThan(Math.PI * 0.75);
+  await expect(page.locator("gnumarus-shell")).toContainText("°");
+});
+
+test("loupe middle-click flips the canvas", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Loupe" }).click();
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  expect(await getViewState(page)).toMatchObject({ flipX: false, flipY: false });
+  await page.mouse.click(cx, cy, { button: "middle" });
+  expect(await getViewState(page)).toMatchObject({ flipX: true, flipY: false });
+  await page.keyboard.down("Shift");
+  await page.mouse.click(cx, cy, { button: "middle" });
+  await page.keyboard.up("Shift");
+  expect(await getViewState(page)).toMatchObject({ flipX: true, flipY: true });
+  await expect(page.locator("gnumarus-shell")).toContainText("Flip XY");
+});
+
+test("pencil paints the right pixel while the canvas is rotated", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const view = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          setRotation(radians: number): void;
+          getViewState(): GnumarusViewState;
+        };
+      };
+    };
+    root.__gnumarus?.engine?.setRotation(Math.PI / 2);
+    return root.__gnumarus?.engine?.getViewState();
+  });
+  expect(view?.rotation).toBeCloseTo(Math.PI / 2, 5);
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const state = await getViewState(page);
+  const target = imageToScreenPixel(
+    63,
+    32,
+    { left: box.x, top: box.y, width: box.width, height: box.height },
+    64,
+    64,
+    { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false },
+  );
+  await page.mouse.click(target.x, target.y);
+  expect(await readPixel(page, 63, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
 });

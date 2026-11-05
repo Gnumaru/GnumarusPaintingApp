@@ -8,7 +8,7 @@ import {
   setPixel,
   type GnumarusRgba,
 } from "./GnumarusPixelBuffer";
-import { clampZoom, screenToImagePixel } from "./GnumarusViewportMath";
+import { clampZoom, normalizeRotation, screenToImagePixel } from "./GnumarusViewportMath";
 import {
   clampCheckerSize,
   DEFAULT_CHECKER_SETTINGS,
@@ -20,9 +20,14 @@ export interface GnumarusEngineStats {
   width: number;
   height: number;
   zoom: number;
+  rotationDeg: number;
+  flipX: boolean;
+  flipY: boolean;
   cursorX: number | null;
   cursorY: number | null;
 }
+
+export type GnumarusCanvasTool = "pencil" | "loupe";
 
 export interface GnumarusEngineOptions {
   onStats: (stats: GnumarusEngineStats) => void;
@@ -61,6 +66,14 @@ export class GnumarusCanvasEngine {
   private zoom: number;
   private panX = 0;
   private panY = 0;
+  private rotation = 0;
+  private flipX = false;
+  private flipY = false;
+  private tool: GnumarusCanvasTool = "pencil";
+  private rotating = false;
+  private lastPointerAngle: number | null = null;
+  private loupeZooming = false;
+  private loupeAnchor: { x: number; y: number } | null = null;
   private color: GnumarusRgba = { r: 0, g: 0, b: 0, a: 255 };
   private drawing = false;
   private panning = false;
@@ -174,6 +187,7 @@ export class GnumarusCanvasEngine {
         "  gl_FragColor = vec4(rgb, 1.0);",
         "}",
       ].join("\n"),
+      side: THREE.DoubleSide,
     });
     this.plane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.material);
     this.scene.add(this.plane);
@@ -260,6 +274,49 @@ export class GnumarusCanvasEngine {
     this.setZoom(this.zoom * factor);
   }
 
+  /** Zoom keeping the image pixel under the client point stable. */
+  zoomAtPoint(clientX: number, clientY: number, factor: number): void {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const cos = Math.cos(this.rotation);
+    const sin = Math.sin(this.rotation);
+    const dx = clientX - centerX - this.panX;
+    const dy = clientY - centerY - this.panY;
+    const vx = (cos * dx + sin * dy) / this.zoom;
+    const vy = (-sin * dx + cos * dy) / this.zoom;
+    const nextZoom = clampZoom(this.zoom * factor);
+    this.zoom = nextZoom;
+    this.panX = clientX - centerX - (cos * vx - sin * vy) * nextZoom;
+    this.panY = clientY - centerY - (sin * vx + cos * vy) * nextZoom;
+    this.layoutScene();
+    this.render();
+    this.emitStats();
+  }
+
+  setRotation(radians: number): void {
+    this.rotation = normalizeRotation(radians);
+    this.layoutScene();
+    this.render();
+    this.emitStats();
+  }
+
+  setFlip(flipX: boolean, flipY: boolean): void {
+    this.flipX = flipX;
+    this.flipY = flipY;
+    this.layoutScene();
+    this.render();
+    this.emitStats();
+  }
+
+  setTool(tool: GnumarusCanvasTool): void {
+    this.tool = tool;
+  }
+
+  getViewState(): { zoom: number; rotation: number; flipX: boolean; flipY: boolean } {
+    return { zoom: this.zoom, rotation: this.rotation, flipX: this.flipX, flipY: this.flipY };
+  }
+
   applyCheckerSettings(settings: GnumarusCheckerSettings): void {
     this.checkerMode = settings.mode;
     this.checkerSizeX = clampCheckerSize(settings.sizeX);
@@ -321,12 +378,39 @@ export class GnumarusCanvasEngine {
   private attachEvents(): void {
     const canvas = this.renderer.domElement;
     canvas.addEventListener("pointerdown", (event: PointerEvent) => {
+      if (event.button === 1 && this.tool === "loupe") {
+        // Middle click with the loupe tool flips the canvas view.
+        if (event.shiftKey) {
+          this.setFlip(this.flipX, !this.flipY);
+        } else {
+          this.setFlip(!this.flipX, this.flipY);
+        }
+        return;
+      }
       if (event.button === 1 || this.spaceDown) {
         this.panning = true;
         canvas.setPointerCapture(event.pointerId);
         return;
       }
+      if (event.button === 2 && this.tool === "loupe") {
+        // Right-drag with the loupe tool rotates around the image center.
+        const angle = this.pointerAngle(event.clientX, event.clientY);
+        if (angle === null) {
+          return;
+        }
+        this.rotating = true;
+        this.lastPointerAngle = angle;
+        canvas.setPointerCapture(event.pointerId);
+        return;
+      }
       if (event.button !== 0) {
+        return;
+      }
+      if (this.tool === "loupe") {
+        // Left-drag with the loupe tool zooms: up/right zooms in.
+        this.loupeZooming = true;
+        this.loupeAnchor = { x: event.clientX, y: event.clientY };
+        canvas.setPointerCapture(event.pointerId);
         return;
       }
       const pixel = this.toImagePixel(event.clientX, event.clientY);
@@ -345,6 +429,27 @@ export class GnumarusCanvasEngine {
     canvas.addEventListener("pointermove", (event: PointerEvent) => {
       const pixel = this.toImagePixel(event.clientX, event.clientY);
       this.cursor = pixel;
+      if (this.rotating) {
+        const angle = this.pointerAngle(event.clientX, event.clientY);
+        if (angle !== null && this.lastPointerAngle !== null) {
+          let delta = angle - this.lastPointerAngle;
+          if (delta > Math.PI) {
+            delta -= Math.PI * 2;
+          } else if (delta < -Math.PI) {
+            delta += Math.PI * 2;
+          }
+          this.setRotation(this.rotation + delta);
+          this.lastPointerAngle = angle;
+        }
+        return;
+      }
+      if (this.loupeZooming && this.loupeAnchor !== null) {
+        const amount = event.movementX - event.movementY;
+        if (amount !== 0) {
+          this.zoomAtPoint(this.loupeAnchor.x, this.loupeAnchor.y, 1 + amount * 0.004);
+        }
+        return;
+      }
       if (this.panning) {
         this.panX += event.movementX;
         this.panY += event.movementY;
@@ -374,6 +479,10 @@ export class GnumarusCanvasEngine {
     const endStroke = (): void => {
       this.drawing = false;
       this.panning = false;
+      this.rotating = false;
+      this.loupeZooming = false;
+      this.lastPointerAngle = null;
+      this.loupeAnchor = null;
       this.lastPixel = null;
     };
     canvas.addEventListener("pointerup", endStroke);
@@ -386,19 +495,7 @@ export class GnumarusCanvasEngine {
       "wheel",
       (event: WheelEvent) => {
         event.preventDefault();
-        const rect = canvas.getBoundingClientRect();
-        const before = this.toImagePixel(event.clientX, event.clientY);
-        const factor = event.deltaY < 0 ? 1.25 : 0.8;
-        this.zoom = clampZoom(this.zoom * factor);
-        if (before !== null) {
-          const centerX = rect.left + rect.width / 2;
-          const centerY = rect.top + rect.height / 2;
-          this.panX = event.clientX - centerX - (before.x + 0.5 - this.imageWidth / 2) * this.zoom;
-          this.panY = event.clientY - centerY - (before.y + 0.5 - this.imageHeight / 2) * this.zoom;
-        }
-        this.layoutScene();
-        this.render();
-        this.emitStats();
+        this.zoomAtPoint(event.clientX, event.clientY, event.deltaY < 0 ? 1.25 : 0.8);
       },
       { passive: false },
     );
@@ -444,8 +541,26 @@ export class GnumarusCanvasEngine {
       { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
       this.imageWidth,
       this.imageHeight,
-      { zoom: this.zoom, panX: this.panX, panY: this.panY },
+      {
+        zoom: this.zoom,
+        panX: this.panX,
+        panY: this.panY,
+        rotation: this.rotation,
+        flipX: this.flipX,
+        flipY: this.flipY,
+      },
     );
+  }
+
+  /** Pointer angle around the image center, clockwise-positive. Null at the center. */
+  private pointerAngle(clientX: number, clientY: number): number | null {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const dx = clientX - (rect.left + rect.width / 2 + this.panX);
+    const dy = clientY - (rect.top + rect.height / 2 + this.panY);
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) {
+      return null;
+    }
+    return Math.atan2(dy, dx);
   }
 
   private layout(): void {
@@ -469,7 +584,12 @@ export class GnumarusCanvasEngine {
     this.camera.top = height / 2;
     this.camera.bottom = -height / 2;
     this.camera.updateProjectionMatrix();
-    this.plane.scale.set(this.imageWidth * this.zoom, this.imageHeight * this.zoom, 1);
+    this.plane.scale.set(
+      this.imageWidth * this.zoom * (this.flipX ? -1 : 1),
+      this.imageHeight * this.zoom * (this.flipY ? -1 : 1),
+      1,
+    );
+    this.plane.rotation.z = -this.rotation;
     this.plane.position.set(this.panX, -this.panY, 0);
   }
 
@@ -485,6 +605,9 @@ export class GnumarusCanvasEngine {
       width: this.imageWidth,
       height: this.imageHeight,
       zoom: this.zoom,
+      rotationDeg: Math.round((this.rotation * 180) / Math.PI),
+      flipX: this.flipX,
+      flipY: this.flipY,
       cursorX: this.cursor === null ? null : this.cursor.x,
       cursorY: this.cursor === null ? null : this.cursor.y,
     });

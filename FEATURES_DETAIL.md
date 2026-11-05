@@ -5,22 +5,23 @@
 - `gnumarus-shell` Lit component: menu bar, toolbar, canvas host, status bar, New-canvas dialog, Settings dialog.
 - File menu items: New (width/height dialog, 1..1024, default 64x64), Open (directory picker), Save (writes to picked directory, reuses the handle afterwards).
 - Edit menu items: Settings (checkerboard mode image-space/screen-space, independent square width/height 1..128 default 16x16, colors A/B with Reset defaults; applied live and persisted to `localStorage`).
-- Toolbar: pencil tool (only tool, always active) and a color input.
-- Status bar shows tool, hex color, cursor pixel coordinates, canvas dimensions, zoom percentage, project name, modified marker, WebGL2/FS-API messages.
+- Toolbar: pencil tool (pixel-art) and loupe tool (zoom/rotate/flip) plus a color input.
+- Status bar shows tool, rotation degrees, flip state, hex color, cursor pixel coordinates, canvas dimensions, zoom percentage, project name, modified marker, WebGL2/FS-API messages.
 - All UI strings in American English.
 
 ## 2. WebGL2 canvas engine (`src/canvas/GnumarusCanvasEngine.ts`)
 
 - Single `THREE.WebGLRenderer` (WebGL2-only, no fallback). Throws `GnumarusWebGlError` with a user-facing message when WebGL2 is unavailable.
 - One `THREE.DataTexture` (`NearestFilter`, no mipmaps) over a CPU `Uint8ClampedArray` RGBA buffer; orthographic camera; a custom `ShaderMaterial` composites the layer over a configurable transparency checker (image-space squares that pan/zoom with the canvas, or fixed screen-space squares; size and both colors editable in Edit > Settings, persisted to `localStorage`), while the scene clear color (`#333333`) fills everything outside the drawable area.
-- On-demand rendering (resize, view change, stroke), DPR capped at 2.
-- Zoom (wheel, 0.5x..64x, zoom-to-cursor), keyboard shortcuts `Ctrl+Alt+=` / `Ctrl+Alt++` (zoom in) and `Ctrl+Alt+-` (zoom out, main keyboard and keypad), pan (middle-drag or Space+drag).
+- View transform (view-only, buffer stays canonical): zoom 0.5x..64x, arbitrary rotation (clockwise-positive), horizontal/vertical mirror. The plane scale/rotation renders it; pointer mapping inverts the full transform so painting works while transformed.
+- Tools: pencil (1px solid, Bresenham, draws through the current transform) and loupe — left-drag zooms (up/right in, down/left out, anchored at drag start), right-drag rotates around the image center, middle-click flips X (Shift+middle-click flips Y).
+- Zoom (wheel with zoom-to-cursor even while rotated, keyboard shortcuts `Ctrl+Alt+=` / `Ctrl+Alt++` zoom in and `Ctrl+Alt+-` zooms out), pan (middle-drag or Space+drag).
 - Pencil strokes: pointer capture, Bresenham line interpolation between events, out-of-bounds pixels ignored.
 
 ## 3. Pure logic modules (fully unit-tested)
 
 - `src/canvas/GnumarusPixelBuffer.ts`: buffer create/clear/get/set, Bresenham line, `#rgb`/`#rrggbb` parsing.
-- `src/canvas/GnumarusViewportMath.ts`: centered screen-to-pixel mapping with pan/zoom, zoom clamping.
+- `src/canvas/GnumarusViewportMath.ts`: screen<->pixel mapping with pan/zoom/rotation/flip (exact inverses), zoom clamping, rotation normalization.
 - `src/project/GnumarusProjectFormat.ts`: `project.json` build/serialize/strict-parse, `cells/<layer>_frame<frame>.png` paths.
 
 ## 4. Project format and file access
