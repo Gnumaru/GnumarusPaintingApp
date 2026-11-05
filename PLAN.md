@@ -110,6 +110,11 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Brush size and line width accept floats 0.1..64 (number inputs min 0.1 step 0.1).
 - Anti-aliasing off uses the value rounded to the nearest integer (min 1); anti-aliasing on uses the real float value, so 1.5 renders between 1 and 2.
 
+## 20. Cubic Bezier curve tool (implemented)
+- New curve tool (`C`, `〜` glyph): press-drag-release sets start/end, then one click sets the start control point and a final click sets the end control point; the cubic is then rasterized into the current cell texture.
+- Live preview while drawing: curve path, control-point markers and thin handle lines (endpoint to its control); all auxiliaries destroyed after commit/cancel (`Escape` cancels).
+- Curve options like line/pencil: width 0.1..64 (rounded when AA off, float when on), square/circle ends, anti-aliasing checkbox.
+
 ## 11. Custom color picker (implemented)
 - Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).
 - Every model carries an alpha axis; RGBA axes span 0..255. ARD Diagonal spans 0..360 and Ratio 0..255.

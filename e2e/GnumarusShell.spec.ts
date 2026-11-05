@@ -1319,12 +1319,13 @@ test("toolbar icons fill buttons without growing them", async ({ page }) => {
       };
     });
   });
-  expect(boxes).toHaveLength(6);
+  expect(boxes).toHaveLength(7);
   const expected: Record<string, { w: number; h: number }> = {
     Pencil: { w: 33, h: 25 },
     Loupe: { w: 30, h: 25 },
     "Bucket fill": { w: 35, h: 26 },
     Line: { w: 30, h: 25 },
+    Curve: { w: 35, h: 29 },
     Transform: { w: 31, h: 29 },
     "Final preview": { w: 32, h: 29 },
   };
@@ -2116,6 +2117,118 @@ test("Delete resets the current cell texture to zeros", async ({ page }) => {
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   await page.keyboard.press("Control+z");
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+});
+
+test("curve tool draws cubic beziers with two control clicks", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          loadProject(
+            width: number,
+            height: number,
+            inputs: Array<{
+              id: string;
+              name: string;
+              visible: boolean;
+              opacity: number;
+              width: number;
+              height: number;
+              buffer: Uint8ClampedArray;
+              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
+            }>,
+          ): void;
+        };
+      };
+    };
+    root.__gnumarus?.engine?.loadProject(64, 64, [
+      {
+        id: "tiny",
+        name: "Tiny",
+        visible: true,
+        opacity: 1,
+        width: 8,
+        height: 8,
+        buffer: new Uint8ClampedArray(8 * 8 * 4),
+        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+      },
+    ]);
+  });
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Curve" }).click();
+  await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toContainText("Curve width");
+  await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toContainText("Anti-aliasing");
+  await page.locator("gnumarus-shell input#curveWidth").fill("1");
+  await expect(page.locator("gnumarus-shell")).toContainText("Curve width: 1");
+  const phaseOf = (): Promise<string> =>
+    page.evaluate(() => {
+      const root = window as unknown as { __gnumarus?: { engine?: { getCurvePhase(): string } } };
+      return root.__gnumarus?.engine?.getCurvePhase() ?? "missing";
+    });
+  const previewVisible = (): Promise<{ svg: string; path: string }> =>
+    page.evaluate(() => {
+      const root = document.querySelector("gnumarus-shell")?.shadowRoot;
+      const host = root?.getElementById("canvasHost") ?? null;
+      const svg = host?.querySelector('[data-testid="line-preview"]') as SVGSVGElement | null;
+      const path = host?.querySelector('[data-testid="curve-preview"]') as SVGPathElement | null;
+      return { svg: svg?.style.display ?? "missing", path: path?.style.display ?? "missing" };
+    });
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const toScreen = async (lx: number, ly: number): Promise<{ x: number; y: number }> => {
+    const state = await getViewState(page);
+    return layerPixelToScreen(
+      lx,
+      ly,
+      { left: box.x, top: box.y, width: box.width, height: box.height },
+      8,
+      8,
+      { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false },
+      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+    );
+  };
+  expect(await phaseOf()).toBe("idle");
+  const start = await toScreen(1, 4);
+  const end = await toScreen(6, 4);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 8 });
+  await page.mouse.up();
+  expect(await phaseOf()).toBe("awaitC1");
+  expect((await previewVisible()).path).toBe("block");
+  const c1 = await toScreen(2, 1);
+  await page.mouse.click(c1.x, c1.y);
+  expect(await phaseOf()).toBe("awaitC2");
+  const c2 = await toScreen(5, 6);
+  await page.mouse.click(c2.x, c2.y);
+  expect(await phaseOf()).toBe("idle");
+  expect((await previewVisible()).svg).toBe("none");
+  expect(await readPixel(page, 1, 4)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 6, 4)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  const apex = [await readPixel(page, 3, 3), await readPixel(page, 4, 3)];
+  expect(apex.some((pixel) => pixel !== null && pixel.r === 255 && pixel.a === 255)).toBe(true);
+  expect(await readPixel(page, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 1, 4)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  const restart = await toScreen(1, 1);
+  const reend = await toScreen(6, 1);
+  await page.mouse.move(restart.x, restart.y);
+  await page.mouse.down();
+  await page.mouse.move(reend.x, reend.y, { steps: 4 });
+  await page.mouse.up();
+  expect(await phaseOf()).toBe("awaitC1");
+  await page.keyboard.press("Escape");
+  expect(await phaseOf()).toBe("idle");
+  expect(await readPixel(page, 1, 1)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  await page.keyboard.press("c");
+  await expect(page.locator("gnumarus-shell")).toContainText("curve");
+  await page.keyboard.press("p");
+  await expect(page.locator("gnumarus-shell")).toContainText("pencil");
 });
 
 test("brush and line widths accept floats with AA-dependent rounding", async ({ page }) => {

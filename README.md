@@ -8,10 +8,11 @@ Classic desktop-like painting app (top menu bar, central canvas, bottom status b
 
 ## Features (v1)
 
-- Desktop shell: File menu (New, Open, Save), Edit menu (Undo/Redo, Settings, Reset Canvas Transform), pencil/bucket/line/loupe/transform toolbar with color picker, tool options bar below the menu bar, WebGL2 canvas, layers panel, status bar. `Ctrl+S` (`Cmd+S` on macOS) saves like File > Save (reuses the chosen folder, otherwise shows the OS folder picker).
+- Desktop shell: File menu (New, Open, Save), Edit menu (Undo/Redo, Settings, Reset Canvas Transform), pencil/bucket/line/curve/loupe/transform toolbar with color picker, tool options bar below the menu bar, WebGL2 canvas, layers panel, status bar. `Ctrl+S` (`Cmd+S` on macOS) saves like File > Save (reuses the chosen folder, otherwise shows the OS folder picker).
 - Pixel-art pencil: solid color, brush size 0.1..64 with square/circle tip plus anti-aliasing toggle in the tool options bar (integer-rounded when off, true float when on) with live mouse preview, nearest-neighbor display, wheel zoom + pan + rotation + flips.
 - Bucket fill: click fills the contiguous region of identical color with the current solid color (4-way flood fill, channel-lock aware, undoable, shortcut `B`).
 - Line tool: two clicks define a segment with width 0.1..64, square/circle ends and optional anti-aliasing (integer-rounded when off, true float when on) in the tool options bar, with mouse and rubber-band previews (shortcut `N`).
+- Curve tool: press-drag-release sets start/end, then one click sets the start control point and a final click sets the end control point; live curve path, markers and handle lines while drawing; width 0.1..64, square/circle ends, anti-aliasing; undoable (shortcut `C`).
 - Layers: add, delete, reorder, rename, visibility, opacity, right-click Merge Down (undoable); `Delete` resets the current cell texture to transparent zeros (undoable); Transform tool edits the active cell content; painting targets the active cell at the current frame (empty cells materialize on first use).
 - Pixel grid over the active layer (follows rotation/transform), hidden below 200 percent zoom; minimum zoom 200..6400 percent, default 1000 percent, in Edit > Settings.
 - Canvas background: checkerboard (default) or solid color in Edit > Settings; every setting has a per-setting reset arrow when non-default.
@@ -19,7 +20,6 @@ Classic desktop-like painting app (top menu bar, central canvas, bottom status b
 - Custom color picker: RGB/CMYK/HSV/HSL (default)/OKHSL/OKHSV/ARD with per-axis gradient bars and editable inputs; alpha axis on every model; no browser color picker is used anywhere.
 - Animation matrix above the status bar: rows are layers, columns are frames; each cell holds zero or one shareable cell content (texture plus transform). New frames start empty; cell menu creates, associates or dissociates contents and texture links.
 - Frame durations and playback: each frame may carry an explicit duration in milliseconds via its header menu (Set/Clear, 1..60000 ms); frames without one use the project default (100 ms, configurable in Edit > Settings Animation section with reset arrow, stored in `project.json`); play/stop transport in the matrix corner plays from the current frame, looping until stopped.
-- Layers: add, delete, reorder, rename, visibility, opacity, right-click Merge Down (undoable); Transform tool edits the active cell content; painting targets the active cell at the current frame (empty cells materialize on first use).
 - Layer resize: per-layer width/height 1..1024 via Resize button; expand fills transparent right and below, shrink crops right and below; undoable.
 - Channel lock: per-layer R/G/B/A toggles; paint, clear and Merge Down write only unlocked channels. Example: alpha locked + paint keeps old alpha; green locked + cyan paint yields blue.
 - Directory projects via the File System Access API (Chromium derivatives): `project.json` metadata plus `textures/*.png` cell images (legacy `cells/*.png` projects open via automatic migration).

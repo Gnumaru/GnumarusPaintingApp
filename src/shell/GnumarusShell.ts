@@ -728,6 +728,9 @@ export class GnumarusShell extends LitElement {
     lineWidth: { type: Number },
     lineShape: { type: String },
     lineAntialias: { type: Boolean },
+    curveWidth: { type: Number },
+    curveShape: { type: String },
+    curveAntialias: { type: Boolean },
   };
 
   declare tool: GnumarusCanvasTool;
@@ -785,6 +788,9 @@ export class GnumarusShell extends LitElement {
   declare lineWidth: number;
   declare lineShape: GnumarusBrushShape;
   declare lineAntialias: boolean;
+  declare curveWidth: number;
+  declare curveShape: GnumarusBrushShape;
+  declare curveAntialias: boolean;
 
   private engine: GnumarusCanvasEngine | null = null;
   private directoryHandle: GnumarusDirectoryHandle | null = null;
@@ -845,6 +851,9 @@ export class GnumarusShell extends LitElement {
     this.lineWidth = 1;
     this.lineShape = "square";
     this.lineAntialias = false;
+    this.curveWidth = 1;
+    this.curveShape = "square";
+    this.curveAntialias = false;
   }
 
   render() {
@@ -955,6 +964,17 @@ export class GnumarusShell extends LitElement {
             }}
           >
             <span class="tool-icon">╲</span>
+          </button>
+          <button
+            class=${this.tool === "curve" ? "active" : ""}
+            title="Curve (drag endpoints, then two control clicks)"
+            aria-label="Curve"
+            @click=${(): void => {
+              this.tool = "curve";
+              this.engine?.setTool("curve");
+            }}
+          >
+            <span class="tool-icon">〜</span>
           </button>
           <button
             class=${this.tool === "transform" ? "active" : ""}
@@ -1585,6 +1605,40 @@ export class GnumarusShell extends LitElement {
               id="lineAntialias"
               .checked=${this.lineAntialias}
               @change=${(): void => this.applyLineAntialiasFromDialog()}
+            />
+            Anti-aliasing
+          </label>
+        </div>
+      `;
+    }
+    if (this.tool === "curve") {
+      return html`
+        <div class="tool-options" data-testid="tool-options" aria-label="Curve options">
+          <label
+            >Curve width
+            <input
+              type="number"
+              id="curveWidth"
+              min="0.1"
+              max="64"
+              step="0.1"
+              .value=${String(this.curveWidth)}
+              @input=${(): void => this.applyCurveWidthFromDialog()}
+            />
+          </label>
+          <label
+            >Curve shape
+            <select id="curveShape" .value=${this.curveShape} @change=${(): void => this.applyCurveShapeFromDialog()}>
+              <option value="square">Square</option>
+              <option value="circle">Circle</option>
+            </select>
+          </label>
+          <label
+            ><input
+              type="checkbox"
+              id="curveAntialias"
+              .checked=${this.curveAntialias}
+              @change=${(): void => this.applyCurveAntialiasFromDialog()}
             />
             Anti-aliasing
           </label>
@@ -2242,6 +2296,67 @@ export class GnumarusShell extends LitElement {
     this.lineAntialias = enabled;
     this.engine?.setLineAntialias(enabled);
     this.statusMessage = `Line anti-aliasing: ${enabled ? "on" : "off"}`;
+  }
+
+  /** Test hook: set the curve width (floats 0.1..64, clamped). */
+  setCurveWidth(size: number): void {
+    const clamped = clampBrushSizeFloat(size);
+    this.curveWidth = clamped;
+    this.engine?.setCurveWidth(clamped);
+    this.statusMessage = `Curve width: ${clamped}`;
+  }
+
+  /** Test hook: set the curve shape (square/circle, defaults to square). */
+  setCurveShape(shape: GnumarusBrushShape): void {
+    const parsed = parseBrushShape(shape);
+    this.curveShape = parsed;
+    this.engine?.setCurveShape(parsed);
+    this.statusMessage = `Curve shape: ${parsed}`;
+  }
+
+  /** Test hook: enable or disable curve anti-aliasing. */
+  setCurveAntialias(enabled: boolean): void {
+    const next = enabled === true;
+    this.curveAntialias = next;
+    this.engine?.setCurveAntialias(next);
+    this.statusMessage = `Curve anti-aliasing: ${next ? "on" : "off"}`;
+  }
+
+  private currentDialogCurveWidth(): number {
+    const input = this.shadowRoot?.getElementById("curveWidth") as HTMLInputElement | null;
+    const parsed = Number(input?.value ?? "1");
+    return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1);
+  }
+
+  private currentDialogCurveShape(): GnumarusBrushShape {
+    const select = this.shadowRoot?.getElementById("curveShape") as HTMLSelectElement | null;
+    return parseBrushShape(select?.value ?? "square");
+  }
+
+  private currentDialogCurveAntialias(): boolean {
+    const input = this.shadowRoot?.getElementById("curveAntialias") as HTMLInputElement | null;
+    return input?.checked === true;
+  }
+
+  private applyCurveWidthFromDialog(): void {
+    const size = this.currentDialogCurveWidth();
+    this.curveWidth = size;
+    this.engine?.setCurveWidth(size);
+    this.statusMessage = `Curve width: ${size}`;
+  }
+
+  private applyCurveShapeFromDialog(): void {
+    const shape = this.currentDialogCurveShape();
+    this.curveShape = shape;
+    this.engine?.setCurveShape(shape);
+    this.statusMessage = `Curve shape: ${shape}`;
+  }
+
+  private applyCurveAntialiasFromDialog(): void {
+    const enabled = this.currentDialogCurveAntialias();
+    this.curveAntialias = enabled;
+    this.engine?.setCurveAntialias(enabled);
+    this.statusMessage = `Curve anti-aliasing: ${enabled ? "on" : "off"}`;
   }
 
   /** Test and picker hook: set checker color A (opaque hex only). */

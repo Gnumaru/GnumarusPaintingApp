@@ -5,6 +5,7 @@ import {
   clampLayerDim,
   compositePixelOver,
   createPixelBuffer,
+  drawCubicBezier,
   drawLineSegment,
   floodFill,
   getPixel,
@@ -25,6 +26,7 @@ import {
   projectToLayerPixel,
   projectToScreen,
   screenToLayerPixel,
+  screenToProject,
 } from "./GnumarusViewportMath";
 import type {
   GnumarusLayerTransform,
@@ -75,7 +77,7 @@ export interface GnumarusEngineStats {
   cursorY: number | null;
 }
 
-export type GnumarusCanvasTool = "pencil" | "bucket" | "line" | "loupe" | "transform";
+export type GnumarusCanvasTool = "pencil" | "bucket" | "line" | "curve" | "loupe" | "transform";
 
 export interface GnumarusLayerInfo {
   id: string;
@@ -314,10 +316,22 @@ export class GnumarusCanvasEngine {
   private lineShape: GnumarusBrushShape = "square";
   private lineAntialias = false;
   private lineAnchor: { x: number; y: number; clientX: number; clientY: number } | null = null;
+  private curveWidth = 1;
+  private curveShape: GnumarusBrushShape = "square";
+  private curveAntialias = false;
+  private curvePhase: "idle" | "dragging" | "awaitC1" | "awaitC2" = "idle";
+  private curveP0: { x: number; y: number; clientX: number; clientY: number } | null = null;
+  private curveP3: { x: number; y: number; clientX: number; clientY: number } | null = null;
+  private curveC1: { x: number; y: number; clientX: number; clientY: number } | null = null;
+  private curveDragCurrent: { x: number; y: number; clientX: number; clientY: number } | null = null;
   private lastMouseClient: { x: number; y: number } | null = null;
   private readonly previewTip: HTMLDivElement;
   private readonly previewSvg: SVGSVGElement;
   private readonly previewLine: SVGLineElement;
+  private readonly previewCurve: SVGPathElement;
+  private readonly previewHandleA: SVGLineElement;
+  private readonly previewHandleB: SVGLineElement;
+  private readonly previewMarkers: SVGCircleElement[];
   private drawing = false;
   private panning = false;
   private spaceDown = false;
@@ -415,6 +429,34 @@ export class GnumarusCanvasEngine {
     this.previewLine.setAttribute("fill", "none");
     this.previewLine.setAttribute("opacity", "0.9");
     this.previewSvg.appendChild(this.previewLine);
+    this.previewCurve = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    this.previewCurve.setAttribute("data-testid", "curve-preview");
+    this.previewCurve.setAttribute("fill", "none");
+    this.previewCurve.setAttribute("opacity", "0.9");
+    this.previewSvg.appendChild(this.previewCurve);
+    const makeHandle = (testId: string): SVGLineElement => {
+      const handle = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      handle.setAttribute("data-testid", testId);
+      handle.setAttribute("stroke", "#ffffff");
+      handle.setAttribute("stroke-width", "1");
+      handle.setAttribute("opacity", "0.85");
+      this.previewSvg.appendChild(handle);
+      return handle;
+    };
+    this.previewHandleA = makeHandle("curve-handle-a");
+    this.previewHandleB = makeHandle("curve-handle-b");
+    this.previewMarkers = [];
+    for (let i = 0; i < 4; i += 1) {
+      const marker = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      marker.setAttribute("data-testid", `curve-point-${i}`);
+      marker.setAttribute("r", "3.5");
+      marker.setAttribute("fill", "#ffffff");
+      marker.setAttribute("stroke", "#000000");
+      marker.setAttribute("stroke-width", "1");
+      marker.setAttribute("opacity", "0.95");
+      this.previewSvg.appendChild(marker);
+      this.previewMarkers.push(marker);
+    }
     container.appendChild(this.previewSvg);
 
     this.scene = new THREE.Scene();
@@ -1751,6 +1793,7 @@ export class GnumarusCanvasEngine {
     this.contents.clear();
     this.cells.clear();
     this.lineAnchor = null;
+    this.resetCurveState();
     this.hidePreviews();
     this.frameDurations.clear();
     this.defaultFrameDuration = GNUMARUS_DEFAULT_FRAME_DURATION_MS;
@@ -1909,6 +1952,105 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
+  getCurveWidth(): number {
+    return this.curveWidth;
+  }
+
+  getCurveShape(): GnumarusBrushShape {
+    return this.curveShape;
+  }
+
+  getCurveAntialias(): boolean {
+    return this.curveAntialias;
+  }
+
+  setCurveWidth(size: number): boolean {
+    const clamped = clampBrushSizeFloat(size);
+    if (clamped === this.curveWidth) {
+      return false;
+    }
+    this.curveWidth = clamped;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  setCurveShape(shape: GnumarusBrushShape): boolean {
+    const parsed = parseBrushShape(shape);
+    if (parsed === this.curveShape) {
+      return false;
+    }
+    this.curveShape = parsed;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  setCurveAntialias(enabled: boolean): boolean {
+    const next = enabled === true;
+    if (next === this.curveAntialias) {
+      return false;
+    }
+    this.curveAntialias = next;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  /** Current curve phase for tests and UI. */
+  getCurvePhase(): "idle" | "dragging" | "awaitC1" | "awaitC2" {
+    return this.curvePhase;
+  }
+
+  cancelCurve(): boolean {
+    if (this.curvePhase === "idle") {
+      return false;
+    }
+    this.curvePhase = "idle";
+    this.curveP0 = null;
+    this.curveP3 = null;
+    this.curveC1 = null;
+    this.curveDragCurrent = null;
+    this.updatePreviews();
+    return true;
+  }
+
+  /** Map a client point to continuous layer image coordinates (unbounded, may be fractional). */
+  private clientToLayerImageFloat(clientX: number, clientY: number): { x: number; y: number } | null {
+    const layer = this.activeLayer();
+    if (layer === null || layer.width < 1 || layer.height < 1) {
+      return null;
+    }
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const project = screenToProject(
+      clientX,
+      clientY,
+      { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      this.viewTransform(),
+    );
+    if (project === null) {
+      return null;
+    }
+    const transform = layer.transform;
+    const rx = project.x - transform.x;
+    const ry = project.y - transform.y;
+    const cos = Math.cos(transform.rotation);
+    const sin = Math.sin(transform.rotation);
+    const qx = cos * rx + sin * ry;
+    const qy = -sin * rx + cos * ry;
+    const fx = transform.flipX ? -1 : 1;
+    const fy = transform.flipY ? -1 : 1;
+    return { x: qx / fx + layer.width / 2, y: qy / fy + layer.height / 2 };
+  }
+
+  private resetCurveState(): void {
+    this.curvePhase = "idle";
+    this.curveP0 = null;
+    this.curveP3 = null;
+    this.curveC1 = null;
+    this.curveDragCurrent = null;
+  }
+
   /**
    * Draw the pending line through (x, y). When no anchor exists, arm it and
    * return 0 without drawing. Otherwise draws the segment, clears the anchor
@@ -1974,24 +2116,95 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
+  /**
+   * Draw the armed cubic Bezier through (x, y) as the end control point.
+   * Requires start/end plus the start control point; renders the curve,
+   * destroys all auxiliaries and returns true when pixels changed.
+   */
+  commitCurveTo(c2x: number, c2y: number): boolean {
+    if (this.curvePhase !== "awaitC2") {
+      return false;
+    }
+    const p0 = this.curveP0;
+    const p3 = this.curveP3;
+    const c1 = this.curveC1;
+    if (p0 === null || p3 === null || c1 === null) {
+      return false;
+    }
+    if (!Number.isFinite(c2x) || !Number.isFinite(c2y)) {
+      return false;
+    }
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return false;
+    }
+    const ensured = this.ensureCellContent(layer.id, this.currentFrame);
+    if (ensured === null) {
+      return false;
+    }
+    const tex = ensured.texture;
+    const base = tex.buffer.slice();
+    drawCubicBezier(
+      tex.buffer,
+      tex.width,
+      tex.height,
+      { x: p0.x, y: p0.y },
+      { x: c1.x, y: c1.y },
+      { x: c2x, y: c2y },
+      { x: p3.x, y: p3.y },
+      this.curveWidth,
+      this.curveShape,
+      this.curveAntialias,
+      this.color,
+      layer.lockedChannels,
+    );
+    this.resetCurveState();
+    const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
+    if (diff === null) {
+      this.syncAllLayerRenders();
+      this.refreshLayerStacking();
+      this.render();
+      this.updatePreviews();
+      this.emitStats();
+      return false;
+    }
+    this.history.push({ type: "stroke", layerId: tex.id, diff });
+    this.syncAllLayerRenders();
+    this.markTextureViewsDirty(tex.id);
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
   private colorCss(): string {
     const alpha = Math.round((this.color.a / 255) * 100) / 100;
     return `rgba(${this.color.r}, ${this.color.g}, ${this.color.b}, ${alpha})`;
   }
 
-  /** Refresh the brush tip and line rubber-band overlays for the last mouse position. */
+  /** Refresh the brush tip and line/curve overlays for the last mouse position. */
   private updatePreviews(): void {
     if (this.disposed) {
       return;
     }
     const mouse = this.lastMouseClient;
-    const showTip = (this.tool === "pencil" || this.tool === "line") && mouse !== null;
+    const showTip =
+      (this.tool === "pencil" || this.tool === "line" || this.tool === "curve") && mouse !== null;
     if (!showTip || mouse === null) {
       this.previewTip.style.display = "none";
     } else {
       const rect = this.renderer.domElement.getBoundingClientRect();
-      const tipSize = (this.tool === "pencil" ? this.brushSize : this.lineWidth) * this.zoom;
-      const tipShape = this.tool === "pencil" ? this.brushShape : this.lineShape;
+      const tipSize =
+        (this.tool === "pencil"
+          ? this.brushSize
+          : this.tool === "line"
+            ? this.lineWidth
+            : this.curveWidth) * this.zoom;
+      const tipShape =
+        this.tool === "pencil" ? this.brushShape : this.tool === "line" ? this.lineShape : this.curveShape;
       const size = Math.max(2, tipSize);
       this.previewTip.style.display = "block";
       this.previewTip.style.width = `${size}px`;
@@ -2000,9 +2213,36 @@ export class GnumarusCanvasEngine {
       this.previewTip.style.top = `${mouse.y - rect.top - size / 2}px`;
       this.previewTip.style.borderRadius = tipShape === "circle" ? "50%" : "0";
     }
-    if (this.tool === "line" && this.lineAnchor !== null && mouse !== null) {
-      const rect = this.renderer.domElement.getBoundingClientRect();
+    this.previewLine.removeAttribute("display");
+    this.previewLine.style.display = "none";
+    this.previewCurve.style.display = "none";
+    this.previewHandleA.style.display = "none";
+    this.previewHandleB.style.display = "none";
+    for (const marker of this.previewMarkers) {
+      marker.style.display = "none";
+    }
+    if (mouse === null) {
+      this.previewSvg.style.display = "none";
+      return;
+    }
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const rel = (clientX: number, clientY: number): { x: number; y: number } => ({
+      x: clientX - rect.left,
+      y: clientY - rect.top,
+    });
+    const placeMarker = (index: number, clientX: number, clientY: number): void => {
+      const marker = this.previewMarkers[index];
+      if (marker === undefined) {
+        return;
+      }
+      const p = rel(clientX, clientY);
+      marker.setAttribute("cx", String(p.x));
+      marker.setAttribute("cy", String(p.y));
+      marker.style.display = "block";
+    };
+    if (this.tool === "line" && this.lineAnchor !== null) {
       this.previewSvg.style.display = "block";
+      this.previewLine.style.display = "block";
       this.previewLine.setAttribute("x1", String(this.lineAnchor.clientX - rect.left));
       this.previewLine.setAttribute("y1", String(this.lineAnchor.clientY - rect.top));
       this.previewLine.setAttribute("x2", String(mouse.x - rect.left));
@@ -2010,14 +2250,100 @@ export class GnumarusCanvasEngine {
       this.previewLine.setAttribute("stroke", this.colorCss());
       this.previewLine.setAttribute("stroke-width", String(Math.max(1, this.lineWidth * this.zoom)));
       this.previewLine.setAttribute("stroke-linecap", this.lineShape === "circle" ? "round" : "butt");
-    } else {
-      this.previewSvg.style.display = "none";
+      return;
     }
+    if (this.tool !== "curve") {
+      this.previewSvg.style.display = "none";
+      return;
+    }
+    if (this.curvePhase === "dragging" && this.curveP0 !== null) {
+      const current = this.curveDragCurrent;
+      const endX = current === null ? mouse.x : current.clientX;
+      const endY = current === null ? mouse.y : current.clientY;
+      this.previewSvg.style.display = "block";
+      this.previewLine.style.display = "block";
+      this.previewLine.setAttribute("x1", String(this.curveP0.clientX - rect.left));
+      this.previewLine.setAttribute("y1", String(this.curveP0.clientY - rect.top));
+      this.previewLine.setAttribute("x2", String(endX - rect.left));
+      this.previewLine.setAttribute("y2", String(endY - rect.top));
+      this.previewLine.setAttribute("stroke", this.colorCss());
+      this.previewLine.setAttribute("stroke-width", String(Math.max(1, this.curveWidth * this.zoom)));
+      this.previewLine.setAttribute("stroke-linecap", this.curveShape === "circle" ? "round" : "butt");
+      placeMarker(0, this.curveP0.clientX, this.curveP0.clientY);
+      placeMarker(3, endX, endY);
+      return;
+    }
+    if (this.curvePhase === "awaitC1" && this.curveP0 !== null && this.curveP3 !== null) {
+      this.previewSvg.style.display = "block";
+      const p0 = rel(this.curveP0.clientX, this.curveP0.clientY);
+      const p3 = rel(this.curveP3.clientX, this.curveP3.clientY);
+      const p1 = rel(mouse.x, mouse.y);
+      this.previewCurve.style.display = "block";
+      this.previewCurve.setAttribute(
+        "d",
+        `M ${p0.x} ${p0.y} C ${p1.x} ${p1.y} ${p3.x} ${p3.y} ${p3.x} ${p3.y}`,
+      );
+      this.previewCurve.setAttribute("stroke", this.colorCss());
+      this.previewCurve.setAttribute("stroke-width", String(Math.max(1, this.curveWidth * this.zoom)));
+      this.previewCurve.setAttribute("stroke-linecap", this.curveShape === "circle" ? "round" : "butt");
+      this.previewHandleA.style.display = "block";
+      this.previewHandleA.setAttribute("x1", String(p0.x));
+      this.previewHandleA.setAttribute("y1", String(p0.y));
+      this.previewHandleA.setAttribute("x2", String(p1.x));
+      this.previewHandleA.setAttribute("y2", String(p1.y));
+      placeMarker(0, this.curveP0.clientX, this.curveP0.clientY);
+      placeMarker(1, mouse.x, mouse.y);
+      placeMarker(3, this.curveP3.clientX, this.curveP3.clientY);
+      return;
+    }
+    if (
+      this.curvePhase === "awaitC2" &&
+      this.curveP0 !== null &&
+      this.curveP3 !== null &&
+      this.curveC1 !== null
+    ) {
+      this.previewSvg.style.display = "block";
+      const p0 = rel(this.curveP0.clientX, this.curveP0.clientY);
+      const p3 = rel(this.curveP3.clientX, this.curveP3.clientY);
+      const p1 = rel(this.curveC1.clientX, this.curveC1.clientY);
+      const p2 = rel(mouse.x, mouse.y);
+      this.previewCurve.style.display = "block";
+      this.previewCurve.setAttribute(
+        "d",
+        `M ${p0.x} ${p0.y} C ${p1.x} ${p1.y} ${p2.x} ${p2.y} ${p3.x} ${p3.y}`,
+      );
+      this.previewCurve.setAttribute("stroke", this.colorCss());
+      this.previewCurve.setAttribute("stroke-width", String(Math.max(1, this.curveWidth * this.zoom)));
+      this.previewCurve.setAttribute("stroke-linecap", this.curveShape === "circle" ? "round" : "butt");
+      this.previewHandleA.style.display = "block";
+      this.previewHandleA.setAttribute("x1", String(p0.x));
+      this.previewHandleA.setAttribute("y1", String(p0.y));
+      this.previewHandleA.setAttribute("x2", String(p1.x));
+      this.previewHandleA.setAttribute("y2", String(p1.y));
+      this.previewHandleB.style.display = "block";
+      this.previewHandleB.setAttribute("x1", String(p3.x));
+      this.previewHandleB.setAttribute("y1", String(p3.y));
+      this.previewHandleB.setAttribute("x2", String(p2.x));
+      this.previewHandleB.setAttribute("y2", String(p2.y));
+      placeMarker(0, this.curveP0.clientX, this.curveP0.clientY);
+      placeMarker(1, this.curveC1.clientX, this.curveC1.clientY);
+      placeMarker(2, mouse.x, mouse.y);
+      placeMarker(3, this.curveP3.clientX, this.curveP3.clientY);
+      return;
+    }
+    this.previewSvg.style.display = "none";
   }
 
   private hidePreviews(): void {
     this.previewTip.style.display = "none";
     this.previewSvg.style.display = "none";
+    this.previewLine.style.display = "none";
+    this.previewCurve.style.display = "none";
+    this.previewHandleA.style.display = "none";
+    this.previewHandleB.style.display = "none";
+    for (const marker of this.previewMarkers) {
+      marker.style.display = "none";
+    }
   }
 
   clear(): void {
@@ -2185,6 +2511,9 @@ export class GnumarusCanvasEngine {
     this.tool = tool;
     if (tool !== "line") {
       this.lineAnchor = null;
+    }
+    if (tool !== "curve") {
+      this.resetCurveState();
     }
     this.updatePreviews();
     this.onToolChanged?.(tool);
@@ -2544,6 +2873,60 @@ export class GnumarusCanvasEngine {
         this.commitLineTo(pixel.x, pixel.y);
         return;
       }
+      if (this.tool === "curve") {
+        const layer = this.activeLayer();
+        if (layer === null) {
+          return;
+        }
+        if (this.curvePhase === "awaitC2") {
+          const control = this.clientToLayerImageFloat(event.clientX, event.clientY);
+          if (control === null) {
+            return;
+          }
+          this.lastMouseClient = { x: event.clientX, y: event.clientY };
+          const ensured = this.ensureCellContent(layer.id, this.currentFrame);
+          if (ensured === null) {
+            return;
+          }
+          this.syncLayerRender(layer);
+          this.refreshLayerStacking();
+          this.commitCurveTo(control.x, control.y);
+          return;
+        }
+        if (this.curvePhase === "awaitC1") {
+          const control = this.clientToLayerImageFloat(event.clientX, event.clientY);
+          if (control === null) {
+            return;
+          }
+          this.curveC1 = { x: control.x, y: control.y, clientX: event.clientX, clientY: event.clientY };
+          this.lastMouseClient = { x: event.clientX, y: event.clientY };
+          this.curvePhase = "awaitC2";
+          this.updatePreviews();
+          return;
+        }
+        if (this.curvePhase === "idle") {
+          const ensured = this.ensureCellContent(layer.id, this.currentFrame);
+          if (ensured === null) {
+            return;
+          }
+          this.syncLayerRender(layer);
+          this.refreshLayerStacking();
+          const pixel = this.toImagePixel(event.clientX, event.clientY);
+          if (pixel === null) {
+            return;
+          }
+          this.curveP0 = { x: pixel.x, y: pixel.y, clientX: event.clientX, clientY: event.clientY };
+          this.curveDragCurrent = { x: pixel.x, y: pixel.y, clientX: event.clientX, clientY: event.clientY };
+          this.curveP3 = null;
+          this.curveC1 = null;
+          this.curvePhase = "dragging";
+          this.lastMouseClient = { x: event.clientX, y: event.clientY };
+          canvas.setPointerCapture(event.pointerId);
+          this.updatePreviews();
+          return;
+        }
+        return;
+      }
       const layer = this.activeLayer();
       if (layer === null) {
         return;
@@ -2588,6 +2971,14 @@ export class GnumarusCanvasEngine {
       const pixel = this.toImagePixel(event.clientX, event.clientY);
       this.cursor = pixel;
       this.lastMouseClient = { x: event.clientX, y: event.clientY };
+      if (this.tool === "curve" && this.curvePhase === "dragging" && pixel !== null) {
+        this.curveDragCurrent = {
+          x: pixel.x,
+          y: pixel.y,
+          clientX: event.clientX,
+          clientY: event.clientY,
+        };
+      }
       this.updatePreviews();
       if (this.transformRotating) {
         const angle = this.layerPointerAngle(event.clientX, event.clientY);
@@ -2707,7 +3098,30 @@ export class GnumarusCanvasEngine {
       this.lastPixel = null;
     };
     canvas.addEventListener("pointerup", endStroke);
+    canvas.addEventListener("pointerup", (event: PointerEvent) => {
+      if (this.tool !== "curve" || this.curvePhase !== "dragging" || event.button !== 0) {
+        return;
+      }
+      const pixel = this.toImagePixel(event.clientX, event.clientY);
+      if (pixel !== null) {
+        this.curveP3 = { x: pixel.x, y: pixel.y, clientX: event.clientX, clientY: event.clientY };
+      } else if (this.curveDragCurrent !== null) {
+        this.curveP3 = { ...this.curveDragCurrent };
+      } else {
+        return;
+      }
+      this.curvePhase = "awaitC1";
+      this.curveDragCurrent = null;
+      this.lastMouseClient = { x: event.clientX, y: event.clientY };
+      this.updatePreviews();
+    });
     canvas.addEventListener("pointercancel", endStroke);
+    canvas.addEventListener("pointercancel", () => {
+      if (this.tool === "curve" && this.curvePhase === "dragging") {
+        this.resetCurveState();
+        this.updatePreviews();
+      }
+    });
     canvas.addEventListener("pointerleave", () => {
       this.cursor = null;
       this.lastMouseClient = null;
@@ -2767,6 +3181,10 @@ export class GnumarusCanvasEngine {
           this.setTool("line");
           return;
         }
+        if (event.key === "c" || event.key === "C") {
+          this.setTool("curve");
+          return;
+        }
         if (event.key === "l" || event.key === "L") {
           this.setTool("loupe");
           return;
@@ -2777,6 +3195,11 @@ export class GnumarusCanvasEngine {
         }
         if (event.key === "Escape" && this.tool === "line" && this.lineAnchor !== null) {
           this.lineAnchor = null;
+          this.updatePreviews();
+          return;
+        }
+        if (event.key === "Escape" && this.tool === "curve" && this.curvePhase !== "idle") {
+          this.resetCurveState();
           this.updatePreviews();
           return;
         }

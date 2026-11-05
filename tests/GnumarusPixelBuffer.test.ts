@@ -7,6 +7,7 @@ import {
   createPixelBuffer,
   drawBrushLine,
   drawBrushStamp,
+  drawCubicBezier,
   drawLineSegment,
   drawPixelLine,
   floodFill,
@@ -265,5 +266,62 @@ describe("GnumarusPixelBuffer", () => {
     expect(wideEdge).not.toBeNull();
     expect(wideEdge!.r).toBeGreaterThan(midEdge!.r);
     expect(wideEdge!.r).toBeLessThan(255);
+  });
+
+  it("draws cubic beziers through endpoints with control influence", () => {
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    const flat = createPixelBuffer(8, 8);
+    drawCubicBezier(
+      flat,
+      8,
+      8,
+      { x: 0, y: 3 },
+      { x: 2, y: 3 },
+      { x: 5, y: 3 },
+      { x: 7, y: 3 },
+      1,
+      "square",
+      false,
+      red,
+    );
+    expect(getPixel(flat, 8, 8, 0, 3)).toEqual(red);
+    expect(getPixel(flat, 8, 8, 7, 3)).toEqual(red);
+    expect(getPixel(flat, 8, 8, 3, 3)).toEqual(red);
+    expect(getPixel(flat, 8, 8, 3, 5)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    const bowed = createPixelBuffer(8, 8);
+    drawCubicBezier(
+      bowed,
+      8,
+      8,
+      { x: 1, y: 1 },
+      { x: 2, y: 4 },
+      { x: 5, y: 4 },
+      { x: 6, y: 1 },
+      1,
+      "square",
+      false,
+      red,
+    );
+    expect(getPixel(bowed, 8, 8, 1, 1)).toEqual(red);
+    expect(getPixel(bowed, 8, 8, 6, 1)).toEqual(red);
+    expect(getPixel(bowed, 8, 8, 3, 3)).toEqual(red);
+    expect(getPixel(bowed, 8, 8, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    const smooth = createPixelBuffer(8, 8);
+    drawCubicBezier(
+      smooth,
+      8,
+      8,
+      { x: 1, y: 1 },
+      { x: 2, y: 4 },
+      { x: 5, y: 4 },
+      { x: 6, y: 1 },
+      1.5,
+      "square",
+      true,
+      red,
+    );
+    const soft = getPixel(smooth, 8, 8, 3, 2);
+    expect(soft).not.toBeNull();
+    expect(soft!.r).toBeGreaterThan(0);
   });
 });

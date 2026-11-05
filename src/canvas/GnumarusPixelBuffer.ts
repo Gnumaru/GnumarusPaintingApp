@@ -540,6 +540,61 @@ export function drawLineSegment(
   }
 }
 
+export interface GnumarusBezierPoint {
+  x: number;
+  y: number;
+}
+
+/**
+ * Rasterize a cubic Bezier curve by flattening it to a polyline and drawing
+ * each chord with `drawLineSegment` (same width/shape/anti-aliasing rules, so
+ * 1.5 renders between 1 and 2 when smoothed and rounds to 2 when not).
+ * The control polygon length sets the segment count (16..200); a degenerate
+ * curve draws a single dot. Control points may be fractional or off-canvas.
+ */
+export function drawCubicBezier(
+  buffer: Uint8ClampedArray,
+  width: number,
+  height: number,
+  p0: GnumarusBezierPoint,
+  p1: GnumarusBezierPoint,
+  p2: GnumarusBezierPoint,
+  p3: GnumarusBezierPoint,
+  lineWidth: number,
+  shape: GnumarusBrushShape,
+  antialiased: boolean,
+  color: GnumarusRgba,
+  locked: GnumarusChannelLock | undefined = undefined,
+): void {
+  const chord = (a: GnumarusBezierPoint, b: GnumarusBezierPoint): number =>
+    Math.sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
+  const polygon = chord(p0, p1) + chord(p1, p2) + chord(p2, p3);
+  if (!(polygon > 1e-9)) {
+    drawLineSegment(buffer, width, height, p0.x, p0.y, p0.x, p0.y, lineWidth, shape, antialiased, color, locked);
+    return;
+  }
+  const segments = Math.min(200, Math.max(16, Math.ceil(polygon * 2)));
+  let prevX = p0.x;
+  let prevY = p0.y;
+  for (let i = 1; i <= segments; i += 1) {
+    const t = i / segments;
+    const it = 1 - t;
+    const x =
+      it * it * it * p0.x + 3 * it * it * t * p1.x + 3 * it * t * t * p2.x + t * t * t * p3.x;
+    const y =
+      it * it * it * p0.y + 3 * it * it * t * p1.y + 3 * it * t * t * p2.y + t * t * t * p3.y;
+    // The aliased path rasterizes on integer pixels; round each joint so the
+    // Bresenham/stamp walkers always terminate. The smoothed path keeps floats.
+    const sx0 = antialiased ? prevX : Math.round(prevX);
+    const sy0 = antialiased ? prevY : Math.round(prevY);
+    const sx1 = antialiased ? x : Math.round(x);
+    const sy1 = antialiased ? y : Math.round(y);
+    drawLineSegment(buffer, width, height, sx0, sy0, sx1, sy1, lineWidth, shape, antialiased, color, locked);
+    prevX = x;
+    prevY = y;
+  }
+}
+
 /** Per-pixel straight-alpha source-over: src[srcIndex..] over dst[dstIndex..]. */
 export function compositePixelOver(
   dst: Uint8ClampedArray,
