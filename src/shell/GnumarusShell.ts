@@ -93,6 +93,13 @@ export class GnumarusShell extends LitElement {
     .dropdown button:hover {
       background: #0e639c;
     }
+    .dropdown button:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+    .dropdown button:disabled:hover {
+      background: transparent;
+    }
     .app-title {
       margin-left: 8px;
       color: #9a9a9a;
@@ -226,6 +233,8 @@ export class GnumarusShell extends LitElement {
     checkerMode: { type: String },
     checkerSizeX: { type: Number },
     checkerSizeY: { type: Number },
+    canUndo: { type: Boolean },
+    canRedo: { type: Boolean },
     checkerColorA: { type: String },
     checkerColorB: { type: String },
   };
@@ -249,6 +258,8 @@ export class GnumarusShell extends LitElement {
   declare checkerMode: GnumarusCheckerMode;
   declare checkerSizeX: number;
   declare checkerSizeY: number;
+  declare canUndo: boolean;
+  declare canRedo: boolean;
   declare checkerColorA: string;
   declare checkerColorB: string;
 
@@ -276,6 +287,8 @@ export class GnumarusShell extends LitElement {
     this.checkerMode = DEFAULT_CHECKER_SETTINGS.mode;
     this.checkerSizeX = DEFAULT_CHECKER_SETTINGS.sizeX;
     this.checkerSizeY = DEFAULT_CHECKER_SETTINGS.sizeY;
+    this.canUndo = false;
+    this.canRedo = false;
     this.checkerColorA = DEFAULT_CHECKER_SETTINGS.colorA;
     this.checkerColorB = DEFAULT_CHECKER_SETTINGS.colorB;
   }
@@ -316,6 +329,8 @@ export class GnumarusShell extends LitElement {
           ${this.editMenuOpen
             ? html`
                 <div class="dropdown">
+                  <button ?disabled=${!this.canUndo} @click=${(): void => this.doUndo()}>Undo</button>
+                  <button ?disabled=${!this.canRedo} @click=${(): void => this.doRedo()}>Redo</button>
                   <button @click=${(): void => this.openSettingsDialog()}>Settings</button>
                   <button @click=${(): void => this.resetCanvasTransform()}>Reset Canvas Transform</button>
                 </div>
@@ -439,6 +454,8 @@ export class GnumarusShell extends LitElement {
         checker: storedChecker,
         onStats: (stats): void => {
           this.zoomText = `${Math.round(stats.zoom * 100)}%`;
+          this.canUndo = stats.canUndo;
+          this.canRedo = stats.canRedo;
           this.rotText = `${Math.round(stats.rotationDeg)}°`;
           this.flipText =
             stats.flipX && stats.flipY ? "Flip XY" : stats.flipX ? "Flip X" : stats.flipY ? "Flip Y" : "";
@@ -483,6 +500,18 @@ export class GnumarusShell extends LitElement {
     this.fileMenuOpen = false;
     this.engine?.resetViewTransform();
     this.statusMessage = "Canvas transform reset";
+  }
+
+  private doUndo(): void {
+    this.editMenuOpen = false;
+    this.fileMenuOpen = false;
+    this.statusMessage = this.engine?.undo() === true ? "Undo" : "Nothing to undo";
+  }
+
+  private doRedo(): void {
+    this.editMenuOpen = false;
+    this.fileMenuOpen = false;
+    this.statusMessage = this.engine?.redo() === true ? "Redo" : "Nothing to redo";
   }
 
   private openSettingsDialog(): void {

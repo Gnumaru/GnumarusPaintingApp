@@ -241,6 +241,69 @@ test("loupe Ctrl+middle-click resets the transform", async ({ page }) => {
   expect((await getViewState(page)).rotation).toBeCloseTo(0, 5);
 });
 
+test("undo and redo restore image pixels via menu and shortcuts", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await expect(page.getByRole("button", { name: "Undo" })).toBeDisabled();
+  await page.getByRole("button", { name: "Edit" }).click();
+
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 12, box.y + box.height / 2 + 12, { steps: 4 });
+  await page.mouse.up();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+
+  await page.keyboard.press("Control+y");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Undo" }).click();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+});
+
+test("transform changes are not recorded in undo history", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.up();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          setRotation(r: number): void;
+          setFlip(x: boolean, y: boolean): void;
+          setZoom(z: number): void;
+        };
+      };
+    };
+    root.__gnumarus?.engine?.setRotation(0.7);
+    root.__gnumarus?.engine?.setFlip(true, false);
+    root.__gnumarus?.engine?.setZoom(20);
+  });
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  const view = await getViewState(page);
+  expect(view.rotation).toBeCloseTo(0.7, 5);
+  expect(view).toMatchObject({ flipX: true, zoom: 20 });
+});
+
 test("pencil paints the right pixel while the canvas is rotated", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

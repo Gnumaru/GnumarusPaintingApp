@@ -15,6 +15,7 @@ import {
   type GnumarusCheckerMode,
   type GnumarusCheckerSettings,
 } from "../settings/GnumarusCheckerSettings";
+import { computeImageDiff, GnumarusHistory } from "../history/GnumarusHistory";
 
 export interface GnumarusEngineStats {
   width: number;
@@ -23,6 +24,8 @@ export interface GnumarusEngineStats {
   rotationDeg: number;
   flipX: boolean;
   flipY: boolean;
+  canUndo: boolean;
+  canRedo: boolean;
   cursorX: number | null;
   cursorY: number | null;
 }
@@ -79,6 +82,8 @@ export class GnumarusCanvasEngine {
   private drawing = false;
   private panning = false;
   private spaceDown = false;
+  private strokeBase: Uint8ClampedArray | null = null;
+  private readonly history = new GnumarusHistory(100);
   private lastPixel: { x: number; y: number } | null = null;
   private cursor: { x: number; y: number } | null = null;
   private disposed = false;
@@ -229,6 +234,8 @@ export class GnumarusCanvasEngine {
     this.imageWidth = width;
     this.imageHeight = height;
     this.buffer = createPixelBuffer(width, height);
+    this.history.clear();
+    this.strokeBase = null;
     this.texture.image = { data: this.buffer, width, height };
     this.texture.needsUpdate = true;
     this.syncImageUniforms();
@@ -243,6 +250,8 @@ export class GnumarusCanvasEngine {
     this.imageWidth = width;
     this.imageHeight = height;
     this.buffer = copy;
+    this.history.clear();
+    this.strokeBase = null;
     this.texture.image = { data: this.buffer, width, height };
     this.texture.needsUpdate = true;
     this.syncImageUniforms();
@@ -319,6 +328,28 @@ export class GnumarusCanvasEngine {
 
   getViewState(): { zoom: number; rotation: number; flipX: boolean; flipY: boolean } {
     return { zoom: this.zoom, rotation: this.rotation, flipX: this.flipX, flipY: this.flipY };
+  }
+
+  undo(): boolean {
+    if (!this.history.undo(this.buffer, this.imageWidth)) {
+      return false;
+    }
+    this.texture.needsUpdate = true;
+    this.render();
+    this.onPixelsChanged();
+    this.emitStats();
+    return true;
+  }
+
+  redo(): boolean {
+    if (!this.history.redo(this.buffer, this.imageWidth)) {
+      return false;
+    }
+    this.texture.needsUpdate = true;
+    this.render();
+    this.onPixelsChanged();
+    this.emitStats();
+    return true;
   }
 
   applyCheckerSettings(settings: GnumarusCheckerSettings): void {
@@ -436,6 +467,7 @@ export class GnumarusCanvasEngine {
       this.drawing = true;
       canvas.setPointerCapture(event.pointerId);
       this.lastPixel = pixel;
+      this.strokeBase = this.buffer.slice();
       setPixel(this.buffer, this.imageWidth, this.imageHeight, pixel.x, pixel.y, this.color);
       this.texture.needsUpdate = true;
       this.render();
@@ -493,6 +525,13 @@ export class GnumarusCanvasEngine {
       this.emitStats();
     });
     const endStroke = (): void => {
+      if (this.strokeBase !== null) {
+        const diff = computeImageDiff(this.strokeBase, this.buffer, this.imageWidth, this.imageHeight);
+        this.strokeBase = null;
+        if (diff !== null) {
+          this.history.push(diff);
+        }
+      }
       this.drawing = false;
       this.panning = false;
       this.rotating = false;
@@ -535,6 +574,19 @@ export class GnumarusCanvasEngine {
         }
         if (event.key === "l" || event.key === "L") {
           this.setTool("loupe");
+          return;
+        }
+      }
+      if (event.ctrlKey && !event.altKey && !event.metaKey && !inField) {
+        const key = event.key.toLowerCase();
+        if (key === "z" && !event.shiftKey) {
+          event.preventDefault();
+          this.undo();
+          return;
+        }
+        if (key === "y" || (key === "z" && event.shiftKey)) {
+          event.preventDefault();
+          this.redo();
           return;
         }
       }
@@ -634,6 +686,8 @@ export class GnumarusCanvasEngine {
       rotationDeg: Math.round((this.rotation * 180) / Math.PI),
       flipX: this.flipX,
       flipY: this.flipY,
+      canUndo: this.history.canUndo(),
+      canRedo: this.history.canRedo(),
       cursorX: this.cursor === null ? null : this.cursor.x,
       cursorY: this.cursor === null ? null : this.cursor.y,
     });

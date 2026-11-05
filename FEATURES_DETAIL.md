@@ -4,7 +4,8 @@
 
 - `gnumarus-shell` Lit component: menu bar, toolbar, canvas host, status bar, New-canvas dialog, Settings dialog.
 - File menu items: New (width/height dialog, 1..1024, default 64x64), Open (directory picker), Save (writes to picked directory, reuses the handle afterwards).
-- Edit menu items: Settings (checkerboard mode image-space/screen-space, independent square width/height 1..128 default 16x16, colors A/B with Reset defaults; applied live and persisted to `localStorage`) and Reset Canvas Transform (restores fit zoom, rotation, flips).
+- Edit menu items: Undo/Redo (image edits only, with disabled state), Settings (checkerboard mode image-space/screen-space, independent square width/height 1..128 default 16x16, colors A/B with Reset defaults; applied live and persisted to `localStorage`) and Reset Canvas Transform (restores fit zoom, rotation, flips).
+- Undo/redo: per-stroke bounding-box diffs (max 100 entries), view transforms and settings never recorded; shortcuts `Ctrl+Z` undo, `Ctrl+Y` or `Shift+Ctrl+Z` redo; history cleared on New/Open.
 - Toolbar: pencil tool (pixel-art) and loupe tool (zoom/rotate/flip) plus a color input.
 - Status bar shows tool, rotation degrees, flip state, hex color, cursor pixel coordinates, canvas dimensions, zoom percentage, project name, modified marker, WebGL2/FS-API messages.
 - All UI strings in American English.
