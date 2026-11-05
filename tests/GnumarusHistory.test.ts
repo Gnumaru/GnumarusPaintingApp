@@ -165,6 +165,8 @@ describe("GnumarusHistory", () => {
           lockedChannels: { r: false, g: false, b: false, a: false },
           stackIndex: 1,
           buffer: upperBuffer,
+          cells: [{ frame: 0, content: "content9" }],
+          detachedContents: ["content7"],
         },
       },
     });

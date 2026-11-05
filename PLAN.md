@@ -70,6 +70,14 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - New background setting: canvas background is checkerboard (default) or solid color. Solid mode shows a color picker; checkerboard mode keeps all previous checker options.
 - New final render preview: small floating resizable window with internal zoom and pan rendering the flattened image as a single PNG export would look.
 
+## 12. Animation matrix (implemented)
+- Project is a cell matrix: rows are layers, columns are animation frames, each cell is the intersection of one layer and one frame.
+- Each cell references 0 or 1 cell content (empty cells render nothing); any number of cells may share the same content with no limit.
+- Cell content = 0 or 1 project texture + cell settings (position, rotation, flip_x, flip_y). Project textures are the layer pixel buffers; each layer owns exactly one texture and new empty textures are created on demand.
+- New frames start with all cells empty; painting or transforming an empty cell materializes content (and texture) as needed so existing single-frame behavior is unchanged.
+- Animation matrix UI directly above the status bar: one row per layer, one column per frame. Cell context menu: dissociate content (empty the cell), create new content, associate an existing content; dissociate a content from its texture or associate it with another project texture. Frames can be added and removed (never the last one); clicking a cell or frame header selects layer and frame.
+- Rendering, painting, transforms, history and the final preview resolve through the current frame (rendering shares texture buffers by reference, undo tags texture owners); the save format carries frames, contents, textures and cells with backward-compatible migration of legacy single-frame projects. Initial canvas fit is recomputed after the first layout so it matches later Reset Canvas Transform results.
+
 ## 11. Custom color picker (implemented)
 - Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).
 - Every model carries an alpha axis; RGBA axes span 0..255. ARD Diagonal spans 0..360 and Ratio 0..255.

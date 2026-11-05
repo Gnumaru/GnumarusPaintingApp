@@ -417,12 +417,14 @@ test("layers can be added, renamed, reordered, hidden and removed", async ({ pag
 test("undo restores pixels on the correct layer", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  const canvas = page.locator("gnumarus-shell canvas");
-  const box = await canvas.boundingBox();
-  if (box === null) {
-    throw new Error("canvas has no bounding box");
-  }
   const paintCenter = async (): Promise<void> => {
+    // Re-measure every time: adding layers grows the animation matrix and
+    // shrinks the canvas, so a cached box would click off-center.
+    const canvas = page.locator("gnumarus-shell canvas");
+    const box = await canvas.boundingBox();
+    if (box === null) {
+      throw new Error("canvas has no bounding box");
+    }
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();
     await page.mouse.up();
@@ -460,7 +462,11 @@ test("layer context menu merges down with opacity", async ({ page }) => {
 
   await page.getByRole("button", { name: "Add layer" }).click();
   await setPencil(page, "#ff0000");
-  await page.mouse.click(cx, cy);
+  const afterAdd = await page.locator("gnumarus-shell canvas").boundingBox();
+  if (afterAdd === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.mouse.click(afterAdd.x + afterAdd.width / 2, afterAdd.y + afterAdd.height / 2);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 
   const row1 = page.locator('gnumarus-shell [data-layer-id="layer1"]');
@@ -724,7 +730,11 @@ test("merge down respects destination locks and undo restores the upper lock", a
 
   await page.getByRole("button", { name: "Add layer" }).click();
   await setPencil(page, "#ff0000");
-  await page.mouse.click(cx, cy);
+  const afterAddLocks = await page.locator("gnumarus-shell canvas").boundingBox();
+  if (afterAddLocks === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.mouse.click(afterAddLocks.x + afterAddLocks.width / 2, afterAddLocks.y + afterAddLocks.height / 2);
 
   await page.evaluate(() => {
     const root = window as unknown as {
@@ -922,6 +932,7 @@ test("pixel grid follows the active layer transform", async ({ page }) => {
     const root = window as unknown as {
       __gnumarus?: {
         engine?: {
+          setZoom(z: number): void;
           setLayerTransform(id: string, t: { rotation: number }): boolean;
           getGridPlaneMatrix(): number[];
           getLayerPlaneMatrix(id: string): number[] | null;
@@ -933,6 +944,7 @@ test("pixel grid follows the active layer transform", async ({ page }) => {
     if (engine === undefined) {
       throw new Error("engine is unavailable");
     }
+    engine.setZoom(16);
     engine.setLayerTransform(engine.getActiveLayerId(), { rotation: Math.PI / 4 });
     return { grid: engine.getGridPlaneMatrix(), layer: engine.getLayerPlaneMatrix(engine.getActiveLayerId()) };
   });
@@ -1070,6 +1082,184 @@ test("final preview shows flattened render with zoom and pan", async ({ page }) 
   await expect(preview).toContainText("400%");
   await preview.getByRole("button", { name: "Close preview" }).click();
   await expect(preview).toHaveCount(0);
+});
+
+interface GnumarusTestMatrix {
+  frameCount: number;
+  currentFrame: number;
+  activeLayerId: string;
+  rows: Array<{
+    layerId: string;
+    cells: Array<{ layerId: string; frame: number; contentId: string | null; contentName: string | null }>;
+  }>;
+  contents: Array<{ id: string; name: string; textureId: string | null }>;
+}
+
+async function getMatrix(page: import("@playwright/test").Page): Promise<GnumarusTestMatrix> {
+  return page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getAnimationMatrix(): GnumarusTestMatrix } };
+    };
+    const matrix = root.__gnumarus?.engine?.getAnimationMatrix();
+    if (matrix === undefined) {
+      throw new Error("animation matrix is unavailable");
+    }
+    return matrix;
+  });
+}
+
+async function paintCenter(page: import("@playwright/test").Page): Promise<void> {
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+}
+
+test("animation matrix shows one row per layer and one column per frame", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await expect(matrix).toBeVisible();
+  expect(await matrix.locator('[data-testid="anim-cell"]').count()).toBe(1);
+  await expect(matrix.locator('[data-testid="anim-frame"][data-frame="0"]')).toBeVisible();
+  await expect(page.locator("gnumarus-shell")).toContainText("Frame 1/1");
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  expect(await matrix.locator('[data-testid="anim-cell"]').count()).toBe(2);
+  await expect(page.locator("gnumarus-shell")).toContainText("Frame 2/2");
+  const state = await getMatrix(page);
+  expect(state.frameCount).toBe(2);
+  expect(state.rows).toHaveLength(1);
+  expect(state.rows[0]?.cells.map((cell) => cell.contentId)).toEqual([expect.any(String), null]);
+});
+
+test("new frames start empty and painting a frame does not leak into others", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click();
+  expect(await readPixel(page, 32, 32)).toBeNull();
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  const state = await getMatrix(page);
+  expect(state.rows[0]?.cells[0]?.contentId).not.toBeNull();
+  expect(state.rows[0]?.cells[1]?.contentId).not.toBeNull();
+  expect(state.rows[0]?.cells[0]?.contentId).not.toBe(state.rows[0]?.cells[1]?.contentId);
+});
+
+test("cell context menu creates, dissociates and associates shared contents", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  const cell = matrix.locator('[data-testid="anim-cell"][data-matrix-frame="1"]');
+  await expect(cell).toHaveAttribute("aria-label", /empty/);
+  await cell.click({ button: "right" });
+  await page.getByRole("button", { name: "New content" }).click();
+  await expect(cell).not.toHaveAttribute("aria-label", /empty/);
+  let state = await getMatrix(page);
+  const freshId = state.rows[0]?.cells[1]?.contentId;
+  expect(typeof freshId).toBe("string");
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  const firstCell = matrix.locator('[data-testid="anim-cell"][data-matrix-frame="0"]');
+  await firstCell.click({ button: "right" });
+  await page.getByRole("button", { name: `Use content "${state.rows[0]?.cells[1]?.contentName ?? ""}"` }).click();
+  state = await getMatrix(page);
+  expect(state.rows[0]?.cells[0]?.contentId).toBe(freshId);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  await firstCell.click({ button: "right" });
+  await page.getByRole("button", { name: "Dissociate content" }).click();
+  state = await getMatrix(page);
+  expect(state.rows[0]?.cells[0]?.contentId).toBeNull();
+  expect(await readPixel(page, 32, 32)).toBeNull();
+});
+
+test("content texture can be dissociated and associated with another texture", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
+  await page.getByRole("button", { name: "Add layer" }).click();
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  const cell = matrix.locator('[data-testid="anim-cell"][data-matrix-layer="layer1"][data-matrix-frame="0"]');
+  await cell.click({ button: "right" });
+  await page.getByRole("button", { name: "Dissociate texture" }).click();
+  let state = await getMatrix(page);
+  const layer1Content = state.rows.find((row) => row.layerId === "layer1")?.cells[0]?.contentId;
+  expect(typeof layer1Content).toBe("string");
+  expect(state.contents.find((entry) => entry.id === layer1Content)?.textureId).toBeNull();
+  const layer1Cell = matrix.locator('[data-testid="anim-cell"][data-matrix-layer="layer1"][data-matrix-frame="0"]');
+  await layer1Cell.click();
+  expect(await readPixel(page, 0, 0)).toBeNull();
+  await layer1Cell.click({ button: "right" });
+  await page.getByRole("button", { name: /Use texture "Layer 0 pixels"/ }).click();
+  state = await getMatrix(page);
+  expect(state.contents.find((entry) => entry.id === layer1Content)?.textureId).toBe("layer0");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+});
+
+test("frames can be removed but never the last one", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  expect(await matrix.locator('[data-testid="anim-cell"]').count()).toBe(3);
+  await matrix.locator('[data-testid="anim-frame"][data-frame="2"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Remove frame" }).click();
+  expect(await matrix.locator('[data-testid="anim-cell"]').count()).toBe(2);
+  expect(await getMatrix(page)).toMatchObject({ frameCount: 2, currentFrame: 1 });
+  await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click({ button: "right" });
+  await expect(page.getByRole("button", { name: "Remove frame" })).toBeEnabled();
+  await page.keyboard.press("Escape");
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Remove frame" }).click();
+  expect(await getMatrix(page)).toMatchObject({ frameCount: 1, currentFrame: 0 });
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click({ button: "right" });
+  await expect(page.getByRole("button", { name: "Remove frame" })).toBeDisabled();
+});
+
+test("cell transform is stored per content and follows the frame", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { setLayerTransform(id: string, t: unknown): boolean } } };
+    root.__gnumarus?.engine?.setLayerTransform("layer0", { x: 5, y: 0 });
+  });
+  await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click();
+  const moved = await page.evaluate((): {
+    rows: Array<{ cells: Array<{ contentId: string | null }> }>;
+    contents: Array<{ id: string; transform: { x: number } }>;
+  } => {
+    const inner = window as unknown as { __gnumarus?: { engine?: { getAnimationMatrix(): unknown } } };
+    const matrix = inner.__gnumarus?.engine?.getAnimationMatrix() as
+      | {
+          rows: Array<{ cells: Array<{ contentId: string | null }> }>;
+          contents: Array<{ id: string; transform: { x: number } }>;
+        }
+      | undefined;
+    if (matrix === undefined) {
+      throw new Error("animation matrix is unavailable");
+    }
+    return matrix;
+  });
+  const frame1Content = moved.rows[0]?.cells[0]?.contentId;
+  const frame2Content = moved.rows[0]?.cells[1]?.contentId;
+  expect(frame1Content).not.toBeNull();
+  expect(frame2Content).not.toBeNull();
+  expect(frame2Content).not.toBe(frame1Content);
+  expect(moved.contents.find((entry) => entry.id === frame1Content)?.transform.x).toBe(0);
+  expect(moved.contents.find((entry) => entry.id === frame2Content)?.transform.x).toBe(5);
 });
 
 test("final preview pans with left, right and middle mouse drags", async ({ page }) => {

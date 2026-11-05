@@ -88,6 +88,10 @@ export interface GnumarusMergedLayerSnapshot {
   lockedChannels: GnumarusChannelLock;
   stackIndex: number;
   buffer: Uint8ClampedArray;
+  /** Cells of the removed layer, so undo can re-associate its contents. */
+  cells: Array<{ frame: number; content: string }>;
+  /** Contents that referenced the removed texture and were detached by the merge. */
+  detachedContents: string[];
 }
 
 export interface GnumarusMergeRecord {

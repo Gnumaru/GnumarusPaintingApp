@@ -65,20 +65,31 @@ async function resolveFile(
 
 export async function readProjectFiles(root: GnumarusDirectoryHandle): Promise<{
   project: GnumarusProjectMeta;
-  cellBlobs: Map<string, Blob>;
+  fileBlobs: Map<string, Blob>;
 }> {
   const metaHandle = await resolveFile(root, GNUMARUS_PROJECT_FILE, false);
   const metaText = await (await metaHandle.getFile()).text();
   const project = parseProject(metaText);
-  const cellBlobs = new Map<string, Blob>();
+  const fileBlobs = new Map<string, Blob>();
+  for (const texture of project.animation.textures) {
+    if (fileBlobs.has(texture.file)) {
+      continue;
+    }
+    const handle = await resolveFile(root, texture.file, false);
+    const buffer = await (await handle.getFile()).arrayBuffer();
+    fileBlobs.set(texture.file, new Blob([buffer], { type: "image/png" }));
+  }
   for (const layer of project.layers) {
-    for (const cell of layer.cells) {
+    for (const cell of layer.cells ?? []) {
+      if (fileBlobs.has(cell.file)) {
+        continue;
+      }
       const handle = await resolveFile(root, cell.file, false);
       const buffer = await (await handle.getFile()).arrayBuffer();
-      cellBlobs.set(cell.file, new Blob([buffer], { type: "image/png" }));
+      fileBlobs.set(cell.file, new Blob([buffer], { type: "image/png" }));
     }
   }
-  return { project, cellBlobs };
+  return { project, fileBlobs };
 }
 
 export async function writeProjectFiles(

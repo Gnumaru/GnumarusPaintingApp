@@ -40,6 +40,12 @@ import {
   shouldShowPixelGrid,
 } from "../settings/GnumarusGridSettings";
 import {
+  animationCellKey,
+  resolveAnimationFrame,
+  type GnumarusResolvedCell,
+  type GnumarusTexturePixels,
+} from "../animation/GnumarusAnimationModel";
+import {
   DEFAULT_BACKGROUND_SETTINGS,
   type GnumarusBackgroundMode,
   type GnumarusBackgroundSettings,
@@ -88,6 +94,70 @@ interface GnumarusLayer extends GnumarusLayerInfo {
   texture: THREE.DataTexture;
   material: THREE.ShaderMaterial;
   plane: THREE.Mesh;
+  /** Texture id currently shown, or null when the active cell is empty. */
+  renderTextureId: string | null;
+}
+
+/** Stored pixel pool entry: one per layer plus any textures created later. */
+interface GnumarusTextureEntry {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  buffer: Uint8ClampedArray;
+}
+
+/** Shareable cell content: optional texture plus per-cell transform settings. */
+interface GnumarusCellContent {
+  id: string;
+  name: string;
+  textureId: string | null;
+  transform: GnumarusLayerTransform;
+}
+
+export interface GnumarusMatrixCellView {
+  layerId: string;
+  frame: number;
+  contentId: string | null;
+  contentName: string | null;
+  hasTexture: boolean;
+}
+
+export interface GnumarusMatrixRowView {
+  layerId: string;
+  layerName: string;
+  cells: GnumarusMatrixCellView[];
+}
+
+export interface GnumarusAnimationMatrixView {
+  frameCount: number;
+  currentFrame: number;
+  activeLayerId: string;
+  rows: GnumarusMatrixRowView[];
+  contents: Array<{
+    id: string;
+    name: string;
+    textureId: string | null;
+    width: number;
+    height: number;
+    transform: GnumarusLayerTransform;
+  }>;
+  textures: Array<{ id: string; name: string; width: number; height: number }>;
+}
+
+export interface GnumarusAnimationProjectData {
+  layers: Array<{
+    id: string;
+    name: string;
+    visible: boolean;
+    opacity: number;
+    lockedChannels: GnumarusChannelLock;
+  }>;
+  textures: GnumarusTexturePixels[];
+  contents: Array<{ id: string; name: string; textureId: string | null; transform: GnumarusLayerTransform }>;
+  cells: Array<{ layer: string; frame: number; content: string }>;
+  frames: number;
+  currentFrame: number;
 }
 
 export interface GnumarusProjectLayerInput {
@@ -202,6 +272,13 @@ export class GnumarusCanvasEngine {
   private layers: GnumarusLayer[] = [];
   private activeLayerId = "";
   private layerCounter = 1;
+  private textures = new Map<string, GnumarusTextureEntry>();
+  private contents = new Map<string, GnumarusCellContent>();
+  private cells = new Map<string, string>();
+  private frameCount = 1;
+  private currentFrame = 0;
+  private contentCounter = 1;
+  private textureCounter = 1;
   private imageWidth: number;
   private imageHeight: number;
   private zoom: number;
@@ -342,6 +419,25 @@ export class GnumarusCanvasEngine {
     this.layers.push(first);
     this.activeLayerId = first.id;
     this.layerCounter = 1;
+    this.textures.set("layer0", {
+      id: "layer0",
+      name: "Layer 0 pixels",
+      width: 64,
+      height: 64,
+      buffer: first.buffer,
+    });
+    this.contents.set("content1", {
+      id: "content1",
+      name: "Content 1",
+      textureId: "layer0",
+      transform: { ...IDENTITY_LAYER_TRANSFORM },
+    });
+    this.cells.set(animationCellKey("layer0", 0), "content1");
+    this.frameCount = 1;
+    this.currentFrame = 0;
+    this.contentCounter = 2;
+    this.textureCounter = 1;
+    this.syncAllLayerRenders();
 
     this.resizeObserver = new ResizeObserver(() => this.layout());
     this.resizeObserver.observe(container);
@@ -411,6 +507,7 @@ export class GnumarusCanvasEngine {
       texture,
       material,
       plane,
+      renderTextureId: null,
     };
   }
 
@@ -436,6 +533,393 @@ export class GnumarusCanvasEngine {
 
   private activeLayer(): GnumarusLayer | null {
     return this.findLayer(this.activeLayerId);
+  }
+
+  private historyTextureFor(id: string): { buffer: Uint8ClampedArray; width: number } | null {
+    const entry = this.textures.get(id);
+    if (entry === undefined) {
+      return null;
+    }
+    return { buffer: entry.buffer, width: entry.width };
+  }
+
+  private resolveFrame(): Map<string, GnumarusResolvedCell> {
+    const textures = new Map<string, { width: number; height: number; buffer: Uint8ClampedArray }>();
+    for (const [id, entry] of this.textures) {
+      textures.set(id, { width: entry.width, height: entry.height, buffer: entry.buffer });
+    }
+    const contents = new Map<string, { textureId: string | null; transform: GnumarusLayerTransform }>();
+    for (const [id, content] of this.contents) {
+      contents.set(id, { textureId: content.textureId, transform: content.transform });
+    }
+    return resolveAnimationFrame(
+      this.layers.map((layer) => layer.id),
+      textures,
+      contents,
+      this.cells,
+      this.currentFrame,
+    );
+  }
+
+  /** Point one layer render at its current-frame cell (shared buffer refs, no copies). */
+  private syncLayerRender(layer: GnumarusLayer): void {
+    const resolved = this.resolveFrame().get(layer.id);
+    if (resolved === undefined || resolved.textureId === null || resolved.buffer === null) {
+      layer.buffer = new Uint8ClampedArray(0);
+      layer.width = 0;
+      layer.height = 0;
+      layer.transform = { ...IDENTITY_LAYER_TRANSFORM };
+      layer.renderTextureId = null;
+      layer.plane.visible = false;
+      return;
+    }
+    const texId = resolved.textureId;
+    const image = layer.texture.image;
+    if (layer.renderTextureId !== texId || image.data !== resolved.buffer || image.width !== resolved.width || image.height !== resolved.height) {
+      layer.texture.dispose();
+      const texture = new THREE.DataTexture(resolved.buffer, resolved.width, resolved.height);
+      texture.magFilter = THREE.NearestFilter;
+      texture.minFilter = THREE.NearestFilter;
+      texture.generateMipmaps = false;
+      texture.flipY = true;
+      texture.needsUpdate = true;
+      layer.texture = texture;
+      layer.material.uniforms["uMap"]!.value = texture;
+    }
+    layer.buffer = resolved.buffer;
+    layer.width = resolved.width;
+    layer.height = resolved.height;
+    layer.transform = { ...resolved.transform };
+    layer.renderTextureId = texId;
+    layer.plane.visible = layer.visible;
+  }
+
+  private syncAllLayerRenders(): void {
+    for (const layer of this.layers) {
+      this.syncLayerRender(layer);
+    }
+  }
+
+  private markTextureViewsDirty(textureId: string): void {
+    for (const layer of this.layers) {
+      if (layer.renderTextureId === textureId) {
+        layer.texture.needsUpdate = true;
+      }
+    }
+  }
+
+  private nextContentId(): string {
+    return `content${this.contentCounter++}`;
+  }
+
+  private nextTextureId(): string {
+    return `tex${this.textureCounter++}`;
+  }
+
+  private contentDisplaySize(content: GnumarusCellContent): { width: number; height: number } {
+    if (content.textureId === null) {
+      return { width: 0, height: 0 };
+    }
+    const tex = this.textures.get(content.textureId);
+    if (tex === undefined) {
+      return { width: 0, height: 0 };
+    }
+    return { width: tex.width, height: tex.height };
+  }
+
+  getFrameCount(): number {
+    return this.frameCount;
+  }
+
+  getCurrentFrame(): number {
+    return this.currentFrame;
+  }
+
+  setCurrentFrame(frame: number): boolean {
+    if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
+      return false;
+    }
+    if (frame === this.currentFrame) {
+      return false;
+    }
+    this.currentFrame = frame;
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.emitStats();
+    this.onLayersChanged?.();
+    return true;
+  }
+
+  addFrame(): number {
+    this.frameCount += 1;
+    this.currentFrame = this.frameCount - 1;
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.emitStats();
+    this.onLayersChanged?.();
+    return this.currentFrame;
+  }
+
+  removeFrame(frame: number): boolean {
+    if (this.frameCount <= 1) {
+      return false;
+    }
+    if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
+      return false;
+    }
+    const kept = new Map<string, string>();
+    for (const [key, contentId] of this.cells) {
+      const separator = key.lastIndexOf("\n");
+      const layerId = key.slice(0, separator);
+      const cellFrame = Number.parseInt(key.slice(separator + 1), 10);
+      if (cellFrame === frame) {
+        continue;
+      }
+      const target = cellFrame > frame ? cellFrame - 1 : cellFrame;
+      kept.set(animationCellKey(layerId, target), contentId);
+    }
+    this.cells = kept;
+    this.frameCount -= 1;
+    if (this.currentFrame > frame) {
+      this.currentFrame -= 1;
+    } else if (this.currentFrame >= this.frameCount) {
+      this.currentFrame = this.frameCount - 1;
+    }
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.emitStats();
+    this.onLayersChanged?.();
+    return true;
+  }
+
+  getCellContentId(layerId: string, frame: number): string | null {
+    return this.cells.get(animationCellKey(layerId, frame)) ?? null;
+  }
+
+  getAnimationMatrix(): GnumarusAnimationMatrixView {
+    const rows: GnumarusMatrixRowView[] = [...this.layers].reverse().map((layer) => ({
+      layerId: layer.id,
+      layerName: layer.name,
+      cells: Array.from({ length: this.frameCount }, (_unused, frame) => {
+        const contentId = this.cells.get(animationCellKey(layer.id, frame)) ?? null;
+        const content = contentId === null ? undefined : this.contents.get(contentId);
+        return {
+          layerId: layer.id,
+          frame,
+          contentId,
+          contentName: content?.name ?? null,
+          hasTexture: content?.textureId !== undefined && content.textureId !== null && this.textures.has(content.textureId),
+        };
+      }),
+    }));
+    return {
+      frameCount: this.frameCount,
+      currentFrame: this.currentFrame,
+      activeLayerId: this.activeLayerId,
+      rows,
+      contents: [...this.contents.values()].map((content) => {
+        const size = this.contentDisplaySize(content);
+        return {
+          id: content.id,
+          name: content.name,
+          textureId: content.textureId,
+          width: size.width,
+          height: size.height,
+          transform: { ...content.transform },
+        };
+      }),
+      textures: [...this.textures.values()].map((texture) => ({
+        id: texture.id,
+        name: texture.name,
+        width: texture.width,
+        height: texture.height,
+      })),
+    };
+  }
+
+  /** Create fresh content with a new empty project-sized texture and attach it to the cell. */
+  createCellContent(layerId: string, frame: number): string | null {
+    if (this.findLayer(layerId) === null) {
+      return null;
+    }
+    if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
+      return null;
+    }
+    const textureId = this.nextTextureId();
+    this.textures.set(textureId, {
+      id: textureId,
+      name: `Texture ${this.textureCounter - 1}`,
+      width: this.imageWidth,
+      height: this.imageHeight,
+      buffer: createPixelBuffer(this.imageWidth, this.imageHeight),
+    });
+    const contentId = this.nextContentId();
+    this.contents.set(contentId, {
+      id: contentId,
+      name: `Content ${this.contentCounter - 1}`,
+      textureId,
+      transform: { ...IDENTITY_LAYER_TRANSFORM },
+    });
+    this.cells.set(animationCellKey(layerId, frame), contentId);
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return contentId;
+  }
+
+  dissociateCellContent(layerId: string, frame: number): boolean {
+    const key = animationCellKey(layerId, frame);
+    if (!this.cells.has(key)) {
+      return false;
+    }
+    this.cells.delete(key);
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return true;
+  }
+
+  associateCellContent(layerId: string, frame: number, contentId: string): boolean {
+    if (this.findLayer(layerId) === null || !this.contents.has(contentId)) {
+      return false;
+    }
+    if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
+      return false;
+    }
+    const key = animationCellKey(layerId, frame);
+    if (this.cells.get(key) === contentId) {
+      return false;
+    }
+    this.cells.set(key, contentId);
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return true;
+  }
+
+  dissociateContentTexture(contentId: string): boolean {
+    const content = this.contents.get(contentId);
+    if (content === undefined || content.textureId === null) {
+      return false;
+    }
+    content.textureId = null;
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return true;
+  }
+
+  associateContentTexture(contentId: string, textureId: string): boolean {
+    const content = this.contents.get(contentId);
+    if (content === undefined || !this.textures.has(textureId)) {
+      return false;
+    }
+    if (content.textureId === textureId) {
+      return false;
+    }
+    content.textureId = textureId;
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return true;
+  }
+
+  /**
+   * Ensure the cell has content backed by a texture, creating both as needed.
+   * Painting and transforming an empty cell materialize it so the canvas
+   * stays directly editable on any frame.
+   */
+  private ensureCellContent(layerId: string, frame: number): { content: GnumarusCellContent; texture: GnumarusTextureEntry } | null {
+    if (this.findLayer(layerId) === null) {
+      return null;
+    }
+    const key = animationCellKey(layerId, frame);
+    let contentId = this.cells.get(key);
+    let content = contentId === undefined ? undefined : this.contents.get(contentId);
+    if (content === undefined) {
+      const createdId = this.nextContentId();
+      content = {
+        id: createdId,
+        name: `Content ${this.contentCounter - 1}`,
+        textureId: null,
+        transform: { ...IDENTITY_LAYER_TRANSFORM },
+      };
+      this.contents.set(createdId, content);
+      this.cells.set(key, createdId);
+      contentId = createdId;
+    }
+    let texture = content.textureId === null ? null : (this.textures.get(content.textureId) ?? null);
+    if (texture === null) {
+      const textureId = this.nextTextureId();
+      texture = {
+        id: textureId,
+        name: `Texture ${this.textureCounter - 1}`,
+        width: this.imageWidth,
+        height: this.imageHeight,
+        buffer: createPixelBuffer(this.imageWidth, this.imageHeight),
+      };
+      this.textures.set(textureId, texture);
+      content.textureId = textureId;
+    }
+    return { content, texture };
+  }
+
+  exportTextures(): GnumarusLayerPixels[] {
+    return [...this.textures.values()].map((texture) => ({
+      id: texture.id,
+      width: texture.width,
+      height: texture.height,
+      buffer: texture.buffer,
+    }));
+  }
+
+  exportAnimationProject(): GnumarusAnimationProjectData {
+    return {
+      layers: this.layers.map((layer) => ({
+        id: layer.id,
+        name: layer.name,
+        visible: layer.visible,
+        opacity: layer.opacity,
+        lockedChannels: { ...layer.lockedChannels },
+      })),
+      textures: [...this.textures.values()].map((texture) => ({
+        id: texture.id,
+        name: texture.name,
+        width: texture.width,
+        height: texture.height,
+        buffer: texture.buffer,
+      })),
+      contents: [...this.contents.values()].map((content) => ({
+        id: content.id,
+        name: content.name,
+        textureId: content.textureId,
+        transform: { ...content.transform },
+      })),
+      cells: [...this.cells.entries()].map(([key, content]) => {
+        const separator = key.lastIndexOf("\n");
+        return { layer: key.slice(0, separator), frame: Number.parseInt(key.slice(separator + 1), 10), content };
+      }),
+      frames: this.frameCount,
+      currentFrame: this.currentFrame,
+    };
   }
 
   getLayers(): GnumarusLayerInfo[] {
@@ -481,9 +965,30 @@ export class GnumarusCanvasEngine {
       { ...IDENTITY_LAYER_TRANSFORM },
     );
     this.layers.push(layer);
+    this.textures.set(id, {
+      id,
+      name: `${name} pixels`,
+      width: this.imageWidth,
+      height: this.imageHeight,
+      buffer: layer.buffer,
+    });
+    layer.renderTextureId = id;
+    const contentId = this.nextContentId();
+    this.contents.set(contentId, {
+      id: contentId,
+      name: `Content ${this.contentCounter - 1}`,
+      textureId: id,
+      transform: { ...IDENTITY_LAYER_TRANSFORM },
+    });
+    for (let frame = 0; frame < this.frameCount; frame += 1) {
+      this.cells.set(animationCellKey(id, frame), contentId);
+    }
     this.activeLayerId = id;
+    this.syncAllLayerRenders();
     this.refreshLayerStacking();
     this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
     this.emitStats();
     return id;
   }
@@ -492,12 +997,31 @@ export class GnumarusCanvasEngine {
     if (this.layers.length <= 1) {
       return false;
     }
-    if (!this.removeLayerSilent(id)) {
+    if (!this.removeLayerFull(id)) {
       return false;
     }
     this.refreshLayerStacking();
     this.render();
     this.emitStats();
+    return true;
+  }
+
+  /** Fully remove a layer: entry, owned texture, cells; detach referencing contents. */
+  private removeLayerFull(id: string): boolean {
+    if (!this.removeLayerSilent(id)) {
+      return false;
+    }
+    for (const content of this.contents.values()) {
+      if (content.textureId === id) {
+        content.textureId = null;
+      }
+    }
+    for (const key of [...this.cells.keys()]) {
+      if (key.startsWith(`${id}\n`)) {
+        this.cells.delete(key);
+      }
+    }
+    this.syncAllLayerRenders();
     return true;
   }
 
@@ -512,6 +1036,7 @@ export class GnumarusCanvasEngine {
       removed.material.dispose();
       removed.texture.dispose();
     }
+    this.textures.delete(id);
     if (this.activeLayerId === id) {
       const next = this.layers[Math.min(index, this.layers.length - 1)];
       if (next !== undefined) {
@@ -531,19 +1056,41 @@ export class GnumarusCanvasEngine {
       buffer,
       snapshot.width,
       snapshot.height,
-      { ...snapshot.transform },
+      { ...IDENTITY_LAYER_TRANSFORM },
       { ...snapshot.lockedChannels },
     );
+    this.textures.set(snapshot.id, {
+      id: snapshot.id,
+      name: `${snapshot.name} pixels`,
+      width: snapshot.width,
+      height: snapshot.height,
+      buffer,
+    });
+    layer.renderTextureId = snapshot.id;
     const at = Math.min(Math.max(0, snapshot.stackIndex), this.layers.length);
     this.layers.splice(at, 0, layer);
+    for (const cell of snapshot.cells) {
+      if (this.contents.has(cell.content)) {
+        this.cells.set(animationCellKey(snapshot.id, cell.frame), cell.content);
+      }
+    }
+    for (const contentId of snapshot.detachedContents) {
+      const content = this.contents.get(contentId);
+      if (content !== undefined) {
+        content.textureId = snapshot.id;
+      }
+    }
     this.activeLayerId = snapshot.id;
+    this.syncAllLayerRenders();
     this.refreshLayerStacking();
   }
 
   /**
    * Merge the layer into the one immediately below it, sampling the upper
    * layer through its own size and transform and using its opacity.
-   * The result is a single undoable history entry.
+   * Operates on the current frame's resolved pixels. The removed layer's
+   * cells and any contents detached from its texture are recorded so undo
+   * restores them. The result is a single undoable history entry.
    */
   mergeDown(id: string): boolean {
     const index = this.layers.findIndex((layer) => layer.id === id);
@@ -555,54 +1102,95 @@ export class GnumarusCanvasEngine {
     if (upper === undefined || lower === undefined) {
       return false;
     }
-    const base = lower.buffer.slice();
-    for (let y = 0; y < lower.height; y += 1) {
-      for (let x = 0; x < lower.width; x += 1) {
-        const project = layerPixelCenterToProject(x, y, lower.width, lower.height, lower.transform);
+    const upperOwner = this.ownerTextureId(upper);
+    const lowerOwner = this.ownerTextureId(lower);
+    if (upperOwner === null || lowerOwner === null) {
+      return false;
+    }
+    const lowerEntry = this.textures.get(lowerOwner);
+    const upperEntry = this.textures.get(upperOwner);
+    const ownedEntry = this.textures.get(id);
+    if (lowerEntry === undefined || upperEntry === undefined || ownedEntry === undefined) {
+      return false;
+    }
+    const base = lowerEntry.buffer.slice();
+    for (let y = 0; y < lowerEntry.height; y += 1) {
+      for (let x = 0; x < lowerEntry.width; x += 1) {
+        const project = layerPixelCenterToProject(x, y, lowerEntry.width, lowerEntry.height, lower.transform);
         const sample = projectToLayerPixel(
           project.x,
           project.y,
-          upper.width,
-          upper.height,
+          upperEntry.width,
+          upperEntry.height,
           upper.transform,
         );
         if (sample === null) {
           continue;
         }
         compositePixelOver(
-          lower.buffer,
-          (y * lower.width + x) * 4,
-          upper.buffer,
-          (sample.y * upper.width + sample.x) * 4,
+          lowerEntry.buffer,
+          (y * lowerEntry.width + x) * 4,
+          upperEntry.buffer,
+          (sample.y * upperEntry.width + sample.x) * 4,
           upper.opacity,
           lower.lockedChannels,
         );
       }
     }
-    const diff = computeImageDiff(base, lower.buffer, lower.width, lower.height);
+    const diff = computeImageDiff(base, lowerEntry.buffer, lowerEntry.width, lowerEntry.height);
+    const upperCells: Array<{ frame: number; content: string }> = [];
+    for (const [key, contentId] of this.cells) {
+      if (key.startsWith(`${id}\n`)) {
+        const separator = key.lastIndexOf("\n");
+        upperCells.push({ frame: Number.parseInt(key.slice(separator + 1), 10), content: contentId });
+      }
+    }
+    const detachedContents: string[] = [];
+    for (const content of this.contents.values()) {
+      if (content.textureId === id) {
+        detachedContents.push(content.id);
+      }
+    }
     const snapshot: GnumarusMergedLayerSnapshot = {
       id: upper.id,
       name: upper.name,
       visible: upper.visible,
       opacity: upper.opacity,
-      width: upper.width,
-      height: upper.height,
+      width: ownedEntry.width,
+      height: ownedEntry.height,
       transform: { ...upper.transform },
       lockedChannels: { ...upper.lockedChannels },
       stackIndex: index,
-      buffer: upper.buffer.slice(),
+      buffer: ownedEntry.buffer.slice(),
+      cells: upperCells,
+      detachedContents,
     };
-    this.removeLayerSilent(id);
+    this.removeLayerFull(id);
     this.activeLayerId = lower.id;
     this.history.push({
       type: "merge",
-      merge: { lowerLayerId: lower.id, lowerDiff: diff, upper: snapshot },
+      merge: { lowerLayerId: lowerOwner, lowerDiff: diff, upper: snapshot },
     });
-    lower.texture.needsUpdate = true;
+    this.markTextureViewsDirty(lowerOwner);
+    this.syncAllLayerRenders();
     this.refreshLayerStacking();
     this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
     this.emitStats();
     return true;
+  }
+
+  /** Texture id whose pixels the layer currently renders (null when empty). */
+  private ownerTextureId(layer: GnumarusLayer): string | null {
+    if (layer.renderTextureId !== null && this.textures.has(layer.renderTextureId)) {
+      return layer.renderTextureId;
+    }
+    const resolved = this.resolveFrame().get(layer.id);
+    if (resolved === undefined || resolved.textureId === null || resolved.buffer === null) {
+      return null;
+    }
+    return resolved.textureId;
   }
 
   renameLayer(id: string, name: string): boolean {
@@ -612,7 +1200,12 @@ export class GnumarusCanvasEngine {
       return false;
     }
     layer.name = trimmed;
+    const owned = this.textures.get(id);
+    if (owned !== undefined) {
+      owned.name = `${trimmed} pixels`;
+    }
     this.emitStats();
+    this.onLayersChanged?.();
     return true;
   }
 
@@ -690,45 +1283,48 @@ export class GnumarusCanvasEngine {
   }
 
   setLayerTransform(id: string, transform: Partial<GnumarusLayerTransform>): boolean {
-    const layer = this.findLayer(id);
-    if (layer === null) {
+    const ensured = this.ensureCellContent(id, this.currentFrame);
+    if (ensured === null) {
       return false;
     }
     if (transform.x !== undefined) {
-      layer.transform.x = transform.x;
+      ensured.content.transform.x = transform.x;
     }
     if (transform.y !== undefined) {
-      layer.transform.y = transform.y;
+      ensured.content.transform.y = transform.y;
     }
     if (transform.rotation !== undefined) {
-      layer.transform.rotation = normalizeRotation(transform.rotation);
+      ensured.content.transform.rotation = normalizeRotation(transform.rotation);
     }
     if (transform.flipX !== undefined) {
-      layer.transform.flipX = transform.flipX;
+      ensured.content.transform.flipX = transform.flipX;
     }
     if (transform.flipY !== undefined) {
-      layer.transform.flipY = transform.flipY;
+      ensured.content.transform.flipY = transform.flipY;
     }
+    this.syncAllLayerRenders();
     this.layoutSceneTransforms();
     this.render();
     return true;
   }
 
   resetLayerTransform(id: string): boolean {
-    const layer = this.findLayer(id);
-    if (layer === null) {
+    const ensured = this.ensureCellContent(id, this.currentFrame);
+    if (ensured === null) {
       return false;
     }
-    layer.transform = { ...IDENTITY_LAYER_TRANSFORM };
+    ensured.content.transform = { ...IDENTITY_LAYER_TRANSFORM };
+    this.syncAllLayerRenders();
     this.layoutSceneTransforms();
     this.render();
     this.emitStats();
     return true;
   }
 
-  private replaceLayerBuffer(layerId: string, width: number, height: number, buffer: Uint8ClampedArray): boolean {
-    const layer = this.findLayer(layerId);
-    if (layer === null) {
+  /** Replace a texture's pixels and refresh every layer view showing it. */
+  private setTexturePixels(textureId: string, width: number, height: number, buffer: Uint8ClampedArray): boolean {
+    const entry = this.textures.get(textureId);
+    if (entry === undefined) {
       return false;
     }
     if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
@@ -737,39 +1333,31 @@ export class GnumarusCanvasEngine {
     if (buffer.length !== width * height * 4) {
       return false;
     }
-    layer.texture.dispose();
-    const texture = new THREE.DataTexture(buffer, width, height);
-    texture.magFilter = THREE.NearestFilter;
-    texture.minFilter = THREE.NearestFilter;
-    texture.generateMipmaps = false;
-    texture.flipY = true;
-    texture.needsUpdate = true;
-    layer.texture = texture;
-    layer.material.uniforms["uMap"]!.value = texture;
-    layer.width = width;
-    layer.height = height;
-    layer.buffer = buffer;
+    entry.width = width;
+    entry.height = height;
+    entry.buffer = buffer;
+    this.syncAllLayerRenders();
     return true;
   }
 
   private applyLayerResize(layerId: string, width: number, height: number, buffer: Uint8ClampedArray): boolean {
     const copy = new Uint8ClampedArray(buffer);
-    if (!this.replaceLayerBuffer(layerId, width, height, copy)) {
+    if (!this.setTexturePixels(layerId, width, height, copy)) {
       return false;
     }
     return true;
   }
 
   /**
-   * Resize a layer, preserving top-left pixels.
+   * Resize a layer's own texture, preserving top-left pixels.
    * Larger dimensions expand right and down with transparent pixels.
    * Smaller dimensions crop excess right and below.
    * Returns false for unknown layers, invalid dimensions or no-op resizes.
    * Successful resizes are undoable.
    */
   resizeLayer(id: string, newWidth: number, newHeight: number): boolean {
-    const layer = this.findLayer(id);
-    if (layer === null) {
+    const entry = this.textures.get(id);
+    if (entry === undefined) {
       return false;
     }
     if (!Number.isFinite(newWidth) || !Number.isFinite(newHeight)) {
@@ -777,15 +1365,15 @@ export class GnumarusCanvasEngine {
     }
     const clampedWidth = clampLayerDim(newWidth);
     const clampedHeight = clampLayerDim(newHeight);
-    if (clampedWidth === layer.width && clampedHeight === layer.height) {
+    if (clampedWidth === entry.width && clampedHeight === entry.height) {
       return false;
     }
-    const beforeWidth = layer.width;
-    const beforeHeight = layer.height;
-    const beforeBuffer = layer.buffer.slice();
-    const nextBuffer = resizePixelBuffer(layer.buffer, layer.width, layer.height, clampedWidth, clampedHeight);
+    const beforeWidth = entry.width;
+    const beforeHeight = entry.height;
+    const beforeBuffer = entry.buffer.slice();
+    const nextBuffer = resizePixelBuffer(entry.buffer, entry.width, entry.height, clampedWidth, clampedHeight);
     const afterBuffer = nextBuffer.slice();
-    if (!this.replaceLayerBuffer(id, clampedWidth, clampedHeight, nextBuffer)) {
+    if (!this.setTexturePixels(id, clampedWidth, clampedHeight, nextBuffer)) {
       return false;
     }
     this.history.push({
@@ -800,6 +1388,7 @@ export class GnumarusCanvasEngine {
         afterBuffer,
       },
     });
+    this.markTextureViewsDirty(id);
     this.refreshLayerStacking();
     this.render();
     this.onPixelsChanged();
@@ -822,12 +1411,7 @@ export class GnumarusCanvasEngine {
     }
     this.imageWidth = Math.max(1, Math.floor(projectWidth));
     this.imageHeight = Math.max(1, Math.floor(projectHeight));
-    for (const layer of this.layers) {
-      this.scene.remove(layer.plane);
-      layer.material.dispose();
-      layer.texture.dispose();
-    }
-    this.layers = [];
+    this.clearAllLayers();
     let maxSuffix = 0;
     for (const input of inputs) {
       const match = /^layer(\d+)$/.exec(input.id);
@@ -835,36 +1419,188 @@ export class GnumarusCanvasEngine {
         maxSuffix = Math.max(maxSuffix, Number.parseInt(match[1], 10) + 1);
       }
       const copy = new Uint8ClampedArray(input.buffer);
-      this.layers.push(
-        this.createLayerInternal(
-          input.id,
-          input.name,
-          input.visible,
-          input.opacity,
-          copy,
-          input.width,
-          input.height,
-          {
-            ...input.transform,
-            rotation: normalizeRotation(input.transform.rotation),
-          },
-          parseChannelLock(input.lockedChannels),
-        ),
+      const layer = this.createLayerInternal(
+        input.id,
+        input.name,
+        input.visible,
+        input.opacity,
+        copy,
+        input.width,
+        input.height,
+        {
+          ...input.transform,
+          rotation: normalizeRotation(input.transform.rotation),
+        },
+        parseChannelLock(input.lockedChannels),
       );
+      this.layers.push(layer);
+      this.textures.set(input.id, {
+        id: input.id,
+        name: `${input.name} pixels`,
+        width: input.width,
+        height: input.height,
+        buffer: copy,
+      });
+      layer.renderTextureId = input.id;
+      const contentId = this.nextContentId();
+      this.contents.set(contentId, {
+        id: contentId,
+        name: `Content ${this.contentCounter - 1}`,
+        textureId: input.id,
+        transform: {
+          ...input.transform,
+          rotation: normalizeRotation(input.transform.rotation),
+        },
+      });
+      this.cells.set(animationCellKey(input.id, 0), contentId);
     }
     const top = this.layers[this.layers.length - 1];
     if (top !== undefined) {
       this.activeLayerId = top.id;
     }
     this.layerCounter = Math.max(maxSuffix, this.layers.length);
+    this.frameCount = 1;
+    this.currentFrame = 0;
     this.history.clear();
     this.strokeBase = null;
     this.strokeLayerId = null;
     this.syncImageUniforms();
+    this.syncAllLayerRenders();
     this.refreshLayerStacking();
     this.resetView();
     this.render();
     this.emitStats();
+    this.onLayersChanged?.();
+  }
+
+  loadAnimationProject(
+    projectWidth: number,
+    projectHeight: number,
+    data: {
+      layers: Array<{
+        id: string;
+        name: string;
+        visible: boolean;
+        opacity: number;
+        lockedChannels: GnumarusChannelLock;
+      }>;
+      textures: GnumarusTexturePixels[];
+      contents: Array<{ id: string; name: string; textureId: string | null; transform: GnumarusLayerTransform }>;
+      cells: Array<{ layer: string; frame: number; content: string }>;
+      frames: number;
+      currentFrame: number;
+    },
+  ): void {
+    if (data.layers.length === 0) {
+      throw new Error("Project has no layers.");
+    }
+    if (!Number.isInteger(data.frames) || data.frames < 1) {
+      throw new Error("Project has an invalid frame count.");
+    }
+    const layerIds = new Set(data.layers.map((layer) => layer.id));
+    for (const texture of data.textures) {
+      if (texture.buffer.length !== texture.width * texture.height * 4) {
+        throw new Error(`Texture buffer size mismatch: ${texture.id}`);
+      }
+    }
+    const textureIds = new Set(data.textures.map((texture) => texture.id));
+    const contentIds = new Set<string>();
+    for (const content of data.contents) {
+      contentIds.add(content.id);
+      if (content.textureId !== null && !textureIds.has(content.textureId)) {
+        throw new Error(`Content references a missing texture: ${content.id}`);
+      }
+    }
+    for (const cell of data.cells) {
+      if (!layerIds.has(cell.layer)) {
+        throw new Error(`Cell references a missing layer: ${cell.layer}`);
+      }
+      if (!Number.isInteger(cell.frame) || cell.frame < 0 || cell.frame >= data.frames) {
+        throw new Error("Cell references an invalid frame.");
+      }
+      if (!contentIds.has(cell.content)) {
+        throw new Error("Cell references a missing content.");
+      }
+    }
+    this.imageWidth = Math.max(1, Math.floor(projectWidth));
+    this.imageHeight = Math.max(1, Math.floor(projectHeight));
+    this.clearAllLayers();
+    for (const layer of data.layers) {
+      const placeholder = new Uint8ClampedArray(4);
+      this.layers.push(
+        this.createLayerInternal(
+          layer.id,
+          layer.name,
+          layer.visible,
+          layer.opacity,
+          placeholder,
+          1,
+          1,
+          { ...IDENTITY_LAYER_TRANSFORM },
+          parseChannelLock(layer.lockedChannels),
+        ),
+      );
+    }
+    for (const texture of data.textures) {
+      this.textures.set(texture.id, {
+        id: texture.id,
+        name: texture.name,
+        width: texture.width,
+        height: texture.height,
+        buffer: new Uint8ClampedArray(texture.buffer),
+      });
+    }
+    for (const content of data.contents) {
+      this.contents.set(content.id, {
+        id: content.id,
+        name: content.name,
+        textureId: content.textureId,
+        transform: { ...content.transform, rotation: normalizeRotation(content.transform.rotation) },
+      });
+    }
+    for (const cell of data.cells) {
+      this.cells.set(animationCellKey(cell.layer, cell.frame), cell.content);
+    }
+    this.frameCount = data.frames;
+    this.currentFrame = Math.min(Math.max(0, Math.floor(data.currentFrame)), data.frames - 1);
+    let maxLayer = 0;
+    let maxContent = 0;
+    let maxTexture = 0;
+    for (const layer of data.layers) {
+      const match = /^layer(\d+)$/.exec(layer.id);
+      if (match?.[1] !== undefined) {
+        maxLayer = Math.max(maxLayer, Number.parseInt(match[1], 10) + 1);
+      }
+    }
+    for (const content of data.contents) {
+      const match = /^content(\d+)$/.exec(content.id);
+      if (match?.[1] !== undefined) {
+        maxContent = Math.max(maxContent, Number.parseInt(match[1], 10) + 1);
+      }
+    }
+    for (const texture of data.textures) {
+      const match = /^tex(\d+)$/.exec(texture.id);
+      if (match?.[1] !== undefined) {
+        maxTexture = Math.max(maxTexture, Number.parseInt(match[1], 10) + 1);
+      }
+    }
+    this.layerCounter = Math.max(maxLayer, data.layers.length);
+    this.contentCounter = Math.max(maxContent, data.contents.length + 1, 1);
+    this.textureCounter = Math.max(maxTexture, 1);
+    const top = this.layers[this.layers.length - 1];
+    if (top !== undefined) {
+      this.activeLayerId = top.id;
+    }
+    this.history.clear();
+    this.strokeBase = null;
+    this.strokeLayerId = null;
+    this.syncImageUniforms();
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.resetView();
+    this.render();
+    this.emitStats();
+    this.onLayersChanged?.();
   }
 
   private syncImageUniforms(): void {
@@ -878,29 +1614,57 @@ export class GnumarusCanvasEngine {
     }
   }
 
-  newProject(width: number, height: number): void {
-    this.imageWidth = width;
-    this.imageHeight = height;
+  private clearAllLayers(): void {
     for (const layer of this.layers) {
       this.scene.remove(layer.plane);
       layer.material.dispose();
       layer.texture.dispose();
     }
     this.layers = [];
+    this.textures.clear();
+    this.contents.clear();
+    this.cells.clear();
+  }
+
+  newProject(width: number, height: number): void {
+    this.imageWidth = width;
+    this.imageHeight = height;
+    this.clearAllLayers();
     const first = this.createLayerInternal("layer0", "Layer 0", true, 1, createPixelBuffer(width, height), width, height, {
       ...IDENTITY_LAYER_TRANSFORM,
     });
     this.layers.push(first);
+    this.textures.set("layer0", {
+      id: "layer0",
+      name: "Layer 0 pixels",
+      width,
+      height,
+      buffer: first.buffer,
+    });
+    first.renderTextureId = "layer0";
+    this.contents.set("content1", {
+      id: "content1",
+      name: "Content 1",
+      textureId: "layer0",
+      transform: { ...IDENTITY_LAYER_TRANSFORM },
+    });
+    this.cells.set(animationCellKey("layer0", 0), "content1");
     this.activeLayerId = first.id;
     this.layerCounter = 1;
+    this.contentCounter = 2;
+    this.textureCounter = 1;
+    this.frameCount = 1;
+    this.currentFrame = 0;
     this.history.clear();
     this.strokeBase = null;
     this.strokeLayerId = null;
     this.syncImageUniforms();
+    this.syncAllLayerRenders();
     this.refreshLayerStacking();
     this.resetView();
     this.render();
     this.emitStats();
+    this.onLayersChanged?.();
   }
 
   setColor(hex: string): void {
@@ -915,15 +1679,23 @@ export class GnumarusCanvasEngine {
     if (layer === null) {
       return;
     }
-    const base = layer.buffer.slice();
-    clearPixelBuffer(layer.buffer, layer.lockedChannels);
-    const diff = computeImageDiff(base, layer.buffer, layer.width, layer.height);
-    if (diff !== null) {
-      this.history.push({ type: "stroke", layerId: layer.id, diff });
+    const ensured = this.ensureCellContent(layer.id, this.currentFrame);
+    if (ensured === null) {
+      return;
     }
-    layer.texture.needsUpdate = true;
+    const tex = ensured.texture;
+    const base = tex.buffer.slice();
+    clearPixelBuffer(tex.buffer, layer.lockedChannels);
+    const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
+    if (diff !== null) {
+      this.history.push({ type: "stroke", layerId: tex.id, diff });
+    }
+    this.syncAllLayerRenders();
+    this.markTextureViewsDirty(tex.id);
+    this.refreshLayerStacking();
     this.render();
     this.onPixelsChanged();
+    this.onLayersChanged?.();
     this.emitStats();
   }
 
@@ -1003,7 +1775,9 @@ export class GnumarusCanvasEngine {
   redo(): boolean {
     const applied = this.history.redo(
       (layerId) => this.historyLayerFor(layerId),
-      (layerId) => this.removeLayerSilent(layerId),
+      (layerId) => {
+        this.removeLayerFull(layerId);
+      },
       (layerId, width, height, buffer) => this.applyLayerResize(layerId, width, height, buffer),
     );
     if (!applied) {
@@ -1019,11 +1793,7 @@ export class GnumarusCanvasEngine {
   }
 
   private historyLayerFor(layerId: string): { buffer: Uint8ClampedArray; width: number } | null {
-    const layer = this.findLayer(layerId);
-    if (layer === null) {
-      return null;
-    }
-    return { buffer: layer.buffer, width: layer.width };
+    return this.historyTextureFor(layerId);
   }
 
   private markLayersDirty(): void {
@@ -1286,23 +2056,31 @@ export class GnumarusCanvasEngine {
         canvas.setPointerCapture(event.pointerId);
         return;
       }
-      const pixel = this.toImagePixel(event.clientX, event.clientY);
-      if (pixel === null) {
-        return;
-      }
       const layer = this.activeLayer();
       if (layer === null) {
         return;
       }
+      const ensured = this.ensureCellContent(layer.id, this.currentFrame);
+      if (ensured === null) {
+        return;
+      }
+      this.syncLayerRender(layer);
+      this.refreshLayerStacking();
+      const pixel = this.toImagePixel(event.clientX, event.clientY);
+      if (pixel === null) {
+        return;
+      }
+      const tex = ensured.texture;
       this.drawing = true;
       canvas.setPointerCapture(event.pointerId);
       this.lastPixel = pixel;
-      this.strokeBase = layer.buffer.slice();
-      this.strokeLayerId = layer.id;
-      setPixel(layer.buffer, layer.width, layer.height, pixel.x, pixel.y, this.color, layer.lockedChannels);
-      layer.texture.needsUpdate = true;
+      this.strokeBase = tex.buffer.slice();
+      this.strokeLayerId = tex.id;
+      setPixel(tex.buffer, tex.width, tex.height, pixel.x, pixel.y, this.color, layer.lockedChannels);
+      this.markTextureViewsDirty(tex.id);
       this.render();
       this.onPixelsChanged();
+      this.onLayersChanged?.();
       this.emitStats();
     });
     canvas.addEventListener("pointermove", (event: PointerEvent) => {
@@ -1373,13 +2151,17 @@ export class GnumarusCanvasEngine {
       }
       if (this.drawing && this.lastPixel !== null && pixel !== null) {
         const layer = this.activeLayer();
-        if (layer === null) {
+        if (layer === null || this.strokeLayerId === null) {
+          return;
+        }
+        const tex = this.textures.get(this.strokeLayerId);
+        if (tex === undefined) {
           return;
         }
         drawPixelLine(
-          layer.buffer,
-          layer.width,
-          layer.height,
+          tex.buffer,
+          tex.width,
+          tex.height,
           this.lastPixel.x,
           this.lastPixel.y,
           pixel.x,
@@ -1388,7 +2170,7 @@ export class GnumarusCanvasEngine {
           layer.lockedChannels,
         );
         this.lastPixel = pixel;
-        layer.texture.needsUpdate = true;
+        this.markTextureViewsDirty(tex.id);
         this.render();
         this.onPixelsChanged();
       }
@@ -1396,11 +2178,11 @@ export class GnumarusCanvasEngine {
     });
     const endStroke = (): void => {
       if (this.strokeBase !== null && this.strokeLayerId !== null) {
-        const layer = this.findLayer(this.strokeLayerId);
-        if (layer !== null) {
-          const diff = computeImageDiff(this.strokeBase, layer.buffer, layer.width, layer.height);
+        const tex = this.textures.get(this.strokeLayerId);
+        if (tex !== undefined) {
+          const diff = computeImageDiff(this.strokeBase, tex.buffer, tex.width, tex.height);
           if (diff !== null) {
-            this.history.push({ type: "stroke", layerId: layer.id, diff });
+            this.history.push({ type: "stroke", layerId: tex.id, diff });
           }
         }
         this.strokeBase = null;
@@ -1496,6 +2278,9 @@ export class GnumarusCanvasEngine {
   private toImagePixel(clientX: number, clientY: number): { x: number; y: number } | null {
     const layer = this.activeLayer();
     if (layer === null) {
+      return null;
+    }
+    if (layer.width < 1 || layer.height < 1 || layer.renderTextureId === null) {
       return null;
     }
     const rect = this.renderer.domElement.getBoundingClientRect();

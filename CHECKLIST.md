@@ -48,5 +48,7 @@
 - [x] Final preview pan limits: e2e scroll-extremes test, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
 - [x] Toolbar icons: scale glyphs to fill buttons via transform without changing button boxes
 - [x] Toolbar icons: e2e box-stability test, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
-- [x] Unit tests (vitest): pixel buffer, color models, channel lock, layer resize, grid settings, pixel grid shader, background settings, final render, project format, mapping, checker, history — 79 passed
-- [x] E2E test (Playwright): shell + menu + New + pencil + layers + merge + channel locks + layer resize + pixel grid + settings reset + background + final preview + pan + custom picker — 34 passed
+- [x] Animation matrix: cells/contents/textures model (shared contents, empty-on-new-frame), matrix UI above status bar, cell/content/texture association ops
+- [x] Animation matrix: unit + e2e tests, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
+- [x] Unit tests (vitest): pixel buffer, color models, animation model, channel lock, layer resize, grid settings, pixel grid shader, background settings, final render, project format, mapping, checker, history — 91 passed
+- [x] E2E test (Playwright): shell + menu + New + pencil + layers + merge + channel locks + layer resize + pixel grid + settings reset + background + final preview + pan + scroll limits + toolbar icons + custom picker + animation matrix — 45 passed

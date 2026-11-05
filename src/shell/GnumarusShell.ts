@@ -14,9 +14,10 @@ import {
 } from "../project/GnumarusFileSystem";
 import {
   GNUMARUS_APP_ID,
-  cellFilePath,
-  type GnumarusLayerMeta,
+  textureFilePath,
+  type GnumarusContentMeta,
   type GnumarusProjectMeta,
+  type GnumarusTextureMeta,
 } from "../project/GnumarusProjectFormat";
 import {
   CHECKER_SETTINGS_STORAGE_KEY,
@@ -48,6 +49,7 @@ import { compositeFinalImage } from "../preview/GnumarusFinalRender";
 import { decodePngToBuffer, encodeBufferToPngBlob } from "../project/GnumarusPngCodec";
 import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
 import { parseHexToRgbaBytes, rgbaBytesToHex } from "../color/GnumarusColorModels";
+import { type GnumarusTexturePixels } from "../animation/GnumarusAnimationModel";
 import "../color/GnumarusColorPicker";
 
 export class GnumarusShell extends LitElement {
@@ -302,6 +304,103 @@ export class GnumarusShell extends LitElement {
     .layer-resize button {
       flex: 0 0 auto;
     }
+    .anim-matrix {
+      flex: 0 0 auto;
+      max-height: 148px;
+      background: #252526;
+      border-top: 1px solid #111;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .anim-scroll {
+      overflow: auto;
+      min-height: 0;
+    }
+    .anim-grid {
+      display: inline-grid;
+      min-width: 100%;
+    }
+    .anim-corner,
+    .anim-frame-header,
+    .anim-layer-name {
+      position: sticky;
+      background: #2b2b2b;
+      z-index: 2;
+    }
+    .anim-corner {
+      top: 0;
+      left: 0;
+      z-index: 3;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2px;
+    }
+    .anim-frame-header {
+      top: 0;
+      text-align: center;
+      padding: 2px;
+    }
+    .anim-frame-header button {
+      background: transparent;
+      color: #e6e6e6;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      padding: 2px 8px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      width: 100%;
+    }
+    .anim-frame-header.current button {
+      background: #0e639c;
+      border-color: #0e639c;
+    }
+    .anim-frame-header button:hover {
+      background: #3a3a3a;
+    }
+    .anim-frame-header.current button:hover {
+      background: #0e639c;
+    }
+    .anim-layer-name {
+      left: 0;
+      padding: 2px 8px;
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      border-top: 1px solid #111;
+      line-height: 24px;
+    }
+    .anim-cell {
+      border-top: 1px solid #111;
+      border-left: 1px solid #111;
+      min-height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 11px;
+      color: #9a9a9a;
+      padding: 0 4px;
+      overflow: hidden;
+    }
+    .anim-cell.filled {
+      background: #094771;
+      color: #e6e6e6;
+    }
+    .anim-cell.current-frame {
+      box-shadow: inset 0 0 0 1px #0e639c;
+    }
+    .anim-cell.active-cell {
+      box-shadow: inset 0 0 0 2px #ffd23f;
+    }
+    .anim-cell .cell-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .context-blocker {
       position: fixed;
       inset: 0;
@@ -311,6 +410,9 @@ export class GnumarusShell extends LitElement {
       position: fixed;
       z-index: 41;
       min-width: 160px;
+      max-width: min(320px, 90vw);
+      max-height: 260px;
+      overflow-y: auto;
       background: #2b2b2b;
       border: 1px solid #111;
       border-radius: 4px;
@@ -521,6 +623,7 @@ export class GnumarusShell extends LitElement {
     cursorText: { type: String },
     canvasText: { type: String },
     layerText: { type: String },
+    frameText: { type: String },
     projectName: { type: String },
     dirty: { type: Boolean },
     statusMessage: { type: String },
@@ -551,6 +654,7 @@ export class GnumarusShell extends LitElement {
     contextMenuLayerId: { type: String },
     contextMenuX: { type: Number },
     contextMenuY: { type: Number },
+    matrixMenu: { type: Object },
     checkerColorA: { type: String },
     checkerColorB: { type: String },
   };
@@ -589,10 +693,15 @@ export class GnumarusShell extends LitElement {
   declare layers: GnumarusLayerInfo[];
   declare activeLayerId: string;
   declare layerText: string;
+  declare frameText: string;
   declare renamingId: string | null;
   declare contextMenuLayerId: string | null;
   declare contextMenuX: number;
   declare contextMenuY: number;
+  declare matrixMenu:
+    | { kind: "cell"; layerId: string; frame: number; x: number; y: number }
+    | { kind: "frame"; frame: number; x: number; y: number }
+    | null;
   declare checkerColorA: string;
   declare checkerColorB: string;
 
@@ -635,10 +744,12 @@ export class GnumarusShell extends LitElement {
     this.layers = [];
     this.activeLayerId = "";
     this.layerText = "-";
+    this.frameText = "Frame 1/1";
     this.renamingId = null;
     this.contextMenuLayerId = null;
     this.contextMenuX = 0;
     this.contextMenuY = 0;
+    this.matrixMenu = null;
     this.checkerColorA = DEFAULT_CHECKER_SETTINGS.colorA;
     this.checkerColorB = DEFAULT_CHECKER_SETTINGS.colorB;
   }
@@ -992,12 +1103,15 @@ export class GnumarusShell extends LitElement {
             `
           : html``}
       </div>
+      ${this.renderAnimationMatrix()}
+      ${this.renderMatrixMenu()}
       <div class="statusbar">
         <span>${this.tool}</span>
         <span>${this.colorValue}</span>
         <span>${this.cursorText}</span>
         <span>${this.canvasText}</span>
         <span>${this.layerText}</span>
+        <span>${this.frameText}</span>
         <span>${this.zoomText}</span>
         <span>${this.rotText}</span>
         <span>${this.flipText}</span>
@@ -1230,8 +1344,147 @@ export class GnumarusShell extends LitElement {
     `;
   }
 
+  private renderAnimationMatrix() {
+    if (this.engine === null) {
+      return html``;
+    }
+    const matrix = this.engine.getAnimationMatrix();
+    const columns = `120px repeat(${matrix.frameCount}, 76px)`;
+    return html`
+      <div class="anim-matrix" data-testid="animation-matrix" aria-label="Animation matrix">
+        <div class="anim-scroll">
+          <div class="anim-grid" style="grid-template-columns: ${columns};">
+            <div class="anim-corner">
+              <button aria-label="Add frame" title="Add frame" @click=${(): void => this.onAddFrame()}>+</button>
+            </div>
+            ${Array.from({ length: matrix.frameCount }, (_unused, frame) => {
+              const current = frame === matrix.currentFrame;
+              return html`
+                <div class="anim-frame-header ${current ? "current" : ""}">
+                  <button
+                    data-testid="anim-frame"
+                    data-frame=${frame}
+                    aria-label="Frame ${frame + 1}${current ? ", current" : ""}"
+                    title="Frame ${frame + 1}${current ? " (current)" : ""}"
+                    @click=${(): void => this.onSelectFrame(frame)}
+                    @contextmenu=${(event: MouseEvent): void => {
+                      event.preventDefault();
+                      this.openMatrixFrameMenu(frame, event.clientX, event.clientY);
+                    }}
+                    >${frame + 1}</button
+                  >
+                </div>
+              `;
+            })}
+            ${matrix.rows.map(
+              (row) => html`
+                <div class="anim-layer-name" title=${row.layerName}>${row.layerName}</div>
+                ${row.cells.map((cell) => {
+                  const isActive = cell.layerId === matrix.activeLayerId && cell.frame === matrix.currentFrame;
+                  const isCurrent = cell.frame === matrix.currentFrame;
+                  const label = cell.contentName ?? "empty";
+                  return html`
+                    <div
+                      class="anim-cell ${cell.contentId !== null ? "filled" : ""} ${isCurrent ? "current-frame" : ""} ${isActive ? "active-cell" : ""}"
+                      data-testid="anim-cell"
+                      data-matrix-layer=${cell.layerId}
+                      data-matrix-frame=${cell.frame}
+                      role="button"
+                      tabindex="0"
+                      aria-label="Animation cell, layer ${row.layerName}, frame ${cell.frame + 1}, ${label}"
+                      title="Layer ${row.layerName}, frame ${cell.frame + 1}: ${label}"
+                      @click=${(): void => this.onCellClick(cell.layerId, cell.frame)}
+                      @keydown=${(event: KeyboardEvent): void => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          this.onCellClick(cell.layerId, cell.frame);
+                        }
+                      }}
+                      @contextmenu=${(event: MouseEvent): void => {
+                        event.preventDefault();
+                        this.openMatrixCellMenu(cell.layerId, cell.frame, event.clientX, event.clientY);
+                      }}
+                    >
+                      ${cell.contentName !== null
+                        ? html`<span class="cell-name">${cell.contentName}</span>`
+                        : html`<span aria-hidden="true">—</span>`}
+                    </div>
+                  `;
+                })}
+              `,
+            )}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderMatrixMenu() {
+    if (this.matrixMenu === null || this.engine === null) {
+      return html``;
+    }
+    if (this.matrixMenu.kind === "frame") {
+      const frame = this.matrixMenu.frame;
+      const count = this.engine.getFrameCount();
+      return html`
+        <div class="context-blocker" @click=${(): void => this.closeMatrixMenu()} @contextmenu=${(event: Event): void => {
+          event.preventDefault();
+          this.closeMatrixMenu();
+        }}></div>
+        <div class="context-menu" style="left: ${this.matrixMenu.x}px; top: ${this.matrixMenu.y}px;">
+          <button ?disabled=${count <= 1} @click=${(): void => this.onRemoveFrame(frame)}>Remove frame</button>
+        </div>
+      `;
+    }
+    const matrix = this.engine.getAnimationMatrix();
+    const menuLayerId = this.matrixMenu.layerId;
+    const menuFrame = this.matrixMenu.frame;
+    const cell = matrix.rows
+      .flatMap((row) => row.cells)
+      .find((entry) => entry.layerId === menuLayerId && entry.frame === menuFrame);
+    const contentId = cell?.contentId ?? null;
+    const content = matrix.contents.find((entry) => entry.id === contentId) ?? null;
+    return html`
+      <div class="context-blocker" @click=${(): void => this.closeMatrixMenu()} @contextmenu=${(event: Event): void => {
+        event.preventDefault();
+        this.closeMatrixMenu();
+      }}></div>
+      <div class="context-menu" style="left: ${this.matrixMenu.x}px; top: ${this.matrixMenu.y}px;">
+        <button @click=${(): void => this.onNewCellContent()}>New content</button>
+        <button ?disabled=${contentId === null} @click=${(): void => this.onDissociateCellContent()}>
+          Dissociate content
+        </button>
+        ${matrix.contents.map(
+          (entry) => html`
+            <button ?disabled=${entry.id === contentId} @click=${(): void => this.onAssociateCellContent(entry.id)}>
+              Use content "${entry.name}"
+            </button>
+          `,
+        )}
+        <button ?disabled=${content === null || content.textureId === null} @click=${(): void => this.onDissociateContentTexture()}>
+          Dissociate texture${content !== null && content.textureId !== null ? ` (${this.textureName(content.textureId, matrix)})` : ""}
+        </button>
+        ${matrix.textures.map(
+          (texture) => html`
+            <button
+              ?disabled=${content?.textureId === texture.id}
+              @click=${(): void => this.onAssociateContentTexture(texture.id)}
+            >
+              Use texture "${texture.name}"
+            </button>
+          `,
+        )}
+      </div>
+    `;
+  }
+
+  private textureName(textureId: string, matrix: { textures: Array<{ id: string; name: string }> }): string {
+    return matrix.textures.find((entry) => entry.id === textureId)?.name ?? textureId;
+  }
+
   firstUpdated(): void {
     this.fsSupported = isFileSystemAccessSupported();
+    window.addEventListener("keydown", this.onGlobalKeyDown);
     const storedChecker = this.loadCheckerSettings();
     this.checkerMode = storedChecker.mode;
     this.checkerSizeX = storedChecker.sizeX;
@@ -1277,6 +1530,11 @@ export class GnumarusShell extends LitElement {
       });
       this.engine.setColor(this.colorValue);
       this.refreshLayers();
+      // The engine fits the zoom during construction, before the animation
+      // matrix above the status bar takes part in the layout. Re-fit once the
+      // first update (matrix included) is painted so the initial zoom matches
+      // what Reset Canvas Transform computes later.
+      void this.fitInitialView();
       if (!this.fsSupported) {
         this.statusMessage = "File System Access API unavailable (use Chromium)";
       }
@@ -1292,6 +1550,29 @@ export class GnumarusShell extends LitElement {
       }
     }
   }
+
+  private async fitInitialView(): Promise<void> {
+    try {
+      await this.updateComplete;
+    } catch {
+      return;
+    }
+    if (!this.isConnected) {
+      return;
+    }
+    this.engine?.resetViewTransform();
+  }
+
+  private onGlobalKeyDown = (event: KeyboardEvent): void => {
+    if (event.key === "Escape") {
+      if (this.matrixMenu !== null) {
+        this.matrixMenu = null;
+      }
+      if (this.contextMenuLayerId !== null) {
+        this.closeLayerMenu();
+      }
+    }
+  };
 
   private openNewDialog(): void {
     this.fileMenuOpen = false;
@@ -1814,6 +2095,7 @@ export class GnumarusShell extends LitElement {
       this.layers = [];
       this.activeLayerId = "";
       this.layerText = "-";
+      this.frameText = "Frame 1/1";
       return;
     }
     this.layers = this.engine.getLayers();
@@ -1822,8 +2104,151 @@ export class GnumarusShell extends LitElement {
     const current = index < 0 ? undefined : this.layers[index];
     this.layerText =
       current === undefined ? "-" : `${current.name} (${this.layers.length - index}/${this.layers.length})`;
+    this.frameText = `Frame ${this.engine.getCurrentFrame() + 1}/${this.engine.getFrameCount()}`;
     if (this.previewOpen) {
       void this.refreshPreview();
+    }
+  }
+
+  private onCellClick(layerId: string, frame: number): void {
+    if (this.engine === null) {
+      return;
+    }
+    this.engine.setActiveLayer(layerId);
+    this.engine.setCurrentFrame(frame);
+    this.refreshLayers();
+  }
+
+  private onSelectFrame(frame: number): void {
+    if (this.engine === null) {
+      return;
+    }
+    if (this.engine.setCurrentFrame(frame)) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = `Frame ${frame + 1} selected`;
+    }
+  }
+
+  private onAddFrame(): void {
+    if (this.engine === null) {
+      return;
+    }
+    const frame = this.engine.addFrame();
+    this.refreshLayers();
+    this.dirty = true;
+    this.statusMessage = `Frame ${frame + 1} added`;
+  }
+
+  private onRemoveFrame(frame: number): void {
+    this.closeMatrixMenu();
+    if (this.engine === null) {
+      return;
+    }
+    if (this.engine.removeFrame(frame)) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = "Frame removed";
+    } else {
+      this.statusMessage = "Cannot remove the last frame";
+    }
+  }
+
+  private openMatrixCellMenu(layerId: string, frame: number, clientX: number, clientY: number): void {
+    this.closeLayerMenu();
+    this.matrixMenu = { kind: "cell", layerId, frame, x: Math.min(clientX, window.innerWidth - 340), y: Math.min(clientY, window.innerHeight - 300) };
+  }
+
+  private openMatrixFrameMenu(frame: number, clientX: number, clientY: number): void {
+    this.closeLayerMenu();
+    this.matrixMenu = { kind: "frame", frame, x: Math.min(clientX, window.innerWidth - 200), y: Math.min(clientY, window.innerHeight - 80) };
+  }
+
+  private closeMatrixMenu(): void {
+    this.matrixMenu = null;
+  }
+
+  private matrixCellTarget(): { layerId: string; frame: number } | null {
+    if (this.matrixMenu === null || this.matrixMenu.kind !== "cell") {
+      return null;
+    }
+    return { layerId: this.matrixMenu.layerId, frame: this.matrixMenu.frame };
+  }
+
+  private onNewCellContent(): void {
+    const target = this.matrixCellTarget();
+    this.closeMatrixMenu();
+    if (target === null || this.engine === null) {
+      return;
+    }
+    const contentId = this.engine.createCellContent(target.layerId, target.frame);
+    if (contentId !== null) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = "Cell content created";
+    }
+  }
+
+  private onDissociateCellContent(): void {
+    const target = this.matrixCellTarget();
+    this.closeMatrixMenu();
+    if (target === null || this.engine === null) {
+      return;
+    }
+    if (this.engine.dissociateCellContent(target.layerId, target.frame)) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = "Cell content dissociated";
+    }
+  }
+
+  private onAssociateCellContent(contentId: string): void {
+    const target = this.matrixCellTarget();
+    this.closeMatrixMenu();
+    if (target === null || this.engine === null) {
+      return;
+    }
+    if (this.engine.associateCellContent(target.layerId, target.frame, contentId)) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = "Cell content associated";
+    } else {
+      this.statusMessage = "Cell already uses that content";
+    }
+  }
+
+  private matrixContentTarget(): string | null {
+    if (this.matrixMenu === null || this.matrixMenu.kind !== "cell" || this.engine === null) {
+      return null;
+    }
+    return this.engine.getCellContentId(this.matrixMenu.layerId, this.matrixMenu.frame);
+  }
+
+  private onDissociateContentTexture(): void {
+    const contentId = this.matrixContentTarget();
+    this.closeMatrixMenu();
+    if (contentId === null || this.engine === null) {
+      return;
+    }
+    if (this.engine.dissociateContentTexture(contentId)) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = "Content dissociated from its texture";
+    }
+  }
+
+  private onAssociateContentTexture(textureId: string): void {
+    const contentId = this.matrixContentTarget();
+    this.closeMatrixMenu();
+    if (contentId === null || this.engine === null) {
+      return;
+    }
+    if (this.engine.associateContentTexture(contentId, textureId)) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = "Content associated with texture";
+    } else {
+      this.statusMessage = "Content already uses that texture";
     }
   }
 
@@ -1966,44 +2391,44 @@ export class GnumarusShell extends LitElement {
     try {
       this.statusMessage = "Opening directory...";
       const dir = await pickProjectDirectory();
-      const { project, cellBlobs } = await readProjectFiles(dir);
-      const inputs: Array<{
-        id: string;
-        name: string;
-        visible: boolean;
-        opacity: number;
-        width: number;
-        height: number;
-        buffer: Uint8ClampedArray;
-        transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
-        lockedChannels: { r: boolean; g: boolean; b: boolean; a: boolean };
-      }> = [];
-      for (const layer of project.layers) {
-        const cell = layer.cells[0];
-        if (cell === undefined) {
-          throw new Error(`Layer ${layer.id} has no cells.`);
-        }
-        const blob = cellBlobs.get(cell.file);
+      const { project, fileBlobs } = await readProjectFiles(dir);
+      const textures: GnumarusTexturePixels[] = [];
+      for (const texture of project.animation.textures) {
+        const blob = fileBlobs.get(texture.file);
         if (blob === undefined) {
-          throw new Error(`Missing cell file: ${cell.file}`);
+          throw new Error(`Missing texture file: ${texture.file}`);
         }
         const decoded = await decodePngToBuffer(blob);
-        if (decoded.width !== layer.width || decoded.height !== layer.height) {
-          throw new Error(`Cell size mismatch: ${cell.file}`);
+        if (decoded.width !== texture.width || decoded.height !== texture.height) {
+          throw new Error(`Texture size mismatch: ${texture.file}`);
         }
-        inputs.push({
+        textures.push({
+          id: texture.id,
+          name: texture.name,
+          width: decoded.width,
+          height: decoded.height,
+          buffer: decoded.buffer,
+        });
+      }
+      this.engine?.loadAnimationProject(project.width, project.height, {
+        layers: project.layers.map((layer) => ({
           id: layer.id,
           name: layer.name,
           visible: layer.visible,
           opacity: layer.opacity,
-          width: decoded.width,
-          height: decoded.height,
-          buffer: decoded.buffer,
-          transform: layer.transform,
           lockedChannels: { ...layer.lockedChannels },
-        });
-      }
-      this.engine?.loadProject(project.width, project.height, inputs);
+        })),
+        textures,
+        contents: project.animation.contents.map((content) => ({
+          id: content.id,
+          name: content.name,
+          textureId: content.textureId,
+          transform: { ...content.transform },
+        })),
+        cells: project.animation.cells.map((cell) => ({ ...cell })),
+        frames: project.animation.frames,
+        currentFrame: project.animation.currentFrame,
+      });
       this.refreshLayers();
       this.directoryHandle = dir;
       this.projectName = dir.name;
@@ -2027,37 +2452,47 @@ export class GnumarusShell extends LitElement {
       this.statusMessage = "Saving...";
       const dir = this.directoryHandle ?? (await pickProjectDirectory());
       const size = this.engine.size;
-      const infos = this.engine.getLayers();
-      const pixels = this.engine.exportLayers();
-      const layersMeta: GnumarusLayerMeta[] = [];
-      const cells = new Map<string, Blob>();
-      for (const info of infos) {
-        const rendered = pixels.find((entry) => entry.id === info.id);
-        if (rendered === undefined) {
-          throw new Error(`Missing pixels for layer ${info.id}`);
-        }
-        const file = cellFilePath(info.id, 0);
-        layersMeta.push({
-          id: info.id,
-          name: info.name,
-          visible: info.visible,
-          opacity: info.opacity,
-          width: info.width,
-          height: info.height,
-          transform: { ...info.transform },
-          lockedChannels: { ...info.lockedChannels },
-          cells: [{ frame: 0, file }],
+      const exported = this.engine.exportAnimationProject();
+      const texturesMeta: GnumarusTextureMeta[] = [];
+      const blobs = new Map<string, Blob>();
+      for (const texture of exported.textures) {
+        const file = textureFilePath(texture.id);
+        texturesMeta.push({
+          id: texture.id,
+          name: texture.name,
+          width: texture.width,
+          height: texture.height,
+          file,
         });
-        cells.set(file, await encodeBufferToPngBlob(rendered.buffer, rendered.width, rendered.height));
+        blobs.set(file, await encodeBufferToPngBlob(texture.buffer, texture.width, texture.height));
       }
+      const contentsMeta: GnumarusContentMeta[] = exported.contents.map((content) => ({
+        id: content.id,
+        name: content.name,
+        textureId: content.textureId,
+        transform: { ...content.transform },
+      }));
       const meta: GnumarusProjectMeta = {
         app: GNUMARUS_APP_ID,
         version: 1,
         width: size.width,
         height: size.height,
-        layers: layersMeta,
+        layers: exported.layers.map((layer) => ({
+          id: layer.id,
+          name: layer.name,
+          visible: layer.visible,
+          opacity: layer.opacity,
+          lockedChannels: { ...layer.lockedChannels },
+        })),
+        animation: {
+          frames: exported.frames,
+          currentFrame: exported.currentFrame,
+          textures: texturesMeta,
+          contents: contentsMeta,
+          cells: exported.cells.map((cell) => ({ ...cell })),
+        },
       };
-      await writeProjectFiles(dir, meta, cells);
+      await writeProjectFiles(dir, meta, blobs);
       this.directoryHandle = dir;
       this.projectName = dir.name;
       this.dirty = false;

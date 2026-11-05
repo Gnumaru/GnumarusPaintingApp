@@ -4,7 +4,7 @@ Frontend-only single page web application for digital painting, pixel art, vecto
 
 ## Intended use
 
-Classic desktop-like painting app (top menu bar, central canvas, bottom status bar) in the spirit of Photoshop, Krita and GIMP. Current version supports pixel-art sketching with a 1px solid pencil, multi-layer editing with per-layer transforms and per-channel locks, and directory-based projects.
+Classic desktop-like painting app (top menu bar, central canvas, bottom status bar) in the spirit of Photoshop, Krita and GIMP. Current version supports pixel-art sketching with a 1px solid pencil, multi-layer editing with per-layer transforms and per-channel locks, frame-by-frame animation over a layer x frame cell matrix, and directory-based projects.
 
 ## Features (v1)
 
@@ -14,9 +14,11 @@ Classic desktop-like painting app (top menu bar, central canvas, bottom status b
 - Canvas background: checkerboard (default) or solid color in Edit > Settings; every setting has a per-setting reset arrow when non-default.
 - Final preview window (floating, resizable) with internal zoom/pan (drag with left, right or middle button) of the flattened image as a single PNG export would look.
 - Custom color picker: RGB/CMYK/HSV/HSL (default)/OKHSL/OKHSV/ARD with per-axis gradient bars and editable inputs; alpha axis on every model; no browser color picker is used anywhere.
-- Layers: add, delete, reorder, rename, visibility, opacity, right-click Merge Down (undoable); independent size and transform; per-layer resize (expand right/down transparent, shrink crops right/below, undoable).
+- Animation matrix above the status bar: rows are layers, columns are frames; each cell holds zero or one shareable cell content (texture plus transform). New frames start empty; cell menu creates, associates or dissociates contents and texture links.
+- Layers: add, delete, reorder, rename, visibility, opacity, right-click Merge Down (undoable); Transform tool edits the active cell content; painting targets the active cell at the current frame (empty cells materialize on first use).
+- Layer resize: per-layer width/height 1..1024 via Resize button; expand fills transparent right and below, shrink crops right and below; undoable.
 - Channel lock: per-layer R/G/B/A toggles; paint, clear and Merge Down write only unlocked channels. Example: alpha locked + paint keeps old alpha; green locked + cyan paint yields blue.
-- Directory projects via the File System Access API (Chromium derivatives): `project.json` metadata plus `cells/<layer>_frame<frame>.png` cell images (format already supports future animation; locks persist in `project.json`).
+- Directory projects via the File System Access API (Chromium derivatives): `project.json` metadata plus `textures/*.png` cell images (legacy `cells/*.png` projects open via automatic migration).
 - WebGL2-only rendering with an explicit error message when unavailable. No WebGL1 fallback.
 
 ## Requirements

@@ -7,13 +7,14 @@
 - Canvas background: checkerboard (default, configurable) or solid color (configurable) in Edit > Settings.
 - Settings with per-setting reset arrows shown only when non-default.
 - Final preview: floating resizable window with internal zoom and any-button drag pan of the flattened PNG-like render.
-- Layers: add, delete, reorder, rename, visibility, opacity, right-click Merge Down (undoable); independent per-layer size and transform (position/rotation/flips); Transform tool; painting targets the active layer.
+- Animation matrix above the status bar: rows are project layers, columns are animation frames; each cell holds zero or one shareable cell content (texture plus transform settings). New frames start empty; cell menu creates/associates/dissociates contents and texture links.
+- Layers: add, delete, reorder, rename, visibility, opacity, right-click Merge Down (undoable); Transform tool edits the active cell content; painting and clear target the active cell content at the current frame (empty cells materialize on first use).
 - Layer resize: per-layer width/height 1..1024 via Resize button + dialog; expand fills transparent right and below, shrink crops right and below, top-left preserved; undoable.
 - Channel lock: per-layer R/G/B/A lock toggles; paint, clear and Merge Down write only unlocked channels (locked channels keep old values).
-- Undo/redo for image edits and layer resizes (`Ctrl+Z` / `Ctrl+Y`), region-based history tagged per layer.
-- Single cell per layer for now (no animation UI yet; project format already supports cells/frames).
+- Undo/redo for image edits and layer resizes (`Ctrl+Z` / `Ctrl+Y`), region-based history tagged per texture.
+- Project directory holds `project.json` (layers, frames, contents, textures, cells) plus `textures/*.png` (legacy `cells/*.png` opens via automatic migration).
 - WebGL2-only canvas (Three.js) with nearest-neighbor scaling, zoom, rotation + mirror view transform, and pan.
 - Toolbar with pencil and loupe (zoom/rotate/flip) tools.
 - Configurable transparency checkerboard: image-space or screen-space, independent width/height (default 16x16, asymmetric like 8x16 supported), two colors, persisted in the browser.
-- Directory projects over File System Access API: `project.json` + `cells/*.png`.
-- Status bar: tool, color, cursor pixel, canvas size, zoom, project name, dirty flag, messages.
+- Directory projects over File System Access API: `project.json` + `textures/*.png`.
+- Status bar: tool, color, cursor pixel, canvas size, layer, frame, zoom, rotation, flip state, project name, dirty flag, messages.
