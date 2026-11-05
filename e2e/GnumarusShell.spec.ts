@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { imageToScreenPixel } from "../src/canvas/GnumarusViewportMath";
+import { imageToScreenPixel, layerPixelToScreen } from "../src/canvas/GnumarusViewportMath";
 
 interface GnumarusPixel {
   r: number;
@@ -309,6 +309,9 @@ interface GnumarusLayerState {
   name: string;
   visible: boolean;
   opacity: number;
+  width: number;
+  height: number;
+  transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
 }
 
 async function getLayers(page: import("@playwright/test").Page): Promise<{
@@ -441,6 +444,110 @@ test("layer context menu merges down with opacity", async ({ page }) => {
   await page.keyboard.press("Control+y");
   expect(await getLayers(page)).toMatchObject({ layers: [{ id: "layer0" }] });
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("transform tool moves, rotates and flips the active layer", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.keyboard.press("t");
+  await expect(page.locator("gnumarus-shell")).toContainText("transform");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  const zoomBefore = (await getViewState(page)).zoom;
+
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx, cy + 40, { steps: 4 });
+  await page.mouse.up();
+  let transform = (await getLayers(page)).layers[0]?.transform;
+  expect(transform?.x ?? 0).toBeCloseTo(0, 4);
+  expect(transform?.y ?? 0).toBeCloseTo(40 / zoomBefore, 4);
+
+  await page.mouse.move(cx + 60, cy);
+  await page.mouse.down({ button: "right" });
+  await page.mouse.move(cx, cy + 60, { steps: 4 });
+  await page.mouse.up({ button: "right" });
+  transform = (await getLayers(page)).layers[0]?.transform;
+  expect(transform?.rotation ?? 0).toBeGreaterThan(Math.PI / 3);
+  expect(transform?.rotation ?? 0).toBeLessThan(Math.PI * 0.75);
+
+  await page.mouse.click(cx, cy, { button: "middle" });
+  transform = (await getLayers(page)).layers[0]?.transform;
+  expect(transform).toMatchObject({ flipX: true, flipY: false });
+  await page.keyboard.down("Shift");
+  await page.mouse.click(cx, cy, { button: "middle" });
+  await page.keyboard.up("Shift");
+  transform = (await getLayers(page)).layers[0]?.transform;
+  expect(transform).toMatchObject({ flipX: true, flipY: true });
+});
+
+test("painting works on a layer smaller than the project", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          loadProject(
+            width: number,
+            height: number,
+            inputs: Array<{
+              id: string;
+              name: string;
+              visible: boolean;
+              opacity: number;
+              width: number;
+              height: number;
+              buffer: Uint8ClampedArray;
+              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
+            }>,
+          ): void;
+        };
+      };
+    };
+    const red = new Uint8ClampedArray(8 * 8 * 4);
+    for (let i = 0; i < 8 * 8; i += 1) {
+      red[i * 4] = 255;
+      red[i * 4 + 3] = 255;
+    }
+    root.__gnumarus?.engine?.loadProject(64, 64, [
+      {
+        id: "tiny",
+        name: "Tiny",
+        visible: true,
+        opacity: 1,
+        width: 8,
+        height: 8,
+        buffer: red,
+        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+      },
+    ]);
+  });
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const state = await getViewState(page);
+  const layers = await getLayers(page);
+  expect(layers.layers.map((layer) => layer.id)).toEqual(["tiny"]);
+  const target = layerPixelToScreen(
+    2,
+    2,
+    { left: box.x, top: box.y, width: box.width, height: box.height },
+    8,
+    8,
+    { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false },
+    { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+  );
+  await page.mouse.click(target.x, target.y);
+  expect(await readPixel(page, 2, 2)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 0, 0)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
 test("pencil paints the right pixel while the canvas is rotated", async ({ page }) => {

@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import {
   clearPixelBuffer,
-  compositeOver,
+  compositePixelOver,
   createPixelBuffer,
   drawPixelLine,
   getPixel,
@@ -9,7 +9,21 @@ import {
   setPixel,
   type GnumarusRgba,
 } from "./GnumarusPixelBuffer";
-import { clampZoom, normalizeRotation, screenToImagePixel } from "./GnumarusViewportMath";
+import {
+  clampZoom,
+  IDENTITY_LAYER_TRANSFORM,
+  layerImageToProject,
+  layerPixelCenterToProject,
+  normalizeRotation,
+  projectToLayerPixel,
+  projectToScreen,
+  screenToLayerPixel,
+} from "./GnumarusViewportMath";
+import type {
+  GnumarusLayerTransform,
+  GnumarusRect,
+  GnumarusViewTransform,
+} from "./GnumarusViewportMath";
 import {
   clampCheckerSize,
   DEFAULT_CHECKER_SETTINGS,
@@ -35,13 +49,16 @@ export interface GnumarusEngineStats {
   cursorY: number | null;
 }
 
-export type GnumarusCanvasTool = "pencil" | "loupe";
+export type GnumarusCanvasTool = "pencil" | "loupe" | "transform";
 
 export interface GnumarusLayerInfo {
   id: string;
   name: string;
   visible: boolean;
   opacity: number;
+  width: number;
+  height: number;
+  transform: GnumarusLayerTransform;
 }
 
 export interface GnumarusLayerPixels {
@@ -66,6 +83,7 @@ export interface GnumarusProjectLayerInput {
   width: number;
   height: number;
   buffer: Uint8ClampedArray;
+  transform: GnumarusLayerTransform;
 }
 
 const LAYER_VERTEX_SHADER = [
@@ -158,6 +176,10 @@ export class GnumarusCanvasEngine {
   private lastPointerAngle: number | null = null;
   private loupeZooming = false;
   private loupeAnchor: { x: number; y: number } | null = null;
+  private transforming = false;
+  private transformStart: { clientX: number; clientY: number; x: number; y: number } | null = null;
+  private transformRotating = false;
+  private transformLastAngle: number | null = null;
   private color: GnumarusRgba = { r: 0, g: 0, b: 0, a: 255 };
   private drawing = false;
   private panning = false;
@@ -244,10 +266,12 @@ export class GnumarusCanvasEngine {
       side: THREE.DoubleSide,
     });
     this.backgroundPlane = new THREE.Mesh(this.sharedGeometry, this.backgroundMaterial);
-    this.backgroundPlane.position.set(0, 0, -0.02);
+    this.backgroundPlane.matrixAutoUpdate = false;
     this.backgroundPlane.renderOrder = -1;
     this.scene.add(this.backgroundPlane);
-    const first = this.createLayerInternal("layer0", "Layer 0", true, 1, createPixelBuffer(64, 64));
+    const first = this.createLayerInternal("layer0", "Layer 0", true, 1, createPixelBuffer(64, 64), 64, 64, {
+      ...IDENTITY_LAYER_TRANSFORM,
+    });
     this.layers.push(first);
     this.activeLayerId = first.id;
     this.layerCounter = 1;
@@ -277,8 +301,11 @@ export class GnumarusCanvasEngine {
     visible: boolean,
     opacity: number,
     buffer: Uint8ClampedArray,
+    width: number,
+    height: number,
+    transform: GnumarusLayerTransform,
   ): GnumarusLayer {
-    const texture = new THREE.DataTexture(buffer, this.imageWidth, this.imageHeight);
+    const texture = new THREE.DataTexture(buffer, width, height);
     texture.magFilter = THREE.NearestFilter;
     texture.minFilter = THREE.NearestFilter;
     texture.generateMipmaps = false;
@@ -297,12 +324,24 @@ export class GnumarusCanvasEngine {
       depthWrite: false,
     });
     const plane = new THREE.Mesh(this.sharedGeometry, material);
+    plane.matrixAutoUpdate = false;
     const stackIndex = this.layers.length;
-    plane.position.set(0, 0, stackIndex * 0.01);
     plane.renderOrder = stackIndex;
     plane.visible = visible;
     this.scene.add(plane);
-    return { id, name, visible, opacity: clampedOpacity, buffer, texture, material, plane };
+    return {
+      id,
+      name,
+      visible,
+      opacity: clampedOpacity,
+      width,
+      height,
+      transform: { ...transform },
+      buffer,
+      texture,
+      material,
+      plane,
+    };
   }
 
   private refreshLayerStacking(): void {
@@ -335,6 +374,9 @@ export class GnumarusCanvasEngine {
       name: layer.name,
       visible: layer.visible,
       opacity: layer.opacity,
+      width: layer.width,
+      height: layer.height,
+      transform: { ...layer.transform },
     }));
   }
 
@@ -355,7 +397,16 @@ export class GnumarusCanvasEngine {
     const id = `layer${this.layerCounter}`;
     const name = `Layer ${this.layerCounter}`;
     this.layerCounter += 1;
-    const layer = this.createLayerInternal(id, name, true, 1, createPixelBuffer(this.imageWidth, this.imageHeight));
+    const layer = this.createLayerInternal(
+      id,
+      name,
+      true,
+      1,
+      createPixelBuffer(this.imageWidth, this.imageHeight),
+      this.imageWidth,
+      this.imageHeight,
+      { ...IDENTITY_LAYER_TRANSFORM },
+    );
     this.layers.push(layer);
     this.activeLayerId = id;
     this.refreshLayerStacking();
@@ -405,6 +456,9 @@ export class GnumarusCanvasEngine {
       snapshot.visible,
       snapshot.opacity,
       buffer,
+      snapshot.width,
+      snapshot.height,
+      { ...snapshot.transform },
     );
     const at = Math.min(Math.max(0, snapshot.stackIndex), this.layers.length);
     this.layers.splice(at, 0, layer);
@@ -413,8 +467,9 @@ export class GnumarusCanvasEngine {
   }
 
   /**
-   * Merge the layer into the one immediately below it using the upper
-   * layer's current opacity. The result is a single undoable history entry.
+   * Merge the layer into the one immediately below it, sampling the upper
+   * layer through its own size and transform and using its opacity.
+   * The result is a single undoable history entry.
    */
   mergeDown(id: string): boolean {
     const index = this.layers.findIndex((layer) => layer.id === id);
@@ -427,13 +482,37 @@ export class GnumarusCanvasEngine {
       return false;
     }
     const base = lower.buffer.slice();
-    compositeOver(lower.buffer, upper.buffer, this.imageWidth, this.imageHeight, upper.opacity);
-    const diff = computeImageDiff(base, lower.buffer, this.imageWidth, this.imageHeight);
+    for (let y = 0; y < lower.height; y += 1) {
+      for (let x = 0; x < lower.width; x += 1) {
+        const project = layerPixelCenterToProject(x, y, lower.width, lower.height, lower.transform);
+        const sample = projectToLayerPixel(
+          project.x,
+          project.y,
+          upper.width,
+          upper.height,
+          upper.transform,
+        );
+        if (sample === null) {
+          continue;
+        }
+        compositePixelOver(
+          lower.buffer,
+          (y * lower.width + x) * 4,
+          upper.buffer,
+          (sample.y * upper.width + sample.x) * 4,
+          upper.opacity,
+        );
+      }
+    }
+    const diff = computeImageDiff(base, lower.buffer, lower.width, lower.height);
     const snapshot: GnumarusMergedLayerSnapshot = {
       id: upper.id,
       name: upper.name,
       visible: upper.visible,
       opacity: upper.opacity,
+      width: upper.width,
+      height: upper.height,
+      transform: { ...upper.transform },
       stackIndex: index,
       buffer: upper.buffer.slice(),
     };
@@ -508,27 +587,63 @@ export class GnumarusCanvasEngine {
   exportLayers(): GnumarusLayerPixels[] {
     return this.layers.map((layer) => ({
       id: layer.id,
-      width: this.imageWidth,
-      height: this.imageHeight,
+      width: layer.width,
+      height: layer.height,
       buffer: layer.buffer,
     }));
   }
 
-  loadProject(inputs: GnumarusProjectLayerInput[]): void {
+  setLayerTransform(id: string, transform: Partial<GnumarusLayerTransform>): boolean {
+    const layer = this.findLayer(id);
+    if (layer === null) {
+      return false;
+    }
+    if (transform.x !== undefined) {
+      layer.transform.x = transform.x;
+    }
+    if (transform.y !== undefined) {
+      layer.transform.y = transform.y;
+    }
+    if (transform.rotation !== undefined) {
+      layer.transform.rotation = normalizeRotation(transform.rotation);
+    }
+    if (transform.flipX !== undefined) {
+      layer.transform.flipX = transform.flipX;
+    }
+    if (transform.flipY !== undefined) {
+      layer.transform.flipY = transform.flipY;
+    }
+    this.layoutSceneTransforms();
+    this.render();
+    return true;
+  }
+
+  resetLayerTransform(id: string): boolean {
+    const layer = this.findLayer(id);
+    if (layer === null) {
+      return false;
+    }
+    layer.transform = { ...IDENTITY_LAYER_TRANSFORM };
+    this.layoutSceneTransforms();
+    this.render();
+    this.emitStats();
+    return true;
+  }
+
+  loadProject(projectWidth: number, projectHeight: number, inputs: GnumarusProjectLayerInput[]): void {
     if (inputs.length === 0) {
       throw new Error("Project has no layers.");
     }
-    const first = inputs[0];
-    if (first === undefined) {
-      throw new Error("Project has no layers.");
-    }
     for (const input of inputs) {
-      if (input.width !== first.width || input.height !== first.height) {
-        throw new Error(`Layer size mismatch: ${input.id}`);
+      if (!Number.isInteger(input.width) || !Number.isInteger(input.height) || input.width < 1 || input.height < 1) {
+        throw new Error(`Layer has invalid dimensions: ${input.id}`);
+      }
+      if (input.buffer.length !== input.width * input.height * 4) {
+        throw new Error(`Layer buffer size mismatch: ${input.id}`);
       }
     }
-    this.imageWidth = first.width;
-    this.imageHeight = first.height;
+    this.imageWidth = Math.max(1, Math.floor(projectWidth));
+    this.imageHeight = Math.max(1, Math.floor(projectHeight));
     for (const layer of this.layers) {
       this.scene.remove(layer.plane);
       layer.material.dispose();
@@ -541,10 +656,12 @@ export class GnumarusCanvasEngine {
       if (match !== null && match[1] !== undefined) {
         maxSuffix = Math.max(maxSuffix, Number.parseInt(match[1], 10) + 1);
       }
-      const copy = new Uint8ClampedArray(input.width * input.height * 4);
-      copy.set(input.buffer.subarray(0, input.width * input.height * 4));
+      const copy = new Uint8ClampedArray(input.buffer);
       this.layers.push(
-        this.createLayerInternal(input.id, input.name, input.visible, input.opacity, copy),
+        this.createLayerInternal(input.id, input.name, input.visible, input.opacity, copy, input.width, input.height, {
+          ...input.transform,
+          rotation: normalizeRotation(input.transform.rotation),
+        }),
       );
     }
     const top = this.layers[this.layers.length - 1];
@@ -582,7 +699,9 @@ export class GnumarusCanvasEngine {
       layer.texture.dispose();
     }
     this.layers = [];
-    const first = this.createLayerInternal("layer0", "Layer 0", true, 1, createPixelBuffer(width, height));
+    const first = this.createLayerInternal("layer0", "Layer 0", true, 1, createPixelBuffer(width, height), width, height, {
+      ...IDENTITY_LAYER_TRANSFORM,
+    });
     this.layers.push(first);
     this.activeLayerId = first.id;
     this.layerCounter = 1;
@@ -610,7 +729,7 @@ export class GnumarusCanvasEngine {
     }
     const base = layer.buffer.slice();
     clearPixelBuffer(layer.buffer);
-    const diff = computeImageDiff(base, layer.buffer, this.imageWidth, this.imageHeight);
+    const diff = computeImageDiff(base, layer.buffer, layer.width, layer.height);
     if (diff !== null) {
       this.history.push({ type: "stroke", layerId: layer.id, diff });
     }
@@ -798,16 +917,35 @@ export class GnumarusCanvasEngine {
   private attachEvents(): void {
     const canvas = this.renderer.domElement;
     canvas.addEventListener("pointerdown", (event: PointerEvent) => {
-      if (event.button === 1 && this.tool === "loupe") {
+      if (event.button === 1 && (this.tool === "loupe" || this.tool === "transform")) {
         event.preventDefault();
         if (event.ctrlKey) {
-          // Ctrl+middle-click with the loupe tool resets the transform.
-          this.resetViewTransform();
-        } else if (event.shiftKey) {
+          // Ctrl+middle-click resets the transform.
+          if (this.tool === "loupe") {
+            this.resetViewTransform();
+          } else {
+            const layer = this.activeLayer();
+            if (layer !== null) {
+              this.resetLayerTransform(layer.id);
+            }
+          }
+        } else if (this.tool === "loupe") {
           // Middle click with the loupe tool flips the canvas view.
-          this.setFlip(this.flipX, !this.flipY);
+          if (event.shiftKey) {
+            this.setFlip(this.flipX, !this.flipY);
+          } else {
+            this.setFlip(!this.flipX, this.flipY);
+          }
         } else {
-          this.setFlip(!this.flipX, this.flipY);
+          // Middle click with the transform tool flips the active layer.
+          const layer = this.activeLayer();
+          if (layer !== null) {
+            if (event.shiftKey) {
+              this.setLayerTransform(layer.id, { flipY: !layer.transform.flipY });
+            } else {
+              this.setLayerTransform(layer.id, { flipX: !layer.transform.flipX });
+            }
+          }
         }
         return;
       }
@@ -816,18 +954,42 @@ export class GnumarusCanvasEngine {
         canvas.setPointerCapture(event.pointerId);
         return;
       }
-      if (event.button === 2 && this.tool === "loupe") {
-        // Right-drag with the loupe tool rotates around the image center.
-        const angle = this.pointerAngle(event.clientX, event.clientY);
+      if (event.button === 2 && (this.tool === "loupe" || this.tool === "transform")) {
+        // Right-drag rotates around the image (loupe) or layer (transform) center.
+        const angle =
+          this.tool === "loupe"
+            ? this.pointerAngle(event.clientX, event.clientY)
+            : this.layerPointerAngle(event.clientX, event.clientY);
         if (angle === null) {
           return;
         }
-        this.rotating = true;
-        this.lastPointerAngle = angle;
+        if (this.tool === "loupe") {
+          this.rotating = true;
+          this.lastPointerAngle = angle;
+        } else {
+          this.transformRotating = true;
+          this.transformLastAngle = angle;
+        }
         canvas.setPointerCapture(event.pointerId);
         return;
       }
       if (event.button !== 0) {
+        return;
+      }
+      if (this.tool === "transform") {
+        // Left-drag with the transform tool moves the active layer.
+        const layer = this.activeLayer();
+        if (layer === null) {
+          return;
+        }
+        this.transforming = true;
+        this.transformStart = {
+          clientX: event.clientX,
+          clientY: event.clientY,
+          x: layer.transform.x,
+          y: layer.transform.y,
+        };
+        canvas.setPointerCapture(event.pointerId);
         return;
       }
       if (this.tool === "loupe") {
@@ -850,7 +1012,7 @@ export class GnumarusCanvasEngine {
       this.lastPixel = pixel;
       this.strokeBase = layer.buffer.slice();
       this.strokeLayerId = layer.id;
-      setPixel(layer.buffer, this.imageWidth, this.imageHeight, pixel.x, pixel.y, this.color);
+      setPixel(layer.buffer, layer.width, layer.height, pixel.x, pixel.y, this.color);
       layer.texture.needsUpdate = true;
       this.render();
       this.onPixelsChanged();
@@ -859,6 +1021,40 @@ export class GnumarusCanvasEngine {
     canvas.addEventListener("pointermove", (event: PointerEvent) => {
       const pixel = this.toImagePixel(event.clientX, event.clientY);
       this.cursor = pixel;
+      if (this.transformRotating) {
+        const angle = this.layerPointerAngle(event.clientX, event.clientY);
+        if (angle !== null && this.transformLastAngle !== null) {
+          let delta = angle - this.transformLastAngle;
+          if (delta > Math.PI) {
+            delta -= Math.PI * 2;
+          } else if (delta < -Math.PI) {
+            delta += Math.PI * 2;
+          }
+          const layer = this.activeLayer();
+          if (layer !== null) {
+            this.setLayerTransform(layer.id, { rotation: layer.transform.rotation + delta });
+            this.transformLastAngle = angle;
+          }
+        }
+        return;
+      }
+      if (this.transforming && this.transformStart !== null) {
+        const layer = this.activeLayer();
+        if (layer === null) {
+          return;
+        }
+        const cos = Math.cos(this.rotation);
+        const sin = Math.sin(this.rotation);
+        const dx = event.clientX - this.transformStart.clientX;
+        const dy = event.clientY - this.transformStart.clientY;
+        const vx = (cos * dx + sin * dy) / this.zoom;
+        const vy = (-sin * dx + cos * dy) / this.zoom;
+        this.setLayerTransform(layer.id, {
+          x: this.transformStart.x + vx / (this.flipX ? -1 : 1),
+          y: this.transformStart.y + vy / (this.flipY ? -1 : 1),
+        });
+        return;
+      }
       if (this.rotating) {
         const angle = this.pointerAngle(event.clientX, event.clientY);
         if (angle !== null && this.lastPointerAngle !== null) {
@@ -895,8 +1091,8 @@ export class GnumarusCanvasEngine {
         }
         drawPixelLine(
           layer.buffer,
-          this.imageWidth,
-          this.imageHeight,
+          layer.width,
+          layer.height,
           this.lastPixel.x,
           this.lastPixel.y,
           pixel.x,
@@ -914,7 +1110,7 @@ export class GnumarusCanvasEngine {
       if (this.strokeBase !== null && this.strokeLayerId !== null) {
         const layer = this.findLayer(this.strokeLayerId);
         if (layer !== null) {
-          const diff = computeImageDiff(this.strokeBase, layer.buffer, this.imageWidth, this.imageHeight);
+          const diff = computeImageDiff(this.strokeBase, layer.buffer, layer.width, layer.height);
           if (diff !== null) {
             this.history.push({ type: "stroke", layerId: layer.id, diff });
           }
@@ -926,7 +1122,11 @@ export class GnumarusCanvasEngine {
       this.panning = false;
       this.rotating = false;
       this.loupeZooming = false;
+      this.transforming = false;
+      this.transformRotating = false;
       this.lastPointerAngle = null;
+      this.transformLastAngle = null;
+      this.transformStart = null;
       this.loupeAnchor = null;
       this.lastPixel = null;
     };
@@ -966,6 +1166,10 @@ export class GnumarusCanvasEngine {
           this.setTool("loupe");
           return;
         }
+        if (event.key === "t" || event.key === "T") {
+          this.setTool("transform");
+          return;
+        }
       }
       if (event.ctrlKey && !event.altKey && !event.metaKey && !inField) {
         const key = event.key.toLowerCase();
@@ -1002,21 +1206,19 @@ export class GnumarusCanvasEngine {
   }
 
   private toImagePixel(clientX: number, clientY: number): { x: number; y: number } | null {
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return null;
+    }
     const rect = this.renderer.domElement.getBoundingClientRect();
-    return screenToImagePixel(
+    return screenToLayerPixel(
       clientX,
       clientY,
       { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-      this.imageWidth,
-      this.imageHeight,
-      {
-        zoom: this.zoom,
-        panX: this.panX,
-        panY: this.panY,
-        rotation: this.rotation,
-        flipX: this.flipX,
-        flipY: this.flipY,
-      },
+      layer.width,
+      layer.height,
+      this.viewTransform(),
+      layer.transform,
     );
   }
 
@@ -1025,6 +1227,27 @@ export class GnumarusCanvasEngine {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const dx = clientX - (rect.left + rect.width / 2 + this.panX);
     const dy = clientY - (rect.top + rect.height / 2 + this.panY);
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) {
+      return null;
+    }
+    return Math.atan2(dy, dx);
+  }
+
+  /** Pointer angle around the active layer's screen center. Null at the center. */
+  private layerPointerAngle(clientX: number, clientY: number): number | null {
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return null;
+    }
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const center = projectToScreen(
+      layer.transform.x,
+      layer.transform.y,
+      { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      this.viewTransform(),
+    );
+    const dx = clientX - center.x;
+    const dy = clientY - center.y;
     if (Math.abs(dx) < 1 && Math.abs(dy) < 1) {
       return null;
     }
@@ -1055,21 +1278,76 @@ export class GnumarusCanvasEngine {
     this.layoutSceneTransforms();
   }
 
+  private viewTransform(): GnumarusViewTransform {
+    return {
+      zoom: this.zoom,
+      panX: this.panX,
+      panY: this.panY,
+      rotation: this.rotation,
+      flipX: this.flipX,
+      flipY: this.flipY,
+    };
+  }
+
+  /**
+   * Position a plane from its layer transform and the view transform by
+   * evaluating the same pure mapping used for pointer math, so render and
+   * picking always agree.
+   */
+  private writePlaneMatrix(
+    mesh: THREE.Mesh,
+    layerWidth: number,
+    layerHeight: number,
+    layer: GnumarusLayerTransform,
+    z: number,
+  ): void {
+    const rect = this.container.getBoundingClientRect();
+    const w = Math.max(1, rect.width);
+    const h = Math.max(1, rect.height);
+    const local: GnumarusRect = { left: 0, top: 0, width: w, height: h };
+    const view = this.viewTransform();
+    const at = (lx: number, ly: number): { x: number; y: number } => {
+      const projected = layerImageToProject((lx + 0.5) * layerWidth, (0.5 - ly) * layerHeight, layerWidth, layerHeight, layer);
+      return projectToScreen(projected.x, projected.y, local, view);
+    };
+    const o = at(0, 0);
+    const ex = at(1, 0);
+    const ey = at(0, 1);
+    const e = mesh.matrix.elements;
+    e[0] = ex.x - o.x;
+    e[1] = -(ex.y - o.y);
+    e[2] = 0;
+    e[3] = 0;
+    e[4] = ey.x - o.x;
+    e[5] = -(ey.y - o.y);
+    e[6] = 0;
+    e[7] = 0;
+    e[8] = 0;
+    e[9] = 0;
+    e[10] = 1;
+    e[11] = 0;
+    e[12] = o.x - w / 2;
+    e[13] = h / 2 - o.y;
+    e[14] = z;
+    e[15] = 1;
+    mesh.matrixWorldNeedsUpdate = true;
+  }
+
   private layoutSceneTransforms(): void {
-    const flipX = this.flipX ? -1 : 1;
-    const flipY = this.flipY ? -1 : 1;
     for (let i = 0; i < this.layers.length; i += 1) {
       const layer = this.layers[i];
       if (layer === undefined) {
         continue;
       }
-      layer.plane.scale.set(this.imageWidth * this.zoom * flipX, this.imageHeight * this.zoom * flipY, 1);
-      layer.plane.rotation.z = -this.rotation;
-      layer.plane.position.set(this.panX, -this.panY, i * 0.01);
+      this.writePlaneMatrix(layer.plane, layer.width, layer.height, layer.transform, i * 0.01);
     }
-    this.backgroundPlane.scale.set(this.imageWidth * this.zoom * flipX, this.imageHeight * this.zoom * flipY, 1);
-    this.backgroundPlane.rotation.z = -this.rotation;
-    this.backgroundPlane.position.set(this.panX, -this.panY, -0.02);
+    this.writePlaneMatrix(
+      this.backgroundPlane,
+      this.imageWidth,
+      this.imageHeight,
+      IDENTITY_LAYER_TRANSFORM,
+      -0.02,
+    );
   }
 
   private render(): void {
@@ -1099,6 +1377,6 @@ export class GnumarusCanvasEngine {
     if (layer === null) {
       return null;
     }
-    return getPixel(layer.buffer, this.imageWidth, this.imageHeight, x, y);
+    return getPixel(layer.buffer, layer.width, layer.height, x, y);
   }
 }

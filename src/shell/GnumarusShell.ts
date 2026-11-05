@@ -202,6 +202,11 @@ export class GnumarusShell extends LitElement {
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .layer-dims {
+      color: #9a9a9a;
+      font-size: 11px;
+      flex: 0 0 auto;
+    }
     .layer-row input.layer-rename {
       flex: 1 1 auto;
       min-width: 0;
@@ -519,6 +524,17 @@ export class GnumarusShell extends LitElement {
           >
             ⌕
           </button>
+          <button
+            class=${this.tool === "transform" ? "active" : ""}
+            title="Transform (left-drag move, right-drag rotate, middle-click flip layer)"
+            aria-label="Transform"
+            @click=${(): void => {
+              this.tool = "transform";
+              this.engine?.setTool("transform");
+            }}
+          >
+            ⤢
+          </button>
           <input
             type="color"
             id="pencilColor"
@@ -585,6 +601,7 @@ export class GnumarusShell extends LitElement {
                           <span class="layer-name" @dblclick=${(): void => this.onRenameStart(layer.id)}>
                             ${layer.name}
                           </span>
+                          <span class="layer-dims">${layer.width}×${layer.height}</span>
                         `}
                     <button
                       aria-label="Move layer up"
@@ -1027,6 +1044,7 @@ export class GnumarusShell extends LitElement {
         width: number;
         height: number;
         buffer: Uint8ClampedArray;
+        transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
       }> = [];
       for (const layer of project.layers) {
         const cell = layer.cells[0];
@@ -1038,7 +1056,7 @@ export class GnumarusShell extends LitElement {
           throw new Error(`Missing cell file: ${cell.file}`);
         }
         const decoded = await decodePngToBuffer(blob);
-        if (decoded.width !== project.width || decoded.height !== project.height) {
+        if (decoded.width !== layer.width || decoded.height !== layer.height) {
           throw new Error(`Cell size mismatch: ${cell.file}`);
         }
         inputs.push({
@@ -1049,9 +1067,10 @@ export class GnumarusShell extends LitElement {
           width: decoded.width,
           height: decoded.height,
           buffer: decoded.buffer,
+          transform: layer.transform,
         });
       }
-      this.engine?.loadProject(inputs);
+      this.engine?.loadProject(project.width, project.height, inputs);
       this.refreshLayers();
       this.directoryHandle = dir;
       this.projectName = dir.name;
@@ -1090,9 +1109,12 @@ export class GnumarusShell extends LitElement {
           name: info.name,
           visible: info.visible,
           opacity: info.opacity,
+          width: info.width,
+          height: info.height,
+          transform: { ...info.transform },
           cells: [{ frame: 0, file }],
         });
-        cells.set(file, await encodeBufferToPngBlob(rendered.buffer, size.width, size.height));
+        cells.set(file, await encodeBufferToPngBlob(rendered.buffer, rendered.width, rendered.height));
       }
       const meta: GnumarusProjectMeta = {
         app: GNUMARUS_APP_ID,

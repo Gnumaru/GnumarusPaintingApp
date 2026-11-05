@@ -1,3 +1,6 @@
+import type { GnumarusLayerTransform } from "../canvas/GnumarusViewportMath";
+import { IDENTITY_LAYER_TRANSFORM } from "../canvas/GnumarusViewportMath";
+
 export interface GnumarusCellRef {
   frame: number;
   file: string;
@@ -8,6 +11,9 @@ export interface GnumarusLayerMeta {
   name: string;
   visible: boolean;
   opacity: number;
+  width: number;
+  height: number;
+  transform: GnumarusLayerTransform;
   cells: GnumarusCellRef[];
 }
 
@@ -45,6 +51,9 @@ export function createDefaultProject(width: number, height: number): GnumarusPro
         name: "Layer 0",
         visible: true,
         opacity: 1,
+        width,
+        height,
+        transform: { ...IDENTITY_LAYER_TRANSFORM },
         cells: [{ frame: 0, file: cellFilePath("layer0", 0) }],
       },
     ],
@@ -57,6 +66,20 @@ export function serializeProject(project: GnumarusProjectMeta): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseLayerTransform(value: unknown): GnumarusLayerTransform {
+  if (!isRecord(value)) {
+    return { ...IDENTITY_LAYER_TRANSFORM };
+  }
+  const { x, y, rotation, flipX, flipY } = value;
+  return {
+    x: typeof x === "number" && Number.isFinite(x) ? x : 0,
+    y: typeof y === "number" && Number.isFinite(y) ? y : 0,
+    rotation: typeof rotation === "number" && Number.isFinite(rotation) ? rotation : 0,
+    flipX: flipX === true,
+    flipY: flipY === true,
+  };
 }
 
 export function parseProject(jsonText: string): GnumarusProjectMeta {
@@ -79,6 +102,8 @@ export function parseProject(jsonText: string): GnumarusProjectMeta {
   if (typeof width !== "number" || typeof height !== "number" || width < 1 || height < 1) {
     throw new GnumarusProjectError("project.json has invalid dimensions");
   }
+  const widthDim = Math.floor(width);
+  const heightDim = Math.floor(height);
   if (!Array.isArray(layers) || layers.length === 0) {
     throw new GnumarusProjectError("project.json has no layers");
   }
@@ -86,7 +111,7 @@ export function parseProject(jsonText: string): GnumarusProjectMeta {
     if (!isRecord(entry)) {
       throw new GnumarusProjectError("project.json has an invalid layer");
     }
-    const { id, name, visible, opacity, cells } = entry;
+    const { id, name, visible, opacity, width, height, transform, cells } = entry;
     if (typeof id !== "string" || typeof name !== "string") {
       throw new GnumarusProjectError("project.json has a layer with invalid id/name");
     }
@@ -102,7 +127,16 @@ export function parseProject(jsonText: string): GnumarusProjectMeta {
       }
       return { frame: cell.frame, file: cell.file };
     });
-    return { id, name, visible, opacity, cells: checkedCells };
+    return {
+      id,
+      name,
+      visible,
+      opacity,
+      width: typeof width === "number" && width >= 1 ? Math.floor(width) : Math.floor(widthDim),
+      height: typeof height === "number" && height >= 1 ? Math.floor(height) : Math.floor(heightDim),
+      transform: parseLayerTransform(transform),
+      cells: checkedCells,
+    };
   });
   return {
     app: GNUMARUS_APP_ID,

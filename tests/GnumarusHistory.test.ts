@@ -154,7 +154,17 @@ describe("GnumarusHistory", () => {
       merge: {
         lowerLayerId: "lower",
         lowerDiff,
-        upper: { id: "upper", name: "Upper", visible: true, opacity: 1, stackIndex: 1, buffer: upperBuffer },
+        upper: {
+          id: "upper",
+          name: "Upper",
+          visible: true,
+          opacity: 1,
+          width: 4,
+          height: 4,
+          transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+          stackIndex: 1,
+          buffer: upperBuffer,
+        },
       },
     });
     layers.get("lower")?.set(upperBuffer);

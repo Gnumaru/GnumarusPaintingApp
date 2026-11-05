@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   clampZoom,
   imageToScreenPixel,
+  layerPixelToScreen,
   normalizeRotation,
+  projectToLayerPixel,
   screenToImagePixel,
+  screenToLayerPixel,
+  type GnumarusLayerTransform,
   type GnumarusViewTransform,
 } from "../src/canvas/GnumarusViewportMath";
 
@@ -80,5 +84,45 @@ describe("GnumarusViewportMath", () => {
     const left = imageToScreenPixel(0, 32, RECT, 64, 64, view);
     expect(right.x).toBeLessThan(200);
     expect(left.x).toBeGreaterThan(200);
+  });
+
+  it("maps small offset layers", () => {
+    const layer: GnumarusLayerTransform = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false };
+    const screen = layerPixelToScreen(0, 0, RECT, 8, 8, PLAIN, layer);
+    expect(screen.x).toBeCloseTo(200 - 3.5 * 4, 6);
+    expect(screen.y).toBeCloseTo(150 - 3.5 * 4, 6);
+    expect(projectToLayerPixel(1000, 1000, 8, 8, layer)).toBeNull();
+  });
+
+  it("shifts layers by their offset", () => {
+    const centered: GnumarusLayerTransform = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false };
+    const shifted: GnumarusLayerTransform = { x: 10, y: -5, rotation: 0, flipX: false, flipY: false };
+    const a = layerPixelToScreen(4, 4, RECT, 8, 8, PLAIN, centered);
+    const b = layerPixelToScreen(4, 4, RECT, 8, 8, PLAIN, shifted);
+    expect(b.x - a.x).toBeCloseTo(40, 6);
+    expect(b.y - a.y).toBeCloseTo(-20, 6);
+  });
+
+  it("round-trips pixels through layer rotation and flips", () => {
+    const view: GnumarusViewTransform = { ...PLAIN, rotation: Math.PI / 6 };
+    const layers: GnumarusLayerTransform[] = [
+      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+      { x: 20, y: -13, rotation: Math.PI / 3, flipX: false, flipY: false },
+      { x: -40, y: 30, rotation: -Math.PI / 2, flipX: true, flipY: false },
+      { x: 5, y: 5, rotation: Math.PI, flipX: true, flipY: true },
+    ];
+    for (const layer of layers) {
+      for (const [ix, iy] of [
+        [0, 0],
+        [7, 0],
+        [0, 7],
+        [7, 7],
+        [3, 5],
+      ]) {
+        const screen = layerPixelToScreen(ix, iy, RECT, 8, 8, view, layer);
+        const back = screenToLayerPixel(screen.x, screen.y, RECT, 8, 8, view, layer);
+        expect(back, `view-rot layer=${JSON.stringify(layer)} pixel=${ix},${iy}`).toEqual({ x: ix, y: iy });
+      }
+    }
   });
 });

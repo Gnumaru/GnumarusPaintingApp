@@ -13,8 +13,26 @@ describe("GnumarusProjectFormat", () => {
     const project = createDefaultProject(64, 64);
     expect(project.app).toBe(GNUMARUS_APP_ID);
     expect(project.layers.length).toBe(1);
+    expect(project.layers[0]).toMatchObject({ width: 64, height: 64 });
     const parsed = parseProject(serializeProject(project));
     expect(parsed).toEqual(project);
+  });
+
+  it("defaults legacy layers without size or transform", () => {
+    const parsed = parseProject(
+      JSON.stringify({
+        app: GNUMARUS_APP_ID,
+        version: 1,
+        width: 64,
+        height: 64,
+        layers: [{ id: "layer0", name: "Layer 0", visible: true, opacity: 1, cells: [{ frame: 0, file: "cells/layer0_frame0.png" }] }],
+      }),
+    );
+    expect(parsed.layers[0]).toMatchObject({
+      width: 64,
+      height: 64,
+      transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+    });
   });
 
   it("builds predictable cell paths", () => {

@@ -81,6 +81,27 @@ export function drawPixelLine(
   }
 }
 
+/** Per-pixel straight-alpha source-over: src[srcIndex..] over dst[dstIndex..]. */
+export function compositePixelOver(
+  dst: Uint8ClampedArray,
+  dstIndex: number,
+  src: Uint8ClampedArray,
+  srcIndex: number,
+  opacity: number,
+): void {
+  const srcA = (src[srcIndex + 3] / 255) * opacity;
+  if (srcA <= 0) {
+    return;
+  }
+  const dstA = dst[dstIndex + 3] / 255;
+  const outA = srcA + dstA * (1 - srcA);
+  const inv = dstA * (1 - srcA);
+  dst[dstIndex] = Math.round((src[srcIndex] * srcA + dst[dstIndex] * inv) / outA);
+  dst[dstIndex + 1] = Math.round((src[srcIndex + 1] * srcA + dst[dstIndex + 1] * inv) / outA);
+  dst[dstIndex + 2] = Math.round((src[srcIndex + 2] * srcA + dst[dstIndex + 2] * inv) / outA);
+  dst[dstIndex + 3] = Math.round(outA * 255);
+}
+
 /** Source-over composite of `src` onto `dst` in place, both same-size straight-alpha buffers. */
 export function compositeOver(
   dst: Uint8ClampedArray,
@@ -89,23 +110,9 @@ export function compositeOver(
   height: number,
   opacity: number,
 ): void {
-  const count = width * height * 4;
-  for (let i = 0; i < count; i += 4) {
-    const srcA = (src[i + 3] / 255) * opacity;
-    const dstA = dst[i + 3] / 255;
-    const outA = srcA + dstA * (1 - srcA);
-    if (outA <= 0) {
-      dst[i] = 0;
-      dst[i + 1] = 0;
-      dst[i + 2] = 0;
-      dst[i + 3] = 0;
-      continue;
-    }
-    const inv = dstA * (1 - srcA);
-    dst[i] = Math.round((src[i] * srcA + dst[i] * inv) / outA);
-    dst[i + 1] = Math.round((src[i + 1] * srcA + dst[i + 1] * inv) / outA);
-    dst[i + 2] = Math.round((src[i + 2] * srcA + dst[i + 2] * inv) / outA);
-    dst[i + 3] = Math.round(outA * 255);
+  const count = width * height;
+  for (let i = 0; i < count; i += 1) {
+    compositePixelOver(dst, i * 4, src, i * 4, opacity);
   }
 }
 

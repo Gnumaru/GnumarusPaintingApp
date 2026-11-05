@@ -1,3 +1,5 @@
+import type { GnumarusLayerTransform } from "../canvas/GnumarusViewportMath";
+
 export interface GnumarusImageDiff {
   x: number;
   y: number;
@@ -79,6 +81,9 @@ export interface GnumarusMergedLayerSnapshot {
   name: string;
   visible: boolean;
   opacity: number;
+  width: number;
+  height: number;
+  transform: GnumarusLayerTransform;
   stackIndex: number;
   buffer: Uint8ClampedArray;
 }
