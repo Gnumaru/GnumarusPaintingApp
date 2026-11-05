@@ -1111,6 +1111,53 @@ test("final preview pans with left, right and middle mouse drags", async ({ page
   expect(middleDrag.top).toBeGreaterThan(0);
 });
 
+test("final preview scroll limits show all four image edges", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Final preview" }).click();
+  const preview = page.locator('gnumarus-shell [data-testid="final-preview"]');
+  await expect(preview).toBeVisible();
+  await preview.getByRole("button", { name: "Zoom in preview" }).click();
+  await preview.getByRole("button", { name: "Zoom in preview" }).click();
+  const body = preview.locator(".preview-body");
+  const previewCanvas = preview.locator("canvas#previewCanvas");
+  await expect(previewCanvas).toBeVisible();
+  const edges = await body.evaluate((element: HTMLElement) => {
+    const canvas = element.querySelector("canvas");
+    if (canvas === null) {
+      throw new Error("preview canvas is missing");
+    }
+    const setScroll = (left: number, top: number): DOMRect => {
+      element.scrollLeft = left;
+      element.scrollTop = top;
+      return canvas.getBoundingClientRect();
+    };
+    const bodyRect = element.getBoundingClientRect();
+    const atStart = setScroll(0, 0);
+    const maxLeft = element.scrollWidth - element.clientWidth;
+    const maxTop = element.scrollHeight - element.clientHeight;
+    const atEnd = setScroll(maxLeft, maxTop);
+    return {
+      bodyLeft: bodyRect.left,
+      bodyTop: bodyRect.top,
+      bodyRight: bodyRect.right,
+      bodyBottom: bodyRect.bottom,
+      startLeft: atStart.left,
+      startTop: atStart.top,
+      endRight: atEnd.right,
+      endBottom: atEnd.bottom,
+      maxLeft,
+      maxTop,
+    };
+  });
+  expect(edges.maxLeft).toBeGreaterThan(0);
+  expect(edges.maxTop).toBeGreaterThan(0);
+  expect(Math.abs(edges.startLeft - edges.bodyLeft)).toBeLessThanOrEqual(1);
+  expect(Math.abs(edges.startTop - edges.bodyTop)).toBeLessThanOrEqual(1);
+  expect(Math.abs(edges.endRight - edges.bodyRight)).toBeLessThanOrEqual(1);
+  expect(Math.abs(edges.endBottom - edges.bodyBottom)).toBeLessThanOrEqual(1);
+});
+
 test("custom picker edits pencil color through models and inputs", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

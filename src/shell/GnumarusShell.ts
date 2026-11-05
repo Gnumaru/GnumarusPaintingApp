@@ -477,8 +477,6 @@ export class GnumarusShell extends LitElement {
       min-height: 0;
       background: #1e1e1e;
       display: flex;
-      align-items: center;
-      justify-content: center;
       cursor: grab;
       touch-action: none;
     }
@@ -488,6 +486,8 @@ export class GnumarusShell extends LitElement {
     .preview-body canvas {
       image-rendering: pixelated;
       background: transparent;
+      flex: 0 0 auto;
+      margin: auto;
     }
     .dialog-actions {
       display: flex;

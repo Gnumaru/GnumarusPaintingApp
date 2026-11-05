@@ -61,7 +61,7 @@
 ## 6. Tests
 
 - Vitest unit tests (`tests/`): pixel buffer (incl. 8-digit hex), color models (all seven incl. Oklab round-trips, ARD, per-model alpha, ARD 0..360/0..255 ranges), channel locks, layer resize, grid settings, pixel grid shader, background settings, final render, viewport math, project format, checker settings, layer-tagged history — 83 tests.
-- Playwright E2E (`e2e/`, Chromium): shell, menus, dialogs, pencil, zoom shortcuts, checker settings (via custom picker), loupe gestures, P/L tools, transform reset, undo/redo, full layer management, channel lock toggles + masked paint + merge/undo, layer resize dialog + undo, pixel grid visibility + threshold + rotation + max zoom cycle, settings reset arrows, background mode (via custom picker), final preview zoom + any-button drag pan, custom picker models/inputs/bar-drag/alpha/clamping/default-HSL/ARD-ranges/zero-value sliders — 37 tests.
+- Playwright E2E (`e2e/`, Chromium): shell, menus, dialogs, pencil, zoom shortcuts, checker settings (via custom picker), loupe gestures, P/L tools, transform reset, undo/redo, full layer management, channel lock toggles + masked paint + merge/undo, layer resize dialog + undo, pixel grid visibility + threshold + rotation + max zoom cycle, settings reset arrows, background mode (via custom picker), final preview zoom + any-button drag pan + scroll limits on all four edges, custom picker models/inputs/bar-drag/alpha/clamping/default-HSL/ARD-ranges/zero-value sliders — 38 tests.
 
 ## 7. Build and deploy
 

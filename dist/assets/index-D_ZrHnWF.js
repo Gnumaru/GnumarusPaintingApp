@@ -4891,8 +4891,6 @@ void main() {
       min-height: 0;
       background: #1e1e1e;
       display: flex;
-      align-items: center;
-      justify-content: center;
       cursor: grab;
       touch-action: none;
     }
@@ -4902,6 +4900,8 @@ void main() {
     .preview-body canvas {
       image-rendering: pixelated;
       background: transparent;
+      flex: 0 0 auto;
+      margin: auto;
     }
     .dialog-actions {
       display: flex;
