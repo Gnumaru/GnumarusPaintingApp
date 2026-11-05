@@ -372,6 +372,157 @@ export function drawBrushLine(
   }
 }
 
+/** Blend one pixel toward `color` by `coverage` (0..1), honoring channel locks. */
+function blendPixelCoverage(
+  buffer: Uint8ClampedArray,
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+  color: GnumarusRgba,
+  coverage: number,
+  locked: GnumarusChannelLock | undefined = undefined,
+): void {
+  if (!(coverage > 0)) {
+    return;
+  }
+  if (x < 0 || y < 0 || x >= width || y >= height) {
+    return;
+  }
+  const clamped = Math.min(1, Math.max(0, coverage));
+  if (clamped >= 1) {
+    setPixel(buffer, width, height, x, y, color, locked);
+    return;
+  }
+  const i = (y * width + x) * 4;
+  const inv = 1 - clamped;
+  if (locked === undefined || areAllChannelsUnlocked(locked)) {
+    buffer[i] = Math.round(buffer[i] * inv + color.r * clamped);
+    buffer[i + 1] = Math.round(buffer[i + 1] * inv + color.g * clamped);
+    buffer[i + 2] = Math.round(buffer[i + 2] * inv + color.b * clamped);
+    buffer[i + 3] = Math.round(buffer[i + 3] * inv + color.a * clamped);
+    return;
+  }
+  if (locked.r !== true) {
+    buffer[i] = Math.round(buffer[i] * inv + color.r * clamped);
+  }
+  if (locked.g !== true) {
+    buffer[i + 1] = Math.round(buffer[i + 1] * inv + color.g * clamped);
+  }
+  if (locked.b !== true) {
+    buffer[i + 2] = Math.round(buffer[i + 2] * inv + color.b * clamped);
+  }
+  if (locked.a !== true) {
+    buffer[i + 3] = Math.round(buffer[i + 3] * inv + color.a * clamped);
+  }
+}
+
+/**
+ * Straight segment with thickness, end shape and optional anti-aliasing.
+ * Without anti-aliasing this stamps the brush tip along the Bresenham path
+ * (1px falls back to the exact pencil line). With anti-aliasing, coverage is
+ * computed per pixel from the distance to the segment: round (`circle`) uses
+ * Euclidean distance with semicircular caps, flat (`square`) uses a butt-cap
+ * rectangle with a 1px feather on edges and ends. Partial pixels are blended
+ * toward the fill color honoring channel locks.
+ */
+export function drawLineSegment(
+  buffer: Uint8ClampedArray,
+  width: number,
+  height: number,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  lineWidth: number,
+  shape: GnumarusBrushShape,
+  antialiased: boolean,
+  color: GnumarusRgba,
+  locked: GnumarusChannelLock | undefined = undefined,
+): void {
+  const thick = clampBrushSize(lineWidth);
+  if (!antialiased) {
+    if (thick <= 1) {
+      drawPixelLine(buffer, width, height, x0, y0, x1, y1, color, locked);
+    } else {
+      drawBrushLine(buffer, width, height, x0, y0, x1, y1, thick, shape, color, locked);
+    }
+    return;
+  }
+  const half = thick / 2;
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const length = Math.sqrt(dx * dx + dy * dy);
+  if (!(length > 1e-9)) {
+    if (shape === "square") {
+      const reach = half + 0.5;
+      const minX = Math.floor(x0 - reach);
+      const maxX = Math.ceil(x0 + reach);
+      const minY = Math.floor(y0 - reach);
+      const maxY = Math.ceil(y0 + reach);
+      for (let y = minY; y <= maxY; y += 1) {
+        for (let x = minX; x <= maxX; x += 1) {
+          const cx = Math.min(1, Math.max(0, half + 0.5 - Math.abs(x - x0)));
+          const cy = Math.min(1, Math.max(0, half + 0.5 - Math.abs(y - y0)));
+          blendPixelCoverage(buffer, width, height, x, y, color, Math.min(cx, cy), locked);
+        }
+      }
+    } else {
+      const radius = Math.max(0, half + 0.5);
+      const minX = Math.floor(x0 - radius);
+      const maxX = Math.ceil(x0 + radius);
+      const minY = Math.floor(y0 - radius);
+      const maxY = Math.ceil(y0 + radius);
+      for (let y = minY; y <= maxY; y += 1) {
+        for (let x = minX; x <= maxX; x += 1) {
+          const dist = Math.sqrt((x - x0) * (x - x0) + (y - y0) * (y - y0));
+          blendPixelCoverage(buffer, width, height, x, y, color, half + 0.5 - dist, locked);
+        }
+      }
+    }
+    return;
+  }
+  const ux = dx / length;
+  const uy = dy / length;
+  const pad = half + 1;
+  const minX = Math.max(0, Math.floor(Math.min(x0, x1) - pad));
+  const maxX = Math.min(width - 1, Math.ceil(Math.max(x0, x1) + pad));
+  const minY = Math.max(0, Math.floor(Math.min(y0, y1) - pad));
+  const maxY = Math.min(height - 1, Math.ceil(Math.max(y0, y1) + pad));
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      const relX = x - x0;
+      const relY = y - y0;
+      const along = relX * ux + relY * uy;
+      const perp = Math.abs(relX * uy - relY * ux);
+      let coverage: number;
+      if (shape === "circle") {
+        const clamped = Math.min(length, Math.max(0, along));
+        const cx = x0 + ux * clamped;
+        const cy = y0 + uy * clamped;
+        const dist = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+        coverage = half + 0.5 - dist;
+      } else {
+        const perpCoverage = half + 0.5 - perp;
+        if (perpCoverage <= 0) {
+          continue;
+        }
+        let endFade = 1;
+        if (along < 0) {
+          endFade = 1 + along;
+        } else if (along > length) {
+          endFade = 1 - (along - length);
+        }
+        if (endFade <= 0) {
+          continue;
+        }
+        coverage = perpCoverage < endFade ? perpCoverage : endFade;
+      }
+      blendPixelCoverage(buffer, width, height, x, y, color, coverage, locked);
+    }
+  }
+}
+
 /** Per-pixel straight-alpha source-over: src[srcIndex..] over dst[dstIndex..]. */
 export function compositePixelOver(
   dst: Uint8ClampedArray,

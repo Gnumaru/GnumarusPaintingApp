@@ -99,6 +99,9 @@ export class GnumarusShell extends LitElement {
       display: inline-block;
       transform: scale(2.5);
     }
+    .toolbar .tool-icon svg {
+      display: block;
+    }
     .menu > button:hover,
     .toolbar button:hover {
       background: #3a3a3a;
@@ -721,6 +724,9 @@ export class GnumarusShell extends LitElement {
     playing: { type: Boolean },
     brushSize: { type: Number },
     brushShape: { type: String },
+    lineWidth: { type: Number },
+    lineShape: { type: String },
+    lineAntialias: { type: Boolean },
   };
 
   declare tool: GnumarusCanvasTool;
@@ -774,6 +780,9 @@ export class GnumarusShell extends LitElement {
   declare playing: boolean;
   declare brushSize: number;
   declare brushShape: GnumarusBrushShape;
+  declare lineWidth: number;
+  declare lineShape: GnumarusBrushShape;
+  declare lineAntialias: boolean;
 
   private engine: GnumarusCanvasEngine | null = null;
   private directoryHandle: GnumarusDirectoryHandle | null = null;
@@ -830,6 +839,9 @@ export class GnumarusShell extends LitElement {
     this.playTimer = null;
     this.brushSize = 1;
     this.brushShape = "square";
+    this.lineWidth = 1;
+    this.lineShape = "square";
+    this.lineAntialias = false;
   }
 
   render() {
@@ -912,7 +924,34 @@ export class GnumarusShell extends LitElement {
               this.engine?.setTool("bucket");
             }}
           >
-            <span class="tool-icon">◼</span>
+            <span class="tool-icon"
+              ><svg
+                viewBox="0 0 16 16"
+                width="13"
+                height="13"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M2.8 6.4h10.4l-1.6 7H4.4L2.8 6.4z" />
+                <path d="M2 6.4h12" />
+                <path d="M11.6 1.2c.7 1 1.4 1.9 1.4 2.8a1.4 1.4 0 1 1-2.8 0c0-.9.7-1.8 1.4-2.8z" />
+              </svg>
+            </span>
+          </button>
+          <button
+            class=${this.tool === "line" ? "active" : ""}
+            title="Line (click start point, click end point)"
+            aria-label="Line"
+            @click=${(): void => {
+              this.tool = "line";
+              this.engine?.setTool("line");
+            }}
+          >
+            <span class="tool-icon">╲</span>
           </button>
           <button
             class=${this.tool === "transform" ? "active" : ""}
@@ -1506,6 +1545,40 @@ export class GnumarusShell extends LitElement {
         </div>
       `;
     }
+    if (this.tool === "line") {
+      return html`
+        <div class="tool-options" data-testid="tool-options" aria-label="Line options">
+          <label
+            >Line width
+            <input
+              type="number"
+              id="lineWidth"
+              min="1"
+              max="64"
+              step="1"
+              .value=${String(this.lineWidth)}
+              @input=${(): void => this.applyLineWidthFromDialog()}
+            />
+          </label>
+          <label
+            >Line shape
+            <select id="lineShape" .value=${this.lineShape} @change=${(): void => this.applyLineShapeFromDialog()}>
+              <option value="square">Square</option>
+              <option value="circle">Circle</option>
+            </select>
+          </label>
+          <label
+            ><input
+              type="checkbox"
+              id="lineAntialias"
+              .checked=${this.lineAntialias}
+              @change=${(): void => this.applyLineAntialiasFromDialog()}
+            />
+            Anti-aliasing
+          </label>
+        </div>
+      `;
+    }
     return html`
       <div class="tool-options" data-testid="tool-options" aria-label="${this.tool} options">
         <span class="tool-options-empty">the ${this.tool} tool does not have any setting or helper button</span>
@@ -2075,6 +2148,66 @@ export class GnumarusShell extends LitElement {
     this.brushShape = shape;
     this.engine?.setBrushShape(shape);
     this.statusMessage = `Brush shape: ${shape}`;
+  }
+
+  /** Test hook: set the line width (integers 1..64, clamped). */
+  setLineWidth(size: number): void {
+    const clamped = clampBrushSize(size);
+    this.lineWidth = clamped;
+    this.engine?.setLineWidth(clamped);
+    this.statusMessage = `Line width: ${clamped}`;
+  }
+
+  /** Test hook: set the line shape (square/circle, defaults to square). */
+  setLineShape(shape: GnumarusBrushShape): void {
+    const parsed = parseBrushShape(shape);
+    this.lineShape = parsed;
+    this.engine?.setLineShape(parsed);
+    this.statusMessage = `Line shape: ${parsed}`;
+  }
+
+  /** Test hook: enable or disable line anti-aliasing. */
+  setLineAntialias(enabled: boolean): void {
+    const next = enabled === true;
+    this.lineAntialias = next;
+    this.engine?.setLineAntialias(next);
+    this.statusMessage = `Line anti-aliasing: ${next ? "on" : "off"}`;
+  }
+
+  private currentDialogLineWidth(): number {
+    const input = this.shadowRoot?.getElementById("lineWidth") as HTMLInputElement | null;
+    return clampBrushSize(Number(input?.value ?? "1") || 1);
+  }
+
+  private currentDialogLineShape(): GnumarusBrushShape {
+    const select = this.shadowRoot?.getElementById("lineShape") as HTMLSelectElement | null;
+    return parseBrushShape(select?.value ?? "square");
+  }
+
+  private currentDialogLineAntialias(): boolean {
+    const input = this.shadowRoot?.getElementById("lineAntialias") as HTMLInputElement | null;
+    return input?.checked === true;
+  }
+
+  private applyLineWidthFromDialog(): void {
+    const size = this.currentDialogLineWidth();
+    this.lineWidth = size;
+    this.engine?.setLineWidth(size);
+    this.statusMessage = `Line width: ${size}`;
+  }
+
+  private applyLineShapeFromDialog(): void {
+    const shape = this.currentDialogLineShape();
+    this.lineShape = shape;
+    this.engine?.setLineShape(shape);
+    this.statusMessage = `Line shape: ${shape}`;
+  }
+
+  private applyLineAntialiasFromDialog(): void {
+    const enabled = this.currentDialogLineAntialias();
+    this.lineAntialias = enabled;
+    this.engine?.setLineAntialias(enabled);
+    this.statusMessage = `Line anti-aliasing: ${enabled ? "on" : "off"}`;
   }
 
   /** Test and picker hook: set checker color A (opaque hex only). */

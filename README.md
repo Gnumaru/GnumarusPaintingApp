@@ -8,8 +8,10 @@ Classic desktop-like painting app (top menu bar, central canvas, bottom status b
 
 ## Features (v1)
 
-- Desktop shell: File menu (New, Open, Save), Edit menu (Undo/Redo, Settings, Reset Canvas Transform), pencil/bucket/loupe/transform toolbar with color picker, tool options bar below the menu bar, WebGL2 canvas, layers panel, status bar. `Ctrl+S` (`Cmd+S` on macOS) saves like File > Save (reuses the chosen folder, otherwise shows the OS folder picker).
-- Pixel-art pencil: solid color, no anti-aliasing, Bresenham strokes, brush size 1..64 and square/circle tip in the tool options bar, nearest-neighbor display, wheel zoom + pan + rotation + flips.
+- Desktop shell: File menu (New, Open, Save), Edit menu (Undo/Redo, Settings, Reset Canvas Transform), pencil/bucket/line/loupe/transform toolbar with color picker, tool options bar below the menu bar, WebGL2 canvas, layers panel, status bar. `Ctrl+S` (`Cmd+S` on macOS) saves like File > Save (reuses the chosen folder, otherwise shows the OS folder picker).
+- Pixel-art pencil: solid color, no anti-aliasing, Bresenham strokes, brush size 1..64 and square/circle tip in the tool options bar with live mouse preview, nearest-neighbor display, wheel zoom + pan + rotation + flips.
+- Bucket fill: click fills the contiguous region of identical color with the current solid color (4-way flood fill, channel-lock aware, undoable, shortcut `B`).
+- Line tool: two clicks define a segment with width 1..64, square/circle ends and optional anti-aliasing in the tool options bar, with mouse and rubber-band previews (shortcut `N`).
 - Bucket fill: click fills the contiguous region of identical color with the current solid color (4-way flood fill, channel-lock aware, undoable, shortcut `B`).
 - Bucket fill: click fills the contiguous region of identical color with the current solid color (4-way flood fill, channel-lock aware, undoable, shortcut `B`).
 - Pixel grid over the active layer (follows rotation/transform), hidden below 200 percent zoom; minimum zoom 200..6400 percent, default 1000 percent, in Edit > Settings.

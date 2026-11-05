@@ -6,6 +6,7 @@ import {
   createPixelBuffer,
   drawBrushLine,
   drawBrushStamp,
+  drawLineSegment,
   drawPixelLine,
   floodFill,
   getPixel,
@@ -184,5 +185,44 @@ describe("GnumarusPixelBuffer", () => {
     }
     drawBrushStamp(masked, 4, 4, 1, 1, 2, "square", red, { r: true, g: false, b: false, a: false });
     expect(getPixel(masked, 4, 4, 1, 1)).toEqual({ r: 10, g: 0, b: 0, a: 255 });
+  });
+
+  it("draws aliased line segments with width and shape", () => {
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    const thin = createPixelBuffer(8, 8);
+    drawLineSegment(thin, 8, 8, 0, 0, 7, 0, 1, "square", false, red);
+    for (let x = 0; x < 8; x += 1) {
+      expect(getPixel(thin, 8, 8, x, 0)).toEqual(red);
+    }
+    expect(getPixel(thin, 8, 8, 0, 1)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    const wide = createPixelBuffer(8, 8);
+    drawLineSegment(wide, 8, 8, 0, 3, 7, 3, 3, "square", false, red);
+    expect(getPixel(wide, 8, 8, 3, 2)).toEqual(red);
+    expect(getPixel(wide, 8, 8, 3, 4)).toEqual(red);
+    expect(getPixel(wide, 8, 8, 3, 5)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    const dot = createPixelBuffer(4, 4);
+    drawLineSegment(dot, 4, 4, 2, 2, 2, 2, 3, "circle", false, red);
+    expect(getPixel(dot, 4, 4, 2, 2)).toEqual(red);
+    expect(getPixel(dot, 4, 4, 1, 1)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  });
+
+  it("draws anti-aliased lines with soft edges", () => {
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    const smooth = createPixelBuffer(8, 8);
+    drawLineSegment(smooth, 8, 8, 0, 0, 7, 7, 1, "square", true, red);
+    expect(getPixel(smooth, 8, 8, 3, 3)).toEqual(red);
+    const edge = getPixel(smooth, 8, 8, 3, 4);
+    expect(edge).not.toBeNull();
+    expect(edge!.r).toBeGreaterThan(0);
+    expect(edge!.r).toBeLessThan(255);
+    expect(getPixel(smooth, 8, 8, 3, 6)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    const masked = createPixelBuffer(4, 4);
+    drawLineSegment(masked, 4, 4, 0, 0, 3, 0, 1, "square", true, red, {
+      r: true,
+      g: false,
+      b: false,
+      a: false,
+    });
+    expect(getPixel(masked, 4, 4, 1, 0)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
   });
 });

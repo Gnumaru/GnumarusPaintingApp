@@ -7,6 +7,7 @@ import {
   createPixelBuffer,
   drawBrushLine,
   drawBrushStamp,
+  drawLineSegment,
   floodFill,
   getPixel,
   parseBrushShape,
@@ -76,7 +77,7 @@ export interface GnumarusEngineStats {
   cursorY: number | null;
 }
 
-export type GnumarusCanvasTool = "pencil" | "loupe" | "transform" | "bucket";
+export type GnumarusCanvasTool = "pencil" | "bucket" | "line" | "loupe" | "transform";
 
 export interface GnumarusLayerInfo {
   id: string;
@@ -310,6 +311,14 @@ export class GnumarusCanvasEngine {
   private color: GnumarusRgba = { r: 0, g: 0, b: 0, a: 255 };
   private brushSize = 1;
   private brushShape: GnumarusBrushShape = "square";
+  private lineWidth = 1;
+  private lineShape: GnumarusBrushShape = "square";
+  private lineAntialias = false;
+  private lineAnchor: { x: number; y: number; clientX: number; clientY: number } | null = null;
+  private lastMouseClient: { x: number; y: number } | null = null;
+  private readonly previewTip: HTMLDivElement;
+  private readonly previewSvg: SVGSVGElement;
+  private readonly previewLine: SVGLineElement;
   private drawing = false;
   private panning = false;
   private spaceDown = false;
@@ -383,6 +392,31 @@ export class GnumarusCanvasEngine {
     this.renderer.domElement.style.height = "100%";
     this.renderer.domElement.style.touchAction = "none";
     container.appendChild(this.renderer.domElement);
+    this.previewTip = document.createElement("div");
+    this.previewTip.setAttribute("data-testid", "brush-preview");
+    this.previewTip.style.position = "absolute";
+    this.previewTip.style.pointerEvents = "none";
+    this.previewTip.style.display = "none";
+    this.previewTip.style.border = "1px solid #ffffff";
+    this.previewTip.style.boxShadow = "0 0 0 1px #000000";
+    this.previewTip.style.boxSizing = "border-box";
+    this.previewTip.style.zIndex = "5";
+    container.appendChild(this.previewTip);
+    this.previewSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    this.previewSvg.setAttribute("data-testid", "line-preview");
+    this.previewSvg.style.position = "absolute";
+    this.previewSvg.style.inset = "0";
+    this.previewSvg.style.width = "100%";
+    this.previewSvg.style.height = "100%";
+    this.previewSvg.style.pointerEvents = "none";
+    this.previewSvg.style.display = "none";
+    this.previewSvg.style.zIndex = "6";
+    this.previewSvg.style.overflow = "visible";
+    this.previewLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    this.previewLine.setAttribute("fill", "none");
+    this.previewLine.setAttribute("opacity", "0.9");
+    this.previewSvg.appendChild(this.previewLine);
+    container.appendChild(this.previewSvg);
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -10, 10);
@@ -1717,6 +1751,8 @@ export class GnumarusCanvasEngine {
     this.textures.clear();
     this.contents.clear();
     this.cells.clear();
+    this.lineAnchor = null;
+    this.hidePreviews();
     this.frameDurations.clear();
     this.defaultFrameDuration = GNUMARUS_DEFAULT_FRAME_DURATION_MS;
   }
@@ -1766,6 +1802,7 @@ export class GnumarusCanvasEngine {
     const parsed = parseHexColor(hex);
     if (parsed !== null) {
       this.color = parsed;
+      this.updatePreviews();
     }
   }
 
@@ -1784,6 +1821,7 @@ export class GnumarusCanvasEngine {
     }
     this.brushSize = clamped;
     this.emitStats();
+    this.updatePreviews();
     return true;
   }
 
@@ -1794,7 +1832,178 @@ export class GnumarusCanvasEngine {
     }
     this.brushShape = parsed;
     this.emitStats();
+    this.updatePreviews();
     return true;
+  }
+
+  getLineWidth(): number {
+    return this.lineWidth;
+  }
+
+  getLineShape(): GnumarusBrushShape {
+    return this.lineShape;
+  }
+
+  getLineAntialias(): boolean {
+    return this.lineAntialias;
+  }
+
+  setLineWidth(size: number): boolean {
+    const clamped = clampBrushSize(size);
+    if (clamped === this.lineWidth) {
+      return false;
+    }
+    this.lineWidth = clamped;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  setLineShape(shape: GnumarusBrushShape): boolean {
+    const parsed = parseBrushShape(shape);
+    if (parsed === this.lineShape) {
+      return false;
+    }
+    this.lineShape = parsed;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  setLineAntialias(enabled: boolean): boolean {
+    const next = enabled === true;
+    if (next === this.lineAntialias) {
+      return false;
+    }
+    this.lineAntialias = next;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  /** Pending line start in texture pixels, or null when no line is armed. */
+  getLineAnchor(): { x: number; y: number } | null {
+    return this.lineAnchor === null ? null : { x: this.lineAnchor.x, y: this.lineAnchor.y };
+  }
+
+  cancelLine(): boolean {
+    if (this.lineAnchor === null) {
+      return false;
+    }
+    this.lineAnchor = null;
+    this.updatePreviews();
+    return true;
+  }
+
+  /**
+   * Draw the pending line through (x, y). When no anchor exists, arm it and
+   * return 0 without drawing. Otherwise draws the segment, clears the anchor
+   * and returns true when pixels changed.
+   */
+  commitLineTo(x: number, y: number): boolean {
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return false;
+    }
+    const ensured = this.ensureCellContent(layer.id, this.currentFrame);
+    if (ensured === null) {
+      return false;
+    }
+    if (
+      !Number.isInteger(x) ||
+      !Number.isInteger(y) ||
+      x < 0 ||
+      y < 0 ||
+      x >= ensured.texture.width ||
+      y >= ensured.texture.height
+    ) {
+      return false;
+    }
+    if (this.lineAnchor === null) {
+      return false;
+    }
+    const tex = ensured.texture;
+    const base = tex.buffer.slice();
+    drawLineSegment(
+      tex.buffer,
+      tex.width,
+      tex.height,
+      this.lineAnchor.x,
+      this.lineAnchor.y,
+      x,
+      y,
+      this.lineWidth,
+      this.lineShape,
+      this.lineAntialias,
+      this.color,
+      layer.lockedChannels,
+    );
+    this.lineAnchor = null;
+    const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
+    if (diff === null) {
+      this.syncAllLayerRenders();
+      this.refreshLayerStacking();
+      this.render();
+      this.updatePreviews();
+      this.emitStats();
+      return false;
+    }
+    this.history.push({ type: "stroke", layerId: tex.id, diff });
+    this.syncAllLayerRenders();
+    this.markTextureViewsDirty(tex.id);
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  private colorCss(): string {
+    const alpha = Math.round((this.color.a / 255) * 100) / 100;
+    return `rgba(${this.color.r}, ${this.color.g}, ${this.color.b}, ${alpha})`;
+  }
+
+  /** Refresh the brush tip and line rubber-band overlays for the last mouse position. */
+  private updatePreviews(): void {
+    if (this.disposed) {
+      return;
+    }
+    const mouse = this.lastMouseClient;
+    const showTip = (this.tool === "pencil" || this.tool === "line") && mouse !== null;
+    if (!showTip || mouse === null) {
+      this.previewTip.style.display = "none";
+    } else {
+      const rect = this.renderer.domElement.getBoundingClientRect();
+      const tipSize = (this.tool === "pencil" ? this.brushSize : this.lineWidth) * this.zoom;
+      const tipShape = this.tool === "pencil" ? this.brushShape : this.lineShape;
+      const size = Math.max(2, tipSize);
+      this.previewTip.style.display = "block";
+      this.previewTip.style.width = `${size}px`;
+      this.previewTip.style.height = `${size}px`;
+      this.previewTip.style.left = `${mouse.x - rect.left - size / 2}px`;
+      this.previewTip.style.top = `${mouse.y - rect.top - size / 2}px`;
+      this.previewTip.style.borderRadius = tipShape === "circle" ? "50%" : "0";
+    }
+    if (this.tool === "line" && this.lineAnchor !== null && mouse !== null) {
+      const rect = this.renderer.domElement.getBoundingClientRect();
+      this.previewSvg.style.display = "block";
+      this.previewLine.setAttribute("x1", String(this.lineAnchor.clientX - rect.left));
+      this.previewLine.setAttribute("y1", String(this.lineAnchor.clientY - rect.top));
+      this.previewLine.setAttribute("x2", String(mouse.x - rect.left));
+      this.previewLine.setAttribute("y2", String(mouse.y - rect.top));
+      this.previewLine.setAttribute("stroke", this.colorCss());
+      this.previewLine.setAttribute("stroke-width", String(Math.max(1, this.lineWidth * this.zoom)));
+      this.previewLine.setAttribute("stroke-linecap", this.lineShape === "circle" ? "round" : "butt");
+    } else {
+      this.previewSvg.style.display = "none";
+    }
+  }
+
+  private hidePreviews(): void {
+    this.previewTip.style.display = "none";
+    this.previewSvg.style.display = "none";
   }
 
   clear(): void {
@@ -1873,6 +2082,7 @@ export class GnumarusCanvasEngine {
     this.zoom = clampZoom(zoom);
     this.layoutScene();
     this.render();
+    this.updatePreviews();
     this.emitStats();
   }
 
@@ -1897,6 +2107,7 @@ export class GnumarusCanvasEngine {
     this.panY = clientY - centerY - (sin * vx + cos * vy) * nextZoom;
     this.layoutScene();
     this.render();
+    this.updatePreviews();
     this.emitStats();
   }
 
@@ -1904,6 +2115,7 @@ export class GnumarusCanvasEngine {
     this.rotation = normalizeRotation(radians);
     this.layoutScene();
     this.render();
+    this.updatePreviews();
     this.emitStats();
   }
 
@@ -1912,11 +2124,16 @@ export class GnumarusCanvasEngine {
     this.flipY = flipY;
     this.layoutScene();
     this.render();
+    this.updatePreviews();
     this.emitStats();
   }
 
   setTool(tool: GnumarusCanvasTool): void {
     this.tool = tool;
+    if (tool !== "line") {
+      this.lineAnchor = null;
+    }
+    this.updatePreviews();
     this.onToolChanged?.(tool);
   }
 
@@ -2126,6 +2343,10 @@ export class GnumarusCanvasEngine {
     }
     this.disposed = true;
     this.resizeObserver.disconnect();
+    this.lineAnchor = null;
+    this.lastMouseClient = null;
+    this.previewTip.remove();
+    this.previewSvg.remove();
     for (const layer of this.layers) {
       this.scene.remove(layer.plane);
       layer.material.dispose();
@@ -2245,6 +2466,31 @@ export class GnumarusCanvasEngine {
         this.bucketFillAt(pixel.x, pixel.y);
         return;
       }
+      if (this.tool === "line") {
+        // Two clicks define a segment: first arms the start, second draws.
+        const layer = this.activeLayer();
+        if (layer === null) {
+          return;
+        }
+        const ensured = this.ensureCellContent(layer.id, this.currentFrame);
+        if (ensured === null) {
+          return;
+        }
+        this.syncLayerRender(layer);
+        this.refreshLayerStacking();
+        const pixel = this.toImagePixel(event.clientX, event.clientY);
+        if (pixel === null) {
+          return;
+        }
+        if (this.lineAnchor === null) {
+          this.lineAnchor = { x: pixel.x, y: pixel.y, clientX: event.clientX, clientY: event.clientY };
+          this.lastMouseClient = { x: event.clientX, y: event.clientY };
+          this.updatePreviews();
+          return;
+        }
+        this.commitLineTo(pixel.x, pixel.y);
+        return;
+      }
       const layer = this.activeLayer();
       if (layer === null) {
         return;
@@ -2285,6 +2531,8 @@ export class GnumarusCanvasEngine {
     canvas.addEventListener("pointermove", (event: PointerEvent) => {
       const pixel = this.toImagePixel(event.clientX, event.clientY);
       this.cursor = pixel;
+      this.lastMouseClient = { x: event.clientX, y: event.clientY };
+      this.updatePreviews();
       if (this.transformRotating) {
         const angle = this.layerPointerAngle(event.clientX, event.clientY);
         if (angle !== null && this.transformLastAngle !== null) {
@@ -2405,6 +2653,8 @@ export class GnumarusCanvasEngine {
     canvas.addEventListener("pointercancel", endStroke);
     canvas.addEventListener("pointerleave", () => {
       this.cursor = null;
+      this.lastMouseClient = null;
+      this.hidePreviews();
       this.emitStats();
     });
     canvas.addEventListener(
@@ -2437,12 +2687,21 @@ export class GnumarusCanvasEngine {
           this.setTool("bucket");
           return;
         }
+        if (event.key === "n" || event.key === "N") {
+          this.setTool("line");
+          return;
+        }
         if (event.key === "l" || event.key === "L") {
           this.setTool("loupe");
           return;
         }
         if (event.key === "t" || event.key === "T") {
           this.setTool("transform");
+          return;
+        }
+        if (event.key === "Escape" && this.tool === "line" && this.lineAnchor !== null) {
+          this.lineAnchor = null;
+          this.updatePreviews();
           return;
         }
       }
@@ -2542,6 +2801,7 @@ export class GnumarusCanvasEngine {
     this.renderer.setSize(width, height, false);
     this.layoutScene();
     this.render();
+    this.updatePreviews();
   }
 
   private layoutScene(): void {

@@ -98,6 +98,10 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Pencil options: brush size integer 1..64 (clamped) and shape square/circle (disk mask for circle); stamping along the stroke path; same channel-lock masking; undoable.
 - Bucket toolbar glyph is a monochrome geometric mark in the same style as pencil/loupe/transform (no color emoji).
 
+## 17. Line tool + brush/line previews (implemented)
+- New line tool: two clicks define start/end, draws the connecting segment with width 1..64, square/circle ends and optional anti-aliasing; undoable; shortcut `N`.
+- Pencil shows a live tip preview (shape/size) following the mouse; line shows a tip preview plus a rubber-band segment preview after the first click.
+
 ## 11. Custom color picker (implemented)
 - Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).
 - Every model carries an alpha axis; RGBA axes span 0..255. ARD Diagonal spans 0..360 and Ratio 0..255.
