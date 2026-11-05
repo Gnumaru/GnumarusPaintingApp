@@ -85,6 +85,10 @@ export class GnumarusShell extends LitElement {
       cursor: pointer;
       font-size: 13px;
     }
+    .toolbar .tool-icon {
+      display: inline-block;
+      transform: scale(2.5);
+    }
     .menu > button:hover,
     .toolbar button:hover {
       background: #3a3a3a;
@@ -696,7 +700,7 @@ export class GnumarusShell extends LitElement {
               this.engine?.setTool("pencil");
             }}
           >
-            ✎
+            <span class="tool-icon">✎</span>
           </button>
           <button
             class=${this.tool === "loupe" ? "active" : ""}
@@ -707,7 +711,7 @@ export class GnumarusShell extends LitElement {
               this.engine?.setTool("loupe");
             }}
           >
-            ⌕
+            <span class="tool-icon">⌕</span>
           </button>
           <button
             class=${this.tool === "transform" ? "active" : ""}
@@ -718,7 +722,7 @@ export class GnumarusShell extends LitElement {
               this.engine?.setTool("transform");
             }}
           >
-            ⤢
+            <span class="tool-icon">⤢</span>
           </button>
           <gnumarus-color-picker
             id="pencilColor"
@@ -739,7 +743,7 @@ export class GnumarusShell extends LitElement {
               this.togglePreview();
             }}
           >
-            ⊞
+            <span class="tool-icon">⊞</span>
           </button>
         </div>
         <div class="canvas-host" id="canvasHost">

@@ -1111,6 +1111,40 @@ test("final preview pans with left, right and middle mouse drags", async ({ page
   expect(middleDrag.top).toBeGreaterThan(0);
 });
 
+test("toolbar icons fill buttons without growing them", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const boxes = await page.evaluate(() => {
+    const root = document.querySelector("gnumarus-shell")?.shadowRoot;
+    const buttons = Array.from(root?.querySelectorAll(".toolbar button") ?? []);
+    return buttons.map((button) => {
+      const rect = (button as HTMLElement).getBoundingClientRect();
+      const icon = (button as HTMLElement).querySelector(".tool-icon");
+      const transform = icon === null ? "none" : getComputedStyle(icon).transform;
+      return {
+        label: (button as HTMLElement).getAttribute("aria-label"),
+        w: rect.width,
+        h: rect.height,
+        transform,
+      };
+    });
+  });
+  expect(boxes).toHaveLength(4);
+  const expected: Record<string, { w: number; h: number }> = {
+    Pencil: { w: 33, h: 25 },
+    Loupe: { w: 30, h: 25 },
+    Transform: { w: 31, h: 29 },
+    "Final preview": { w: 32, h: 29 },
+  };
+  for (const box of boxes) {
+    const ref = expected[box.label ?? ""];
+    expect(ref).toBeDefined();
+    expect(Math.abs(box.w - ref.w)).toBeLessThanOrEqual(1);
+    expect(Math.abs(box.h - ref.h)).toBeLessThanOrEqual(1);
+    expect(box.transform).not.toBe("none");
+  }
+});
+
 test("final preview scroll limits show all four image edges", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

@@ -4499,6 +4499,10 @@ void main() {
       cursor: pointer;
       font-size: 13px;
     }
+    .toolbar .tool-icon {
+      display: inline-block;
+      transform: scale(2.5);
+    }
     .menu > button:hover,
     .toolbar button:hover {
       background: #3a3a3a;
@@ -4963,7 +4967,7 @@ void main() {
             aria-label="Pencil"
             @click=${()=>{this.tool=`pencil`,this.engine?.setTool(`pencil`)}}
           >
-            ✎
+            <span class="tool-icon">✎</span>
           </button>
           <button
             class=${this.tool===`loupe`?`active`:``}
@@ -4971,7 +4975,7 @@ void main() {
             aria-label="Loupe"
             @click=${()=>{this.tool=`loupe`,this.engine?.setTool(`loupe`)}}
           >
-            ⌕
+            <span class="tool-icon">⌕</span>
           </button>
           <button
             class=${this.tool===`transform`?`active`:``}
@@ -4979,7 +4983,7 @@ void main() {
             aria-label="Transform"
             @click=${()=>{this.tool=`transform`,this.engine?.setTool(`transform`)}}
           >
-            ⤢
+            <span class="tool-icon">⤢</span>
           </button>
           <gnumarus-color-picker
             id="pencilColor"
@@ -4993,7 +4997,7 @@ void main() {
             aria-label="Final preview"
             @click=${()=>{this.togglePreview()}}
           >
-            ⊞
+            <span class="tool-icon">⊞</span>
           </button>
         </div>
         <div class="canvas-host" id="canvasHost">
