@@ -4,14 +4,15 @@ Frontend-only single page web application for digital painting, pixel art, vecto
 
 ## Intended use
 
-Classic desktop-like painting app (top menu bar, central canvas, bottom status bar) in the spirit of Photoshop, Krita and GIMP. Current version supports pixel-art sketching with a 1px solid pencil and a contiguous-region bucket fill, multi-layer editing with per-layer transforms and per-channel locks, frame-by-frame animation over a layer x frame cell matrix, and directory-based projects.
+Classic desktop-like painting app (top menu bar, central canvas, bottom status bar) in the spirit of Photoshop, Krita and GIMP. Current version supports pixel-art sketching with a solid brush pencil and additive blending, contiguous-region bucket fill, two-click lines, cubic Bezier curves, multi-layer editing with per-layer transforms and per-channel locks, frame-by-frame animation over a layer x frame cell matrix, and directory-based projects.
 
 ## Features (v1)
 
 - Desktop shell: File menu (New, Open, Save), Edit menu (Undo/Redo, Settings, Reset Canvas Transform), pencil/bucket/line/curve/loupe/transform toolbar with color picker, tool options bar below the menu bar, WebGL2 canvas, layers panel, status bar. `Ctrl+S` (`Cmd+S` on macOS) saves like File > Save (reuses the chosen folder, otherwise shows the OS folder picker).
-- Pixel-art pencil: solid color, brush size 0.1..64 with square/circle tip plus anti-aliasing toggle in the tool options bar (integer-rounded when off, true float when on) with live mouse preview, nearest-neighbor display, wheel zoom + pan + rotation + flips. Loupe shortcut is `Z`.
+- Pixel-art pencil (`B`): solid color, brush size 0.1..64 with square/circle tip plus anti-aliasing toggle in the tool options bar (integer-rounded when off, true float when on) with live mouse preview, nearest-neighbor display, wheel zoom + pan + rotation + flips. Loupe shortcut is `Z`.
 - `Tab` hides/shows all interface chrome except the canvas.
-- Bucket fill: click fills the contiguous region of identical color with the current solid color (4-way flood fill, channel-lock aware, undoable, shortcut `B`).
+- Bucket fill (`G`): click fills the contiguous region of identical color with the current solid color (4-way flood fill, channel-lock aware, undoable).
+- Paint blend mode (shared by pencil/bucket/line/curve, selectable in each tool options bar): `replace` overwrites unlocked channels, `additive` sums painted values onto the pixel (clamped; translucent repeats accumulate opacity).
 - Line tool: two clicks define a segment with width 0.1..64, square/circle ends and optional anti-aliasing (integer-rounded when off, true float when on) in the tool options bar, with mouse and rubber-band previews (shortcut `N`).
 - Curve tool: press-drag-release sets start/end, then one click sets the start control point and a final click sets the end control point; live curve path, markers and handle lines while drawing; width 0.1..64, square/circle ends, anti-aliasing; undoable (shortcut `C`).
 - Layers: add (`Insert` above current), delete, reorder, rename, visibility, opacity, right-click Merge Down (undoable, `Ctrl+E` on the active layer); `PageUp`/`PageDown` select above/below with wrap-around plus `pos/total: name` toast; `Delete` resets the current cell texture to transparent zeros (undoable); Transform tool edits the active cell content; painting targets the active cell at the current frame (empty cells materialize on first use).

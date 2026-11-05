@@ -121,6 +121,10 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - `PageUp`/`PageDown` select the layer above/below with wrap-around (top+Up→bottom, bottom+Down→top); a canvas-overlay toast `pos/total: name` (1 = bottom) shows even when the UI is hidden, auto-hiding after ~2s.
 - `Insert` inserts a new layer immediately above the current one and selects it; `Ctrl+E` merges the active layer down exactly like the context-menu item (which already samples through the lower layer transform).
 
+## 22. Pencil on B, additive blend mode (implemented)
+- Pencil shortcut moves from `P` to `B`; bucket moves from `B` to `G` (Photoshop-style; no-modifier keys; `Ctrl` combos unaffected).
+- New shared paint blend mode `replace` (current behavior) / `additive` (painted channels are summed onto the pixel, clamped; translucent repeats accumulate opacity), selectable in pencil/bucket/line/curve options; honored by every color-paint path including anti-aliased edge blending and flood fill (same-color regions still fill in additive mode).
+
 ## 11. Custom color picker (implemented)
 - Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).
 - Every model carries an alpha axis; RGBA axes span 0..255. ARD Diagonal spans 0..360 and Ratio 0..255.

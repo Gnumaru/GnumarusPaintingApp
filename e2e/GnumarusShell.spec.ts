@@ -220,13 +220,13 @@ test("loupe middle-click flips the canvas", async ({ page }) => {
   await expect(page.locator("gnumarus-shell")).toContainText("Flip XY");
 });
 
-test("P and Z switch between pencil and loupe", async ({ page }) => {
+test("B and Z switch between pencil and loupe", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await expect(page.locator("gnumarus-shell")).toContainText("pencil");
   await page.keyboard.press("z");
   await expect(page.locator("gnumarus-shell")).toContainText("loupe");
-  await page.keyboard.press("p");
+  await page.keyboard.press("b");
   await expect(page.locator("gnumarus-shell")).toContainText("pencil");
 });
 
@@ -1756,13 +1756,13 @@ test("bucket fill fills a contiguous region without crossing barriers", async ({
   expect(await readPixel(page, 6, 4)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   await page.keyboard.press("Control+z");
   expect(await readPixel(page, 1, 4)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
-  await page.keyboard.press("b");
+  await page.keyboard.press("g");
   await expect(page.locator("gnumarus-shell")).toContainText("bucket");
-  await page.keyboard.press("p");
+  await page.keyboard.press("b");
   await expect(page.locator("gnumarus-shell")).toContainText("pencil");
 });
 
-test("tool options bar shows pencil brush settings and empty labels otherwise", async ({ page }) => {
+test("tool options bar shows drawing settings and empty labels otherwise", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const options = page.locator('gnumarus-shell [data-testid="tool-options"]');
@@ -1770,8 +1770,10 @@ test("tool options bar shows pencil brush settings and empty labels otherwise", 
   await expect(options).toContainText("Brush size");
   await expect(options).toContainText("Brush shape");
   await expect(options).toContainText("Anti-aliasing");
+  await expect(options).toContainText("Blend mode");
   await page.getByRole("button", { name: "Bucket fill" }).click();
-  await expect(options).toContainText("the bucket tool does not have any setting or helper button");
+  await expect(options).toContainText("Blend mode");
+  await expect(options).not.toContainText("does not have any setting");
   await page.getByRole("button", { name: "Loupe" }).click();
   await expect(options).toContainText("the loupe tool does not have any setting or helper button");
   await page.getByRole("button", { name: "Transform" }).click();
@@ -2227,7 +2229,7 @@ test("curve tool draws cubic beziers with two control clicks", async ({ page }) 
   expect(await readPixel(page, 1, 1)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   await page.keyboard.press("c");
   await expect(page.locator("gnumarus-shell")).toContainText("curve");
-  await page.keyboard.press("p");
+  await page.keyboard.press("b");
   await expect(page.locator("gnumarus-shell")).toContainText("pencil");
 });
 
@@ -2318,6 +2320,80 @@ test("brush and line widths accept floats with AA-dependent rounding", async ({ 
   await page.locator("gnumarus-shell input#lineWidth").fill("1.5");
   expect(await lineOf()).toBeCloseTo(1.5, 5);
   await expect(page.locator("gnumarus-shell")).toContainText("Line width: 1.5");
+});
+
+test("additive blend accumulates translucent paint", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          loadProject(
+            width: number,
+            height: number,
+            inputs: Array<{
+              id: string;
+              name: string;
+              visible: boolean;
+              opacity: number;
+              width: number;
+              height: number;
+              buffer: Uint8ClampedArray;
+              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
+            }>,
+          ): void;
+        };
+      };
+    };
+    root.__gnumarus?.engine?.loadProject(64, 64, [
+      {
+        id: "tiny",
+        name: "Tiny",
+        visible: true,
+        opacity: 1,
+        width: 8,
+        height: 8,
+        buffer: new Uint8ClampedArray(8 * 8 * 4),
+        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+      },
+    ]);
+  });
+  await setPencil(page, "#ff000080");
+  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.locator("gnumarus-shell input#brushSize").fill("1");
+  await page.locator("gnumarus-shell select#blendMode").selectOption("additive");
+  await expect(page.locator("gnumarus-shell")).toContainText("Blend mode: additive");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const clickAt = async (lx: number, ly: number): Promise<void> => {
+    const state = await getViewState(page);
+    const target = layerPixelToScreen(
+      lx,
+      ly,
+      { left: box.x, top: box.y, width: box.width, height: box.height },
+      8,
+      8,
+      { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false },
+      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+    );
+    await page.mouse.click(target.x, target.y);
+  };
+  await clickAt(4, 4);
+  expect(await readPixel(page, 4, 4)).toEqual({ r: 255, g: 0, b: 0, a: 128 });
+  await clickAt(4, 4);
+  expect(await readPixel(page, 4, 4)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.keyboard.press("Delete");
+  expect(await readPixel(page, 4, 4)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  await page.locator("gnumarus-shell select#blendMode").selectOption("replace");
+  await clickAt(4, 4);
+  await clickAt(4, 4);
+  expect(await readPixel(page, 4, 4)).toEqual({ r: 255, g: 0, b: 0, a: 128 });
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toContainText("Blend mode");
 });
 
 test("Tab hides and shows the interface, toast still works", async ({ page }) => {

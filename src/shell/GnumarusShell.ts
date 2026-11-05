@@ -50,7 +50,9 @@ import { decodePngToBuffer, encodeBufferToPngBlob } from "../project/GnumarusPng
 import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
 import {
   clampBrushSizeFloat,
+  parseBlendMode,
   parseBrushShape,
+  type GnumarusBlendMode,
   type GnumarusBrushShape,
 } from "../canvas/GnumarusPixelBuffer";
 import { parseHexToRgbaBytes, rgbaBytesToHex } from "../color/GnumarusColorModels";
@@ -744,6 +746,7 @@ export class GnumarusShell extends LitElement {
     brushSize: { type: Number },
     brushShape: { type: String },
     pencilAntialias: { type: Boolean },
+    blendMode: { type: String },
     lineWidth: { type: Number },
     lineShape: { type: String },
     lineAntialias: { type: Boolean },
@@ -806,6 +809,7 @@ export class GnumarusShell extends LitElement {
   declare brushSize: number;
   declare brushShape: GnumarusBrushShape;
   declare pencilAntialias: boolean;
+  declare blendMode: GnumarusBlendMode;
   declare lineWidth: number;
   declare lineShape: GnumarusBrushShape;
   declare lineAntialias: boolean;
@@ -872,6 +876,7 @@ export class GnumarusShell extends LitElement {
     this.brushSize = 1;
     this.brushShape = "square";
     this.pencilAntialias = false;
+    this.blendMode = "replace";
     this.lineWidth = 1;
     this.lineShape = "square";
     this.lineAntialias = false;
@@ -1569,6 +1574,18 @@ export class GnumarusShell extends LitElement {
     `;
   }
 
+  private renderBlendModeOption() {
+    return html`
+      <label
+        >Blend mode
+        <select id="blendMode" .value=${this.blendMode} @change=${(): void => this.applyBlendModeFromDialog()}>
+          <option value="replace">Replace</option>
+          <option value="additive">Additive</option>
+        </select>
+      </label>
+    `;
+  }
+
   private renderToolOptions() {
     if (this.tool === "pencil") {
       return html`
@@ -1601,6 +1618,7 @@ export class GnumarusShell extends LitElement {
             />
             Anti-aliasing
           </label>
+          ${this.renderBlendModeOption()}
         </div>
       `;
     }
@@ -1635,6 +1653,7 @@ export class GnumarusShell extends LitElement {
             />
             Anti-aliasing
           </label>
+          ${this.renderBlendModeOption()}
         </div>
       `;
     }
@@ -1669,6 +1688,14 @@ export class GnumarusShell extends LitElement {
             />
             Anti-aliasing
           </label>
+          ${this.renderBlendModeOption()}
+        </div>
+      `;
+    }
+    if (this.tool === "bucket") {
+      return html`
+        <div class="tool-options" data-testid="tool-options" aria-label="Bucket options" ?hidden=${this.uiHidden}>
+          ${this.renderBlendModeOption()}
         </div>
       `;
     }
@@ -2373,6 +2400,26 @@ export class GnumarusShell extends LitElement {
     this.pencilAntialias = enabled;
     this.engine?.setPencilAntialias(enabled);
     this.statusMessage = `Pencil anti-aliasing: ${enabled ? "on" : "off"}`;
+  }
+
+  /** Test hook: set the shared paint blend mode (replace/additive, defaults to replace). */
+  setBlendMode(mode: GnumarusBlendMode): void {
+    const parsed = parseBlendMode(mode);
+    this.blendMode = parsed;
+    this.engine?.setBlendMode(parsed);
+    this.statusMessage = `Blend mode: ${parsed}`;
+  }
+
+  private currentDialogBlendMode(): GnumarusBlendMode {
+    const select = this.shadowRoot?.getElementById("blendMode") as HTMLSelectElement | null;
+    return parseBlendMode(select?.value ?? "replace");
+  }
+
+  private applyBlendModeFromDialog(): void {
+    const mode = this.currentDialogBlendMode();
+    this.blendMode = mode;
+    this.engine?.setBlendMode(mode);
+    this.statusMessage = `Blend mode: ${mode}`;
   }
 
   /** Test hook: set the line width (floats 0.1..64, clamped). */

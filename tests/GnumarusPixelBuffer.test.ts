@@ -219,6 +219,66 @@ describe("GnumarusPixelBuffer", () => {
     expect(getPixel(dot, 4, 4, 1, 1)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   });
 
+  it("adds channel values in additive blend mode with clamping", () => {
+    const buffer = createPixelBuffer(2, 2);
+    const half = { r: 200, g: 10, b: 10, a: 100 };
+    expect(setPixel(buffer, 2, 2, 0, 0, half, undefined, "additive")).toBe(true);
+    expect(getPixel(buffer, 2, 2, 0, 0)).toEqual(half);
+    expect(setPixel(buffer, 2, 2, 0, 0, half, undefined, "additive")).toBe(true);
+    expect(getPixel(buffer, 2, 2, 0, 0)).toEqual({ r: 255, g: 20, b: 20, a: 200 });
+    const masked = createPixelBuffer(1, 1);
+    setPixel(masked, 1, 1, 0, 0, { r: 50, g: 50, b: 50, a: 50 });
+    setPixel(
+      masked,
+      1,
+      1,
+      0,
+      0,
+      { r: 100, g: 100, b: 100, a: 100 },
+      { r: true, g: false, b: true, a: false },
+      "additive",
+    );
+    expect(getPixel(masked, 1, 1, 0, 0)).toEqual({ r: 50, g: 150, b: 50, a: 150 });
+  });
+
+  it("flood fills additively even when the region matches the fill color", () => {
+    const red = { r: 255, g: 0, b: 0, a: 200 };
+    const buffer = createPixelBuffer(3, 3);
+    setPixel(buffer, 3, 3, 1, 1, red);
+    expect(floodFill(buffer, 3, 3, 1, 1, red)).toBe(0);
+    expect(floodFill(buffer, 3, 3, 1, 1, red, undefined, "additive")).toBe(1);
+    expect(getPixel(buffer, 3, 3, 1, 1)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  });
+
+  it("accumulates repeated strokes in additive blend mode", () => {
+    const translucent = { r: 0, g: 0, b: 0, a: 100 };
+    const buffer = createPixelBuffer(4, 4);
+    drawLineSegment(buffer, 4, 4, 0, 0, 3, 0, 1, "square", false, translucent, undefined, "replace");
+    expect(getPixel(buffer, 4, 4, 1, 0)).toEqual({ r: 0, g: 0, b: 0, a: 100 });
+    drawLineSegment(buffer, 4, 4, 0, 0, 3, 0, 1, "square", false, translucent, undefined, "additive");
+    expect(getPixel(buffer, 4, 4, 1, 0)).toEqual({ r: 0, g: 0, b: 0, a: 200 });
+    const smooth = createPixelBuffer(8, 8);
+    drawLineSegment(
+      smooth,
+      8,
+      8,
+      0,
+      0,
+      7,
+      7,
+      1,
+      "square",
+      true,
+      { r: 255, g: 0, b: 0, a: 255 },
+      undefined,
+      "additive",
+    );
+    const edge = getPixel(smooth, 8, 8, 3, 4);
+    expect(edge).not.toBeNull();
+    expect(edge!.r).toBeGreaterThan(0);
+    expect(edge!.r).toBeLessThan(255);
+  });
+
   it("draws anti-aliased lines with soft edges", () => {
     const red = { r: 255, g: 0, b: 0, a: 255 };
     const smooth = createPixelBuffer(8, 8);

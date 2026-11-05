@@ -13,6 +13,7 @@ import {
   parseChannelLock,
   parseHexColor,
   resizePixelBuffer,
+  type GnumarusBlendMode,
   type GnumarusBrushShape,
   type GnumarusChannelLock,
   type GnumarusRgba,
@@ -309,6 +310,7 @@ export class GnumarusCanvasEngine {
   private transformRotating = false;
   private transformLastAngle: number | null = null;
   private color: GnumarusRgba = { r: 0, g: 0, b: 0, a: 255 };
+  private blendMode: GnumarusBlendMode = "replace";
   private brushSize = 1;
   private brushShape: GnumarusBrushShape = "square";
   private pencilAntialias = false;
@@ -1860,6 +1862,21 @@ export class GnumarusCanvasEngine {
     }
   }
 
+  getBlendMode(): GnumarusBlendMode {
+    return this.blendMode;
+  }
+
+  setBlendMode(mode: GnumarusBlendMode): boolean {
+    const parsed = mode === "additive" ? "additive" : "replace";
+    if (parsed === this.blendMode) {
+      return false;
+    }
+    this.blendMode = parsed;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
   getBrushSize(): number {
     return this.brushSize;
   }
@@ -2105,6 +2122,7 @@ export class GnumarusCanvasEngine {
       this.lineAntialias,
       this.color,
       layer.lockedChannels,
+      this.blendMode,
     );
     this.lineAnchor = null;
     const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
@@ -2169,6 +2187,7 @@ export class GnumarusCanvasEngine {
       this.curveAntialias,
       this.color,
       layer.lockedChannels,
+      this.blendMode,
     );
     this.resetCurveState();
     const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
@@ -2441,7 +2460,16 @@ export class GnumarusCanvasEngine {
       return 0;
     }
     const base = tex.buffer.slice();
-    const filled = floodFill(tex.buffer, tex.width, tex.height, x, y, this.color, layer.lockedChannels);
+    const filled = floodFill(
+      tex.buffer,
+      tex.width,
+      tex.height,
+      x,
+      y,
+      this.color,
+      layer.lockedChannels,
+      this.blendMode,
+    );
     if (filled === 0) {
       return 0;
     }
@@ -2972,6 +3000,7 @@ export class GnumarusCanvasEngine {
         this.pencilAntialias,
         this.color,
         layer.lockedChannels,
+        this.blendMode,
       );
       this.markTextureViewsDirty(tex.id);
       this.render();
@@ -3077,6 +3106,7 @@ export class GnumarusCanvasEngine {
           this.pencilAntialias,
           this.color,
           layer.lockedChannels,
+          this.blendMode,
         );
         this.lastPixel = pixel;
         this.markTextureViewsDirty(tex.id);
@@ -3181,11 +3211,11 @@ export class GnumarusCanvasEngine {
         );
       })();
       if (!event.ctrlKey && !event.altKey && !event.metaKey && !inField) {
-        if (event.key === "p" || event.key === "P") {
+        if (event.key === "b" || event.key === "B") {
           this.setTool("pencil");
           return;
         }
-        if (event.key === "b" || event.key === "B") {
+        if (event.key === "g" || event.key === "G") {
           this.setTool("bucket");
           return;
         }

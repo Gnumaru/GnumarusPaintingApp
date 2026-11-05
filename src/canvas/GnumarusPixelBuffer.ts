@@ -12,6 +12,14 @@ export interface GnumarusChannelLock {
   a: boolean;
 }
 
+/** How painted colors combine with existing pixels: replace or add (clamped). */
+export type GnumarusBlendMode = "replace" | "additive";
+
+/** Parse a blend mode, defaulting to replace for missing or invalid input. */
+export function parseBlendMode(value: unknown): GnumarusBlendMode {
+  return value === "additive" ? "additive" : "replace";
+}
+
 export const GNUMARUS_UNLOCKED_CHANNELS: GnumarusChannelLock = {
   r: false,
   g: false,
@@ -106,11 +114,27 @@ export function setPixel(
   y: number,
   color: GnumarusRgba,
   locked: GnumarusChannelLock | undefined = undefined,
+  blend: GnumarusBlendMode = "replace",
 ): boolean {
   if (x < 0 || y < 0 || x >= width || y >= height) {
     return false;
   }
   const i = (y * width + x) * 4;
+  if (blend === "additive") {
+    if (locked?.r !== true) {
+      buffer[i] = buffer[i] + color.r;
+    }
+    if (locked?.g !== true) {
+      buffer[i + 1] = buffer[i + 1] + color.g;
+    }
+    if (locked?.b !== true) {
+      buffer[i + 2] = buffer[i + 2] + color.b;
+    }
+    if (locked?.a !== true) {
+      buffer[i + 3] = buffer[i + 3] + color.a;
+    }
+    return true;
+  }
   if (locked === undefined || areAllChannelsUnlocked(locked)) {
     buffer[i] = color.r;
     buffer[i + 1] = color.g;
@@ -158,6 +182,7 @@ export function drawPixelLine(
   y1: number,
   color: GnumarusRgba,
   locked: GnumarusChannelLock | undefined = undefined,
+  blend: GnumarusBlendMode = "replace",
 ): void {
   let x = x0;
   let y = y0;
@@ -167,7 +192,7 @@ export function drawPixelLine(
   const sy = y0 < y1 ? 1 : -1;
   let err = dx - dy;
   for (;;) {
-    setPixel(buffer, width, height, x, y, color, locked);
+    setPixel(buffer, width, height, x, y, color, locked, blend);
     if (x === x1 && y === y1) {
       break;
     }
@@ -186,8 +211,10 @@ export function drawPixelLine(
 /**
  * 4-way flood fill of the contiguous region holding the exact start pixel
  * RGBA value. Writes `color` with the same channel-lock masking as `setPixel`.
- * Returns the number of region pixels visited (0 when out of bounds or when
- * the region already holds `color`). Uses a `Uint8Array` visited mask plus an
+ * Returns the number of region pixels visited (0 when out of bounds or, in
+ * replace mode, when the region already holds `color`). In additive mode the
+ * same-color early exit is skipped because summing still changes the pixels
+ * (until they saturate). Uses a `Uint8Array` visited mask plus an
  * explicit stack so large fills never recurse and RAM stays proportional to
  * the image (one byte per pixel plus frontier).
  */
@@ -199,6 +226,7 @@ export function floodFill(
   startY: number,
   color: GnumarusRgba,
   locked: GnumarusChannelLock | undefined = undefined,
+  blend: GnumarusBlendMode = "replace",
 ): number {
   if (!Number.isInteger(startX) || !Number.isInteger(startY)) {
     return 0;
@@ -214,7 +242,13 @@ export function floodFill(
   const targetG = buffer[startIndex + 1];
   const targetB = buffer[startIndex + 2];
   const targetA = buffer[startIndex + 3];
-  if (targetR === color.r && targetG === color.g && targetB === color.b && targetA === color.a) {
+  if (
+    blend !== "additive" &&
+    targetR === color.r &&
+    targetG === color.g &&
+    targetB === color.b &&
+    targetA === color.a
+  ) {
     return 0;
   }
   const visited = new Uint8Array(width * height);
@@ -232,7 +266,7 @@ export function floodFill(
     if (buffer[i] !== targetR || buffer[i + 1] !== targetG || buffer[i + 2] !== targetB || buffer[i + 3] !== targetA) {
       continue;
     }
-    setPixel(buffer, width, height, x, y, color, locked);
+    setPixel(buffer, width, height, x, y, color, locked, blend);
     filled += 1;
     if (x > 0) {
       const neighbor = index - 1;
@@ -318,6 +352,7 @@ export function drawBrushStamp(
   shape: GnumarusBrushShape,
   color: GnumarusRgba,
   locked: GnumarusChannelLock | undefined = undefined,
+  blend: GnumarusBlendMode = "replace",
 ): void {
   const tip = clampBrushSize(size);
   const anchor = Math.floor((tip - 1) / 2);
@@ -326,7 +361,7 @@ export function drawBrushStamp(
   if (shape === "square") {
     for (let dy = 0; dy < tip; dy += 1) {
       for (let dx = 0; dx < tip; dx += 1) {
-        setPixel(buffer, width, height, left + dx, top + dy, color, locked);
+        setPixel(buffer, width, height, left + dx, top + dy, color, locked, blend);
       }
     }
     return;
@@ -337,7 +372,7 @@ export function drawBrushStamp(
     for (let dx = 0; dx < tip; dx += 1) {
       const distSquared = (dx - center) * (dx - center) + (dy - center) * (dy - center);
       if (distSquared <= threshold + 1e-9) {
-        setPixel(buffer, width, height, left + dx, top + dy, color, locked);
+        setPixel(buffer, width, height, left + dx, top + dy, color, locked, blend);
       }
     }
   }
@@ -359,10 +394,11 @@ export function drawBrushLine(
   shape: GnumarusBrushShape,
   color: GnumarusRgba,
   locked: GnumarusChannelLock | undefined = undefined,
+  blend: GnumarusBlendMode = "replace",
 ): void {
   const tip = clampBrushSize(size);
   if (tip <= 1) {
-    drawPixelLine(buffer, width, height, x0, y0, x1, y1, color, locked);
+    drawPixelLine(buffer, width, height, x0, y0, x1, y1, color, locked, blend);
     return;
   }
   let x = x0;
@@ -373,7 +409,7 @@ export function drawBrushLine(
   const sy = y0 < y1 ? 1 : -1;
   let err = dx - dy;
   for (;;) {
-    drawBrushStamp(buffer, width, height, x, y, tip, shape, color, locked);
+    drawBrushStamp(buffer, width, height, x, y, tip, shape, color, locked, blend);
     if (x === x1 && y === y1) {
       break;
     }
@@ -399,6 +435,7 @@ function blendPixelCoverage(
   color: GnumarusRgba,
   coverage: number,
   locked: GnumarusChannelLock | undefined = undefined,
+  blend: GnumarusBlendMode = "replace",
 ): void {
   if (!(coverage > 0)) {
     return;
@@ -407,6 +444,22 @@ function blendPixelCoverage(
     return;
   }
   const clamped = Math.min(1, Math.max(0, coverage));
+  if (blend === "additive") {
+    const i = (y * width + x) * 4;
+    if (locked?.r !== true) {
+      buffer[i] = Math.round(buffer[i] + color.r * clamped);
+    }
+    if (locked?.g !== true) {
+      buffer[i + 1] = Math.round(buffer[i + 1] + color.g * clamped);
+    }
+    if (locked?.b !== true) {
+      buffer[i + 2] = Math.round(buffer[i + 2] + color.b * clamped);
+    }
+    if (locked?.a !== true) {
+      buffer[i + 3] = Math.round(buffer[i + 3] + color.a * clamped);
+    }
+    return;
+  }
   if (clamped >= 1) {
     setPixel(buffer, width, height, x, y, color, locked);
     return;
@@ -456,13 +509,14 @@ export function drawLineSegment(
   antialiased: boolean,
   color: GnumarusRgba,
   locked: GnumarusChannelLock | undefined = undefined,
+  blend: GnumarusBlendMode = "replace",
 ): void {
   const thick = antialiased ? clampBrushSizeFloat(lineWidth) : roundBrushSizeForAliased(lineWidth);
   if (!antialiased) {
     if (thick <= 1) {
-      drawPixelLine(buffer, width, height, x0, y0, x1, y1, color, locked);
+      drawPixelLine(buffer, width, height, x0, y0, x1, y1, color, locked, blend);
     } else {
-      drawBrushLine(buffer, width, height, x0, y0, x1, y1, thick, shape, color, locked);
+      drawBrushLine(buffer, width, height, x0, y0, x1, y1, thick, shape, color, locked, blend);
     }
     return;
   }
@@ -481,7 +535,7 @@ export function drawLineSegment(
         for (let x = minX; x <= maxX; x += 1) {
           const cx = Math.min(1, Math.max(0, half + 0.5 - Math.abs(x - x0)));
           const cy = Math.min(1, Math.max(0, half + 0.5 - Math.abs(y - y0)));
-          blendPixelCoverage(buffer, width, height, x, y, color, Math.min(cx, cy), locked);
+          blendPixelCoverage(buffer, width, height, x, y, color, Math.min(cx, cy), locked, blend);
         }
       }
     } else {
@@ -493,7 +547,7 @@ export function drawLineSegment(
       for (let y = minY; y <= maxY; y += 1) {
         for (let x = minX; x <= maxX; x += 1) {
           const dist = Math.sqrt((x - x0) * (x - x0) + (y - y0) * (y - y0));
-          blendPixelCoverage(buffer, width, height, x, y, color, half + 0.5 - dist, locked);
+          blendPixelCoverage(buffer, width, height, x, y, color, half + 0.5 - dist, locked, blend);
         }
       }
     }
@@ -535,7 +589,7 @@ export function drawLineSegment(
         }
         coverage = perpCoverage < endFade ? perpCoverage : endFade;
       }
-      blendPixelCoverage(buffer, width, height, x, y, color, coverage, locked);
+      blendPixelCoverage(buffer, width, height, x, y, color, coverage, locked, blend);
     }
   }
 }
@@ -565,12 +619,13 @@ export function drawCubicBezier(
   antialiased: boolean,
   color: GnumarusRgba,
   locked: GnumarusChannelLock | undefined = undefined,
+  blend: GnumarusBlendMode = "replace",
 ): void {
   const chord = (a: GnumarusBezierPoint, b: GnumarusBezierPoint): number =>
     Math.sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
   const polygon = chord(p0, p1) + chord(p1, p2) + chord(p2, p3);
   if (!(polygon > 1e-9)) {
-    drawLineSegment(buffer, width, height, p0.x, p0.y, p0.x, p0.y, lineWidth, shape, antialiased, color, locked);
+    drawLineSegment(buffer, width, height, p0.x, p0.y, p0.x, p0.y, lineWidth, shape, antialiased, color, locked, blend);
     return;
   }
   const segments = Math.min(200, Math.max(16, Math.ceil(polygon * 2)));
@@ -589,7 +644,7 @@ export function drawCubicBezier(
     const sy0 = antialiased ? prevY : Math.round(prevY);
     const sx1 = antialiased ? x : Math.round(x);
     const sy1 = antialiased ? y : Math.round(y);
-    drawLineSegment(buffer, width, height, sx0, sy0, sx1, sy1, lineWidth, shape, antialiased, color, locked);
+    drawLineSegment(buffer, width, height, sx0, sy0, sx1, sy1, lineWidth, shape, antialiased, color, locked, blend);
     prevX = x;
     prevY = y;
   }
