@@ -64,3 +64,24 @@ test("pencil draws a solid pixel on the WebGL2 canvas", async ({ page }) => {
   await page.mouse.up();
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
 });
+
+test("keyboard shortcuts zoom in and out", async ({ page }) => {
+  const zoomOf = (): Promise<number> =>
+    page.evaluate(() => {
+      const root = window as unknown as {
+        __gnumarus?: { engine?: { currentZoom: number } };
+      };
+      return root.__gnumarus?.engine?.currentZoom ?? 0;
+    });
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const before = await zoomOf();
+  expect(before).toBeGreaterThan(0);
+  await page.keyboard.press("Control+Alt+=");
+  expect(await zoomOf()).toBeCloseTo(before * 1.25, 5);
+  await page.keyboard.press("Control+Alt+NumpadAdd");
+  expect(await zoomOf()).toBeCloseTo(before * 1.25 * 1.25, 4);
+  await page.keyboard.press("Control+Alt+-");
+  await page.keyboard.press("Control+Alt+NumpadSubtract");
+  expect(await zoomOf()).toBeCloseTo(before, 4);
+});

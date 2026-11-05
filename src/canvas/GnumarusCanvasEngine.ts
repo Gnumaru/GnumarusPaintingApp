@@ -197,6 +197,10 @@ export class GnumarusCanvasEngine {
     this.emitStats();
   }
 
+  zoomBy(factor: number): void {
+    this.setZoom(this.zoom * factor);
+  }
+
   resetView(): void {
     const rect = this.container.getBoundingClientRect();
     if (rect.width > 0 && rect.height > 0) {
@@ -315,6 +319,24 @@ export class GnumarusCanvasEngine {
     window.addEventListener("keydown", (event: KeyboardEvent) => {
       if (event.code === "Space") {
         this.spaceDown = true;
+        return;
+      }
+      if (event.ctrlKey && event.altKey && !event.metaKey) {
+        const target = event.target;
+        if (
+          target instanceof HTMLInputElement ||
+          target instanceof HTMLTextAreaElement ||
+          target instanceof HTMLSelectElement
+        ) {
+          return;
+        }
+        if (event.key === "+" || event.key === "=" || event.code === "Equal" || event.code === "NumpadAdd") {
+          event.preventDefault();
+          this.zoomBy(1.25);
+        } else if (event.key === "-" || event.code === "Minus" || event.code === "NumpadSubtract") {
+          event.preventDefault();
+          this.zoomBy(0.8);
+        }
       }
     });
     window.addEventListener("keyup", (event: KeyboardEvent) => {
