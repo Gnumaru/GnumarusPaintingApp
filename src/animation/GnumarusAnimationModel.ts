@@ -40,6 +40,26 @@ export function animationCellKey(layerId: string, frame: number): string {
   return `${layerId}\n${frame}`;
 }
 
+export const GNUMARUS_DEFAULT_FRAME_DURATION_MS = 100;
+export const GNUMARUS_MIN_FRAME_DURATION_MS = 1;
+export const GNUMARUS_MAX_FRAME_DURATION_MS = 60000;
+
+/** Clamp a frame duration to the supported millisecond range. */
+export function clampFrameDurationMs(value: number): number {
+  if (!Number.isFinite(value)) {
+    return GNUMARUS_DEFAULT_FRAME_DURATION_MS;
+  }
+  return Math.min(GNUMARUS_MAX_FRAME_DURATION_MS, Math.max(GNUMARUS_MIN_FRAME_DURATION_MS, Math.floor(value)));
+}
+
+/** Explicit per-frame duration wins; otherwise the project default applies. */
+export function effectiveFrameDurationMs(explicitMs: number | null | undefined, defaultMs: number): number {
+  if (explicitMs === null || explicitMs === undefined || !Number.isFinite(explicitMs)) {
+    return clampFrameDurationMs(defaultMs);
+  }
+  return clampFrameDurationMs(explicitMs);
+}
+
 /**
  * Resolve every layer to the pixels and transform it shows on one frame.
  * Buffers are shared references into the texture pool (no copies), so

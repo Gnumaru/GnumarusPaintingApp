@@ -44,6 +44,8 @@ describe("GnumarusProjectFormat", () => {
     expect(parsed.layers[0]).toMatchObject({ id: "layer0" });
     expect(parsed.layers[0]?.width).toBeUndefined();
     expect(parsed.animation.frames).toBe(1);
+    expect(parsed.animation.defaultFrameDuration).toBe(100);
+    expect(parsed.animation.frameDurations).toEqual([]);
     expect(parsed.animation.textures).toEqual([
       { id: "layer0", name: "Layer 0 pixels", width: 64, height: 64, file: "cells/layer0_frame0.png" },
     ]);
@@ -95,8 +97,18 @@ describe("GnumarusProjectFormat", () => {
       { layer: "layer0", frame: 1, content: "content1" },
       { layer: "layer0", frame: 2, content: "content2" },
     );
+    project.animation.defaultFrameDuration = 100;
+    project.animation.frameDurations = [
+      { frame: 0, duration: 120 },
+      { frame: 2, duration: 500 },
+    ];
     const parsed = parseProject(serializeProject(project));
     expect(parsed).toEqual(project);
+    expect(parsed.animation.defaultFrameDuration).toBe(100);
+    expect(parsed.animation.frameDurations).toEqual([
+      { frame: 0, duration: 120 },
+      { frame: 2, duration: 500 },
+    ]);
   });
 
   it("builds predictable texture paths", () => {
@@ -146,6 +158,31 @@ describe("GnumarusProjectFormat", () => {
           animation: { ...ok.animation, cells: [{ layer: "layer0", frame: 0, content: "missing" }] },
         }),
       ),
+    ).toThrow(GnumarusProjectError);
+    expect(() =>
+      parseProject(
+        serializeProject({
+          ...ok,
+          animation: { ...ok.animation, frameDurations: [{ frame: 5, duration: 100 }] },
+        }),
+      ),
+    ).toThrow(GnumarusProjectError);
+    expect(() =>
+      parseProject(
+        serializeProject({
+          ...ok,
+          animation: {
+            ...ok.animation,
+            frameDurations: [
+              { frame: 0, duration: 100 },
+              { frame: 0, duration: 200 },
+            ],
+          },
+        }),
+      ),
+    ).toThrow(GnumarusProjectError);
+    expect(() =>
+      parseProject(serializeProject({ ...ok, animation: { ...ok.animation, defaultFrameDuration: "fast" as unknown as number } })),
     ).toThrow(GnumarusProjectError);
   });
 });

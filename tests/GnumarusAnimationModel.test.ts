@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   animationCellKey,
+  clampFrameDurationMs,
+  effectiveFrameDurationMs,
   resolveAnimationFrame,
+  GNUMARUS_DEFAULT_FRAME_DURATION_MS,
+  GNUMARUS_MAX_FRAME_DURATION_MS,
+  GNUMARUS_MIN_FRAME_DURATION_MS,
 } from "../src/animation/GnumarusAnimationModel";
 
 function bufferOf(width: number, height: number, fill: number): Uint8ClampedArray {
@@ -78,5 +83,20 @@ describe("GnumarusAnimationModel", () => {
     const cells = new Map([[animationCellKey("layer0", 0), "gone"]]);
     const resolved = resolveAnimationFrame(["layer0"], new Map(), new Map(), cells, 0).get("layer0");
     expect(resolved).toMatchObject({ contentId: null, buffer: null });
+  });
+
+  it("clamps frame durations and falls back to the project default", () => {
+    expect(GNUMARUS_DEFAULT_FRAME_DURATION_MS).toBe(100);
+    expect(GNUMARUS_MIN_FRAME_DURATION_MS).toBe(1);
+    expect(GNUMARUS_MAX_FRAME_DURATION_MS).toBe(60000);
+    expect(clampFrameDurationMs(250)).toBe(250);
+    expect(clampFrameDurationMs(0)).toBe(1);
+    expect(clampFrameDurationMs(-50)).toBe(1);
+    expect(clampFrameDurationMs(999999)).toBe(60000);
+    expect(clampFrameDurationMs(Number.NaN)).toBe(100);
+    expect(effectiveFrameDurationMs(250, 100)).toBe(250);
+    expect(effectiveFrameDurationMs(null, 100)).toBe(100);
+    expect(effectiveFrameDurationMs(undefined, 400)).toBe(400);
+    expect(effectiveFrameDurationMs(Number.NaN, 100)).toBe(100);
   });
 });

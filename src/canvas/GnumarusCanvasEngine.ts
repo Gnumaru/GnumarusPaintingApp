@@ -41,6 +41,9 @@ import {
 } from "../settings/GnumarusGridSettings";
 import {
   animationCellKey,
+  clampFrameDurationMs,
+  effectiveFrameDurationMs,
+  GNUMARUS_DEFAULT_FRAME_DURATION_MS,
   resolveAnimationFrame,
   type GnumarusResolvedCell,
   type GnumarusTexturePixels,
@@ -158,6 +161,8 @@ export interface GnumarusAnimationProjectData {
   cells: Array<{ layer: string; frame: number; content: string }>;
   frames: number;
   currentFrame: number;
+  defaultFrameDuration: number;
+  frameDurations: Array<{ frame: number; duration: number }>;
 }
 
 export interface GnumarusProjectLayerInput {
@@ -277,6 +282,8 @@ export class GnumarusCanvasEngine {
   private cells = new Map<string, string>();
   private frameCount = 1;
   private currentFrame = 0;
+  private frameDurations = new Map<number, number>();
+  private defaultFrameDuration = GNUMARUS_DEFAULT_FRAME_DURATION_MS;
   private contentCounter = 1;
   private textureCounter = 1;
   private imageWidth: number;
@@ -681,6 +688,14 @@ export class GnumarusCanvasEngine {
       kept.set(animationCellKey(layerId, target), contentId);
     }
     this.cells = kept;
+    const keptDurations = new Map<number, number>();
+    for (const [at, duration] of this.frameDurations) {
+      if (at === frame) {
+        continue;
+      }
+      keptDurations.set(at > frame ? at - 1 : at, duration);
+    }
+    this.frameDurations = keptDurations;
     this.frameCount -= 1;
     if (this.currentFrame > frame) {
       this.currentFrame -= 1;
@@ -692,6 +707,62 @@ export class GnumarusCanvasEngine {
     this.render();
     this.emitStats();
     this.onLayersChanged?.();
+    return true;
+  }
+
+  /** Explicit per-frame duration in milliseconds, or null for the project default. */
+  getFrameDuration(frame: number): number | null {
+    if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
+      return null;
+    }
+    return this.frameDurations.get(frame) ?? null;
+  }
+
+  getDefaultFrameDuration(): number {
+    return this.defaultFrameDuration;
+  }
+
+  getEffectiveFrameDuration(frame: number): number {
+    return effectiveFrameDurationMs(this.getFrameDuration(frame), this.defaultFrameDuration);
+  }
+
+  setFrameDuration(frame: number, durationMs: number | null): boolean {
+    if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
+      return false;
+    }
+    if (durationMs === null) {
+      if (!this.frameDurations.has(frame)) {
+        return false;
+      }
+      this.frameDurations.delete(frame);
+      this.onLayersChanged?.();
+      this.emitStats();
+      return true;
+    }
+    if (!Number.isFinite(durationMs)) {
+      return false;
+    }
+    const clamped = clampFrameDurationMs(durationMs);
+    if (this.frameDurations.get(frame) === clamped) {
+      return false;
+    }
+    this.frameDurations.set(frame, clamped);
+    this.onLayersChanged?.();
+    this.emitStats();
+    return true;
+  }
+
+  setDefaultFrameDuration(durationMs: number): boolean {
+    if (!Number.isFinite(durationMs)) {
+      return false;
+    }
+    const clamped = clampFrameDurationMs(durationMs);
+    if (clamped === this.defaultFrameDuration) {
+      return false;
+    }
+    this.defaultFrameDuration = clamped;
+    this.onLayersChanged?.();
+    this.emitStats();
     return true;
   }
 
@@ -919,6 +990,8 @@ export class GnumarusCanvasEngine {
       }),
       frames: this.frameCount,
       currentFrame: this.currentFrame,
+      defaultFrameDuration: this.defaultFrameDuration,
+      frameDurations: [...this.frameDurations.entries()].map(([frame, duration]) => ({ frame, duration })),
     };
   }
 
@@ -1489,6 +1562,8 @@ export class GnumarusCanvasEngine {
       cells: Array<{ layer: string; frame: number; content: string }>;
       frames: number;
       currentFrame: number;
+      defaultFrameDuration?: number;
+      frameDurations?: Array<{ frame: number; duration: number }>;
     },
   ): void {
     if (data.layers.length === 0) {
@@ -1563,6 +1638,18 @@ export class GnumarusCanvasEngine {
     }
     this.frameCount = data.frames;
     this.currentFrame = Math.min(Math.max(0, Math.floor(data.currentFrame)), data.frames - 1);
+    this.defaultFrameDuration = clampFrameDurationMs(data.defaultFrameDuration ?? GNUMARUS_DEFAULT_FRAME_DURATION_MS);
+    this.frameDurations = new Map<number, number>();
+    for (const entry of data.frameDurations ?? []) {
+      if (
+        Number.isInteger(entry.frame) &&
+        entry.frame >= 0 &&
+        entry.frame < data.frames &&
+        Number.isFinite(entry.duration)
+      ) {
+        this.frameDurations.set(entry.frame, clampFrameDurationMs(entry.duration));
+      }
+    }
     let maxLayer = 0;
     let maxContent = 0;
     let maxTexture = 0;
@@ -1624,6 +1711,8 @@ export class GnumarusCanvasEngine {
     this.textures.clear();
     this.contents.clear();
     this.cells.clear();
+    this.frameDurations.clear();
+    this.defaultFrameDuration = GNUMARUS_DEFAULT_FRAME_DURATION_MS;
   }
 
   newProject(width: number, height: number): void {

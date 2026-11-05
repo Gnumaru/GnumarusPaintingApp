@@ -1,6 +1,10 @@
 import type { GnumarusLayerTransform } from "../canvas/GnumarusViewportMath";
 import { IDENTITY_LAYER_TRANSFORM } from "../canvas/GnumarusViewportMath";
 import { parseChannelLock, type GnumarusChannelLock } from "../canvas/GnumarusPixelBuffer";
+import {
+  clampFrameDurationMs,
+  GNUMARUS_DEFAULT_FRAME_DURATION_MS,
+} from "../animation/GnumarusAnimationModel";
 
 export interface GnumarusCellRef {
   frame: number;
@@ -29,9 +33,18 @@ export interface GnumarusMatrixCellRef {
   content: string;
 }
 
+export interface GnumarusFrameDurationRef {
+  frame: number;
+  duration: number;
+}
+
 export interface GnumarusAnimationMeta {
   frames: number;
   currentFrame: number;
+  /** Project-wide fallback in milliseconds when a frame has no explicit duration. */
+  defaultFrameDuration: number;
+  /** Only frames with an explicit duration are listed. */
+  frameDurations: GnumarusFrameDurationRef[];
   textures: GnumarusTextureMeta[];
   contents: GnumarusContentMeta[];
   cells: GnumarusMatrixCellRef[];
@@ -95,6 +108,8 @@ export function createDefaultProject(width: number, height: number): GnumarusPro
     animation: {
       frames: 1,
       currentFrame: 0,
+      defaultFrameDuration: GNUMARUS_DEFAULT_FRAME_DURATION_MS,
+      frameDurations: [],
       textures: [{ id: "layer0", name: "Layer 0 pixels", width, height, file: textureFilePath("layer0") }],
       contents: [
         {
@@ -149,7 +164,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>): GnumarusAnim
   if (!isRecord(value)) {
     throw new GnumarusProjectError("project.json has an invalid animation section");
   }
-  const { frames, currentFrame, textures, contents, cells } = value;
+  const { frames, currentFrame, defaultFrameDuration, frameDurations, textures, contents, cells } = value;
   if (!Number.isInteger(frames) || (frames as number) < 1) {
     throw new GnumarusProjectError("project.json has an invalid frame count");
   }
@@ -246,9 +261,43 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>): GnumarusAnim
     seenCells.add(key);
     checkedCells.push({ layer, frame: frame as number, content: content as string });
   }
+  let checkedDefaultMs = GNUMARUS_DEFAULT_FRAME_DURATION_MS;
+  if (defaultFrameDuration !== undefined) {
+    if (typeof defaultFrameDuration !== "number" || !Number.isFinite(defaultFrameDuration)) {
+      throw new GnumarusProjectError("project.json has an invalid default frame duration");
+    }
+    checkedDefaultMs = clampFrameDurationMs(defaultFrameDuration);
+  }
+  const checkedDurations: GnumarusFrameDurationRef[] = [];
+  if (frameDurations !== undefined) {
+    if (!Array.isArray(frameDurations)) {
+      throw new GnumarusProjectError("project.json has invalid frame durations");
+    }
+    const seenFrames = new Set<number>();
+    for (const entry of frameDurations) {
+      if (!isRecord(entry)) {
+        throw new GnumarusProjectError("project.json has an invalid frame duration");
+      }
+      const { frame, duration } = entry;
+      if (!Number.isInteger(frame) || (frame as number) < 0 || (frame as number) >= frameCount) {
+        throw new GnumarusProjectError("project.json has a frame duration with an invalid frame");
+      }
+      if (typeof duration !== "number" || !Number.isFinite(duration)) {
+        throw new GnumarusProjectError("project.json has a frame duration with an invalid duration");
+      }
+      if (seenFrames.has(frame as number)) {
+        throw new GnumarusProjectError("project.json has a duplicated frame duration");
+      }
+      seenFrames.add(frame as number);
+      checkedDurations.push({ frame: frame as number, duration: clampFrameDurationMs(duration as number) });
+    }
+    checkedDurations.sort((left, right) => left.frame - right.frame);
+  }
   return {
     frames: frameCount,
     currentFrame: startFrame,
+    defaultFrameDuration: checkedDefaultMs,
+    frameDurations: checkedDurations,
     textures: checkedTextures,
     contents: checkedContents,
     cells: checkedCells,
@@ -283,7 +332,15 @@ function migrateLegacyLayersToAnimation(
     });
     cells.push({ layer: layer.id, frame: 0, content: contentId });
   });
-  return { frames: 1, currentFrame: 0, textures, contents, cells };
+  return {
+    frames: 1,
+    currentFrame: 0,
+    defaultFrameDuration: GNUMARUS_DEFAULT_FRAME_DURATION_MS,
+    frameDurations: [],
+    textures,
+    contents,
+    cells,
+  };
 }
 
 export function parseProject(jsonText: string): GnumarusProjectMeta {

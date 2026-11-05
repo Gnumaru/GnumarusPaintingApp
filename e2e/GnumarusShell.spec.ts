@@ -1528,3 +1528,92 @@ test("custom picker sliders and inputs work while value is zero", async ({ page 
   await picker.getByLabel("Value", { exact: true }).fill("100");
   await expect(page.locator("gnumarus-shell")).not.toContainText("#000000");
 });
+
+async function getFrameDuration(page: import("@playwright/test").Page, frame: number): Promise<number | null> {
+  return page.evaluate((target: number) => {
+    const root = window as unknown as { __gnumarus?: { engine?: { getFrameDuration(f: number): number | null } } };
+    return root.__gnumarus?.engine?.getFrameDuration(target) ?? null;
+  }, frame);
+}
+
+async function getDefaultFrameDuration(page: import("@playwright/test").Page): Promise<number> {
+  return page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { getDefaultFrameDuration(): number } } };
+    return root.__gnumarus?.engine?.getDefaultFrameDuration() ?? 0;
+  });
+}
+
+test("frame menu sets and clears an explicit frame duration", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  expect(await getFrameDuration(page, 0)).toBeNull();
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Set frame duration…" }).click();
+  await page.locator("gnumarus-shell input#frameDuration").fill("250");
+  await page.getByRole("button", { name: "Set", exact: true }).click();
+  expect(await getFrameDuration(page, 1)).toBe(250);
+  expect(await getFrameDuration(page, 0)).toBeNull();
+  await expect(page.locator("gnumarus-shell")).toContainText("Frame 2 duration: 250 ms");
+  await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Set frame duration…" }).click();
+  await expect(page.locator("gnumarus-shell input#frameDuration")).toHaveValue("250");
+  await page.getByRole("button", { name: "Clear" }).click();
+  await expect(page.locator("gnumarus-shell dialog#frameDurationDialog")).toBeHidden();
+  expect(await getFrameDuration(page, 1)).toBeNull();
+  await expect(page.locator("gnumarus-shell")).toContainText("uses the project default");
+});
+
+test("project default frame duration is configurable with a reset", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  expect(await getDefaultFrameDuration(page)).toBe(100);
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Default frame duration");
+  const input = page.locator("gnumarus-shell input#defaultFrameDuration");
+  await expect(input).toHaveValue("100");
+  await expect(page.getByRole("button", { name: "Reset default frame duration to default" })).toHaveCount(0);
+  await input.fill("500");
+  expect(await getDefaultFrameDuration(page)).toBe(500);
+  await expect(page.getByRole("button", { name: "Reset default frame duration to default" })).toBeVisible();
+  await expect(page.locator("gnumarus-shell")).toContainText("Default frame duration: 500 ms");
+  await page.getByRole("button", { name: "Reset default frame duration to default" }).click();
+  expect(await getDefaultFrameDuration(page)).toBe(100);
+  await expect(page.getByRole("button", { name: "Reset default frame duration to default" })).toHaveCount(0);
+});
+
+test("playback advances frames by duration and stops on demand", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { setFrameDuration(f: number, d: number | null): boolean; setCurrentFrame(f: number): boolean } };
+    };
+    root.__gnumarus?.engine?.setFrameDuration(0, 200);
+    root.__gnumarus?.engine?.setFrameDuration(2, 200);
+    root.__gnumarus?.engine?.setCurrentFrame(1);
+  });
+  await expect(matrix.locator('[data-testid="anim-frame"][data-frame="1"]')).toHaveAttribute("aria-label", /current/);
+  await matrix.getByRole("button", { name: "Play animation", exact: true }).click();
+  await expect(matrix.getByRole("button", { name: "Stop animation", exact: true })).toBeVisible();
+  await expect
+    .poll(async () => getMatrixFrame(page), { timeout: 5000 })
+    .toBe(2);
+  await matrix.getByRole("button", { name: "Stop animation", exact: true }).click();
+  const stoppedAt = await getMatrixFrame(page);
+  await page.waitForTimeout(400);
+  expect(await getMatrixFrame(page)).toBe(stoppedAt);
+  await expect(matrix.getByRole("button", { name: "Play animation", exact: true })).toBeVisible();
+});
+
+async function getMatrixFrame(page: import("@playwright/test").Page): Promise<number> {
+  return page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { getCurrentFrame(): number } } };
+    return root.__gnumarus?.engine?.getCurrentFrame() ?? -1;
+  });
+}

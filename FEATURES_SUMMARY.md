@@ -8,6 +8,7 @@
 - Settings with per-setting reset arrows shown only when non-default.
 - Final preview: floating resizable window with internal zoom and any-button drag pan of the flattened PNG-like render.
 - Animation matrix above the status bar: rows are project layers, columns are animation frames; each cell holds zero or one shareable cell content (texture plus transform settings). New frames start empty; cell menu creates/associates/dissociates contents and texture links.
+- Frame durations and playback: each frame may carry an explicit duration in milliseconds (frame header menu, Set/Clear dialog, 1..60000 ms, empty means project default); project default 100 ms in Edit > Settings Animation section with per-setting reset arrow, stored in `project.json`; play/stop transport in the matrix corner starts from the currently selected frame, each frame shows for its own duration or the project default, looping until stopped.
 - Layers: add, delete, reorder, rename, visibility, opacity, right-click Merge Down (undoable); Transform tool edits the active cell content; painting and clear target the active cell content at the current frame (empty cells materialize on first use).
 - Layer resize: per-layer width/height 1..1024 via Resize button + dialog; expand fills transparent right and below, shrink crops right and below, top-left preserved; undoable.
 - Channel lock: per-layer R/G/B/A lock toggles; paint, clear and Merge Down write only unlocked channels (locked channels keep old values).

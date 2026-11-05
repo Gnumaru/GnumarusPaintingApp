@@ -50,6 +50,9 @@ import { decodePngToBuffer, encodeBufferToPngBlob } from "../project/GnumarusPng
 import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
 import { parseHexToRgbaBytes, rgbaBytesToHex } from "../color/GnumarusColorModels";
 import { type GnumarusTexturePixels } from "../animation/GnumarusAnimationModel";
+import {
+  GNUMARUS_DEFAULT_FRAME_DURATION_MS as DEFAULT_ANIMATION_FRAME_DURATION,
+} from "../animation/GnumarusAnimationModel";
 import "../color/GnumarusColorPicker";
 
 export class GnumarusShell extends LitElement {
@@ -335,7 +338,21 @@ export class GnumarusShell extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
+      gap: 4px;
       padding: 2px;
+    }
+    .anim-corner button {
+      background: transparent;
+      color: #e6e6e6;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      padding: 2px 8px;
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .anim-corner button:hover {
+      background: #3a3a3a;
     }
     .anim-frame-header {
       top: 0;
@@ -657,6 +674,10 @@ export class GnumarusShell extends LitElement {
     matrixMenu: { type: Object },
     checkerColorA: { type: String },
     checkerColorB: { type: String },
+    defaultFrameDuration: { type: Number },
+    durationTargetFrame: { type: Number },
+    durationValue: { type: Number },
+    playing: { type: Boolean },
   };
 
   declare tool: GnumarusCanvasTool;
@@ -704,9 +725,14 @@ export class GnumarusShell extends LitElement {
     | null;
   declare checkerColorA: string;
   declare checkerColorB: string;
+  declare defaultFrameDuration: number;
+  declare durationTargetFrame: number | null;
+  declare durationValue: number | null;
+  declare playing: boolean;
 
   private engine: GnumarusCanvasEngine | null = null;
   private directoryHandle: GnumarusDirectoryHandle | null = null;
+  private playTimer: number | null = null;
 
   constructor() {
     super();
@@ -752,6 +778,11 @@ export class GnumarusShell extends LitElement {
     this.matrixMenu = null;
     this.checkerColorA = DEFAULT_CHECKER_SETTINGS.colorA;
     this.checkerColorB = DEFAULT_CHECKER_SETTINGS.colorB;
+    this.defaultFrameDuration = DEFAULT_ANIMATION_FRAME_DURATION;
+    this.durationTargetFrame = null;
+    this.durationValue = null;
+    this.playing = false;
+    this.playTimer = null;
   }
 
   render() {
@@ -1336,9 +1367,55 @@ export class GnumarusShell extends LitElement {
               </button>`
             : html``}
         </div>
+        <div class="settings-section">Animation</div>
+        <div class="setting-row">
+          <label
+            >Default frame duration (ms)
+            <input
+              type="number"
+              id="defaultFrameDuration"
+              min="1"
+              max="60000"
+              step="10"
+              .value=${String(Math.round(this.defaultFrameDuration))}
+              @input=${(): void => this.applyDefaultFrameDurationFromDialog()}
+            />
+          </label>
+          ${this.defaultFrameDuration !== DEFAULT_ANIMATION_FRAME_DURATION
+            ? html`<button
+                class="reset-btn"
+                aria-label="Reset default frame duration to default"
+                title="Reset to default"
+                @click=${(): void => this.resetDefaultFrameDuration()}
+              >
+                ↻
+              </button>`
+            : html``}
+        </div>
         <div class="dialog-actions">
           <button @click=${(): void => this.resetCheckerDefaults()}>Reset defaults</button>
           <button @click=${(): void => this.closeSettingsDialog()}>Close</button>
+        </div>
+      </dialog>
+      <dialog id="frameDurationDialog">
+        <h3>Frame duration</h3>
+        <p>How long this frame shows during playback. Empty means the project default.</p>
+        <label
+          >Duration (ms)
+          <input
+            type="number"
+            id="frameDuration"
+            min="1"
+            max="60000"
+            step="10"
+            placeholder=${String(Math.round(this.defaultFrameDuration))}
+            .value=${this.durationValue === null ? "" : String(this.durationValue)}
+          />
+        </label>
+        <div class="dialog-actions">
+          <button @click=${(): void => this.closeFrameDurationDialog()}>Cancel</button>
+          <button @click=${(): void => this.clearFrameDuration()}>Clear</button>
+          <button @click=${(): void => this.confirmFrameDuration()}>Set</button>
         </div>
       </dialog>
     `;
@@ -1356,16 +1433,23 @@ export class GnumarusShell extends LitElement {
           <div class="anim-grid" style="grid-template-columns: ${columns};">
             <div class="anim-corner">
               <button aria-label="Add frame" title="Add frame" @click=${(): void => this.onAddFrame()}>+</button>
+              <button
+                aria-label=${this.playing ? "Stop animation" : "Play animation"}
+                title=${this.playing ? "Stop animation" : "Play animation"}
+                @click=${(): void => this.togglePlayback()}
+                >${this.playing ? "■" : "▶"}</button
+              >
             </div>
             ${Array.from({ length: matrix.frameCount }, (_unused, frame) => {
               const current = frame === matrix.currentFrame;
+              const duration = this.engine?.getEffectiveFrameDuration(frame) ?? 0;
               return html`
                 <div class="anim-frame-header ${current ? "current" : ""}">
                   <button
                     data-testid="anim-frame"
                     data-frame=${frame}
-                    aria-label="Frame ${frame + 1}${current ? ", current" : ""}"
-                    title="Frame ${frame + 1}${current ? " (current)" : ""}"
+                    aria-label="Frame ${frame + 1}${current ? ", current" : ""}, ${duration} milliseconds"
+                    title="Frame ${frame + 1}${current ? " (current)" : ""} — ${duration} ms"
                     @click=${(): void => this.onSelectFrame(frame)}
                     @contextmenu=${(event: MouseEvent): void => {
                       event.preventDefault();
@@ -1432,6 +1516,7 @@ export class GnumarusShell extends LitElement {
           this.closeMatrixMenu();
         }}></div>
         <div class="context-menu" style="left: ${this.matrixMenu.x}px; top: ${this.matrixMenu.y}px;">
+          <button @click=${(): void => this.onOpenFrameDuration()}>Set frame duration…</button>
           <button ?disabled=${count <= 1} @click=${(): void => this.onRemoveFrame(frame)}>Remove frame</button>
         </div>
       `;
@@ -2105,6 +2190,7 @@ export class GnumarusShell extends LitElement {
     this.layerText =
       current === undefined ? "-" : `${current.name} (${this.layers.length - index}/${this.layers.length})`;
     this.frameText = `Frame ${this.engine.getCurrentFrame() + 1}/${this.engine.getFrameCount()}`;
+    this.defaultFrameDuration = this.engine.getDefaultFrameDuration();
     if (this.previewOpen) {
       void this.refreshPreview();
     }
@@ -2252,6 +2338,139 @@ export class GnumarusShell extends LitElement {
     }
   }
 
+  private currentDialogDefaultFrameDuration(): number {
+    const input = this.shadowRoot?.getElementById("defaultFrameDuration") as HTMLInputElement | null;
+    const value = Math.floor(Number(input?.value ?? "100") || 100);
+    return Math.min(60000, Math.max(1, value));
+  }
+
+  private applyDefaultFrameDurationFromDialog(): void {
+    const duration = this.currentDialogDefaultFrameDuration();
+    this.defaultFrameDuration = duration;
+    this.engine?.setDefaultFrameDuration(duration);
+    this.refreshLayers();
+    this.dirty = true;
+    this.statusMessage = `Default frame duration: ${duration} ms`;
+  }
+
+  private resetDefaultFrameDuration(): void {
+    this.defaultFrameDuration = DEFAULT_ANIMATION_FRAME_DURATION;
+    this.engine?.setDefaultFrameDuration(DEFAULT_ANIMATION_FRAME_DURATION);
+    this.refreshLayers();
+    this.dirty = true;
+    this.statusMessage = "Default frame duration reset to default";
+  }
+
+  private openFrameDurationDialog(frame: number): void {
+    if (this.engine === null) {
+      return;
+    }
+    this.durationTargetFrame = frame;
+    this.durationValue = this.engine.getFrameDuration(frame);
+    this.requestUpdate();
+    const dialog = this.shadowRoot?.getElementById("frameDurationDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+  }
+
+  private onOpenFrameDuration(): void {
+    if (this.matrixMenu === null || this.matrixMenu.kind !== "frame") {
+      this.closeMatrixMenu();
+      return;
+    }
+    const frame = this.matrixMenu.frame;
+    this.closeMatrixMenu();
+    this.openFrameDurationDialog(frame);
+  }
+
+  private closeFrameDurationDialog(): void {
+    const dialog = this.shadowRoot?.getElementById("frameDurationDialog") as HTMLDialogElement | null;
+    dialog?.close();
+    this.durationTargetFrame = null;
+  }
+
+  private confirmFrameDuration(): void {
+    const target = this.durationTargetFrame;
+    if (target === null || this.engine === null) {
+      this.closeFrameDurationDialog();
+      return;
+    }
+    const input = this.shadowRoot?.getElementById("frameDuration") as HTMLInputElement | null;
+    const raw = (input?.value ?? "").trim();
+    if (raw === "") {
+      this.engine.setFrameDuration(target, null);
+      this.statusMessage = `Frame ${target + 1} uses the project default`;
+    } else {
+      const duration = Math.min(60000, Math.max(1, Math.floor(Number(raw) || 0)));
+      if (duration < 1) {
+        this.closeFrameDurationDialog();
+        return;
+      }
+      this.engine.setFrameDuration(target, duration);
+      this.statusMessage = `Frame ${target + 1} duration: ${duration} ms`;
+    }
+    this.refreshLayers();
+    this.dirty = true;
+    this.closeFrameDurationDialog();
+  }
+
+  private clearFrameDuration(): void {
+    const target = this.durationTargetFrame;
+    this.closeFrameDurationDialog();
+    if (target === null || this.engine === null) {
+      return;
+    }
+    if (this.engine.setFrameDuration(target, null)) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = `Frame ${target + 1} uses the project default`;
+    }
+  }
+
+  private togglePlayback(): void {
+    if (this.engine === null) {
+      return;
+    }
+    if (this.playing) {
+      this.stopPlayback("Animation stopped");
+      return;
+    }
+    this.playing = true;
+    this.statusMessage = `Playing from frame ${this.engine.getCurrentFrame() + 1}`;
+    this.schedulePlaybackTick();
+  }
+
+  private stopPlayback(message = ""): void {
+    if (this.playTimer !== null) {
+      window.clearTimeout(this.playTimer);
+      this.playTimer = null;
+    }
+    if (this.playing) {
+      this.playing = false;
+      if (message !== "") {
+        this.statusMessage = message;
+      }
+    }
+  }
+
+  private schedulePlaybackTick(): void {
+    if (!this.playing || this.engine === null) {
+      return;
+    }
+    const delay = Math.max(1, this.engine.getEffectiveFrameDuration(this.engine.getCurrentFrame()));
+    if (this.playTimer !== null) {
+      window.clearTimeout(this.playTimer);
+    }
+    this.playTimer = window.setTimeout(() => {
+      if (!this.playing || this.engine === null) {
+        return;
+      }
+      const next = (this.engine.getCurrentFrame() + 1) % Math.max(1, this.engine.getFrameCount());
+      this.engine.setCurrentFrame(next);
+      this.refreshLayers();
+      this.schedulePlaybackTick();
+    }, delay);
+  }
+
   private onAddLayer(): void {
     if (this.engine === null) {
       return;
@@ -2367,6 +2586,7 @@ export class GnumarusShell extends LitElement {
   }
 
   private async createNew(): Promise<void> {
+    this.stopPlayback();
     const widthInput = this.shadowRoot?.getElementById("newWidth") as HTMLInputElement | null;
     const heightInput = this.shadowRoot?.getElementById("newHeight") as HTMLInputElement | null;
     const width = Math.min(1024, Math.max(1, Number(widthInput?.value ?? "64") || 64));
@@ -2388,6 +2608,7 @@ export class GnumarusShell extends LitElement {
       this.statusMessage = "Open requires the File System Access API (Chromium)";
       return;
     }
+    this.stopPlayback();
     try {
       this.statusMessage = "Opening directory...";
       const dir = await pickProjectDirectory();
@@ -2428,6 +2649,8 @@ export class GnumarusShell extends LitElement {
         cells: project.animation.cells.map((cell) => ({ ...cell })),
         frames: project.animation.frames,
         currentFrame: project.animation.currentFrame,
+        defaultFrameDuration: project.animation.defaultFrameDuration,
+        frameDurations: project.animation.frameDurations.map((entry) => ({ ...entry })),
       });
       this.refreshLayers();
       this.directoryHandle = dir;
@@ -2487,6 +2710,8 @@ export class GnumarusShell extends LitElement {
         animation: {
           frames: exported.frames,
           currentFrame: exported.currentFrame,
+          defaultFrameDuration: exported.defaultFrameDuration,
+          frameDurations: exported.frameDurations.map((entry) => ({ ...entry })),
           textures: texturesMeta,
           contents: contentsMeta,
           cells: exported.cells.map((cell) => ({ ...cell })),

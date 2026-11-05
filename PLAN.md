@@ -78,6 +78,11 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Animation matrix UI directly above the status bar: one row per layer, one column per frame. Cell context menu: dissociate content (empty the cell), create new content, associate an existing content; dissociate a content from its texture or associate it with another project texture. Frames can be added and removed (never the last one); clicking a cell or frame header selects layer and frame.
 - Rendering, painting, transforms, history and the final preview resolve through the current frame (rendering shares texture buffers by reference, undo tags texture owners); the save format carries frames, contents, textures and cells with backward-compatible migration of legacy single-frame projects. Initial canvas fit is recomputed after the first layout so it matches later Reset Canvas Transform results.
 
+## 13. Frame durations and playback (implemented)
+- Each frame may carry an explicit duration in milliseconds, set from the frame context menu (dialog with Set/Clear); frames without one use the project default.
+- Project settings gain a default frame duration (100 ms factory default), editable in Settings under an Animation section with the standard per-setting reset arrow; stored in project.json (not localStorage).
+- Play/stop transport in the animation matrix corner starts playback from the currently selected frame; each frame shows for its own duration or the project default, looping until stopped; manual frame selection moves the playhead and playback continues from there.
+
 ## 11. Custom color picker (implemented)
 - Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).
 - Every model carries an alpha axis; RGBA axes span 0..255. ARD Diagonal spans 0..360 and Ratio 0..255.
