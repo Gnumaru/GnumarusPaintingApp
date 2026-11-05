@@ -138,22 +138,19 @@ const LAYER_FRAGMENT_SHADER = [
   "}",
 ].join("\n");
 
-const GRID_FRAGMENT_SHADER = [
-  "precision mediump float;",
+export const GRID_FRAGMENT_SHADER = [
+  "precision highp float;",
   "varying vec2 vUv;",
   "uniform float uLayerW;",
   "uniform float uLayerH;",
-  "uniform float uZoom;",
   "void main() {",
-  "  if (uLayerW < 1.0 || uLayerH < 1.0 || uZoom < 0.01) { discard; }",
+  "  if (uLayerW < 1.0 || uLayerH < 1.0) { discard; }",
   "  vec2 coord = vec2(vUv.x * uLayerW, vUv.y * uLayerH);",
-  "  vec2 f = fract(coord);",
-  "  vec2 d = min(f, 1.0 - f);",
-  "  float dist = min(d.x, d.y);",
-  "  float halfW = 0.5 / max(uZoom, 0.01);",
-  "  float line = 1.0 - smoothstep(0.0, halfW, dist);",
-  "  if (line < 0.01) { discard; }",
-  "  gl_FragColor = vec4(1.0, 1.0, 1.0, line * 0.4);",
+  "  vec2 fw = fwidth(coord);",
+  "  vec2 g = abs(fract(coord - 0.5) - 0.5) / max(fw, vec2(1e-4));",
+  "  float line = 1.0 - min(min(g.x, g.y), 1.0);",
+  "  if (line < 0.02) { discard; }",
+  "  gl_FragColor = vec4(1.0, 1.0, 1.0, line * 0.45);",
   "}",
 ].join("\n");
 
@@ -308,7 +305,6 @@ export class GnumarusCanvasEngine {
       uniforms: {
         uLayerW: { value: 64 },
         uLayerH: { value: 64 },
-        uZoom: { value: this.zoom },
       },
       vertexShader: LAYER_VERTEX_SHADER,
       fragmentShader: GRID_FRAGMENT_SHADER,
@@ -1100,7 +1096,6 @@ export class GnumarusCanvasEngine {
     const visible = shouldShowPixelGrid(this.zoom, this.gridMinZoom);
     this.gridMaterial.uniforms["uLayerW"]!.value = active.width;
     this.gridMaterial.uniforms["uLayerH"]!.value = active.height;
-    this.gridMaterial.uniforms["uZoom"]!.value = this.zoom;
     this.gridPlane.visible = visible;
     if (visible) {
       this.writePlaneMatrix(this.gridPlane, active.width, active.height, active.transform, this.layers.length * 0.01 + 0.02);

@@ -34,6 +34,7 @@
 ## 4. Pure logic modules (fully unit-tested)
 
 - `src/canvas/GnumarusPixelBuffer.ts`: buffer create/clear/get/set, Bresenham line, `#rgb`/`#rrggbb` parsing, `GnumarusChannelLock` (`{ r, g, b, a }`), `parseChannelLock`, masked `setPixel`/`drawPixelLine`/`clearPixelBuffer`/`compositePixelOver`, `clampLayerDim` + `resizePixelBuffer` (top-left preserve, transparent expand, crop).
+- `src/canvas/GnumarusCanvasEngine.ts`: exported `GRID_FRAGMENT_SHADER` uses `highp` + `fwidth` for uniform 1 screen pixel grid lines (no `uZoom` fixed-width logic).
 - `src/canvas/GnumarusViewportMath.ts`: screen<->pixel mapping with pan/zoom/rotation/flip (exact inverses), zoom clamping, rotation normalization.
 - `src/history/GnumarusHistory.ts`: bounding-box image diffs tagged by layer plus `resize` before/after snapshots, capped undo/redo stacks; merge snapshot carries `lockedChannels`.
 - `src/project/GnumarusProjectFormat.ts`: `project.json` build/serialize/strict-parse with `lockedChannels` (legacy defaults to unlocked), `cells/<layer>_frame<frame>.png` paths (multi-layer).
@@ -53,8 +54,8 @@
 
 ## 6. Tests
 
-- Vitest unit tests (`tests/`): pixel buffer, channel locks, layer resize, grid settings, viewport math, project format, checker settings, layer-tagged history — 55 tests.
-- Playwright E2E (`e2e/`, Chromium): shell, menus, dialogs, pencil, zoom shortcuts, checker settings, loupe gestures, P/L tools, transform reset, undo/redo, full layer management, channel lock toggles + masked paint + merge/undo, layer resize dialog + undo, pixel grid visibility + threshold + rotation — 26 tests.
+- Vitest unit tests (`tests/`): pixel buffer, channel locks, layer resize, grid settings, pixel grid shader, viewport math, project format, checker settings, layer-tagged history — 57 tests.
+- Playwright E2E (`e2e/`, Chromium): shell, menus, dialogs, pencil, zoom shortcuts, checker settings, loupe gestures, P/L tools, transform reset, undo/redo, full layer management, channel lock toggles + masked paint + merge/undo, layer resize dialog + undo, pixel grid visibility + threshold + rotation + max zoom cycle — 27 tests.
 
 ## 7. Build and deploy
 

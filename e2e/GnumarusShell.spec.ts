@@ -905,3 +905,42 @@ test("pixel grid follows the active layer transform", async ({ page }) => {
     return root.__gnumarus?.engine?.isPixelGridVisible() ?? false;
   })).toBe(true);
 });
+
+test("pixel grid stays visible across max zoom out/in with black checkerboard", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error: Error) => {
+    errors.push(error.message);
+  });
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.locator("gnumarus-shell input#checkerColorA").fill("#000000");
+  await page.locator("gnumarus-shell input#checkerColorB").fill("#000000");
+  await page.getByRole("button", { name: "Close" }).click();
+  const setZoom = (zoom: number): Promise<void> =>
+    page.evaluate((value: number) => {
+      const root = window as unknown as {
+        __gnumarus?: { engine?: { setZoom(z: number): void } };
+      };
+      root.__gnumarus?.engine?.setZoom(value);
+    }, zoom);
+  const isVisible = (): Promise<boolean> =>
+    page.evaluate(() => {
+      const root = window as unknown as {
+        __gnumarus?: { engine?: { isPixelGridVisible(): boolean } };
+      };
+      return root.__gnumarus?.engine?.isPixelGridVisible() ?? false;
+    });
+  await setZoom(64);
+  expect(await isVisible()).toBe(true);
+  await setZoom(48);
+  expect(await isVisible()).toBe(true);
+  await setZoom(64);
+  expect(await isVisible()).toBe(true);
+  await setZoom(32);
+  expect(await isVisible()).toBe(true);
+  await setZoom(64);
+  expect(await isVisible()).toBe(true);
+  expect(errors).toEqual([]);
+});

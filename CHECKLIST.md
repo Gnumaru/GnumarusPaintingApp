@@ -28,3 +28,7 @@
 - [x] Pixel grid: unit + e2e tests, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
 - [x] Unit tests (vitest): pixel buffer, channel lock, layer resize, grid settings, project format, mapping, checker, history — 55 passed
 - [x] E2E test (Playwright): shell + menu + New + pencil + layers + merge + channel locks + layer resize + pixel grid — 26 passed
+- [x] Pixel grid uniformity: `highp` + `fwidth` 1 screen pixel lines, stable across zoom in/out
+- [x] Pixel grid uniformity: unit + e2e tests, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
+- [x] Unit tests (vitest): pixel buffer, channel lock, layer resize, grid settings, pixel grid shader, project format, mapping, checker, history — 57 passed
+- [x] E2E test (Playwright): shell + menu + New + pencil + layers + merge + channel locks + layer resize + pixel grid — 27 passed
