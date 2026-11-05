@@ -376,6 +376,56 @@ export function hslToRgb01(h: number, s: number, l: number): { r: number; g: num
   return { r: r + m, g: g + m, b: b + m };
 }
 
+/* ------------------------------------------------------------------ */
+/* HSV triangle + hue ring helpers for the always-visible picker.      */
+/* s/v are fractions (0..1), hue is degrees (0..360).                   */
+/* ------------------------------------------------------------------ */
+
+/** HSV (degrees, fractions) to sRGB bytes (alpha always 255). */
+export function hsvToRgbBytes(h: number, s: number, v: number): GnumarusRgbaBytes {
+  const rgb = hsvToRgb01(h, s, v);
+  return { r: clampByte(rgb.r * 255), g: clampByte(rgb.g * 255), b: clampByte(rgb.b * 255), a: 255 };
+}
+
+/** sRGB bytes to HSV (degrees, fractions). */
+export function rgbBytesToHsv(color: GnumarusRgbaBytes): GnumarusHsv {
+  return rgb01ToHsv(clamp(color.r, 0, 255) / 255, clamp(color.g, 0, 255) / 255, clamp(color.b, 0, 255) / 255);
+}
+
+/**
+ * Map a point in the saturation/value triangle to fractions.
+ * The triangle spans its bounding box: left edge is S = 0 (white),
+ * right edge is S = 1, top edge is V = 1, bottom edge is V = 0 (black).
+ */
+export function trianglePointToSv(
+  x: number,
+  y: number,
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+): { s: number; v: number } {
+  if (!(width > 0) || !(height > 0)) {
+    return { s: 0, v: 1 };
+  }
+  return {
+    s: clamp((x - left) / width, 0, 1),
+    v: clamp(1 - (y - top) / height, 0, 1),
+  };
+}
+
+/**
+ * Map a pointer offset from the hue ring center to degrees.
+ * Hue 0 points up and grows clockwise, matching a `conic-gradient`
+ * that starts red at the top.
+ */
+export function hsvWheelHue(dx: number, dy: number): number {
+  if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) {
+    return 0;
+  }
+  return (((Math.atan2(dx, -dy) * 180) / Math.PI) % 360 + 360) % 360;
+}
+
 export interface GnumarusCmyk {
   c: number;
   m: number;

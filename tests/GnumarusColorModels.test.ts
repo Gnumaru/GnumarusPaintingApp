@@ -6,6 +6,8 @@ import {
   getColorModelDef,
   hslToRgb01,
   hsvToRgb01,
+  hsvToRgbBytes,
+  hsvWheelHue,
   isColorModelId,
   linearSrgbToOkhsl,
   linearSrgbToOkhsv,
@@ -21,9 +23,11 @@ import {
   rgb01ToCmyk,
   rgb01ToHsl,
   rgb01ToHsv,
+  rgbBytesToHsv,
   rgbBytesToModelAxes,
   rgbaBytesToHex,
   srgbByteToLinear,
+  trianglePointToSv,
 } from "../src/color/GnumarusColorModels";
 
 function expectBytesClose(actual: { r: number; g: number; b: number }, expected: { r: number; g: number; b: number }, tolerance = 2): void {
@@ -261,5 +265,39 @@ describe("GnumarusColorModels alpha axes", () => {
     expect(rgbBytesToModelAxes({ r: 255, g: 255, b: 255, a: 255 }, "ard")).toEqual([0, 0, 360, 255]);
     const round = modelAxesToRgbBytes("ard", [30, 255, 120, 255]);
     expect(round).toMatchObject({ r: 255, g: 0, b: 0 });
+  });
+});
+
+describe("GnumarusColorModels hsv triangle and wheel", () => {
+  it("converts hsv bytes at the triangle corners", () => {
+    expect(hsvToRgbBytes(0, 1, 1)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+    expect(hsvToRgbBytes(120, 1, 1)).toEqual({ r: 0, g: 255, b: 0, a: 255 });
+    expect(hsvToRgbBytes(0, 0, 1)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
+    expect(hsvToRgbBytes(200, 0.5, 0)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+    expect(hsvToRgbBytes(90, 0.75, 0.75)).toEqual({ r: 120, g: 191, b: 48, a: 255 });
+  });
+
+  it("reads hsv fractions back from bytes", () => {
+    expect(rgbBytesToHsv({ r: 255, g: 0, b: 0, a: 255 })).toMatchObject({ h: 0, s: 1, v: 1 });
+    expect(rgbBytesToHsv({ r: 255, g: 255, b: 255, a: 255 })).toMatchObject({ s: 0, v: 1 });
+    expect(rgbBytesToHsv({ r: 0, g: 0, b: 0, a: 255 })).toMatchObject({ s: 0, v: 0 });
+  });
+
+  it("maps triangle points to saturation and value with clamping", () => {
+    expect(trianglePointToSv(0, 0, 0, 0, 100, 84)).toEqual({ s: 0, v: 1 });
+    expect(trianglePointToSv(100, 0, 0, 0, 100, 84)).toEqual({ s: 1, v: 1 });
+    expect(trianglePointToSv(50, 84, 0, 0, 100, 84)).toEqual({ s: 0.5, v: 0 });
+    expect(trianglePointToSv(75, 21, 0, 0, 100, 84)).toEqual({ s: 0.75, v: 0.75 });
+    expect(trianglePointToSv(-10, 200, 0, 0, 100, 84)).toEqual({ s: 0, v: 0 });
+    expect(trianglePointToSv(0, 0, 0, 0, 0, 0)).toEqual({ s: 0, v: 1 });
+  });
+
+  it("maps ring offsets to hue with zero at the top, clockwise", () => {
+    expect(hsvWheelHue(0, -1)).toBeCloseTo(0, 5);
+    expect(hsvWheelHue(1, 0)).toBeCloseTo(90, 5);
+    expect(hsvWheelHue(0, 1)).toBeCloseTo(180, 5);
+    expect(hsvWheelHue(-1, 0)).toBeCloseTo(270, 5);
+    expect(hsvWheelHue(0, 0)).toBe(0);
+    expect(hsvWheelHue(Number.NaN, 0)).toBe(0);
   });
 });

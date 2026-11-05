@@ -2322,6 +2322,75 @@ test("brush and line widths accept floats with AA-dependent rounding", async ({ 
   await expect(page.locator("gnumarus-shell")).toContainText("Line width: 1.5");
 });
 
+test("hsv triangle and hue ring edit the color in any model", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const picker = await openPicker(page, "pencilColor");
+  const wheel = picker.locator('[data-testid="hsv-wheel"]');
+  const ring = picker.locator('[data-testid="hsv-ring"]');
+  const triangle = picker.locator('[data-testid="hsv-triangle"]');
+  await expect(wheel).toBeVisible();
+  await picker.locator("select#modelSelect").selectOption("rgb");
+  await expect(ring).toBeVisible();
+  await expect(triangle).toBeVisible();
+  await picker.locator("#hexInput").fill("#ff0000");
+  await picker.locator("select#modelSelect").selectOption("hsv");
+  await expect(picker.getByLabel("Hue", { exact: true })).toHaveValue("0.0");
+  await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("100.0");
+  await expect(picker.getByLabel("Value", { exact: true })).toHaveValue("100.0");
+  await picker.locator("select#modelSelect").selectOption("rgb");
+  await picker.getByLabel("Alpha", { exact: true }).fill("128");
+  await expect(page.locator("gnumarus-shell")).toContainText("#ff000080");
+  await picker.locator("select#modelSelect").selectOption("hsv");
+  const ringBox = await ring.boundingBox();
+  if (ringBox === null) {
+    throw new Error("hue ring has no bounding box");
+  }
+  await page.mouse.click(ringBox.x + ringBox.width * 0.9, ringBox.y + ringBox.height / 2);
+  expect(Number(await picker.getByLabel("Hue", { exact: true }).inputValue())).toBeCloseTo(90, 0);
+  await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("100.0");
+  await expect(picker.getByLabel("Value", { exact: true })).toHaveValue("100.0");
+  await expect(picker.locator("#hexInput")).toHaveValue("#80ff0080");
+  await picker.locator("select#modelSelect").selectOption("rgb");
+  await picker.getByLabel("Alpha", { exact: true }).fill("255");
+  await picker.locator("select#modelSelect").selectOption("hsv");
+  await page.mouse.click(ringBox.x + ringBox.width / 2, ringBox.y + ringBox.height * 0.9);
+  await expect(picker.getByLabel("Hue", { exact: true })).toHaveValue("180.0");
+  await expect(picker.locator("#hexInput")).toHaveValue("#00ffff");
+  const triBox = await triangle.boundingBox();
+  if (triBox === null) {
+    throw new Error("hsv triangle has no bounding box");
+  }
+  await page.mouse.click(triBox.x + triBox.width * 0.05, triBox.y + triBox.height * 0.05);
+  await expect(picker.getByLabel("Hue", { exact: true })).toHaveValue("180.0");
+  await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("5.0");
+  await expect(picker.getByLabel("Value", { exact: true })).toHaveValue("94.9");
+  await expect(picker.locator("#hexInput")).toHaveValue("#e6f2f2");
+  await page.mouse.click(triBox.x + triBox.width * 0.75, triBox.y + triBox.height * 0.25);
+  await expect(picker.getByLabel("Hue", { exact: true })).toHaveValue("180.0");
+  await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("74.9");
+  await expect(picker.getByLabel("Value", { exact: true })).toHaveValue("74.9");
+  await expect(picker.locator("#hexInput")).toHaveValue("#30bfbf");
+  await triangle.focus();
+  await page.keyboard.down("Shift");
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.up("Shift");
+  await expect(picker.locator("#hexInput")).toHaveValue("#43bfbf");
+  await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("64.9");
+  await page.mouse.click(triBox.x + triBox.width * 0.5, triBox.y + triBox.height * 0.95);
+  await expect(picker.locator("#hexInput")).toHaveValue("#060d0d");
+  await expect(picker.getByLabel("Value", { exact: true })).toHaveValue("5.1");
+  await expect(picker.getByLabel("Hue", { exact: true })).toHaveValue("180.0");
+  await triangle.focus();
+  await page.keyboard.press("ArrowUp");
+  await expect(picker.locator("#hexInput")).toHaveValue("#071010");
+  await expect(picker.getByLabel("Value", { exact: true })).toHaveValue("6.3");
+  await ring.focus();
+  await page.keyboard.press("End");
+  await expect(picker.getByLabel("Hue", { exact: true })).toHaveValue("0.0");
+  await expect(picker.locator("#hexInput")).toHaveValue("#100707");
+});
+
 test("additive blend accumulates translucent paint", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

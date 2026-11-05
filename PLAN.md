@@ -125,6 +125,11 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Pencil shortcut moves from `P` to `B`; bucket moves from `B` to `G` (Photoshop-style; no-modifier keys; `Ctrl` combos unaffected).
 - New shared paint blend mode `replace` (current behavior) / `additive` (painted channels are summed onto the pixel, clamped; translucent repeats accumulate opacity), selectable in pencil/bucket/line/curve options; honored by every color-paint path including anti-aliased edge blending and flood fill (same-color regions still fill in additive mode).
 
+## 23. Always-visible HSV triangle + hue ring (implemented)
+- Color picker popup gains an HSV section that is always visible regardless of the selected model: a triangle (white corner, black corner, full-saturation corner, full-area gradient) inside a hue ring.
+- Dragging the triangle sets the current color to the gradient point (S = x fraction, V = 1 - y fraction, hue kept from a tracked value that survives achromatic colors); dragging the ring sets only the hue (S/V kept); alpha is always preserved; model axes/hex stay in sync.
+- Keyboard support on both controls; pure geometry/color helpers unit-tested.
+
 ## 11. Custom color picker (implemented)
 - Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).
 - Every model carries an alpha axis; RGBA axes span 0..255. ARD Diagonal spans 0..360 and Ratio 0..255.

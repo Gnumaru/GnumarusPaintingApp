@@ -1,14 +1,18 @@
 import { LitElement, css, html } from "lit";
 import {
   getColorModelDef,
+  hsvToRgbBytes,
+  hsvWheelHue,
   isColorModelId,
   modelAlphaFromValues,
   modelAxesToRgbBytes,
   modelAxisGradientCss,
   parseAxisInput,
   parseHexToRgbaBytes,
+  rgbBytesToHsv,
   rgbBytesToModelAxes,
   rgbaBytesToHex,
+  trianglePointToSv,
   GNUMARUS_COLOR_MODELS,
   type GnumarusColorModelDef,
   type GnumarusColorModelId,
@@ -144,6 +148,59 @@ export class GnumarusColorPicker extends LitElement {
       padding: 4px 6px;
       font-family: monospace;
     }
+    .hsv-wheel {
+      position: relative;
+      width: 200px;
+      height: 200px;
+      margin: 2px auto 10px;
+      touch-action: none;
+      user-select: none;
+    }
+    .hsv-ring {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: conic-gradient(#ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000);
+      cursor: pointer;
+    }
+    .hsv-ring:focus-visible {
+      outline: 2px solid #0e639c;
+      outline-offset: 2px;
+    }
+    .hsv-hole {
+      position: absolute;
+      left: 32px;
+      top: 32px;
+      width: 136px;
+      height: 136px;
+      border-radius: 50%;
+      background: #2b2b2b;
+      pointer-events: none;
+    }
+    .hsv-triangle {
+      position: absolute;
+      left: 50px;
+      top: 58px;
+      width: 100px;
+      height: 84px;
+      cursor: crosshair;
+    }
+    .hsv-triangle:focus-visible {
+      outline: 2px solid #0e639c;
+      outline-offset: 2px;
+    }
+    .hsv-thumb {
+      position: absolute;
+      width: 12px;
+      height: 12px;
+      margin-left: -6px;
+      margin-top: -6px;
+      border-radius: 50%;
+      background: transparent;
+      border: 2px solid #ffffff;
+      box-shadow: 0 0 0 1px #000000;
+      pointer-events: none;
+    }
   `;
 
   static properties = {
@@ -158,6 +215,8 @@ export class GnumarusColorPicker extends LitElement {
 
   private rgba: GnumarusRgbaBytes = { r: 0, g: 0, b: 0, a: 255 };
   private modelValues: number[] = [0, 0, 0];
+  /** Tracked hue for the HSV triangle, kept across achromatic colors. */
+  private hsvHue = 0;
   private popupPos: { left: number; top: number } | null = null;
 
   constructor() {
@@ -179,6 +238,7 @@ export class GnumarusColorPicker extends LitElement {
     }
     this.rgba = parsed;
     this.modelValues = rgbBytesToModelAxes(parsed, model);
+    this.trackHsvHue();
   }
 
   protected willUpdate(changed: Map<string, unknown>): void {
@@ -216,11 +276,138 @@ export class GnumarusColorPicker extends LitElement {
     const rgb = modelAxesToRgbBytes(this.model, values);
     this.rgba = { r: rgb.r, g: rgb.g, b: rgb.b, a: modelAlphaFromValues(this.model, values, this.rgba.a) };
     this.modelValues = [...values];
+    this.trackHsvHue();
     this.emitChange();
     // Re-render even when the hex output did not change (e.g. editing hue
     // or saturation while value/lightness is zero), so thumbs and inputs
     // always reflect the edited model values.
     this.requestUpdate();
+  }
+
+  /** Keep the triangle hue across achromatic colors (where hue is undefined). */
+  private trackHsvHue(): void {
+    const hsv = rgbBytesToHsv(this.rgba);
+    if (hsv.s > 0.001 && hsv.v > 0.001) {
+      this.hsvHue = ((hsv.h % 360) + 360) % 360;
+    }
+  }
+
+  /** Apply an HSV edit, preserving alpha and syncing the selected model. */
+  private applyHsv(h: number, s: number, v: number): void {
+    const hue = ((h % 360) + 360) % 360;
+    const sat = Math.min(1, Math.max(0, s));
+    const val = Math.min(1, Math.max(0, v));
+    this.hsvHue = hue;
+    const rgb = hsvToRgbBytes(hue, sat, val);
+    this.rgba = { r: rgb.r, g: rgb.g, b: rgb.b, a: this.rgba.a };
+    this.modelValues = rgbBytesToModelAxes(this.rgba, this.model);
+    this.emitChange();
+    this.requestUpdate();
+  }
+
+  private currentHsv(): { h: number; s: number; v: number } {
+    const hsv = rgbBytesToHsv(this.rgba);
+    return { h: this.hsvHue, s: hsv.s, v: hsv.v };
+  }
+
+  private onHsvRingPointerDown(event: PointerEvent): void {
+    const ring = event.currentTarget as HTMLElement | null;
+    if (ring === null) {
+      return;
+    }
+    event.preventDefault();
+    ring.setPointerCapture(event.pointerId);
+    const apply = (clientX: number, clientY: number): void => {
+      const rect = ring.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) {
+        return;
+      }
+      const hue = hsvWheelHue(clientX - (rect.left + rect.width / 2), clientY - (rect.top + rect.height / 2));
+      const current = rgbBytesToHsv(this.rgba);
+      this.applyHsv(hue, current.s, current.v);
+    };
+    apply(event.clientX, event.clientY);
+    const move = (moveEvent: PointerEvent): void => {
+      apply(moveEvent.clientX, moveEvent.clientY);
+    };
+    const up = (): void => {
+      ring.removeEventListener("pointermove", move);
+      ring.removeEventListener("pointerup", up);
+      ring.removeEventListener("pointercancel", up);
+    };
+    ring.addEventListener("pointermove", move);
+    ring.addEventListener("pointerup", up);
+    ring.addEventListener("pointercancel", up);
+  }
+
+  private onHsvTrianglePointerDown(event: PointerEvent): void {
+    const triangle = event.currentTarget as unknown as { getBoundingClientRect(): DOMRect } | null;
+    if (triangle === null) {
+      return;
+    }
+    event.preventDefault();
+    (triangle as unknown as Element).setPointerCapture?.(event.pointerId);
+    const apply = (clientX: number, clientY: number): void => {
+      const rect = triangle.getBoundingClientRect();
+      const { s, v } = trianglePointToSv(clientX, clientY, rect.left, rect.top, rect.width, rect.height);
+      this.applyHsv(this.hsvHue, s, v);
+    };
+    apply(event.clientX, event.clientY);
+    const move = (moveEvent: PointerEvent): void => {
+      apply(moveEvent.clientX, moveEvent.clientY);
+    };
+    const up = (): void => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  }
+
+  private onHsvRingKeyDown(event: KeyboardEvent): void {
+    let delta = 0;
+    if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+      delta = event.shiftKey ? -10 : -1;
+    } else if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+      delta = event.shiftKey ? 10 : 1;
+    } else if (event.key === "Home") {
+      const current = rgbBytesToHsv(this.rgba);
+      this.applyHsv(0, current.s, current.v);
+      event.preventDefault();
+      return;
+    } else if (event.key === "End") {
+      const currentEnd = rgbBytesToHsv(this.rgba);
+      this.applyHsv(359.9, currentEnd.s, currentEnd.v);
+      event.preventDefault();
+      return;
+    } else {
+      return;
+    }
+    event.preventDefault();
+    const current = rgbBytesToHsv(this.rgba);
+    this.applyHsv(this.hsvHue + delta, current.s, current.v);
+  }
+
+  private onHsvTriangleKeyDown(event: KeyboardEvent): void {
+    const step = event.shiftKey ? 0.1 : 0.01;
+    const current = this.currentHsv();
+    let s = current.s;
+    let v = current.v;
+    if (event.key === "ArrowLeft") {
+      s -= step;
+    } else if (event.key === "ArrowRight") {
+      s += step;
+    } else if (event.key === "ArrowUp") {
+      v += step;
+    } else if (event.key === "ArrowDown") {
+      v -= step;
+    } else {
+      return;
+    }
+    event.preventDefault();
+    this.applyHsv(current.h, s, v);
   }
 
   private onModelSelect(event: Event): void {
@@ -380,6 +567,7 @@ export class GnumarusColorPicker extends LitElement {
     }
     this.rgba = parsed;
     this.modelValues = rgbBytesToModelAxes(parsed, this.model);
+    this.trackHsvHue();
     this.emitChange();
   }
 
@@ -441,6 +629,13 @@ export class GnumarusColorPicker extends LitElement {
     const def = this.def;
     const hex = rgbaBytesToHex(this.rgba);
     const swatchStyle = `background-color: ${hex};`;
+    const hsv = this.currentHsv();
+    const hueHex = rgbaBytesToHex(hsvToRgbBytes(hsv.h, 1, 1));
+    const ringAngle = (hsv.h * Math.PI) / 180;
+    const ringThumbLeft = 100 + 81.5 * Math.sin(ringAngle);
+    const ringThumbTop = 100 - 81.5 * Math.cos(ringAngle);
+    const triThumbLeft = 50 + hsv.s * 100;
+    const triThumbTop = 58 + (1 - hsv.v) * 84;
     return html`
       <button
         class="swatch"
@@ -462,6 +657,56 @@ export class GnumarusColorPicker extends LitElement {
                 ? ""
                 : `left: ${this.popupPos.left}px; top: ${this.popupPos.top}px;`}
             >
+              <div class="hsv-wheel" data-testid="hsv-wheel">
+                <div
+                  class="hsv-ring"
+                  data-testid="hsv-ring"
+                  role="slider"
+                  tabindex="0"
+                  aria-label="Hue wheel"
+                  aria-valuemin="0"
+                  aria-valuemax="360"
+                  aria-valuenow=${Math.round(hsv.h * 10) / 10}
+                  @pointerdown=${(event: PointerEvent): void => this.onHsvRingPointerDown(event)}
+                  @keydown=${(event: KeyboardEvent): void => this.onHsvRingKeyDown(event)}
+                ></div>
+                <div class="hsv-hole"></div>
+                <svg
+                  class="hsv-triangle"
+                  data-testid="hsv-triangle"
+                  viewBox="0 0 100 84"
+                  role="slider"
+                  tabindex="0"
+                  aria-label="Saturation and value triangle"
+                  aria-valuetext=${`${Math.round(hsv.s * 1000) / 10} percent saturation, ${Math.round(hsv.v * 1000) / 10} percent value`}
+                  @pointerdown=${(event: PointerEvent): void => this.onHsvTrianglePointerDown(event)}
+                  @keydown=${(event: KeyboardEvent): void => this.onHsvTriangleKeyDown(event)}
+                >
+                  <defs>
+                    <linearGradient id="hsvWhite" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0" stop-color="#ffffff" />
+                      <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
+                    </linearGradient>
+                    <linearGradient id="hsvBlack" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0" stop-color="#000000" stop-opacity="0" />
+                      <stop offset="1" stop-color="#000000" />
+                    </linearGradient>
+                  </defs>
+                  <polygon points="0,0 100,0 50,84" fill=${hueHex} />
+                  <polygon points="0,0 100,0 50,84" fill="url(#hsvWhite)" />
+                  <polygon points="0,0 100,0 50,84" fill="url(#hsvBlack)" />
+                </svg>
+                <div
+                  class="hsv-thumb"
+                  data-testid="hsv-ring-thumb"
+                  style="left: ${ringThumbLeft}px; top: ${ringThumbTop}px;"
+                ></div>
+                <div
+                  class="hsv-thumb"
+                  data-testid="hsv-tri-thumb"
+                  style="left: ${triThumbLeft}px; top: ${triThumbTop}px;"
+                ></div>
+              </div>
               <div class="model-row">
                 <label for="modelSelect">Model</label>
                 <select
