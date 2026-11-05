@@ -803,7 +803,7 @@ export class GnumarusShell extends LitElement {
                 <div class="dropdown">
                   <button @click=${(): void => void this.openNewDialog()}>New</button>
                   <button @click=${(): void => void this.openProject()}>Open</button>
-                  <button @click=${(): void => void this.saveProject()}>Save</button>
+                  <button title="Save (Ctrl+S)" @click=${(): void => void this.saveProject()}>Save</button>
                 </div>
               `
             : html``}
@@ -1649,6 +1649,12 @@ export class GnumarusShell extends LitElement {
   }
 
   private onGlobalKeyDown = (event: KeyboardEvent): void => {
+    const key = event.key.toLowerCase();
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && key === "s") {
+      event.preventDefault();
+      void this.saveProject();
+      return;
+    }
     if (event.key === "Escape") {
       if (this.matrixMenu !== null) {
         this.matrixMenu = null;

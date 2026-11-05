@@ -53,4 +53,6 @@
 - [x] Frame durations and playback: per-frame ms via frame menu, project default 100ms in Settings, play/stop transport from current frame
 - [x] Frame durations and playback: unit + e2e tests, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
 - [x] Unit tests (vitest): pixel buffer, color models, animation model, channel lock, layer resize, grid settings, pixel grid shader, background settings, final render, project format, mapping, checker, history — 92 passed
-- [x] E2E test (Playwright): shell + menu + New + pencil + layers + merge + channel locks + layer resize + pixel grid + settings reset + background + final preview + pan + scroll limits + toolbar icons + custom picker + animation matrix + frame durations + playback — 48 passed
+- [x] E2E test (Playwright): shell + menu + New + pencil + layers + merge + channel locks + layer resize + pixel grid + settings reset + background + final preview + pan + scroll limits + toolbar icons + custom picker + animation matrix + frame durations + playback + save shortcut — 49 passed
+- [x] Save shortcut Ctrl+S: same flow as File > Save (reuse folder when chosen, else OS picker), preventDefault browser dialog
+- [x] Save shortcut Ctrl+S: e2e test, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated

@@ -17,5 +17,5 @@
 - WebGL2-only canvas (Three.js) with nearest-neighbor scaling, zoom, rotation + mirror view transform, and pan.
 - Toolbar with pencil and loupe (zoom/rotate/flip) tools.
 - Configurable transparency checkerboard: image-space or screen-space, independent width/height (default 16x16, asymmetric like 8x16 supported), two colors, persisted in the browser.
-- Directory projects over File System Access API: `project.json` + `textures/*.png`.
+- Directory projects over File System Access API: `project.json` + `textures/*.png`. File > Save reuses the chosen folder; `Ctrl+S` (`Cmd+S` on macOS) triggers the same save (picker only when no folder chosen yet).
 - Status bar: tool, color, cursor pixel, canvas size, layer, frame, zoom, rotation, flip state, project name, dirty flag, messages.

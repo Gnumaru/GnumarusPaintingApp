@@ -1611,6 +1611,78 @@ test("playback advances frames by duration and stops on demand", async ({ page }
   await expect(matrix.getByRole("button", { name: "Play animation", exact: true })).toBeVisible();
 });
 
+test("Control+S saves to the chosen folder without prompting again", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const w = window as unknown as {
+      showDirectoryPicker?: unknown;
+      __gnumarusSaveTest?: { pickCalls: number; written: string[] };
+    };
+    const testState = { pickCalls: 0, written: [] as string[] };
+    w.__gnumarusSaveTest = testState;
+    interface MockFileHandle {
+      getFile(): Promise<{ text(): Promise<string>; arrayBuffer(): Promise<ArrayBuffer> }>;
+      createWritable(): Promise<{ write(data: string | Blob): Promise<void>; close(): Promise<void> }>;
+    }
+    interface MockDirHandle {
+      name: string;
+      getFileHandle(fileName: string): Promise<MockFileHandle>;
+      getDirectoryHandle(dirName: string): Promise<MockDirHandle>;
+    }
+    function makeFileHandle(path: string): MockFileHandle {
+      return {
+        getFile: (): Promise<{ text(): Promise<string>; arrayBuffer(): Promise<ArrayBuffer> }> =>
+          Promise.resolve({
+            text: (): Promise<string> => Promise.resolve(""),
+            arrayBuffer: (): Promise<ArrayBuffer> => Promise.resolve(new ArrayBuffer(0)),
+          }),
+        createWritable: (): Promise<{ write(data: string | Blob): Promise<void>; close(): Promise<void> }> =>
+          Promise.resolve({
+            write: (data: string | Blob): Promise<void> => {
+              void data;
+              return Promise.resolve();
+            },
+            close: (): Promise<void> => {
+              testState.written.push(path);
+              return Promise.resolve();
+            },
+          }),
+      };
+    }
+    function makeDir(name: string, prefix: string): MockDirHandle {
+      return {
+        name,
+        getFileHandle: (fileName: string): Promise<MockFileHandle> =>
+          Promise.resolve(makeFileHandle(prefix + fileName)),
+        getDirectoryHandle: (dirName: string): Promise<MockDirHandle> =>
+          Promise.resolve(makeDir(dirName, `${prefix}${dirName}/`)),
+      };
+    }
+    w.showDirectoryPicker = (): Promise<MockDirHandle> => {
+      testState.pickCalls += 1;
+      return Promise.resolve(makeDir("MockDir", ""));
+    };
+  });
+  const pickCalls = (): Promise<number> =>
+    page.evaluate(
+      () =>
+        (window as unknown as { __gnumarusSaveTest?: { pickCalls: number } }).__gnumarusSaveTest?.pickCalls ??
+        -1,
+    );
+  const writtenFiles = (): Promise<string[]> =>
+    page.evaluate(
+      () => (window as unknown as { __gnumarusSaveTest?: { written: string[] } }).__gnumarusSaveTest?.written ?? [],
+    );
+  await page.keyboard.press("Control+s");
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockDir");
+  expect(await pickCalls()).toBe(1);
+  expect(await writtenFiles()).toContain("project.json");
+  await page.keyboard.press("Control+s");
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockDir");
+  expect(await pickCalls()).toBe(1);
+});
+
 async function getMatrixFrame(page: import("@playwright/test").Page): Promise<number> {
   return page.evaluate(() => {
     const root = window as unknown as { __gnumarus?: { engine?: { getCurrentFrame(): number } } };
