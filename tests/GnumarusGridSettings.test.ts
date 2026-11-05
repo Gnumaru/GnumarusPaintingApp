@@ -11,20 +11,20 @@ import {
 } from "../src/settings/GnumarusGridSettings";
 
 describe("GnumarusGridSettings", () => {
-  it("defaults to 200 percent", () => {
-    expect(DEFAULT_GRID_SETTINGS).toEqual({ minZoom: 2 });
+  it("defaults to 1000 percent", () => {
+    expect(DEFAULT_GRID_SETTINGS).toEqual({ minZoom: 10 });
     expect(GNUMARUS_GRID_MIN_ZOOM).toBe(2);
     expect(GNUMARUS_GRID_MAX_ZOOM).toBe(64);
   });
 
   it("clamps the minimum zoom into range", () => {
-    expect(clampGridMinZoom(2)).toBe(2);
+    expect(clampGridMinZoom(10)).toBe(10);
     expect(clampGridMinZoom(8)).toBe(8);
     expect(clampGridMinZoom(1)).toBe(2);
     expect(clampGridMinZoom(1.99)).toBe(2);
     expect(clampGridMinZoom(100)).toBe(64);
-    expect(clampGridMinZoom(Number.NaN)).toBe(2);
-    expect(clampGridMinZoom(Number.POSITIVE_INFINITY)).toBe(2);
+    expect(clampGridMinZoom(Number.NaN)).toBe(10);
+    expect(clampGridMinZoom(Number.POSITIVE_INFINITY)).toBe(10);
   });
 
   it("round-trips settings", () => {

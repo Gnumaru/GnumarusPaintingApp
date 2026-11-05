@@ -63,3 +63,9 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Symptom: with pure black checkerboard at max zoom, grid lines appeared non-deterministic when zooming in/out: sometimes only horizontal, only vertical, or repeating visible/invisible pattern within the same zoom level.
 - Cause: grid fragment used `mediump` precision plus fixed `0.5 / uZoom` width in layer-pixel space. At high zoom the line width in UV space approaches fragment spacing and `mediump` varying quantization skips lines depending on alignment.
 - Fix: use `highp` precision with screen-space derivative (`fwidth`) anti-aliasing so lines stay 1 screen pixel wide regardless of zoom, pan or rotation. Removed `uZoom` uniform.
+
+## 10. Settings reset, background mode and final preview (implemented)
+- Change pixel grid default minimum zoom to 1000 percent.
+- Every setting gets a per-setting reset to factory default: a circular arrow appears only when the value differs from default; clicking resets that setting and the arrow disappears.
+- New background setting: canvas background is checkerboard (default) or solid color. Solid mode shows a color picker; checkerboard mode keeps all previous checker options.
+- New final render preview: small floating resizable window with internal zoom and pan rendering the flattened image as a single PNG export would look.

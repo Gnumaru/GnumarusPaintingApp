@@ -40,6 +40,11 @@ import {
   shouldShowPixelGrid,
 } from "../settings/GnumarusGridSettings";
 import {
+  DEFAULT_BACKGROUND_SETTINGS,
+  type GnumarusBackgroundMode,
+  type GnumarusBackgroundSettings,
+} from "../settings/GnumarusBackgroundSettings";
+import {
   computeImageDiff,
   GnumarusHistory,
   type GnumarusMergedLayerSnapshot,
@@ -116,7 +121,12 @@ const CHECKER_FRAGMENT_SHADER = [
   "uniform float uPixelRatio;",
   "uniform vec3 uColorA;",
   "uniform vec3 uColorB;",
+  "uniform vec3 uSolidColor;",
   "void main() {",
+  "  if (uMode > 1.5) {",
+  "    gl_FragColor = vec4(uSolidColor, 1.0);",
+  "    return;",
+  "  }",
   "  vec2 cell = vec2(max(uSizeX, 1.0), max(uSizeY, 1.0));",
   "  vec2 grid = uMode < 0.5",
   "    ? floor(vec2(vUv.x * uImageW, vUv.y * uImageH) / cell)",
@@ -161,6 +171,7 @@ export interface GnumarusEngineOptions {
   onLayersChanged?: () => void;
   checker?: GnumarusCheckerSettings;
   gridMinZoom?: number;
+  background?: GnumarusBackgroundSettings;
 }
 
 function checkerHexToVec(hex: string): THREE.Vector3 {
@@ -225,6 +236,9 @@ export class GnumarusCanvasEngine {
   private checkerColorB: string;
   private readonly checkerColorAVec: THREE.Vector3;
   private readonly checkerColorBVec: THREE.Vector3;
+  private backgroundMode: GnumarusBackgroundMode;
+  private backgroundColor: string;
+  private readonly backgroundColorVec: THREE.Vector3;
   private gridMinZoom: number;
   private readonly gridMaterial: THREE.ShaderMaterial;
   private readonly gridPlane: THREE.Mesh;
@@ -247,6 +261,10 @@ export class GnumarusCanvasEngine {
     this.checkerColorB = initialChecker.colorB;
     this.checkerColorAVec = checkerHexToVec(initialChecker.colorA);
     this.checkerColorBVec = checkerHexToVec(initialChecker.colorB);
+    const initialBackground = options.background ?? DEFAULT_BACKGROUND_SETTINGS;
+    this.backgroundMode = initialBackground.mode === "solid" ? "solid" : "checkerboard";
+    this.backgroundColor = initialBackground.color;
+    this.backgroundColorVec = checkerHexToVec(initialBackground.color);
     this.gridMinZoom = clampGridMinZoom(options.gridMinZoom ?? DEFAULT_GRID_SETTINGS.minZoom);
     this.imageWidth = 64;
     this.imageHeight = 64;
@@ -286,12 +304,13 @@ export class GnumarusCanvasEngine {
       uniforms: {
         uImageW: { value: this.imageWidth },
         uImageH: { value: this.imageHeight },
-        uMode: { value: this.checkerMode === "screen" ? 1 : 0 },
+        uMode: { value: this.backgroundMode === "solid" ? 2 : this.checkerMode === "screen" ? 1 : 0 },
         uSizeX: { value: this.checkerSizeX },
         uSizeY: { value: this.checkerSizeY },
         uPixelRatio: { value: 1 },
         uColorA: { value: this.checkerColorAVec },
         uColorB: { value: this.checkerColorBVec },
+        uSolidColor: { value: this.backgroundColorVec },
       },
       vertexShader: LAYER_VERTEX_SHADER,
       fragmentShader: CHECKER_FRAGMENT_SHADER,
@@ -1027,7 +1046,7 @@ export class GnumarusCanvasEngine {
       this.checkerColorB = settings.colorB;
       this.checkerColorBVec.set(colorB.r / 255, colorB.g / 255, colorB.b / 255);
     }
-    this.backgroundMaterial.uniforms["uMode"]!.value = this.checkerMode === "screen" ? 1 : 0;
+    this.syncBackgroundModeUniform();
     this.backgroundMaterial.uniforms["uSizeX"]!.value = this.checkerSizeX;
     this.backgroundMaterial.uniforms["uSizeY"]!.value = this.checkerSizeY;
     this.render();
@@ -1041,6 +1060,42 @@ export class GnumarusCanvasEngine {
       colorA: this.checkerColorA,
       colorB: this.checkerColorB,
     };
+  }
+
+  private syncBackgroundModeUniform(): void {
+    this.backgroundMaterial.uniforms["uMode"]!.value =
+      this.backgroundMode === "solid" ? 2 : this.checkerMode === "screen" ? 1 : 0;
+  }
+
+  getBackgroundSettings(): GnumarusBackgroundSettings {
+    return { mode: this.backgroundMode, color: this.backgroundColor };
+  }
+
+  setBackgroundMode(mode: GnumarusBackgroundMode): void {
+    this.backgroundMode = mode === "solid" ? "solid" : "checkerboard";
+    this.syncBackgroundModeUniform();
+    this.render();
+  }
+
+  setBackgroundColor(hex: string): void {
+    const parsed = parseHexColor(hex);
+    if (parsed === null) {
+      return;
+    }
+    this.backgroundColor = hex;
+    this.backgroundColorVec.set(parsed.r / 255, parsed.g / 255, parsed.b / 255);
+    this.render();
+  }
+
+  applyBackgroundSettings(settings: GnumarusBackgroundSettings): void {
+    this.backgroundMode = settings.mode === "solid" ? "solid" : "checkerboard";
+    const parsed = parseHexColor(settings.color);
+    if (parsed !== null) {
+      this.backgroundColor = settings.color;
+      this.backgroundColorVec.set(parsed.r / 255, parsed.g / 255, parsed.b / 255);
+    }
+    this.syncBackgroundModeUniform();
+    this.render();
   }
 
   getGridMinZoom(): number {

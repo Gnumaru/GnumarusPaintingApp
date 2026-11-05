@@ -4,7 +4,7 @@ export interface GnumarusGridSettings {
 }
 
 export const DEFAULT_GRID_SETTINGS: GnumarusGridSettings = {
-  minZoom: 2,
+  minZoom: 10,
 };
 
 export const GRID_SETTINGS_STORAGE_KEY = "gnumarus.settings.grid.v1";

@@ -812,6 +812,12 @@ async function getGrid(page: import("@playwright/test").Page): Promise<{
 test("pixel grid hides below 200 percent and shows above", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { setZoom(z: number): void } };
+    };
+    root.__gnumarus?.engine?.setZoom(10);
+  });
   expect((await getGrid(page)).visible).toBe(true);
   await page.evaluate(() => {
     const root = window as unknown as {
@@ -824,11 +830,11 @@ test("pixel grid hides below 200 percent and shows above", async ({ page }) => {
     const root = window as unknown as {
       __gnumarus?: { engine?: { setZoom(z: number): void } };
     };
-    root.__gnumarus?.engine?.setZoom(8);
+    root.__gnumarus?.engine?.setZoom(16);
   });
   const state = await getGrid(page);
   expect(state.visible).toBe(true);
-  expect(state.minZoom).toBeCloseTo(2, 5);
+  expect(state.minZoom).toBeCloseTo(10, 5);
   expect(state.layerId).toBe("layer0");
   expect(state.width).toBe(64);
 });
@@ -943,4 +949,82 @@ test("pixel grid stays visible across max zoom out/in with black checkerboard", 
   await setZoom(64);
   expect(await isVisible()).toBe(true);
   expect(errors).toEqual([]);
+});
+
+test("settings show reset arrows only when non-default and reset on click", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Pixel grid minimum zoom");
+  expect(await page.getByRole("button", { name: "Reset pixel grid minimum zoom to default" }).count()).toBe(0);
+  await page.locator("gnumarus-shell input#gridMinZoom").fill("400");
+  await expect(page.getByRole("button", { name: "Reset pixel grid minimum zoom to default" })).toBeVisible();
+  await page.getByRole("button", { name: "Reset pixel grid minimum zoom to default" }).click();
+  expect(await getGrid(page)).toMatchObject({ minZoom: 10 });
+  expect(await page.getByRole("button", { name: "Reset pixel grid minimum zoom to default" }).count()).toBe(0);
+  expect(await page.getByRole("button", { name: "Reset checker width to default" }).count()).toBe(0);
+  await page.locator("gnumarus-shell input#checkerSizeX").fill("32");
+  await expect(page.getByRole("button", { name: "Reset checker width to default" })).toBeVisible();
+  await page.getByRole("button", { name: "Reset checker width to default" }).click();
+  const checkerX = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getCheckerSettings(): { sizeX: number } } };
+    };
+    return root.__gnumarus?.engine?.getCheckerSettings().sizeX ?? 0;
+  });
+  expect(checkerX).toBe(16);
+});
+
+test("canvas background can switch between checkerboard and solid color", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Background mode");
+  await expect(page.locator("gnumarus-shell input#checkerSizeX")).toBeVisible();
+  await page.locator("gnumarus-shell select#backgroundMode").selectOption("solid");
+  await expect(page.locator("gnumarus-shell input#backgroundColor")).toBeVisible();
+  await expect(page.locator("gnumarus-shell input#checkerSizeX")).toHaveCount(0);
+  await page.locator("gnumarus-shell input#backgroundColor").fill("#ff0000");
+  const background = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getBackgroundSettings(): { mode: string; color: string } } };
+    };
+    return root.__gnumarus?.engine?.getBackgroundSettings() ?? null;
+  });
+  expect(background).toEqual({ mode: "solid", color: "#ff0000" });
+  const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.background.v1"));
+  expect(persisted).toContain("solid");
+  await page.locator("gnumarus-shell select#backgroundMode").selectOption("checkerboard");
+  await expect(page.locator("gnumarus-shell input#checkerSizeX")).toBeVisible();
+  await expect(page.locator("gnumarus-shell input#backgroundColor")).toHaveCount(0);
+});
+
+test("final preview shows flattened render with zoom and pan", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await page.getByRole("button", { name: "Final preview" }).click();
+  const preview = page.locator('gnumarus-shell [data-testid="final-preview"]');
+  await expect(preview).toBeVisible();
+  await expect(preview).toContainText("Final preview");
+  const previewCanvas = page.locator("gnumarus-shell canvas#previewCanvas");
+  await expect(previewCanvas).toBeVisible();
+  const size = await previewCanvas.evaluate((element: HTMLCanvasElement) => ({ width: element.width, height: element.height }));
+  expect(size).toEqual({ width: 64, height: 64 });
+  await expect(preview).toContainText("400%");
+  await preview.getByRole("button", { name: "Zoom in preview" }).click();
+  await expect(preview).toContainText("800%");
+  const scaledWidth = await previewCanvas.evaluate((element: HTMLCanvasElement) => element.style.width);
+  expect(scaledWidth).toBe("512px");
+  await preview.getByRole("button", { name: "Zoom out preview" }).click();
+  await expect(preview).toContainText("400%");
+  await preview.getByRole("button", { name: "Close preview" }).click();
+  await expect(preview).toHaveCount(0);
 });

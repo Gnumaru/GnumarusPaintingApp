@@ -28,6 +28,14 @@ import {
   type GnumarusCheckerSettings,
 } from "../settings/GnumarusCheckerSettings";
 import {
+  DEFAULT_BACKGROUND_SETTINGS,
+  BACKGROUND_SETTINGS_STORAGE_KEY,
+  parseBackgroundSettings,
+  serializeBackgroundSettings,
+  type GnumarusBackgroundMode,
+  type GnumarusBackgroundSettings,
+} from "../settings/GnumarusBackgroundSettings";
+import {
   DEFAULT_GRID_SETTINGS,
   GRID_SETTINGS_STORAGE_KEY,
   GNUMARUS_GRID_MAX_ZOOM,
@@ -36,6 +44,7 @@ import {
   parseGridSettings,
   serializeGridSettings,
 } from "../settings/GnumarusGridSettings";
+import { compositeFinalImage } from "../preview/GnumarusFinalRender";
 import { decodePngToBuffer, encodeBufferToPngBlob } from "../project/GnumarusPngCodec";
 
 export class GnumarusShell extends LitElement {
@@ -155,6 +164,10 @@ export class GnumarusShell extends LitElement {
       background: #333333;
     }
     .canvas-host canvas {
+      position: static;
+      inset: auto;
+    }
+    .canvas-host > canvas {
       position: absolute;
       inset: 0;
     }
@@ -373,6 +386,111 @@ export class GnumarusShell extends LitElement {
       padding: 4px 6px;
       max-width: 260px;
     }
+    .settings-section {
+      margin: 12px 0 4px 0;
+      font-weight: 600;
+      border-bottom: 1px solid #444;
+      padding-bottom: 4px;
+    }
+    .setting-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin: 8px 0;
+    }
+    .setting-row label {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin: 0;
+      flex: 1 1 auto;
+    }
+    .reset-btn {
+      background: transparent;
+      color: #e6e6e6;
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 2px 8px;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1.2;
+    }
+    .reset-btn:hover {
+      background: #0e639c;
+      border-color: #0e639c;
+    }
+    .preview-window {
+      position: absolute;
+      z-index: 30;
+      min-width: 160px;
+      min-height: 160px;
+      width: 264px;
+      height: 288px;
+      max-width: 80%;
+      max-height: 80%;
+      background: #252526;
+      border: 1px solid #0e639c;
+      border-radius: 6px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      resize: both;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    }
+    .preview-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 8px;
+      background: #2b2b2b;
+      border-bottom: 1px solid #111;
+      cursor: move;
+      flex: 0 0 auto;
+      font-weight: 600;
+    }
+    .preview-header .spacer {
+      flex: 1 1 auto;
+    }
+    .preview-header button {
+      background: transparent;
+      color: #e6e6e6;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      padding: 2px 8px;
+      cursor: pointer;
+    }
+    .preview-header button:hover {
+      background: #3a3a3a;
+    }
+    .preview-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      flex: 0 0 auto;
+      font-size: 12px;
+    }
+    .preview-toolbar button {
+      background: #0e639c;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 2px 10px;
+      cursor: pointer;
+    }
+    .preview-body {
+      flex: 1 1 auto;
+      overflow: auto;
+      min-height: 0;
+      background: #1e1e1e;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .preview-body canvas {
+      image-rendering: pixelated;
+      background: transparent;
+    }
     .dialog-actions {
       display: flex;
       gap: 8px;
@@ -417,6 +535,12 @@ export class GnumarusShell extends LitElement {
     checkerSizeX: { type: Number },
     checkerSizeY: { type: Number },
     gridMinZoom: { type: Number },
+    backgroundMode: { type: String },
+    backgroundColor: { type: String },
+    previewOpen: { type: Boolean },
+    previewZoom: { type: Number },
+    previewX: { type: Number },
+    previewY: { type: Number },
     canUndo: { type: Boolean },
     canRedo: { type: Boolean },
     layers: { type: Array },
@@ -452,6 +576,12 @@ export class GnumarusShell extends LitElement {
   declare checkerSizeX: number;
   declare checkerSizeY: number;
   declare gridMinZoom: number;
+  declare backgroundMode: GnumarusBackgroundMode;
+  declare backgroundColor: string;
+  declare previewOpen: boolean;
+  declare previewZoom: number;
+  declare previewX: number;
+  declare previewY: number;
   declare canUndo: boolean;
   declare canRedo: boolean;
   declare layers: GnumarusLayerInfo[];
@@ -492,6 +622,12 @@ export class GnumarusShell extends LitElement {
     this.checkerSizeX = DEFAULT_CHECKER_SETTINGS.sizeX;
     this.checkerSizeY = DEFAULT_CHECKER_SETTINGS.sizeY;
     this.gridMinZoom = DEFAULT_GRID_SETTINGS.minZoom;
+    this.backgroundMode = DEFAULT_BACKGROUND_SETTINGS.mode;
+    this.backgroundColor = DEFAULT_BACKGROUND_SETTINGS.color;
+    this.previewOpen = false;
+    this.previewZoom = 4;
+    this.previewX = 0;
+    this.previewY = 0;
     this.canUndo = false;
     this.canRedo = false;
     this.layers = [];
@@ -599,8 +735,60 @@ export class GnumarusShell extends LitElement {
               }
             }}
           />
+          <button
+            class=${this.previewOpen ? "active" : ""}
+            title="Final preview (flattened image)"
+            aria-label="Final preview"
+            @click=${(): void => {
+              this.togglePreview();
+            }}
+          >
+            ⊞
+          </button>
         </div>
-        <div class="canvas-host" id="canvasHost"></div>
+        <div class="canvas-host" id="canvasHost">
+          ${this.previewOpen
+            ? html`
+                <div
+                  class="preview-window"
+                  style="left: ${this.previewX}px; top: ${this.previewY}px;"
+                  data-testid="final-preview"
+                >
+                  <div
+                    class="preview-header"
+                    @pointerdown=${(event: PointerEvent): void => this.onPreviewDragStart(event)}
+                  >
+                    <span>Final preview</span>
+                    <span class="spacer"></span>
+                    <button aria-label="Close preview" title="Close preview" @click=${(): void => this.togglePreview()}>
+                      ×
+                    </button>
+                  </div>
+                  <div class="preview-toolbar">
+                    <button aria-label="Zoom out preview" title="Zoom out preview" @click=${(): void => this.zoomPreview(0.5)}>
+                      −
+                    </button>
+                    <span>${Math.round(this.previewZoom * 100)}%</span>
+                    <button aria-label="Zoom in preview" title="Zoom in preview" @click=${(): void => this.zoomPreview(2)}>
+                      +
+                    </button>
+                    <button aria-label="Reset preview zoom" title="Reset preview zoom" @click=${(): void => this.resetPreviewZoom()}>
+                      1:1
+                    </button>
+                  </div>
+                  <div
+                    class="preview-body"
+                    @wheel=${(event: WheelEvent): void => {
+                      event.preventDefault();
+                      this.zoomPreview(event.deltaY < 0 ? 1.25 : 0.8);
+                    }}
+                  >
+                    <canvas id="previewCanvas"></canvas>
+                  </div>
+                </div>
+              `
+            : html``}
+        </div>
         <aside class="layers-panel" aria-label="Layers">
           <div class="layers-header">
             <span>Layers</span>
@@ -830,41 +1018,192 @@ export class GnumarusShell extends LitElement {
       </dialog>
       <dialog id="settingsDialog">
         <h3>Settings</h3>
-        <label
-          >Checkerboard mode
-          <select id="checkerMode" .value=${this.checkerMode} @change=${(): void => this.applyCheckerFromDialog()}>
-            <option value="image">Image-space (moves and zooms with the canvas)</option>
-            <option value="screen">Screen-space (fixed on screen)</option>
-          </select>
-        </label>
-        <label
-          >Checker width <input type="number" id="checkerSizeX" min="1" max="128" .value=${String(this.checkerSizeX)} @input=${(): void =>
-            this.applyCheckerFromDialog()} />
-        </label>
-        <label
-          >Checker height <input type="number" id="checkerSizeY" min="1" max="128" .value=${String(this.checkerSizeY)} @input=${(): void =>
-            this.applyCheckerFromDialog()} />
-        </label>
-        <label
-          >Checker color A <input type="color" id="checkerColorA" .value=${this.checkerColorA} @input=${(): void =>
-            this.applyCheckerFromDialog()} />
-        </label>
-        <label
-          >Checker color B <input type="color" id="checkerColorB" .value=${this.checkerColorB} @input=${(): void =>
-            this.applyCheckerFromDialog()} />
-        </label>
-        <label
-          >Pixel grid minimum zoom (percent)
-          <input
-            type="number"
-            id="gridMinZoom"
-            min="200"
-            max="6400"
-            step="50"
-            .value=${String(Math.round(this.gridMinZoom * 100))}
-            @input=${(): void => this.applyGridFromDialog()}
-          />
-        </label>
+        <div class="settings-section">Background</div>
+        <div class="setting-row">
+          <label
+            >Background mode
+            <select id="backgroundMode" .value=${this.backgroundMode} @change=${(): void => this.applyBackgroundFromDialog()}>
+              <option value="checkerboard">Checkerboard</option>
+              <option value="solid">Solid color</option>
+            </select>
+          </label>
+          ${this.backgroundMode !== DEFAULT_BACKGROUND_SETTINGS.mode
+            ? html`<button
+                class="reset-btn"
+                aria-label="Reset background mode to default"
+                title="Reset to default"
+                @click=${(): void => this.resetBackgroundModeToDefault()}
+              >
+                ↻
+              </button>`
+            : html``}
+        </div>
+        ${this.backgroundMode === "solid"
+          ? html`
+              <div class="setting-row">
+                <label
+                  >Solid color
+                  <input
+                    type="color"
+                    id="backgroundColor"
+                    .value=${this.backgroundColor}
+                    @input=${(): void => this.applyBackgroundFromDialog()}
+                  />
+                </label>
+                ${this.backgroundColor.toLowerCase() !== DEFAULT_BACKGROUND_SETTINGS.color.toLowerCase()
+                  ? html`<button
+                      class="reset-btn"
+                      aria-label="Reset background color to default"
+                      title="Reset to default"
+                      @click=${(): void => this.resetBackgroundColorToDefault()}
+                    >
+                      ↻
+                    </button>`
+                  : html``}
+              </div>
+            `
+          : html``}
+        ${this.backgroundMode === "checkerboard"
+          ? html`
+              <div class="settings-section">Checkerboard</div>
+              <div class="setting-row">
+                <label
+                  >Checkerboard mode
+                  <select
+                    id="checkerMode"
+                    .value=${this.checkerMode}
+                    @change=${(): void => this.applyCheckerFromDialog()}
+                  >
+                    <option value="image">Image-space (moves and zooms with the canvas)</option>
+                    <option value="screen">Screen-space (fixed on screen)</option>
+                  </select>
+                </label>
+                ${this.checkerMode !== DEFAULT_CHECKER_SETTINGS.mode
+                  ? html`<button
+                      class="reset-btn"
+                      aria-label="Reset checkerboard mode to default"
+                      title="Reset to default"
+                      @click=${(): void => this.resetCheckerModeToDefault()}
+                    >
+                      ↻
+                    </button>`
+                  : html``}
+              </div>
+              <div class="setting-row">
+                <label
+                  >Checker width
+                  <input
+                    type="number"
+                    id="checkerSizeX"
+                    min="1"
+                    max="128"
+                    .value=${String(this.checkerSizeX)}
+                    @input=${(): void => this.applyCheckerFromDialog()}
+                  />
+                </label>
+                ${this.checkerSizeX !== DEFAULT_CHECKER_SETTINGS.sizeX
+                  ? html`<button
+                      class="reset-btn"
+                      aria-label="Reset checker width to default"
+                      title="Reset to default"
+                      @click=${(): void => this.resetCheckerSizeXToDefault()}
+                    >
+                      ↻
+                    </button>`
+                  : html``}
+              </div>
+              <div class="setting-row">
+                <label
+                  >Checker height
+                  <input
+                    type="number"
+                    id="checkerSizeY"
+                    min="1"
+                    max="128"
+                    .value=${String(this.checkerSizeY)}
+                    @input=${(): void => this.applyCheckerFromDialog()}
+                  />
+                </label>
+                ${this.checkerSizeY !== DEFAULT_CHECKER_SETTINGS.sizeY
+                  ? html`<button
+                      class="reset-btn"
+                      aria-label="Reset checker height to default"
+                      title="Reset to default"
+                      @click=${(): void => this.resetCheckerSizeYToDefault()}
+                    >
+                      ↻
+                    </button>`
+                  : html``}
+              </div>
+              <div class="setting-row">
+                <label
+                  >Checker color A
+                  <input
+                    type="color"
+                    id="checkerColorA"
+                    .value=${this.checkerColorA}
+                    @input=${(): void => this.applyCheckerFromDialog()}
+                  />
+                </label>
+                ${this.checkerColorA.toLowerCase() !== DEFAULT_CHECKER_SETTINGS.colorA.toLowerCase()
+                  ? html`<button
+                      class="reset-btn"
+                      aria-label="Reset checker color A to default"
+                      title="Reset to default"
+                      @click=${(): void => this.resetCheckerColorAToDefault()}
+                    >
+                      ↻
+                    </button>`
+                  : html``}
+              </div>
+              <div class="setting-row">
+                <label
+                  >Checker color B
+                  <input
+                    type="color"
+                    id="checkerColorB"
+                    .value=${this.checkerColorB}
+                    @input=${(): void => this.applyCheckerFromDialog()}
+                  />
+                </label>
+                ${this.checkerColorB.toLowerCase() !== DEFAULT_CHECKER_SETTINGS.colorB.toLowerCase()
+                  ? html`<button
+                      class="reset-btn"
+                      aria-label="Reset checker color B to default"
+                      title="Reset to default"
+                      @click=${(): void => this.resetCheckerColorBToDefault()}
+                    >
+                      ↻
+                    </button>`
+                  : html``}
+              </div>
+            `
+          : html``}
+        <div class="settings-section">Pixel grid</div>
+        <div class="setting-row">
+          <label
+            >Pixel grid minimum zoom (percent)
+            <input
+              type="number"
+              id="gridMinZoom"
+              min="200"
+              max="6400"
+              step="50"
+              .value=${String(Math.round(this.gridMinZoom * 100))}
+              @input=${(): void => this.applyGridFromDialog()}
+            />
+          </label>
+          ${Math.abs(this.gridMinZoom - DEFAULT_GRID_SETTINGS.minZoom) > 1e-9
+            ? html`<button
+                class="reset-btn"
+                aria-label="Reset pixel grid minimum zoom to default"
+                title="Reset to default"
+                @click=${(): void => this.resetGridMinZoomToDefault()}
+              >
+                ↻
+              </button>`
+            : html``}
+        </div>
         <div class="dialog-actions">
           <button @click=${(): void => this.resetCheckerDefaults()}>Reset defaults</button>
           <button @click=${(): void => this.closeSettingsDialog()}>Close</button>
@@ -883,6 +1222,9 @@ export class GnumarusShell extends LitElement {
     this.checkerColorB = storedChecker.colorB;
     const storedGrid = this.loadGridSettings();
     this.gridMinZoom = storedGrid.minZoom;
+    const storedBackground = this.loadBackgroundSettings();
+    this.backgroundMode = storedBackground.mode;
+    this.backgroundColor = storedBackground.color;
     const host = this.shadowRoot?.getElementById("canvasHost") ?? null;
     if (host === null) {
       this.webglError = "Canvas host is missing.";
@@ -898,6 +1240,7 @@ export class GnumarusShell extends LitElement {
         },
         checker: storedChecker,
         gridMinZoom: storedGrid.minZoom,
+        background: storedBackground,
         onStats: (stats): void => {
           this.zoomText = `${Math.round(stats.zoom * 100)}%`;
           this.canUndo = stats.canUndo;
@@ -911,6 +1254,7 @@ export class GnumarusShell extends LitElement {
         },
         onPixelsChanged: (): void => {
           this.dirty = true;
+          void this.refreshPreview();
         },
       });
       this.engine.setColor(this.colorValue);
@@ -1040,7 +1384,7 @@ export class GnumarusShell extends LitElement {
 
   private currentDialogGridMinZoom(): number {
     const input = this.shadowRoot?.getElementById("gridMinZoom") as HTMLInputElement | null;
-    const percent = Number(input?.value ?? "200") || 200;
+    const percent = Number(input?.value ?? "1000") || 1000;
     const clampedPercent = Math.min(
       GNUMARUS_GRID_MAX_ZOOM * 100,
       Math.max(GNUMARUS_GRID_MIN_ZOOM * 100, Math.floor(percent)),
@@ -1052,12 +1396,159 @@ export class GnumarusShell extends LitElement {
     const minZoom = this.currentDialogGridMinZoom();
     this.gridMinZoom = minZoom;
     this.engine?.setGridMinZoom(minZoom);
+    this.persistGrid();
+    this.statusMessage = `Pixel grid minimum zoom: ${Math.round(minZoom * 100)}%`;
+  }
+
+  private loadBackgroundSettings(): GnumarusBackgroundSettings {
     try {
-      window.localStorage.setItem(GRID_SETTINGS_STORAGE_KEY, serializeGridSettings({ minZoom }));
+      const stored = window.localStorage.getItem(BACKGROUND_SETTINGS_STORAGE_KEY);
+      if (stored !== null) {
+        return parseBackgroundSettings(stored);
+      }
+    } catch {
+      // Corrupt or unavailable storage falls back to defaults.
+    }
+    return { ...DEFAULT_BACKGROUND_SETTINGS };
+  }
+
+  private persistBackground(): void {
+    try {
+      window.localStorage.setItem(
+        BACKGROUND_SETTINGS_STORAGE_KEY,
+        serializeBackgroundSettings({ mode: this.backgroundMode, color: this.backgroundColor }),
+      );
     } catch {
       // Storage failures must not break the settings flow.
     }
-    this.statusMessage = `Pixel grid minimum zoom: ${Math.round(minZoom * 100)}%`;
+  }
+
+  private persistChecker(): void {
+    try {
+      window.localStorage.setItem(
+        CHECKER_SETTINGS_STORAGE_KEY,
+        serializeCheckerSettings({
+          mode: this.checkerMode,
+          sizeX: this.checkerSizeX,
+          sizeY: this.checkerSizeY,
+          colorA: this.checkerColorA,
+          colorB: this.checkerColorB,
+        }),
+      );
+    } catch {
+      // Storage failures must not break the settings flow.
+    }
+  }
+
+  private persistGrid(): void {
+    try {
+      window.localStorage.setItem(GRID_SETTINGS_STORAGE_KEY, serializeGridSettings({ minZoom: this.gridMinZoom }));
+    } catch {
+      // Storage failures must not break the settings flow.
+    }
+  }
+
+  private currentDialogBackground(): GnumarusBackgroundSettings {
+    const modeInput = this.shadowRoot?.getElementById("backgroundMode") as HTMLSelectElement | null;
+    const colorInput = this.shadowRoot?.getElementById("backgroundColor") as HTMLInputElement | null;
+    const mode: GnumarusBackgroundMode = modeInput?.value === "solid" ? "solid" : "checkerboard";
+    return { mode, color: colorInput?.value ?? this.backgroundColor };
+  }
+
+  private applyBackgroundFromDialog(): void {
+    const settings = this.currentDialogBackground();
+    this.backgroundMode = settings.mode;
+    this.backgroundColor = settings.color;
+    this.engine?.applyBackgroundSettings(settings);
+    this.persistBackground();
+    this.statusMessage =
+      settings.mode === "solid" ? `Canvas background: solid ${settings.color}` : "Canvas background: checkerboard";
+  }
+
+  private resetBackgroundModeToDefault(): void {
+    this.backgroundMode = DEFAULT_BACKGROUND_SETTINGS.mode;
+    this.engine?.setBackgroundMode(this.backgroundMode);
+    this.persistBackground();
+    this.statusMessage = "Background mode reset to default";
+  }
+
+  private resetBackgroundColorToDefault(): void {
+    this.backgroundColor = DEFAULT_BACKGROUND_SETTINGS.color;
+    this.engine?.setBackgroundColor(this.backgroundColor);
+    this.persistBackground();
+    this.statusMessage = "Background color reset to default";
+  }
+
+  private resetCheckerModeToDefault(): void {
+    this.checkerMode = DEFAULT_CHECKER_SETTINGS.mode;
+    this.engine?.applyCheckerSettings({
+      mode: this.checkerMode,
+      sizeX: this.checkerSizeX,
+      sizeY: this.checkerSizeY,
+      colorA: this.checkerColorA,
+      colorB: this.checkerColorB,
+    });
+    this.persistChecker();
+    this.statusMessage = "Checkerboard mode reset to default";
+  }
+
+  private resetCheckerSizeXToDefault(): void {
+    this.checkerSizeX = DEFAULT_CHECKER_SETTINGS.sizeX;
+    this.engine?.applyCheckerSettings({
+      mode: this.checkerMode,
+      sizeX: this.checkerSizeX,
+      sizeY: this.checkerSizeY,
+      colorA: this.checkerColorA,
+      colorB: this.checkerColorB,
+    });
+    this.persistChecker();
+    this.statusMessage = "Checker width reset to default";
+  }
+
+  private resetCheckerSizeYToDefault(): void {
+    this.checkerSizeY = DEFAULT_CHECKER_SETTINGS.sizeY;
+    this.engine?.applyCheckerSettings({
+      mode: this.checkerMode,
+      sizeX: this.checkerSizeX,
+      sizeY: this.checkerSizeY,
+      colorA: this.checkerColorA,
+      colorB: this.checkerColorB,
+    });
+    this.persistChecker();
+    this.statusMessage = "Checker height reset to default";
+  }
+
+  private resetCheckerColorAToDefault(): void {
+    this.checkerColorA = DEFAULT_CHECKER_SETTINGS.colorA;
+    this.engine?.applyCheckerSettings({
+      mode: this.checkerMode,
+      sizeX: this.checkerSizeX,
+      sizeY: this.checkerSizeY,
+      colorA: this.checkerColorA,
+      colorB: this.checkerColorB,
+    });
+    this.persistChecker();
+    this.statusMessage = "Checker color A reset to default";
+  }
+
+  private resetCheckerColorBToDefault(): void {
+    this.checkerColorB = DEFAULT_CHECKER_SETTINGS.colorB;
+    this.engine?.applyCheckerSettings({
+      mode: this.checkerMode,
+      sizeX: this.checkerSizeX,
+      sizeY: this.checkerSizeY,
+      colorA: this.checkerColorA,
+      colorB: this.checkerColorB,
+    });
+    this.persistChecker();
+    this.statusMessage = "Checker color B reset to default";
+  }
+
+  private resetGridMinZoomToDefault(): void {
+    this.gridMinZoom = DEFAULT_GRID_SETTINGS.minZoom;
+    this.engine?.setGridMinZoom(this.gridMinZoom);
+    this.persistGrid();
+    this.statusMessage = "Pixel grid minimum zoom reset to default";
   }
 
   private currentDialogChecker(): GnumarusCheckerSettings {
@@ -1084,11 +1575,7 @@ export class GnumarusShell extends LitElement {
     this.checkerColorA = settings.colorA;
     this.checkerColorB = settings.colorB;
     this.engine?.applyCheckerSettings(settings);
-    try {
-      window.localStorage.setItem(CHECKER_SETTINGS_STORAGE_KEY, serializeCheckerSettings(settings));
-    } catch {
-      // Storage failures must not break the settings flow.
-    }
+    this.persistChecker();
     this.statusMessage = `Checkerboard: ${settings.mode}-space, ${settings.sizeX}x${settings.sizeY}px`;
   }
 
@@ -1100,20 +1587,104 @@ export class GnumarusShell extends LitElement {
     this.checkerColorA = settings.colorA;
     this.checkerColorB = settings.colorB;
     this.engine?.applyCheckerSettings(settings);
-    try {
-      window.localStorage.setItem(CHECKER_SETTINGS_STORAGE_KEY, serializeCheckerSettings(settings));
-    } catch {
-      // Storage failures must not break the settings flow.
-    }
+    this.persistChecker();
     const gridSettings = { ...DEFAULT_GRID_SETTINGS };
     this.gridMinZoom = gridSettings.minZoom;
     this.engine?.setGridMinZoom(gridSettings.minZoom);
-    try {
-      window.localStorage.setItem(GRID_SETTINGS_STORAGE_KEY, serializeGridSettings(gridSettings));
-    } catch {
-      // Storage failures must not break the settings flow.
-    }
+    this.persistGrid();
+    const backgroundSettings = { ...DEFAULT_BACKGROUND_SETTINGS };
+    this.backgroundMode = backgroundSettings.mode;
+    this.backgroundColor = backgroundSettings.color;
+    this.engine?.applyBackgroundSettings(backgroundSettings);
+    this.persistBackground();
     this.statusMessage = "Settings reset to defaults";
+  }
+
+  private togglePreview(): void {
+    this.previewOpen = !this.previewOpen;
+    if (this.previewOpen) {
+      this.statusMessage = "Final preview opened";
+      void this.refreshPreview();
+    } else {
+      this.statusMessage = "Final preview closed";
+    }
+  }
+
+  private zoomPreview(factor: number): void {
+    const next = Math.min(64, Math.max(0.25, this.previewZoom * factor));
+    this.previewZoom = next;
+    void this.refreshPreview();
+  }
+
+  private resetPreviewZoom(): void {
+    this.previewZoom = 4;
+    void this.refreshPreview();
+  }
+
+  private previewDragState: { startX: number; startY: number; originX: number; originY: number } | null = null;
+
+  private onPreviewDragStart(event: PointerEvent): void {
+    const target = event.target as HTMLElement | null;
+    if (target !== null && target.closest("button") !== null) {
+      return;
+    }
+    this.previewDragState = { startX: event.clientX, startY: event.clientY, originX: this.previewX, originY: this.previewY };
+    const move = (moveEvent: PointerEvent): void => {
+      if (this.previewDragState === null) {
+        return;
+      }
+      this.previewX = Math.max(0, this.previewDragState.originX + (moveEvent.clientX - this.previewDragState.startX));
+      this.previewY = Math.max(0, this.previewDragState.originY + (moveEvent.clientY - this.previewDragState.startY));
+    };
+    const up = (): void => {
+      this.previewDragState = null;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+
+  private async refreshPreview(): Promise<void> {
+    if (!this.previewOpen || this.engine === null) {
+      return;
+    }
+    await this.updateComplete;
+    const canvas = this.shadowRoot?.getElementById("previewCanvas") as HTMLCanvasElement | null;
+    if (canvas === null) {
+      return;
+    }
+    const size = this.engine.size;
+    const infos = this.engine.getLayers();
+    const pixels = this.engine.exportLayers();
+    const inputs = infos.map((info) => {
+      const rendered = pixels.find((entry) => entry.id === info.id);
+      if (rendered === undefined) {
+        throw new Error(`Missing pixels for layer ${info.id}`);
+      }
+      return {
+        width: info.width,
+        height: info.height,
+        buffer: rendered.buffer,
+        transform: { ...info.transform },
+        visible: info.visible,
+        opacity: info.opacity,
+      };
+    });
+    const flat = compositeFinalImage(size.width, size.height, inputs);
+    canvas.width = size.width;
+    canvas.height = size.height;
+    const ctx = canvas.getContext("2d");
+    if (ctx === null) {
+      return;
+    }
+    const image = ctx.createImageData(size.width, size.height);
+    image.data.set(flat);
+    ctx.putImageData(image, 0, 0);
+    const displayWidth = Math.max(1, Math.round(size.width * this.previewZoom));
+    const displayHeight = Math.max(1, Math.round(size.height * this.previewZoom));
+    canvas.style.width = `${displayWidth}px`;
+    canvas.style.height = `${displayHeight}px`;
   }
 
   private refreshLayers(): void {
@@ -1129,6 +1700,9 @@ export class GnumarusShell extends LitElement {
     const current = index < 0 ? undefined : this.layers[index];
     this.layerText =
       current === undefined ? "-" : `${current.name} (${this.layers.length - index}/${this.layers.length})`;
+    if (this.previewOpen) {
+      void this.refreshPreview();
+    }
   }
 
   private onAddLayer(): void {

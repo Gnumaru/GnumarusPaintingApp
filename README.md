@@ -10,7 +10,9 @@ Classic desktop-like painting app (top menu bar, central canvas, bottom status b
 
 - Desktop shell: File menu (New, Open, Save), Edit menu (Undo/Redo, Settings, Reset Canvas Transform), pencil/loupe/transform toolbar with color picker, WebGL2 canvas, layers panel, status bar.
 - Pixel-art pencil: 1px solid color, no anti-aliasing, Bresenham strokes, nearest-neighbor display, wheel zoom + pan + rotation + flips.
-- Pixel grid over the active layer (follows rotation/transform), hidden below 200 percent zoom; minimum zoom 200..6400 percent in Edit > Settings.
+- Pixel grid over the active layer (follows rotation/transform), hidden below 200 percent zoom; minimum zoom 200..6400 percent, default 1000 percent, in Edit > Settings.
+- Canvas background: checkerboard (default) or solid color in Edit > Settings; every setting has a per-setting reset arrow when non-default.
+- Final preview window (floating, resizable) with internal zoom/pan of the flattened image as a single PNG export would look.
 - Layers: add, delete, reorder, rename, visibility, opacity, right-click Merge Down (undoable); independent size and transform; per-layer resize (expand right/down transparent, shrink crops right/below, undoable).
 - Channel lock: per-layer R/G/B/A toggles; paint, clear and Merge Down write only unlocked channels. Example: alpha locked + paint keeps old alpha; green locked + cyan paint yields blue.
 - Directory projects via the File System Access API (Chromium derivatives): `project.json` metadata plus `cells/<layer>_frame<frame>.png` cell images (format already supports future animation; locks persist in `project.json`).

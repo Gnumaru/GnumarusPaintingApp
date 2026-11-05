@@ -32,3 +32,8 @@
 - [x] Pixel grid uniformity: unit + e2e tests, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
 - [x] Unit tests (vitest): pixel buffer, channel lock, layer resize, grid settings, pixel grid shader, project format, mapping, checker, history — 57 passed
 - [x] E2E test (Playwright): shell + menu + New + pencil + layers + merge + channel locks + layer resize + pixel grid — 27 passed
+- [x] Settings defaults: grid default 1000 percent, per-setting reset arrows, background checkerboard/solid
+- [x] Final preview: floating resizable window with internal zoom/pan of flattened PNG render
+- [x] Settings + preview: unit + e2e tests, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
+- [x] Unit tests (vitest): pixel buffer, channel lock, layer resize, grid settings, pixel grid shader, background settings, final render, project format, mapping, checker, history — 64 passed
+- [x] E2E test (Playwright): shell + menu + New + pencil + layers + merge + channel locks + layer resize + pixel grid + settings reset + background + final preview — 30 passed

@@ -4,17 +4,18 @@
 
 - `gnumarus-shell` Lit component: menu bar, toolbar, canvas host, status bar, New-canvas dialog, Resize-layer dialog, Settings dialog.
 - File menu items: New (width/height dialog, 1..1024, default 64x64), Open (directory picker), Save (writes to picked directory, reuses the handle afterwards).
-- Edit menu items: Undo/Redo (image edits and layer resizes, with disabled state), Settings (checkerboard mode image-space/screen-space, independent square width/height 1..128 default 16x16, colors A/B plus pixel grid minimum zoom 200..6400 percent default 200 percent, with Reset defaults; applied live and persisted to `localStorage`) and Reset Canvas Transform (restores fit zoom, rotation, flips).
-- Undo/redo: per-stroke bounding-box diffs plus resize before/after snapshots (max 100 entries), view transforms and settings never recorded; shortcuts `Ctrl+Z` undo, `Ctrl+Y` or `Shift+Ctrl+Z` redo; history cleared on New/Open.
-- Toolbar: pencil tool (pixel-art), loupe tool (zoom/rotate/flip) and transform tool plus a color input.
+- Edit menu items: Undo/Redo (image edits and layer resizes, with disabled state), Settings (canvas background checkerboard/solid, checkerboard mode image-space/screen-space, independent square width/height 1..128 default 16x16, colors A/B, pixel grid minimum zoom 200..6400 percent default 1000 percent; every setting has a per-setting reset arrow shown only when non-default plus Reset defaults; applied live and persisted to `localStorage`) and Reset Canvas Transform (restores fit zoom, rotation, flips).
+- Undo/redo: per-stroke bounding-box diffs plus resize before/after snapshots (max 100 entries), view transforms, settings and preview never recorded; shortcuts `Ctrl+Z` undo, `Ctrl+Y` or `Shift+Ctrl+Z` redo; history cleared on New/Open.
+- Toolbar: pencil tool (pixel-art), loupe tool (zoom/rotate/flip) and transform tool plus a color input plus a Final preview toggle.
 - Status bar shows tool, rotation degrees, flip state, hex color, cursor pixel coordinates, canvas dimensions, zoom percentage, project name, modified marker, WebGL2/FS-API messages.
 - All UI strings in American English.
 
 ## 2. WebGL2 canvas engine (`src/canvas/GnumarusCanvasEngine.ts`)
 
 - Single `THREE.WebGLRenderer` (WebGL2-only, no fallback). Throws `GnumarusWebGlError` with a user-facing message when WebGL2 is unavailable.
-- One `THREE.DataTexture` (`NearestFilter`, no mipmaps) per layer over CPU `Uint8ClampedArray` RGBA buffers; one plane per layer plus a dedicated checkerboard background plane plus a pixel grid overlay plane for the active layer; per-layer opacity and visibility; orthographic camera. The layer shader outputs `tex.rgb` with `alpha * opacity`; the grid shader draws 1 CSS pixel white lines at pixel boundaries of the active layer using the same project-space matrix; the background shader draws the configurable transparency checker (image-space squares that pan/zoom with the canvas, or fixed screen-space squares; independent width/height, colors editable in Edit > Settings, persisted to `localStorage`), while the scene clear color (`#333333`) fills everything outside the drawable area.
-- Pixel grid: visible only when `zoom >= gridMinZoom` and `zoom >= 200 percent`; threshold configurable 200..6400 percent; follows active layer size, position, rotation, flips and view transform via `writePlaneMatrix`.
+- One `THREE.DataTexture` (`NearestFilter`, no mipmaps) per layer over CPU `Uint8ClampedArray` RGBA buffers; one plane per layer plus a configurable background plane (checkerboard or solid color, default checkerboard) plus a pixel grid overlay plane for the active layer; per-layer opacity and visibility; orthographic camera. The layer shader outputs `tex.rgb` with `alpha * opacity`; the grid shader draws 1 CSS pixel white lines at pixel boundaries of the active layer using the same project-space matrix; the background shader draws either the configurable transparency checker (image-space squares that pan/zoom with the canvas, or fixed screen-space squares; independent width/height, colors editable in Edit > Settings, persisted to `localStorage`) or a solid color (color editable in Edit > Settings), while the scene clear color (`#333333`) fills everything outside the drawable area.
+- Pixel grid: visible only when `zoom >= gridMinZoom` and `zoom >= 200 percent`; threshold configurable 200..6400 percent, default 1000 percent; follows active layer size, position, rotation, flips and view transform via `writePlaneMatrix`.
+- Final preview (`src/preview/GnumarusFinalRender.ts` + floating window): CPU composite of visible layers bottom-to-top in project space (`compositeFinalImage`), shown in a floating resizable window with internal zoom (25..6400 percent, default 400 percent, wheel/buttons) and pan (scroll); refreshes on pixels/layers change; renders the flattened image as a single PNG export would look.
 - View transform (view-only, buffer stays canonical): zoom 0.5x..64x, arbitrary rotation (clockwise-positive), horizontal/vertical mirror. The plane scale/rotation renders it; pointer mapping inverts the full transform so painting works while transformed.
 - Tools: pencil (`P`, 1px solid, Bresenham, draws through the current transform and layer transform), loupe (`L`) and transform (`T`) — loupe left-drag zooms (up/right in, down/left out, anchored at drag start), right-drag rotates the canvas around the image center, middle-click flips the canvas X (Shift Y, Ctrl resets the canvas transform); transform left-drag moves the active layer, right-drag rotates it around its own center, middle-click flips the layer X (Shift Y, Ctrl resets the layer transform).
 - Zoom (wheel with zoom-to-cursor even while rotated, keyboard shortcuts `Ctrl+Alt+=` / `Ctrl+Alt++` zoom in and `Ctrl+Alt+-` zooms out), pan (middle-drag or Space+drag).
@@ -39,7 +40,9 @@
 - `src/history/GnumarusHistory.ts`: bounding-box image diffs tagged by layer plus `resize` before/after snapshots, capped undo/redo stacks; merge snapshot carries `lockedChannels`.
 - `src/project/GnumarusProjectFormat.ts`: `project.json` build/serialize/strict-parse with `lockedChannels` (legacy defaults to unlocked), `cells/<layer>_frame<frame>.png` paths (multi-layer).
 - `src/settings/GnumarusCheckerSettings.ts`: checkerboard settings parse/serialize/validate with legacy migration.
-- `src/settings/GnumarusGridSettings.ts`: pixel grid minimum zoom parse/serialize/validate, clamp 200..6400 percent, `shouldShowPixelGrid` (never below 200 percent).
+- `src/settings/GnumarusGridSettings.ts`: pixel grid minimum zoom parse/serialize/validate, clamp 200..6400 percent, default 1000 percent, `shouldShowPixelGrid` (never below 200 percent).
+- `src/settings/GnumarusBackgroundSettings.ts`: canvas background mode checkerboard/solid plus solid color parse/serialize/validate, default checkerboard `#808080`.
+- `src/preview/GnumarusFinalRender.ts`: `compositeFinalImage` flattening visible layers with opacity and transform (precomputed trig), transparent background.
 
 ## 4. Project format and file access
 
@@ -54,8 +57,8 @@
 
 ## 6. Tests
 
-- Vitest unit tests (`tests/`): pixel buffer, channel locks, layer resize, grid settings, pixel grid shader, viewport math, project format, checker settings, layer-tagged history — 57 tests.
-- Playwright E2E (`e2e/`, Chromium): shell, menus, dialogs, pencil, zoom shortcuts, checker settings, loupe gestures, P/L tools, transform reset, undo/redo, full layer management, channel lock toggles + masked paint + merge/undo, layer resize dialog + undo, pixel grid visibility + threshold + rotation + max zoom cycle — 27 tests.
+- Vitest unit tests (`tests/`): pixel buffer, channel locks, layer resize, grid settings, pixel grid shader, background settings, final render, viewport math, project format, checker settings, layer-tagged history — 64 tests.
+- Playwright E2E (`e2e/`, Chromium): shell, menus, dialogs, pencil, zoom shortcuts, checker settings, loupe gestures, P/L tools, transform reset, undo/redo, full layer management, channel lock toggles + masked paint + merge/undo, layer resize dialog + undo, pixel grid visibility + threshold + rotation + max zoom cycle, settings reset arrows, background mode, final preview zoom — 30 tests.
 
 ## 7. Build and deploy
 
