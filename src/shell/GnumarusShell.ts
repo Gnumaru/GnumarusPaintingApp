@@ -218,7 +218,8 @@ export class GnumarusShell extends LitElement {
     newWidth: { type: Number },
     newHeight: { type: Number },
     checkerMode: { type: String },
-    checkerSize: { type: Number },
+    checkerSizeX: { type: Number },
+    checkerSizeY: { type: Number },
     checkerColorA: { type: String },
     checkerColorB: { type: String },
   };
@@ -238,7 +239,8 @@ export class GnumarusShell extends LitElement {
   declare newWidth: number;
   declare newHeight: number;
   declare checkerMode: GnumarusCheckerMode;
-  declare checkerSize: number;
+  declare checkerSizeX: number;
+  declare checkerSizeY: number;
   declare checkerColorA: string;
   declare checkerColorB: string;
 
@@ -262,7 +264,8 @@ export class GnumarusShell extends LitElement {
     this.newWidth = 64;
     this.newHeight = 64;
     this.checkerMode = DEFAULT_CHECKER_SETTINGS.mode;
-    this.checkerSize = DEFAULT_CHECKER_SETTINGS.size;
+    this.checkerSizeX = DEFAULT_CHECKER_SETTINGS.sizeX;
+    this.checkerSizeY = DEFAULT_CHECKER_SETTINGS.sizeY;
     this.checkerColorA = DEFAULT_CHECKER_SETTINGS.colorA;
     this.checkerColorB = DEFAULT_CHECKER_SETTINGS.colorB;
   }
@@ -366,7 +369,11 @@ export class GnumarusShell extends LitElement {
           </select>
         </label>
         <label
-          >Checker size <input type="number" id="checkerSize" min="1" max="128" .value=${String(this.checkerSize)} @input=${(): void =>
+          >Checker width <input type="number" id="checkerSizeX" min="1" max="128" .value=${String(this.checkerSizeX)} @input=${(): void =>
+            this.applyCheckerFromDialog()} />
+        </label>
+        <label
+          >Checker height <input type="number" id="checkerSizeY" min="1" max="128" .value=${String(this.checkerSizeY)} @input=${(): void =>
             this.applyCheckerFromDialog()} />
         </label>
         <label
@@ -389,7 +396,8 @@ export class GnumarusShell extends LitElement {
     this.fsSupported = isFileSystemAccessSupported();
     const storedChecker = this.loadCheckerSettings();
     this.checkerMode = storedChecker.mode;
-    this.checkerSize = storedChecker.size;
+    this.checkerSizeX = storedChecker.sizeX;
+    this.checkerSizeY = storedChecker.sizeY;
     this.checkerColorA = storedChecker.colorA;
     this.checkerColorB = storedChecker.colorB;
     const host = this.shadowRoot?.getElementById("canvasHost") ?? null;
@@ -464,13 +472,15 @@ export class GnumarusShell extends LitElement {
 
   private currentDialogChecker(): GnumarusCheckerSettings {
     const modeInput = this.shadowRoot?.getElementById("checkerMode") as HTMLSelectElement | null;
-    const sizeInput = this.shadowRoot?.getElementById("checkerSize") as HTMLInputElement | null;
+    const sizeXInput = this.shadowRoot?.getElementById("checkerSizeX") as HTMLInputElement | null;
+    const sizeYInput = this.shadowRoot?.getElementById("checkerSizeY") as HTMLInputElement | null;
     const colorAInput = this.shadowRoot?.getElementById("checkerColorA") as HTMLInputElement | null;
     const colorBInput = this.shadowRoot?.getElementById("checkerColorB") as HTMLInputElement | null;
     const mode: GnumarusCheckerMode = modeInput?.value === "screen" ? "screen" : "image";
     return {
       mode,
-      size: clampCheckerSize(Number(sizeInput?.value ?? "16") || 16),
+      sizeX: clampCheckerSize(Number(sizeXInput?.value ?? "16") || 16),
+      sizeY: clampCheckerSize(Number(sizeYInput?.value ?? "16") || 16),
       colorA: colorAInput?.value ?? this.checkerColorA,
       colorB: colorBInput?.value ?? this.checkerColorB,
     };
@@ -479,7 +489,8 @@ export class GnumarusShell extends LitElement {
   private applyCheckerFromDialog(): void {
     const settings = this.currentDialogChecker();
     this.checkerMode = settings.mode;
-    this.checkerSize = settings.size;
+    this.checkerSizeX = settings.sizeX;
+    this.checkerSizeY = settings.sizeY;
     this.checkerColorA = settings.colorA;
     this.checkerColorB = settings.colorB;
     this.engine?.applyCheckerSettings(settings);
@@ -488,13 +499,14 @@ export class GnumarusShell extends LitElement {
     } catch {
       // Storage failures must not break the settings flow.
     }
-    this.statusMessage = `Checkerboard: ${settings.mode}-space, ${settings.size}px`;
+    this.statusMessage = `Checkerboard: ${settings.mode}-space, ${settings.sizeX}x${settings.sizeY}px`;
   }
 
   private resetCheckerDefaults(): void {
     const settings = { ...DEFAULT_CHECKER_SETTINGS };
     this.checkerMode = settings.mode;
-    this.checkerSize = settings.size;
+    this.checkerSizeX = settings.sizeX;
+    this.checkerSizeY = settings.sizeY;
     this.checkerColorA = settings.colorA;
     this.checkerColorB = settings.colorB;
     this.engine?.applyCheckerSettings(settings);

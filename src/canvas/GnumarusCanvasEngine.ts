@@ -69,7 +69,8 @@ export class GnumarusCanvasEngine {
   private cursor: { x: number; y: number } | null = null;
   private disposed = false;
   private checkerMode: GnumarusCheckerMode;
-  private checkerSize: number;
+  private checkerSizeX: number;
+  private checkerSizeY: number;
   private checkerColorA: string;
   private checkerColorB: string;
   private readonly checkerColorAVec: THREE.Vector3;
@@ -83,7 +84,8 @@ export class GnumarusCanvasEngine {
     this.onPixelsChanged = options.onPixelsChanged;
     const initialChecker = options.checker ?? DEFAULT_CHECKER_SETTINGS;
     this.checkerMode = initialChecker.mode;
-    this.checkerSize = clampCheckerSize(initialChecker.size);
+    this.checkerSizeX = clampCheckerSize(initialChecker.sizeX);
+    this.checkerSizeY = clampCheckerSize(initialChecker.sizeY);
     this.checkerColorA = initialChecker.colorA;
     this.checkerColorB = initialChecker.colorB;
     this.checkerColorAVec = checkerHexToVec(initialChecker.colorA);
@@ -135,7 +137,8 @@ export class GnumarusCanvasEngine {
         uImageW: { value: this.imageWidth },
         uImageH: { value: this.imageHeight },
         uMode: { value: this.checkerMode === "screen" ? 1 : 0 },
-        uSize: { value: this.checkerSize },
+        uSizeX: { value: this.checkerSizeX },
+        uSizeY: { value: this.checkerSizeY },
         uPixelRatio: { value: 1 },
         uColorA: { value: this.checkerColorAVec },
         uColorB: { value: this.checkerColorBVec },
@@ -154,15 +157,17 @@ export class GnumarusCanvasEngine {
         "uniform float uImageW;",
         "uniform float uImageH;",
         "uniform float uMode;",
-        "uniform float uSize;",
+        "uniform float uSizeX;",
+        "uniform float uSizeY;",
         "uniform float uPixelRatio;",
         "uniform vec3 uColorA;",
         "uniform vec3 uColorB;",
         "void main() {",
         "  vec4 tex = texture2D(uMap, vUv);",
+        "  vec2 cell = vec2(max(uSizeX, 1.0), max(uSizeY, 1.0));",
         "  vec2 grid = uMode < 0.5",
-        "    ? floor(vec2(vUv.x * uImageW, vUv.y * uImageH) / max(uSize, 1.0))",
-        "    : floor(gl_FragCoord.xy / max(uSize * uPixelRatio, 1.0));",
+        "    ? floor(vec2(vUv.x * uImageW, vUv.y * uImageH) / cell)",
+        "    : floor(gl_FragCoord.xy / max(cell * uPixelRatio, vec2(1.0)));",
         "  float c = mod(grid.x + grid.y, 2.0);",
         "  vec3 check = mix(uColorA, uColorB, c);",
         "  vec3 rgb = mix(check, tex.rgb, tex.a);",
@@ -257,7 +262,8 @@ export class GnumarusCanvasEngine {
 
   applyCheckerSettings(settings: GnumarusCheckerSettings): void {
     this.checkerMode = settings.mode;
-    this.checkerSize = clampCheckerSize(settings.size);
+    this.checkerSizeX = clampCheckerSize(settings.sizeX);
+    this.checkerSizeY = clampCheckerSize(settings.sizeY);
     const colorA = parseHexColor(settings.colorA);
     const colorB = parseHexColor(settings.colorB);
     if (colorA !== null) {
@@ -269,14 +275,16 @@ export class GnumarusCanvasEngine {
       this.checkerColorBVec.set(colorB.r / 255, colorB.g / 255, colorB.b / 255);
     }
     this.material.uniforms["uMode"]!.value = this.checkerMode === "screen" ? 1 : 0;
-    this.material.uniforms["uSize"]!.value = this.checkerSize;
+    this.material.uniforms["uSizeX"]!.value = this.checkerSizeX;
+    this.material.uniforms["uSizeY"]!.value = this.checkerSizeY;
     this.render();
   }
 
   getCheckerSettings(): GnumarusCheckerSettings {
     return {
       mode: this.checkerMode,
-      size: this.checkerSize,
+      sizeX: this.checkerSizeX,
+      sizeY: this.checkerSizeY,
       colorA: this.checkerColorA,
       colorB: this.checkerColorB,
     };

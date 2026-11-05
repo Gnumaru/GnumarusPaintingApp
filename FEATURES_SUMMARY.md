@@ -4,6 +4,6 @@
 - Pixel-art pencil: 1px solid color, no anti-aliasing.
 - Single layer, single cell (no layers/animation UI yet; project format already supports them).
 - WebGL2-only canvas (Three.js) with nearest-neighbor scaling, zoom (wheel + `Ctrl+Alt+=`/`Ctrl+Alt++`/`Ctrl+Alt+-`) and pan.
-- Configurable transparency checkerboard: image-space or screen-space, square size (default 16), two colors, persisted in the browser.
+- Configurable transparency checkerboard: image-space or screen-space, independent width/height (default 16x16, asymmetric like 8x16 supported), two colors, persisted in the browser.
 - Directory projects over File System Access API: `project.json` + `cells/*.png`.
 - Status bar: tool, color, cursor pixel, canvas size, zoom, project name, dirty flag, messages.
