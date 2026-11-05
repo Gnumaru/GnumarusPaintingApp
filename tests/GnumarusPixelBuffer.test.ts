@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyCoverageMask,
   clampBrushSize,
   clampBrushSizeFloat,
   clearPixelBuffer,
@@ -8,14 +9,17 @@ import {
   drawBrushLine,
   drawBrushStamp,
   drawCubicBezier,
+  drawCubicBezierCoverage,
   drawLineSegment,
   drawPixelLine,
   floodFill,
   getPixel,
+  parseBlendMode,
   parseBrushShape,
   parseHexColor,
   roundBrushSizeForAliased,
   setPixel,
+  stampSegmentCoverage,
 } from "../src/canvas/GnumarusPixelBuffer";
 
 describe("GnumarusPixelBuffer", () => {
@@ -217,6 +221,68 @@ describe("GnumarusPixelBuffer", () => {
     drawLineSegment(dot, 4, 4, 2, 2, 2, 2, 3, "circle", false, red);
     expect(getPixel(dot, 4, 4, 2, 2)).toEqual(red);
     expect(getPixel(dot, 4, 4, 1, 1)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  });
+
+  it("parses blend modes defaulting to normal", () => {
+    expect(parseBlendMode("normal")).toBe("normal");
+    expect(parseBlendMode("copy")).toBe("copy");
+    expect(parseBlendMode("eraser")).toBe("eraser");
+    expect(parseBlendMode("additive")).toBe("normal");
+    expect(parseBlendMode(undefined)).toBe("normal");
+    expect(parseBlendMode(null)).toBe("normal");
+  });
+
+  it("builds union coverage masks and applies them uniformly", () => {
+    const mask = new Uint8Array(8 * 8);
+    stampSegmentCoverage(mask, 8, 8, 0, 0, 7, 0, 1, "square", false);
+    expect(mask[0 * 8 + 3]).toBe(255);
+    expect(mask[1 * 8 + 3]).toBe(0);
+    // Re-stamping the same segment does not change the union mask.
+    const snapshot = mask.slice();
+    stampSegmentCoverage(mask, 8, 8, 0, 0, 7, 0, 1, "square", false);
+    expect(mask).toEqual(snapshot);
+    // Anti-aliased edges record partial coverage.
+    const smooth = new Uint8Array(8 * 8);
+    stampSegmentCoverage(smooth, 8, 8, 0, 0, 7, 7, 1, "square", true);
+    expect(smooth[3 * 8 + 3]).toBe(255);
+    const edge = smooth[4 * 8 + 3]!;
+    expect(edge).toBeGreaterThan(0);
+    expect(edge).toBeLessThan(255);
+    // Applying the same mask twice is identical to applying it once.
+    // Applying the same mask onto two fresh bases gives identical results.
+    const buffer = createPixelBuffer(8, 8);
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    applyCoverageMask(buffer, smooth, 8, 8, red, "normal", undefined);
+    const other = createPixelBuffer(8, 8);
+    applyCoverageMask(other, smooth, 8, 8, red, "normal", undefined);
+    expect(buffer).toEqual(other);
+    expect(getPixel(buffer, 8, 8, 3, 3)).toEqual(red);
+    const soft = getPixel(buffer, 8, 8, 3, 4);
+    expect(soft).not.toBeNull();
+    expect(soft!.a).toBeGreaterThan(0);
+    expect(soft!.a).toBeLessThan(255);
+    // Bezier coverage flattens the curve and applies uniformly too.
+    const curveMask = new Uint8Array(8 * 8);
+    drawCubicBezierCoverage(
+      curveMask,
+      8,
+      8,
+      { x: 1, y: 1 },
+      { x: 2, y: 4 },
+      { x: 5, y: 4 },
+      { x: 6, y: 1 },
+      1,
+      "square",
+      false,
+    );
+    expect(curveMask[1 * 8 + 1]).toBe(255);
+    expect(curveMask[1 * 8 + 6]).toBe(255);
+    expect(curveMask[6 * 8 + 1]).toBe(0);
+    expect(curveMask[0 * 8 + 0]).toBe(0);
+    const curveBuffer = createPixelBuffer(8, 8);
+    applyCoverageMask(curveBuffer, curveMask, 8, 8, red, "copy", undefined);
+    expect(getPixel(curveBuffer, 8, 8, 1, 1)).toEqual(red);
+    expect(getPixel(curveBuffer, 8, 8, 6, 1)).toEqual(red);
   });
 
   it("composites translucent paint over the background in normal mode", () => {

@@ -1,11 +1,13 @@
 import * as THREE from "three";
 import {
+  applyCoverageMask,
   clearPixelBuffer,
   clampBrushSizeFloat,
   clampLayerDim,
   compositePixelOver,
   createPixelBuffer,
   drawCubicBezier,
+  drawCubicBezierCoverage,
   drawLineSegment,
   floodFill,
   getPixel,
@@ -14,6 +16,7 @@ import {
   parseChannelLock,
   parseHexColor,
   resizePixelBuffer,
+  stampSegmentCoverage,
   type GnumarusBlendMode,
   type GnumarusBrushShape,
   type GnumarusChannelLock,
@@ -312,6 +315,8 @@ export class GnumarusCanvasEngine {
   private transformLastAngle: number | null = null;
   private color: GnumarusRgba = { r: 0, g: 0, b: 0, a: 255 };
   private blendMode: GnumarusBlendMode = "normal";
+  private blendBeforeEraser: GnumarusBlendMode = "normal";
+  private accumulate = true;
   private brushSize = 1;
   private brushShape: GnumarusBrushShape = "square";
   private pencilAntialias = false;
@@ -340,6 +345,8 @@ export class GnumarusCanvasEngine {
   private spaceDown = false;
   private strokeBase: Uint8ClampedArray | null = null;
   private strokeLayerId: string | null = null;
+  /** Coverage mask for non-accumulating pencil strokes (union semantics). */
+  private strokeMask: Uint8Array | null = null;
   private readonly history = new GnumarusHistory(100);
   private lastPixel: { x: number; y: number } | null = null;
   private cursor: { x: number; y: number } | null = null;
@@ -1873,8 +1880,38 @@ export class GnumarusCanvasEngine {
       return false;
     }
     this.blendMode = parsed;
+    if (parsed !== "eraser") {
+      this.blendBeforeEraser = parsed;
+    }
     this.emitStats();
     this.updatePreviews();
+    return true;
+  }
+
+  /** Toggle the eraser blend mode, remembering the previous non-eraser mode. */
+  toggleEraserBlend(): GnumarusBlendMode {
+    if (this.blendMode === "eraser") {
+      this.blendMode = this.blendBeforeEraser;
+    } else {
+      this.blendBeforeEraser = this.blendMode;
+      this.blendMode = "eraser";
+    }
+    this.emitStats();
+    this.updatePreviews();
+    return this.blendMode;
+  }
+
+  getAccumulate(): boolean {
+    return this.accumulate;
+  }
+
+  setAccumulate(enabled: boolean): boolean {
+    const next = enabled === true;
+    if (next === this.accumulate) {
+      return false;
+    }
+    this.accumulate = next;
+    this.emitStats();
     return true;
   }
 
@@ -2082,6 +2119,21 @@ export class GnumarusCanvasEngine {
   }
 
   /**
+   * Repaint a texture from a base snapshot plus a coverage mask in one
+   * uniform pass (non-accumulating strokes). The mask holds union coverage,
+   * so overlapping dab regions are applied exactly once.
+   */
+  private repaintFromMask(
+    tex: { buffer: Uint8ClampedArray; width: number; height: number },
+    base: Uint8ClampedArray,
+    mask: Uint8Array,
+    locked: GnumarusChannelLock,
+  ): void {
+    tex.buffer.set(base);
+    applyCoverageMask(tex.buffer, mask, tex.width, tex.height, this.color, this.blendMode, locked);
+  }
+
+  /**
    * Draw the pending line through (x, y). When no anchor exists, arm it and
    * return 0 without drawing. Otherwise draws the segment, clears the anchor
    * and returns true when pixels changed.
@@ -2110,21 +2162,38 @@ export class GnumarusCanvasEngine {
     }
     const tex = ensured.texture;
     const base = tex.buffer.slice();
-    drawLineSegment(
-      tex.buffer,
-      tex.width,
-      tex.height,
-      this.lineAnchor.x,
-      this.lineAnchor.y,
-      x,
-      y,
-      this.lineWidth,
-      this.lineShape,
-      this.lineAntialias,
-      this.color,
-      layer.lockedChannels,
-      this.blendMode,
-    );
+    if (this.accumulate) {
+      drawLineSegment(
+        tex.buffer,
+        tex.width,
+        tex.height,
+        this.lineAnchor.x,
+        this.lineAnchor.y,
+        x,
+        y,
+        this.lineWidth,
+        this.lineShape,
+        this.lineAntialias,
+        this.color,
+        layer.lockedChannels,
+        this.blendMode,
+      );
+    } else {
+      const mask = new Uint8Array(tex.width * tex.height);
+      stampSegmentCoverage(
+        mask,
+        tex.width,
+        tex.height,
+        this.lineAnchor.x,
+        this.lineAnchor.y,
+        x,
+        y,
+        this.lineWidth,
+        this.lineShape,
+        this.lineAntialias,
+      );
+      this.repaintFromMask(tex, base, mask, layer.lockedChannels);
+    }
     this.lineAnchor = null;
     const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
     if (diff === null) {
@@ -2175,21 +2244,38 @@ export class GnumarusCanvasEngine {
     }
     const tex = ensured.texture;
     const base = tex.buffer.slice();
-    drawCubicBezier(
-      tex.buffer,
-      tex.width,
-      tex.height,
-      { x: p0.x, y: p0.y },
-      { x: c1.x, y: c1.y },
-      { x: c2x, y: c2y },
-      { x: p3.x, y: p3.y },
-      this.curveWidth,
-      this.curveShape,
-      this.curveAntialias,
-      this.color,
-      layer.lockedChannels,
-      this.blendMode,
-    );
+    if (this.accumulate) {
+      drawCubicBezier(
+        tex.buffer,
+        tex.width,
+        tex.height,
+        { x: p0.x, y: p0.y },
+        { x: c1.x, y: c1.y },
+        { x: c2x, y: c2y },
+        { x: p3.x, y: p3.y },
+        this.curveWidth,
+        this.curveShape,
+        this.curveAntialias,
+        this.color,
+        layer.lockedChannels,
+        this.blendMode,
+      );
+    } else {
+      const mask = new Uint8Array(tex.width * tex.height);
+      drawCubicBezierCoverage(
+        mask,
+        tex.width,
+        tex.height,
+        { x: p0.x, y: p0.y },
+        { x: c1.x, y: c1.y },
+        { x: c2x, y: c2y },
+        { x: p3.x, y: p3.y },
+        this.curveWidth,
+        this.curveShape,
+        this.curveAntialias,
+      );
+      this.repaintFromMask(tex, base, mask, layer.lockedChannels);
+    }
     this.resetCurveState();
     const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
     if (diff === null) {
@@ -2988,21 +3074,38 @@ export class GnumarusCanvasEngine {
       this.lastPixel = pixel;
       this.strokeBase = tex.buffer.slice();
       this.strokeLayerId = tex.id;
-      drawLineSegment(
-        tex.buffer,
-        tex.width,
-        tex.height,
-        pixel.x,
-        pixel.y,
-        pixel.x,
-        pixel.y,
-        this.brushSize,
-        this.brushShape,
-        this.pencilAntialias,
-        this.color,
-        layer.lockedChannels,
-        this.blendMode,
-      );
+      if (this.accumulate) {
+        drawLineSegment(
+          tex.buffer,
+          tex.width,
+          tex.height,
+          pixel.x,
+          pixel.y,
+          pixel.x,
+          pixel.y,
+          this.brushSize,
+          this.brushShape,
+          this.pencilAntialias,
+          this.color,
+          layer.lockedChannels,
+          this.blendMode,
+        );
+      } else {
+        this.strokeMask = new Uint8Array(tex.width * tex.height);
+        stampSegmentCoverage(
+          this.strokeMask,
+          tex.width,
+          tex.height,
+          pixel.x,
+          pixel.y,
+          pixel.x,
+          pixel.y,
+          this.brushSize,
+          this.brushShape,
+          this.pencilAntialias,
+        );
+        this.repaintFromMask(tex, this.strokeBase, this.strokeMask, layer.lockedChannels);
+      }
       this.markTextureViewsDirty(tex.id);
       this.render();
       this.onPixelsChanged();
@@ -3094,21 +3197,37 @@ export class GnumarusCanvasEngine {
         if (tex === undefined) {
           return;
         }
-        drawLineSegment(
-          tex.buffer,
-          tex.width,
-          tex.height,
-          this.lastPixel.x,
-          this.lastPixel.y,
-          pixel.x,
-          pixel.y,
-          this.brushSize,
-          this.brushShape,
-          this.pencilAntialias,
-          this.color,
-          layer.lockedChannels,
-          this.blendMode,
-        );
+        if (!this.accumulate && this.strokeBase !== null && this.strokeMask !== null) {
+          stampSegmentCoverage(
+            this.strokeMask,
+            tex.width,
+            tex.height,
+            this.lastPixel.x,
+            this.lastPixel.y,
+            pixel.x,
+            pixel.y,
+            this.brushSize,
+            this.brushShape,
+            this.pencilAntialias,
+          );
+          this.repaintFromMask(tex, this.strokeBase, this.strokeMask, layer.lockedChannels);
+        } else {
+          drawLineSegment(
+            tex.buffer,
+            tex.width,
+            tex.height,
+            this.lastPixel.x,
+            this.lastPixel.y,
+            pixel.x,
+            pixel.y,
+            this.brushSize,
+            this.brushShape,
+            this.pencilAntialias,
+            this.color,
+            layer.lockedChannels,
+            this.blendMode,
+          );
+        }
         this.lastPixel = pixel;
         this.markTextureViewsDirty(tex.id);
         this.render();
@@ -3127,6 +3246,7 @@ export class GnumarusCanvasEngine {
         }
         this.strokeBase = null;
         this.strokeLayerId = null;
+        this.strokeMask = null;
       }
       this.drawing = false;
       this.panning = false;

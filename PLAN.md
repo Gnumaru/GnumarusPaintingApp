@@ -124,6 +124,7 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 ## 22. Pencil on B, blend modes normal/copy/eraser (implemented)
 - Pencil shortcut moves from `P` to `B`; bucket moves from `B` to `G` (no-modifier keys; `Ctrl` combos unaffected).
 - Shared paint blend mode: `normal` (default; straight-alpha source-over, so translucent black darkens progressively like Krita/Photoshop), `copy` (old direct replacement, ignores alpha blending), `eraser` (ignores RGB, subtracts paint alpha from pixel alpha down to 0; honors alpha locks), selectable in pencil/bucket/line/curve options; honored by every color-paint path including anti-aliased edge blending and flood fill.
+- `E` toggles eraser on/off remembering the previous non-eraser mode; new `Accumulate` checkbox (on by default) on pencil/line/curve: off builds a union coverage mask per stroke and applies it once (uniform, Krita-like), on keeps accumulating onto the live pixels.
 
 ## 23. Always-visible HSV triangle + hue ring (implemented)
 - Color picker popup gains an HSV section that is always visible regardless of the selected model: a triangle (white corner, black corner, full-saturation corner, full-area gradient) inside a hue ring.

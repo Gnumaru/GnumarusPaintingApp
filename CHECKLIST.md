@@ -71,10 +71,10 @@
 - [x] Curve tool: unit + e2e tests, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
 - [x] Loupe shortcut L→Z; Tab hides/shows UI; PageUp/Down wrap layer select + toast; Insert layer above; Ctrl+E merge down
 - [x] Shortcuts/UI/layers: unit + e2e tests, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
-- [x] Pencil shortcut P→B, bucket B→G; shared normal/copy/eraser paint blend mode in drawing-tool options
-- [x] Blend + shortcuts: unit + e2e tests, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
-- [x] Unit tests (vitest): pixel buffer, color models, animation model, channel lock, layer resize, grid settings, pixel grid shader, background settings, final render, project format, mapping, checker, history — 110 passed
-- [x] E2E test (Playwright): shell + menu + New + pencil + bucket + brush + line + curve + layers + merge + channel locks + layer resize + pixel grid + settings reset + background + final preview + pan + scroll limits + toolbar icons + custom picker + hsv triangle/ring + animation matrix + frame durations + playback + save shortcut + tool options + previews + pencil AA + Delete + float widths + loupe Z + Tab hide + PageUp/Down + Insert + Ctrl+E + blend + eraser — 64 passed
+- [x] Pencil shortcut P→B, bucket B→G; shared normal/copy/eraser paint blend mode in drawing-tool options; E toggles eraser; Accumulate checkbox (union coverage, single apply)
+- [x] Blend + eraser key + accumulate: unit + e2e tests, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
+- [x] Unit tests (vitest): pixel buffer, color models, animation model, channel lock, layer resize, grid settings, pixel grid shader, background settings, final render, project format, mapping, checker, history — 112 passed
+- [x] E2E test (Playwright): shell + menu + New + pencil + bucket + brush + line + curve + layers + merge + channel locks + layer resize + pixel grid + settings reset + background + final preview + pan + scroll limits + toolbar icons + custom picker + hsv triangle/ring + animation matrix + frame durations + playback + save shortcut + tool options + previews + pencil AA + Delete + float widths + loupe Z + Tab hide + PageUp/Down + Insert + Ctrl+E + blend + eraser + E toggle + accumulate — 65 passed
 - [x] Always-visible HSV triangle + hue ring in color picker (any model), with drag + keyboard
 - [x] HSV picker: unit + e2e tests, `npm run build`, `npm run test`, `npm run test:e2e` green, docs updated
 - [x] Unit tests (vitest): pixel buffer, color models, animation model, channel lock, layer resize, grid settings, pixel grid shader, background settings, final render, project format, mapping, checker, history — 109 passed

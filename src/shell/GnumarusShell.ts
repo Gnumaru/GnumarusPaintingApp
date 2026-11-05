@@ -747,6 +747,7 @@ export class GnumarusShell extends LitElement {
     brushShape: { type: String },
     pencilAntialias: { type: Boolean },
     blendMode: { type: String },
+    accumulate: { type: Boolean },
     lineWidth: { type: Number },
     lineShape: { type: String },
     lineAntialias: { type: Boolean },
@@ -810,6 +811,7 @@ export class GnumarusShell extends LitElement {
   declare brushShape: GnumarusBrushShape;
   declare pencilAntialias: boolean;
   declare blendMode: GnumarusBlendMode;
+  declare accumulate: boolean;
   declare lineWidth: number;
   declare lineShape: GnumarusBrushShape;
   declare lineAntialias: boolean;
@@ -877,6 +879,7 @@ export class GnumarusShell extends LitElement {
     this.brushShape = "square";
     this.pencilAntialias = false;
     this.blendMode = "normal";
+    this.accumulate = true;
     this.lineWidth = 1;
     this.lineShape = "square";
     this.lineAntialias = false;
@@ -1587,6 +1590,20 @@ export class GnumarusShell extends LitElement {
     `;
   }
 
+  private renderAccumulateOption() {
+    return html`
+      <label
+        ><input
+          type="checkbox"
+          id="accumulate"
+          .checked=${this.accumulate}
+          @change=${(): void => this.applyAccumulateFromDialog()}
+        />
+        Accumulate
+      </label>
+    `;
+  }
+
   private renderToolOptions() {
     if (this.tool === "pencil") {
       return html`
@@ -1619,7 +1636,7 @@ export class GnumarusShell extends LitElement {
             />
             Anti-aliasing
           </label>
-          ${this.renderBlendModeOption()}
+          ${this.renderBlendModeOption()} ${this.renderAccumulateOption()}
         </div>
       `;
     }
@@ -1654,7 +1671,7 @@ export class GnumarusShell extends LitElement {
             />
             Anti-aliasing
           </label>
-          ${this.renderBlendModeOption()}
+          ${this.renderBlendModeOption()} ${this.renderAccumulateOption()}
         </div>
       `;
     }
@@ -1689,7 +1706,7 @@ export class GnumarusShell extends LitElement {
             />
             Anti-aliasing
           </label>
-          ${this.renderBlendModeOption()}
+          ${this.renderBlendModeOption()} ${this.renderAccumulateOption()}
         </div>
       `;
     }
@@ -1985,6 +2002,11 @@ export class GnumarusShell extends LitElement {
     if (event.key === "Insert") {
       event.preventDefault();
       this.insertLayerAboveActive();
+      return;
+    }
+    if (event.key === "e" || event.key === "E") {
+      event.preventDefault();
+      this.toggleEraserBlend();
     }
   };
 
@@ -2420,6 +2442,36 @@ export class GnumarusShell extends LitElement {
     const mode = this.currentDialogBlendMode();
     this.blendMode = mode;
     this.engine?.setBlendMode(mode);
+    this.statusMessage = `Blend mode: ${mode}`;
+  }
+
+  /** Test hook: set whether strokes accumulate onto themselves while drawing. */
+  setAccumulate(enabled: boolean): void {
+    const next = enabled === true;
+    this.accumulate = next;
+    this.engine?.setAccumulate(next);
+    this.statusMessage = `Accumulate: ${next ? "on" : "off"}`;
+  }
+
+  private currentDialogAccumulate(): boolean {
+    const input = this.shadowRoot?.getElementById("accumulate") as HTMLInputElement | null;
+    return input?.checked === true;
+  }
+
+  private applyAccumulateFromDialog(): void {
+    const enabled = this.currentDialogAccumulate();
+    this.accumulate = enabled;
+    this.engine?.setAccumulate(enabled);
+    this.statusMessage = `Accumulate: ${enabled ? "on" : "off"}`;
+  }
+
+  /** Toggle between eraser and the previously used non-eraser blend mode. */
+  private toggleEraserBlend(): void {
+    if (this.engine === null) {
+      return;
+    }
+    const mode = this.engine.toggleEraserBlend();
+    this.blendMode = mode;
     this.statusMessage = `Blend mode: ${mode}`;
   }
 

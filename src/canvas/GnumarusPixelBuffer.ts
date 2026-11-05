@@ -572,36 +572,18 @@ export function drawLineSegment(
   const dy = y1 - y0;
   const length = Math.sqrt(dx * dx + dy * dy);
   if (!(length > 1e-9)) {
-    if (shape === "square") {
-      const reach = half + 0.5;
-      const minX = Math.floor(x0 - reach);
-      const maxX = Math.ceil(x0 + reach);
-      const minY = Math.floor(y0 - reach);
-      const maxY = Math.ceil(y0 + reach);
-      for (let y = minY; y <= maxY; y += 1) {
-        for (let x = minX; x <= maxX; x += 1) {
-          const cx = Math.min(1, Math.max(0, half + 0.5 - Math.abs(x - x0)));
-          const cy = Math.min(1, Math.max(0, half + 0.5 - Math.abs(y - y0)));
-          blendPixelCoverage(buffer, width, height, x, y, color, Math.min(cx, cy), locked, blend);
-        }
-      }
-    } else {
-      const radius = Math.max(0, half + 0.5);
-      const minX = Math.floor(x0 - radius);
-      const maxX = Math.ceil(x0 + radius);
-      const minY = Math.floor(y0 - radius);
-      const maxY = Math.ceil(y0 + radius);
-      for (let y = minY; y <= maxY; y += 1) {
-        for (let x = minX; x <= maxX; x += 1) {
-          const dist = Math.sqrt((x - x0) * (x - x0) + (y - y0) * (y - y0));
-          blendPixelCoverage(buffer, width, height, x, y, color, half + 0.5 - dist, locked, blend);
-        }
+    const reach = half + 0.5;
+    const minX = Math.floor(x0 - reach);
+    const maxX = Math.ceil(x0 + reach);
+    const minY = Math.floor(y0 - reach);
+    const maxY = Math.ceil(y0 + reach);
+    for (let y = minY; y <= maxY; y += 1) {
+      for (let x = minX; x <= maxX; x += 1) {
+        blendPixelCoverage(buffer, width, height, x, y, color, aaDotCoverageAt(x, y, x0, y0, half, shape), locked, blend);
       }
     }
     return;
   }
-  const ux = dx / length;
-  const uy = dy / length;
   const pad = half + 1;
   const minX = Math.max(0, Math.floor(Math.min(x0, x1) - pad));
   const maxX = Math.min(width - 1, Math.ceil(Math.max(x0, x1) + pad));
@@ -609,34 +591,17 @@ export function drawLineSegment(
   const maxY = Math.min(height - 1, Math.ceil(Math.max(y0, y1) + pad));
   for (let y = minY; y <= maxY; y += 1) {
     for (let x = minX; x <= maxX; x += 1) {
-      const relX = x - x0;
-      const relY = y - y0;
-      const along = relX * ux + relY * uy;
-      const perp = Math.abs(relX * uy - relY * ux);
-      let coverage: number;
-      if (shape === "circle") {
-        const clamped = Math.min(length, Math.max(0, along));
-        const cx = x0 + ux * clamped;
-        const cy = y0 + uy * clamped;
-        const dist = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
-        coverage = half + 0.5 - dist;
-      } else {
-        const perpCoverage = half + 0.5 - perp;
-        if (perpCoverage <= 0) {
-          continue;
-        }
-        let endFade = 1;
-        if (along < 0) {
-          endFade = 1 + along;
-        } else if (along > length) {
-          endFade = 1 - (along - length);
-        }
-        if (endFade <= 0) {
-          continue;
-        }
-        coverage = perpCoverage < endFade ? perpCoverage : endFade;
-      }
-      blendPixelCoverage(buffer, width, height, x, y, color, coverage, locked, blend);
+      blendPixelCoverage(
+        buffer,
+        width,
+        height,
+        x,
+        y,
+        color,
+        aaSegmentCoverageAt(x, y, x0, y0, x1, y1, half, shape),
+        locked,
+        blend,
+      );
     }
   }
 }
@@ -694,6 +659,286 @@ export function drawCubicBezier(
     drawLineSegment(buffer, width, height, sx0, sy0, sx1, sy1, lineWidth, shape, antialiased, color, locked, blend);
     prevX = x;
     prevY = y;
+  }
+}
+
+/** Anti-aliased coverage of a dot centered at (cx, cy) with the given half-width. */
+function aaDotCoverageAt(
+  x: number,
+  y: number,
+  cx: number,
+  cy: number,
+  half: number,
+  shape: GnumarusBrushShape,
+): number {
+  if (shape === "square") {
+    const fx = Math.min(1, Math.max(0, half + 0.5 - Math.abs(x - cx)));
+    const fy = Math.min(1, Math.max(0, half + 0.5 - Math.abs(y - cy)));
+    return Math.min(fx, fy);
+  }
+  const dist = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+  return half + 0.5 - dist;
+}
+
+/** Anti-aliased coverage of a thick segment (round caps for circles, butt caps for squares). */
+function aaSegmentCoverageAt(
+  x: number,
+  y: number,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  half: number,
+  shape: GnumarusBrushShape,
+): number {
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const length = Math.sqrt(dx * dx + dy * dy);
+  if (!(length > 1e-9)) {
+    return aaDotCoverageAt(x, y, x0, y0, half, shape);
+  }
+  const ux = dx / length;
+  const uy = dy / length;
+  const relX = x - x0;
+  const relY = y - y0;
+  const along = relX * ux + relY * uy;
+  const perp = Math.abs(relX * uy - relY * ux);
+  if (shape === "circle") {
+    const clamped = Math.min(length, Math.max(0, along));
+    const cx = x0 + ux * clamped;
+    const cy = y0 + uy * clamped;
+    const dist = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+    return half + 0.5 - dist;
+  }
+  const perpCoverage = half + 0.5 - perp;
+  if (perpCoverage <= 0) {
+    return perpCoverage;
+  }
+  let endFade = 1;
+  if (along < 0) {
+    endFade = 1 + along;
+  } else if (along > length) {
+    endFade = 1 - (along - length);
+  }
+  if (endFade <= 0) {
+    return endFade;
+  }
+  return perpCoverage < endFade ? perpCoverage : endFade;
+}
+
+/**
+ * Rasterize one brush stamp into a byte coverage mask with max (union)
+ * semantics: covered pixels become 255 (hard tip) and overlapping stamps
+ * never accumulate. Out-of-bounds pixels are skipped.
+ */
+function stampDotCoverage(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  centerX: number,
+  centerY: number,
+  tip: number,
+  shape: GnumarusBrushShape,
+): void {
+  const anchor = Math.floor((tip - 1) / 2);
+  const left = Math.round(centerX) - anchor;
+  const top = Math.round(centerY) - anchor;
+  if (shape === "square") {
+    for (let dy = 0; dy < tip; dy += 1) {
+      const y = top + dy;
+      if (y < 0 || y >= height) {
+        continue;
+      }
+      for (let dx = 0; dx < tip; dx += 1) {
+        const x = left + dx;
+        if (x < 0 || x >= width) {
+          continue;
+        }
+        mask[y * width + x] = 255;
+      }
+    }
+    return;
+  }
+  const center = (tip - 1) / 2;
+  const threshold = Math.max(0, (tip * tip) / 4 - 0.5);
+  for (let dy = 0; dy < tip; dy += 1) {
+    const y = top + dy;
+    if (y < 0 || y >= height) {
+      continue;
+    }
+    for (let dx = 0; dx < tip; dx += 1) {
+      const distSquared = (dx - center) * (dx - center) + (dy - center) * (dy - center);
+      if (distSquared <= threshold + 1e-9) {
+        const x = left + dx;
+        if (x < 0 || x >= width) {
+          continue;
+        }
+        mask[y * width + x] = 255;
+      }
+    }
+  }
+}
+
+/**
+ * Rasterize a stroke segment into a byte coverage mask with max (union)
+ * semantics: drawing the same segment twice yields the same mask, so a
+ * stroke scrubbed back and forth over itself stays uniform instead of
+ * accumulating. The mask holds 0..255 per pixel.
+ */
+export function stampSegmentCoverage(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  size: number,
+  shape: GnumarusBrushShape,
+  antialiased: boolean,
+): void {
+  if (mask.length !== width * height) {
+    return;
+  }
+  if (!antialiased) {
+    const thick = roundBrushSizeForAliased(size);
+    // Integer rasterization (Bresenham walkers require integers to terminate).
+    let x = Math.round(x0);
+    let y = Math.round(y0);
+    const endX = Math.round(x1);
+    const endY = Math.round(y1);
+    if (thick <= 1) {
+      const dx = Math.abs(endX - x);
+      const dy = Math.abs(endY - y);
+      const sx = x < endX ? 1 : -1;
+      const sy = y < endY ? 1 : -1;
+      let err = dx - dy;
+      for (;;) {
+        if (x >= 0 && y >= 0 && x < width && y < height) {
+          mask[y * width + x] = 255;
+        }
+        if (x === endX && y === endY) {
+          break;
+        }
+        const e2 = 2 * err;
+        if (e2 > -dy) {
+          err -= dy;
+          x += sx;
+        }
+        if (e2 < dx) {
+          err += dx;
+          y += sy;
+        }
+      }
+      return;
+    }
+    const dx = Math.abs(endX - x);
+    const dy = Math.abs(endY - y);
+    const sx = x < endX ? 1 : -1;
+    const sy = y < endY ? 1 : -1;
+    let err = dx - dy;
+    for (;;) {
+      stampDotCoverage(mask, width, height, x, y, thick, shape);
+      if (x === endX && y === endY) {
+        break;
+      }
+      const e2 = 2 * err;
+      if (e2 > -dy) {
+        err -= dy;
+        x += sx;
+      }
+      if (e2 < dx) {
+        err += dx;
+        y += sy;
+      }
+    }
+    return;
+  }
+  const thick = clampBrushSizeFloat(size);
+  const half = thick / 2;
+  const pad = half + 1;
+  const minX = Math.max(0, Math.floor(Math.min(x0, x1) - pad));
+  const maxX = Math.min(width - 1, Math.ceil(Math.max(x0, x1) + pad));
+  const minY = Math.max(0, Math.floor(Math.min(y0, y1) - pad));
+  const maxY = Math.min(height - 1, Math.ceil(Math.max(y0, y1) + pad));
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      const coverage = aaSegmentCoverageAt(x, y, x0, y0, x1, y1, half, shape);
+      if (coverage > 0) {
+        const index = y * width + x;
+        const value = Math.min(255, Math.round(coverage * 255));
+        if (value > mask[index]!) {
+          mask[index] = value;
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Rasterize a cubic Bezier curve into a byte coverage mask with max (union)
+ * semantics (same flattening as `drawCubicBezier`).
+ */
+export function drawCubicBezierCoverage(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  p0: GnumarusBezierPoint,
+  p1: GnumarusBezierPoint,
+  p2: GnumarusBezierPoint,
+  p3: GnumarusBezierPoint,
+  lineWidth: number,
+  shape: GnumarusBrushShape,
+  antialiased: boolean,
+): void {
+  const chord = (a: GnumarusBezierPoint, b: GnumarusBezierPoint): number =>
+    Math.sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
+  const polygon = chord(p0, p1) + chord(p1, p2) + chord(p2, p3);
+  if (!(polygon > 1e-9)) {
+    stampSegmentCoverage(mask, width, height, p0.x, p0.y, p0.x, p0.y, lineWidth, shape, antialiased);
+    return;
+  }
+  const segments = Math.min(200, Math.max(16, Math.ceil(polygon * 2)));
+  let prevX = p0.x;
+  let prevY = p0.y;
+  for (let i = 1; i <= segments; i += 1) {
+    const t = i / segments;
+    const it = 1 - t;
+    const x =
+      it * it * it * p0.x + 3 * it * it * t * p1.x + 3 * it * t * t * p2.x + t * t * t * p3.x;
+    const y =
+      it * it * it * p0.y + 3 * it * it * t * p1.y + 3 * it * t * t * p2.y + t * t * t * p3.y;
+    stampSegmentCoverage(mask, width, height, prevX, prevY, x, y, lineWidth, shape, antialiased);
+    prevX = x;
+    prevY = y;
+  }
+}
+
+/**
+ * Apply a byte coverage mask to a pixel buffer in one uniform pass using the
+ * given blend mode (mask 255 = full application). Used for non-accumulating
+ * strokes: the shape is built up with max-union coverage, then applied once.
+ */
+export function applyCoverageMask(
+  buffer: Uint8ClampedArray,
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  color: GnumarusRgba,
+  blend: GnumarusBlendMode,
+  locked: GnumarusChannelLock | undefined = undefined,
+): void {
+  if (mask.length !== width * height || buffer.length !== width * height * 4) {
+    return;
+  }
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const m = mask[y * width + x];
+      if (m === undefined || m <= 0) {
+        continue;
+      }
+      blendPixelCoverage(buffer, width, height, x, y, color, m / 255, locked, blend);
+    }
   }
 }
 

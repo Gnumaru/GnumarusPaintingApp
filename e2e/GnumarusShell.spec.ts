@@ -2479,6 +2479,97 @@ test("normal blend accumulates translucent paint and eraser subtracts alpha", as
   await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toContainText("Blend mode");
 });
 
+test("E toggles eraser and strokes can opt out of accumulation", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const blendOf = (): Promise<string> =>
+    page.evaluate(() => {
+      const root = window as unknown as { __gnumarus?: { engine?: { getBlendMode(): string } } };
+      return root.__gnumarus?.engine?.getBlendMode() ?? "missing";
+    });
+  expect(await blendOf()).toBe("normal");
+  await page.keyboard.press("e");
+  expect(await blendOf()).toBe("eraser");
+  await expect(page.locator("gnumarus-shell")).toContainText("Blend mode: eraser");
+  await page.keyboard.press("e");
+  expect(await blendOf()).toBe("normal");
+  await expect(page.locator("gnumarus-shell")).toContainText("Blend mode: normal");
+  await page.locator("gnumarus-shell select#blendMode").selectOption("copy");
+  await page.evaluate(() => {
+    (document.activeElement as HTMLElement | null)?.blur?.();
+  });
+  await page.keyboard.press("e");
+  expect(await blendOf()).toBe("eraser");
+  await page.keyboard.press("e");
+  expect(await blendOf()).toBe("copy");
+  await expect(page.locator("gnumarus-shell")).toContainText("Blend mode: copy");
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          loadProject(
+            width: number,
+            height: number,
+            inputs: Array<{
+              id: string;
+              name: string;
+              visible: boolean;
+              opacity: number;
+              width: number;
+              height: number;
+              buffer: Uint8ClampedArray;
+              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
+            }>,
+          ): void;
+        };
+      };
+    };
+    root.__gnumarus?.engine?.loadProject(64, 64, [
+      {
+        id: "tiny",
+        name: "Tiny",
+        visible: true,
+        opacity: 1,
+        width: 8,
+        height: 8,
+        buffer: new Uint8ClampedArray(8 * 8 * 4),
+        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+      },
+    ]);
+  });
+  await setPencil(page, "#00000080");
+  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.locator("gnumarus-shell input#brushSize").fill("1");
+  await page.locator("gnumarus-shell select#blendMode").selectOption("normal");
+  await expect(page.locator('gnumarus-shell input#accumulate')).toBeChecked();
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const scrubBackAndForth = async (): Promise<void> => {
+    const state = await getViewState(page);
+    const rect = { left: box.x, top: box.y, width: box.width, height: box.height };
+    const view = { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false };
+    const layer = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false };
+    const start = layerPixelToScreen(1, 4, rect, 8, 8, view, layer);
+    const end = layerPixelToScreen(6, 4, rect, 8, 8, view, layer);
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(end.x, end.y, { steps: 1 });
+    await page.mouse.move(start.x, start.y, { steps: 1 });
+    await page.mouse.up();
+  };
+  await scrubBackAndForth();
+  expect(await readPixel(page, 3, 4)).toEqual({ r: 0, g: 0, b: 0, a: 192 });
+  await page.keyboard.press("Delete");
+  expect(await readPixel(page, 3, 4)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  await page.locator("gnumarus-shell input#accumulate").uncheck();
+  await expect(page.locator("gnumarus-shell")).toContainText("Accumulate: off");
+  await scrubBackAndForth();
+  expect(await readPixel(page, 3, 4)).toEqual({ r: 0, g: 0, b: 0, a: 128 });
+});
+
 test("Tab hides and shows the interface, toast still works", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
