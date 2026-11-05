@@ -304,6 +304,105 @@ test("transform changes are not recorded in undo history", async ({ page }) => {
   expect(view).toMatchObject({ flipX: true, zoom: 20 });
 });
 
+interface GnumarusLayerState {
+  id: string;
+  name: string;
+  visible: boolean;
+  opacity: number;
+}
+
+async function getLayers(page: import("@playwright/test").Page): Promise<{
+  layers: GnumarusLayerState[];
+  active: string;
+}> {
+  return page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          getLayers(): GnumarusLayerState[];
+          getActiveLayerId(): string;
+        };
+      };
+    };
+    return {
+      layers: root.__gnumarus?.engine?.getLayers() ?? [],
+      active: root.__gnumarus?.engine?.getActiveLayerId() ?? "",
+    };
+  });
+}
+
+test("layers can be added, renamed, reordered, hidden and removed", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  let state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.id)).toEqual(["layer0"]);
+
+  await page.getByRole("button", { name: "Add layer" }).click();
+  state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.id)).toEqual(["layer0", "layer1"]);
+  expect(state.active).toBe("layer1");
+
+  const row1 = page.locator('gnumarus-shell [data-layer-id="layer1"]');
+  await row1.locator(".layer-name").dblclick();
+  await row1.locator("input.layer-rename").fill("Top");
+  await row1.locator("input.layer-rename").press("Enter");
+  state = await getLayers(page);
+  expect(state.layers[1]?.name).toBe("Top");
+
+  await row1.getByRole("button", { name: "Move layer down" }).click();
+  state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.id)).toEqual(["layer1", "layer0"]);
+
+  const row0 = page.locator('gnumarus-shell [data-layer-id="layer0"]');
+  await row0.getByRole("checkbox").click();
+  state = await getLayers(page);
+  expect(state.layers.find((layer) => layer.id === "layer0")?.visible).toBe(false);
+
+  await row0.locator("input[type=range]").fill("50");
+  state = await getLayers(page);
+  expect(state.layers.find((layer) => layer.id === "layer0")?.opacity).toBeCloseTo(0.5, 5);
+
+  await row0.click();
+  expect((await getLayers(page)).active).toBe("layer0");
+  await page.locator('gnumarus-shell [data-layer-id="layer1"]').getByRole("button", { name: "Delete layer" }).click();
+  state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.id)).toEqual(["layer0"]);
+  await expect(
+    page.locator('gnumarus-shell [data-layer-id="layer0"]').getByRole("button", { name: "Delete layer" }),
+  ).toBeDisabled();
+});
+
+test("undo restores pixels on the correct layer", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const paintCenter = async (): Promise<void> => {
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.up();
+  };
+  await paintCenter();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await paintCenter();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+
+  await page.locator('gnumarus-shell [data-layer-id="layer0"]').click();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+
+  await page.keyboard.press("Control+y");
+  await page.locator('gnumarus-shell [data-layer-id="layer1"]').click();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+});
+
 test("pencil paints the right pixel while the canvas is rotated", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

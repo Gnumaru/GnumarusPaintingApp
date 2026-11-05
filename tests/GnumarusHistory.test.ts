@@ -4,9 +4,18 @@ import {
   applyImageDiff,
   computeImageDiff,
   GnumarusHistory,
+  type GnumarusHistoryLayer,
 } from "../src/history/GnumarusHistory";
 
 const BLACK = { r: 0, g: 0, b: 0, a: 255 };
+
+function layerOf(buffer: Uint8ClampedArray): GnumarusHistoryLayer {
+  return { buffer, width: 8 };
+}
+
+function layerOf4(buffer: Uint8ClampedArray): GnumarusHistoryLayer {
+  return { buffer, width: 4 };
+}
 
 describe("GnumarusHistory", () => {
   it("computes null diff for identical buffers", () => {
@@ -39,20 +48,34 @@ describe("GnumarusHistory", () => {
       throw new Error("expected a diff");
     }
     buffer.set(stroke);
-    history.push(diff);
+    history.push({ layerId: "layer0", diff });
     expect(history.canUndo()).toBe(true);
 
-    expect(history.undo(buffer, 8)).toBe(true);
+    expect(history.undo(() => layerOf(buffer))).toBe(true);
     expect(computeImageDiff(buffer, createPixelBuffer(8, 8), 8, 8)).toBeNull();
     expect(history.canUndo()).toBe(false);
     expect(history.canRedo()).toBe(true);
 
-    expect(history.redo(buffer, 8)).toBe(true);
+    expect(history.redo(() => layerOf(buffer))).toBe(true);
     expect(computeImageDiff(buffer, stroke, 8, 8)).toBeNull();
     expect(history.canUndo()).toBe(true);
     expect(history.canRedo()).toBe(false);
 
-    expect(history.redo(buffer, 8)).toBe(false);
+    expect(history.redo(() => layerOf(buffer))).toBe(false);
+  });
+
+  it("skips entries whose layer no longer exists", () => {
+    const history = new GnumarusHistory();
+    const buffer = createPixelBuffer(8, 8);
+    const stroke = createPixelBuffer(8, 8);
+    setPixel(stroke, 8, 8, 1, 1, BLACK);
+    const diff = computeImageDiff(buffer, stroke, 8, 8);
+    if (diff === null) {
+      throw new Error("expected a diff");
+    }
+    history.push({ layerId: "gone", diff });
+    expect(history.undo(() => null)).toBe(false);
+    expect(history.canUndo()).toBe(false);
   });
 
   it("drops redo when a new action is pushed", () => {
@@ -69,10 +92,10 @@ describe("GnumarusHistory", () => {
     if (diffA === null || diffB === null) {
       throw new Error("expected diffs");
     }
-    history.push(diffA);
-    history.undo(buffer, 4);
+    history.push({ layerId: "layer0", diff: diffA });
+    history.undo(() => layerOf4(buffer));
     buffer.set(first);
-    history.push(diffB);
+    history.push({ layerId: "layer0", diff: diffB });
     expect(history.canRedo()).toBe(false);
   });
 
@@ -86,13 +109,13 @@ describe("GnumarusHistory", () => {
       if (diff === null) {
         throw new Error("expected a diff");
       }
-      history.push(diff);
+      history.push({ layerId: "layer0", diff });
     }
     const buffer = createPixelBuffer(4, 4);
-    expect(history.undo(buffer, 4)).toBe(true);
-    expect(history.undo(buffer, 4)).toBe(true);
-    expect(history.undo(buffer, 4)).toBe(true);
-    expect(history.undo(buffer, 4)).toBe(false);
+    expect(history.undo(() => layerOf4(buffer))).toBe(true);
+    expect(history.undo(() => layerOf4(buffer))).toBe(true);
+    expect(history.undo(() => layerOf4(buffer))).toBe(true);
+    expect(history.undo(() => layerOf4(buffer))).toBe(false);
   });
 
   it("applies diff sides directly", () => {

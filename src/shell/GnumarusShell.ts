@@ -3,6 +3,7 @@ import {
   GnumarusCanvasEngine,
   GnumarusWebGlError,
   type GnumarusCanvasTool,
+  type GnumarusLayerInfo,
 } from "../canvas/GnumarusCanvasEngine";
 import {
   isFileSystemAccessSupported,
@@ -11,7 +12,12 @@ import {
   writeProjectFiles,
   type GnumarusDirectoryHandle,
 } from "../project/GnumarusFileSystem";
-import { createDefaultProject } from "../project/GnumarusProjectFormat";
+import {
+  GNUMARUS_APP_ID,
+  cellFilePath,
+  type GnumarusLayerMeta,
+  type GnumarusProjectMeta,
+} from "../project/GnumarusProjectFormat";
 import {
   CHECKER_SETTINGS_STORAGE_KEY,
   DEFAULT_CHECKER_SETTINGS,
@@ -143,6 +149,99 @@ export class GnumarusShell extends LitElement {
       position: absolute;
       inset: 0;
     }
+    .layers-panel {
+      width: 220px;
+      background: #252526;
+      border-left: 1px solid #111;
+      display: flex;
+      flex-direction: column;
+      flex: 0 0 auto;
+      min-height: 0;
+    }
+    .layers-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 8px;
+      font-weight: 600;
+      border-bottom: 1px solid #111;
+    }
+    .layers-header button {
+      background: #0e639c;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 2px 10px;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    .layers-list {
+      overflow-y: auto;
+      flex: 1 1 auto;
+    }
+    .layer-row {
+      border-bottom: 1px solid #111;
+      padding: 4px 6px;
+      cursor: pointer;
+    }
+    .layer-row.active {
+      background: #094771;
+    }
+    .layer-top {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .layer-top input[type="checkbox"] {
+      cursor: pointer;
+    }
+    .layer-name {
+      flex: 1 1 auto;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .layer-row input.layer-rename {
+      flex: 1 1 auto;
+      min-width: 0;
+      background: #1e1e1e;
+      color: #e6e6e6;
+      border: 1px solid #0e639c;
+      border-radius: 4px;
+      padding: 2px 4px;
+    }
+    .layer-row button {
+      background: transparent;
+      color: #e6e6e6;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      padding: 2px 6px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .layer-row button:hover {
+      background: #3a3a3a;
+    }
+    .layer-row button:disabled {
+      opacity: 0.3;
+      cursor: default;
+    }
+    .layer-row button:disabled:hover {
+      background: transparent;
+    }
+    .layer-opacity {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 4px;
+      font-size: 11px;
+      color: #9a9a9a;
+    }
+    .layer-opacity input[type="range"] {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
     .statusbar {
       display: flex;
       align-items: center;
@@ -235,6 +334,10 @@ export class GnumarusShell extends LitElement {
     checkerSizeY: { type: Number },
     canUndo: { type: Boolean },
     canRedo: { type: Boolean },
+    layers: { type: Array },
+    activeLayerId: { type: String },
+    layerText: { type: String },
+    renamingId: { type: String },
     checkerColorA: { type: String },
     checkerColorB: { type: String },
   };
@@ -260,6 +363,10 @@ export class GnumarusShell extends LitElement {
   declare checkerSizeY: number;
   declare canUndo: boolean;
   declare canRedo: boolean;
+  declare layers: GnumarusLayerInfo[];
+  declare activeLayerId: string;
+  declare layerText: string;
+  declare renamingId: string | null;
   declare checkerColorA: string;
   declare checkerColorB: string;
 
@@ -289,6 +396,10 @@ export class GnumarusShell extends LitElement {
     this.checkerSizeY = DEFAULT_CHECKER_SETTINGS.sizeY;
     this.canUndo = false;
     this.canRedo = false;
+    this.layers = [];
+    this.activeLayerId = "";
+    this.layerText = "-";
+    this.renamingId = null;
     this.checkerColorA = DEFAULT_CHECKER_SETTINGS.colorA;
     this.checkerColorB = DEFAULT_CHECKER_SETTINGS.colorB;
   }
@@ -377,12 +488,116 @@ export class GnumarusShell extends LitElement {
           />
         </div>
         <div class="canvas-host" id="canvasHost"></div>
+        <aside class="layers-panel" aria-label="Layers">
+          <div class="layers-header">
+            <span>Layers</span>
+            <button aria-label="Add layer" title="Add layer" @click=${(): void => this.onAddLayer()}>+</button>
+          </div>
+          <div class="layers-list">
+            ${[...this.layers].reverse().map(
+              (layer, displayIndex, displayLayers) => html`
+                <div
+                  class="layer-row ${layer.id === this.activeLayerId ? "active" : ""}"
+                  data-layer-id=${layer.id}
+                  @click=${(): void => this.onSelectLayer(layer.id)}
+                >
+                  <div class="layer-top">
+                    <input
+                      type="checkbox"
+                      aria-label="Toggle layer visibility"
+                      .checked=${layer.visible}
+                      @click=${(event: Event): void => event.stopPropagation()}
+                      @change=${(event: Event): void => {
+                        const target = event.target as HTMLInputElement | null;
+                        if (target !== null) {
+                          this.onToggleVisible(layer.id, target.checked);
+                        }
+                      }}
+                    />
+                    ${this.renamingId === layer.id
+                      ? html`
+                          <input
+                            class="layer-rename"
+                            .value=${layer.name}
+                            @click=${(event: Event): void => event.stopPropagation()}
+                            @keydown=${(event: KeyboardEvent): void => {
+                              if (event.key === "Enter") {
+                                this.onRenameCommit(layer.id);
+                              } else if (event.key === "Escape") {
+                                this.onRenameCancel();
+                              }
+                              event.stopPropagation();
+                            }}
+                            @blur=${(): void => this.onRenameCommit(layer.id)}
+                          />
+                        `
+                      : html`
+                          <span class="layer-name" @dblclick=${(): void => this.onRenameStart(layer.id)}>
+                            ${layer.name}
+                          </span>
+                        `}
+                    <button
+                      aria-label="Move layer up"
+                      title="Move up"
+                      ?disabled=${displayIndex === 0}
+                      @click=${(event: Event): void => {
+                        event.stopPropagation();
+                        this.onMoveLayer(layer.id, "up");
+                      }}
+                    >
+                      ▲
+                    </button>
+                    <button
+                      aria-label="Move layer down"
+                      title="Move down"
+                      ?disabled=${displayIndex === displayLayers.length - 1}
+                      @click=${(event: Event): void => {
+                        event.stopPropagation();
+                        this.onMoveLayer(layer.id, "down");
+                      }}
+                    >
+                      ▼
+                    </button>
+                    <button
+                      aria-label="Delete layer"
+                      title="Delete layer"
+                      ?disabled=${this.layers.length <= 1}
+                      @click=${(event: Event): void => {
+                        event.stopPropagation();
+                        this.onRemoveLayer(layer.id);
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div class="layer-opacity" @click=${(event: Event): void => event.stopPropagation()}>
+                    <span>Opacity</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      aria-label="Layer opacity"
+                      .value=${String(Math.round(layer.opacity * 100))}
+                      @input=${(event: Event): void => {
+                        const target = event.target as HTMLInputElement | null;
+                        if (target !== null) {
+                          this.onOpacityInput(layer.id, Number(target.value) / 100);
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+              `,
+            )}
+          </div>
+        </aside>
       </div>
       <div class="statusbar">
         <span>${this.tool}</span>
         <span>${this.colorValue}</span>
         <span>${this.cursorText}</span>
         <span>${this.canvasText}</span>
+        <span>${this.layerText}</span>
         <span>${this.zoomText}</span>
         <span>${this.rotText}</span>
         <span>${this.flipText}</span>
@@ -468,6 +683,7 @@ export class GnumarusShell extends LitElement {
         },
       });
       this.engine.setColor(this.colorValue);
+      this.refreshLayers();
       if (!this.fsSupported) {
         this.statusMessage = "File System Access API unavailable (use Chromium)";
       }
@@ -586,6 +802,98 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = "Checkerboard settings reset to defaults";
   }
 
+  private refreshLayers(): void {
+    if (this.engine === null) {
+      this.layers = [];
+      this.activeLayerId = "";
+      this.layerText = "-";
+      return;
+    }
+    this.layers = this.engine.getLayers();
+    this.activeLayerId = this.engine.getActiveLayerId();
+    const index = this.layers.findIndex((layer) => layer.id === this.activeLayerId);
+    const current = index < 0 ? undefined : this.layers[index];
+    this.layerText =
+      current === undefined ? "-" : `${current.name} (${this.layers.length - index}/${this.layers.length})`;
+  }
+
+  private onAddLayer(): void {
+    if (this.engine === null) {
+      return;
+    }
+    this.engine.addLayer();
+    this.refreshLayers();
+    this.dirty = true;
+    this.statusMessage = "Layer added";
+  }
+
+  private onRemoveLayer(id: string): void {
+    if (this.engine === null) {
+      return;
+    }
+    if (this.engine.removeLayer(id)) {
+      this.statusMessage = "Layer deleted";
+      this.dirty = true;
+    } else {
+      this.statusMessage = "Cannot delete the last layer";
+    }
+    this.refreshLayers();
+  }
+
+  private onSelectLayer(id: string): void {
+    if (this.engine === null || id === this.activeLayerId) {
+      return;
+    }
+    this.engine.setActiveLayer(id);
+    this.refreshLayers();
+  }
+
+  private onToggleVisible(id: string, visible: boolean): void {
+    this.engine?.setLayerVisible(id, visible);
+    this.refreshLayers();
+    this.dirty = true;
+  }
+
+  private onOpacityInput(id: string, opacity: number): void {
+    this.engine?.setLayerOpacity(id, opacity);
+    this.refreshLayers();
+    this.dirty = true;
+  }
+
+  private onMoveLayer(id: string, direction: "up" | "down"): void {
+    if (this.engine?.moveLayer(id, direction) === true) {
+      this.statusMessage = `Layer moved ${direction}`;
+      this.dirty = true;
+    }
+    this.refreshLayers();
+  }
+
+  private onRenameStart(id: string): void {
+    this.renamingId = id;
+  }
+
+  private onRenameCancel(): void {
+    this.renamingId = null;
+  }
+
+  private onRenameCommit(id: string): void {
+    if (this.renamingId !== id) {
+      return;
+    }
+    this.renamingId = null;
+    const input = this.shadowRoot?.querySelector(`[data-layer-id="${id}"] input.layer-rename`);
+    const name = input instanceof HTMLInputElement ? input.value : "";
+    if (name.trim().length === 0) {
+      this.refreshLayers();
+      return;
+    }
+    if (this.engine?.renameLayer(id, name) === true) {
+      this.dirty = true;
+      this.statusMessage = "Layer renamed";
+    }
+    this.refreshLayers();
+  }
+
   private async createNew(): Promise<void> {
     const widthInput = this.shadowRoot?.getElementById("newWidth") as HTMLInputElement | null;
     const heightInput = this.shadowRoot?.getElementById("newHeight") as HTMLInputElement | null;
@@ -594,6 +902,7 @@ export class GnumarusShell extends LitElement {
     this.newWidth = Math.floor(width);
     this.newHeight = Math.floor(height);
     this.engine?.newProject(this.newWidth, this.newHeight);
+    this.refreshLayers();
     this.directoryHandle = null;
     this.projectName = "Untitled";
     this.dirty = true;
@@ -611,17 +920,40 @@ export class GnumarusShell extends LitElement {
       this.statusMessage = "Opening directory...";
       const dir = await pickProjectDirectory();
       const { project, cellBlobs } = await readProjectFiles(dir);
-      const firstLayer = project.layers[0];
-      const firstCell = firstLayer?.cells[0];
-      if (firstLayer === undefined || firstCell === undefined) {
-        throw new Error("Project has no cells.");
+      const inputs: Array<{
+        id: string;
+        name: string;
+        visible: boolean;
+        opacity: number;
+        width: number;
+        height: number;
+        buffer: Uint8ClampedArray;
+      }> = [];
+      for (const layer of project.layers) {
+        const cell = layer.cells[0];
+        if (cell === undefined) {
+          throw new Error(`Layer ${layer.id} has no cells.`);
+        }
+        const blob = cellBlobs.get(cell.file);
+        if (blob === undefined) {
+          throw new Error(`Missing cell file: ${cell.file}`);
+        }
+        const decoded = await decodePngToBuffer(blob);
+        if (decoded.width !== project.width || decoded.height !== project.height) {
+          throw new Error(`Cell size mismatch: ${cell.file}`);
+        }
+        inputs.push({
+          id: layer.id,
+          name: layer.name,
+          visible: layer.visible,
+          opacity: layer.opacity,
+          width: decoded.width,
+          height: decoded.height,
+          buffer: decoded.buffer,
+        });
       }
-      const blob = cellBlobs.get(firstCell.file);
-      if (blob === undefined) {
-        throw new Error(`Missing cell file: ${firstCell.file}`);
-      }
-      const decoded = await decodePngToBuffer(blob);
-      this.engine?.loadBuffer(decoded.width, decoded.height, decoded.buffer);
+      this.engine?.loadProject(inputs);
+      this.refreshLayers();
       this.directoryHandle = dir;
       this.projectName = dir.name;
       this.dirty = false;
@@ -644,11 +976,32 @@ export class GnumarusShell extends LitElement {
       this.statusMessage = "Saving...";
       const dir = this.directoryHandle ?? (await pickProjectDirectory());
       const size = this.engine.size;
-      const meta = createDefaultProject(size.width, size.height);
-      const blob = await encodeBufferToPngBlob(this.engine.pixelData, size.width, size.height);
+      const infos = this.engine.getLayers();
+      const pixels = this.engine.exportLayers();
+      const layersMeta: GnumarusLayerMeta[] = [];
       const cells = new Map<string, Blob>();
-      const cellFile = meta.layers[0]?.cells[0]?.file ?? "cells/layer0_frame0.png";
-      cells.set(cellFile, blob);
+      for (const info of infos) {
+        const rendered = pixels.find((entry) => entry.id === info.id);
+        if (rendered === undefined) {
+          throw new Error(`Missing pixels for layer ${info.id}`);
+        }
+        const file = cellFilePath(info.id, 0);
+        layersMeta.push({
+          id: info.id,
+          name: info.name,
+          visible: info.visible,
+          opacity: info.opacity,
+          cells: [{ frame: 0, file }],
+        });
+        cells.set(file, await encodeBufferToPngBlob(rendered.buffer, size.width, size.height));
+      }
+      const meta: GnumarusProjectMeta = {
+        app: GNUMARUS_APP_ID,
+        version: 1,
+        width: size.width,
+        height: size.height,
+        layers: layersMeta,
+      };
       await writeProjectFiles(dir, meta, cells);
       this.directoryHandle = dir;
       this.projectName = dir.name;

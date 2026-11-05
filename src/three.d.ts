@@ -18,6 +18,7 @@ declare module "three" {
 
   export class Scene {
     add(object: Mesh): void;
+    remove(object: Mesh): void;
   }
 
   export class OrthographicCamera {
@@ -66,6 +67,8 @@ declare module "three" {
       vertexShader: string;
       fragmentShader: string;
       side?: number;
+      transparent?: boolean;
+      depthWrite?: boolean;
     });
     dispose(): void;
   }
@@ -80,6 +83,8 @@ declare module "three" {
     readonly scale: Vector3;
     readonly position: Vector3;
     readonly rotation: Vector3;
+    renderOrder: number;
+    visible: boolean;
     constructor(geometry: PlaneGeometry, material: MeshBasicMaterial | ShaderMaterial);
   }
 

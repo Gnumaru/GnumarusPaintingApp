@@ -32,6 +32,78 @@ export interface GnumarusEngineStats {
 
 export type GnumarusCanvasTool = "pencil" | "loupe";
 
+export interface GnumarusLayerInfo {
+  id: string;
+  name: string;
+  visible: boolean;
+  opacity: number;
+}
+
+export interface GnumarusLayerPixels {
+  id: string;
+  width: number;
+  height: number;
+  buffer: Uint8ClampedArray;
+}
+
+interface GnumarusLayer extends GnumarusLayerInfo {
+  buffer: Uint8ClampedArray;
+  texture: THREE.DataTexture;
+  material: THREE.ShaderMaterial;
+  plane: THREE.Mesh;
+}
+
+export interface GnumarusProjectLayerInput {
+  id: string;
+  name: string;
+  visible: boolean;
+  opacity: number;
+  width: number;
+  height: number;
+  buffer: Uint8ClampedArray;
+}
+
+const LAYER_VERTEX_SHADER = [
+  "varying vec2 vUv;",
+  "void main() {",
+  "  vUv = uv;",
+  "  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);",
+  "}",
+].join("\n");
+
+const CHECKER_FRAGMENT_SHADER = [
+  "precision mediump float;",
+  "varying vec2 vUv;",
+  "uniform float uImageW;",
+  "uniform float uImageH;",
+  "uniform float uMode;",
+  "uniform float uSizeX;",
+  "uniform float uSizeY;",
+  "uniform float uPixelRatio;",
+  "uniform vec3 uColorA;",
+  "uniform vec3 uColorB;",
+  "void main() {",
+  "  vec2 cell = vec2(max(uSizeX, 1.0), max(uSizeY, 1.0));",
+  "  vec2 grid = uMode < 0.5",
+  "    ? floor(vec2(vUv.x * uImageW, vUv.y * uImageH) / cell)",
+  "    : floor(gl_FragCoord.xy / max(cell * uPixelRatio, vec2(1.0)));",
+  "  float c = mod(grid.x + grid.y, 2.0);",
+  "  vec3 check = mix(uColorA, uColorB, c);",
+  "  gl_FragColor = vec4(check, 1.0);",
+  "}",
+].join("\n");
+
+const LAYER_FRAGMENT_SHADER = [
+  "precision mediump float;",
+  "varying vec2 vUv;",
+  "uniform sampler2D uMap;",
+  "uniform float uOpacity;",
+  "void main() {",
+  "  vec4 tex = texture2D(uMap, vUv);",
+  "  gl_FragColor = vec4(tex.rgb, tex.a * uOpacity);",
+  "}",
+].join("\n");
+
 export interface GnumarusEngineOptions {
   onStats: (stats: GnumarusEngineStats) => void;
   onPixelsChanged: () => void;
@@ -60,11 +132,13 @@ export class GnumarusCanvasEngine {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene: THREE.Scene;
   private readonly camera: THREE.OrthographicCamera;
-  private readonly texture: THREE.DataTexture;
-  private readonly material: THREE.ShaderMaterial;
-  private readonly plane: THREE.Mesh;
+  private readonly sharedGeometry: THREE.PlaneGeometry;
+  private readonly backgroundMaterial: THREE.ShaderMaterial;
+  private readonly backgroundPlane: THREE.Mesh;
   private readonly resizeObserver: ResizeObserver;
-  private buffer: Uint8ClampedArray;
+  private layers: GnumarusLayer[] = [];
+  private activeLayerId = "";
+  private layerCounter = 1;
   private imageWidth: number;
   private imageHeight: number;
   private zoom: number;
@@ -83,6 +157,7 @@ export class GnumarusCanvasEngine {
   private panning = false;
   private spaceDown = false;
   private strokeBase: Uint8ClampedArray | null = null;
+  private strokeLayerId: string | null = null;
   private readonly history = new GnumarusHistory(100);
   private lastPixel: { x: number; y: number } | null = null;
   private cursor: { x: number; y: number } | null = null;
@@ -114,7 +189,6 @@ export class GnumarusCanvasEngine {
     this.imageWidth = 64;
     this.imageHeight = 64;
     this.zoom = 8;
-    this.buffer = createPixelBuffer(this.imageWidth, this.imageHeight);
 
     let renderer: THREE.WebGLRenderer;
     try {
@@ -145,16 +219,9 @@ export class GnumarusCanvasEngine {
     this.camera.position.set(0, 0, 1);
     this.camera.lookAt(0, 0, 0);
 
-    this.texture = new THREE.DataTexture(this.buffer, this.imageWidth, this.imageHeight);
-    this.texture.magFilter = THREE.NearestFilter;
-    this.texture.minFilter = THREE.NearestFilter;
-    this.texture.generateMipmaps = false;
-    this.texture.flipY = true;
-    this.texture.needsUpdate = true;
-
-    this.material = new THREE.ShaderMaterial({
+    this.sharedGeometry = new THREE.PlaneGeometry(1, 1);
+    this.backgroundMaterial = new THREE.ShaderMaterial({
       uniforms: {
-        uMap: { value: this.texture },
         uImageW: { value: this.imageWidth },
         uImageH: { value: this.imageHeight },
         uMode: { value: this.checkerMode === "screen" ? 1 : 0 },
@@ -164,41 +231,18 @@ export class GnumarusCanvasEngine {
         uColorA: { value: this.checkerColorAVec },
         uColorB: { value: this.checkerColorBVec },
       },
-      vertexShader: [
-        "varying vec2 vUv;",
-        "void main() {",
-        "  vUv = uv;",
-        "  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);",
-        "}",
-      ].join("\n"),
-      fragmentShader: [
-        "precision mediump float;",
-        "varying vec2 vUv;",
-        "uniform sampler2D uMap;",
-        "uniform float uImageW;",
-        "uniform float uImageH;",
-        "uniform float uMode;",
-        "uniform float uSizeX;",
-        "uniform float uSizeY;",
-        "uniform float uPixelRatio;",
-        "uniform vec3 uColorA;",
-        "uniform vec3 uColorB;",
-        "void main() {",
-        "  vec4 tex = texture2D(uMap, vUv);",
-        "  vec2 cell = vec2(max(uSizeX, 1.0), max(uSizeY, 1.0));",
-        "  vec2 grid = uMode < 0.5",
-        "    ? floor(vec2(vUv.x * uImageW, vUv.y * uImageH) / cell)",
-        "    : floor(gl_FragCoord.xy / max(cell * uPixelRatio, vec2(1.0)));",
-        "  float c = mod(grid.x + grid.y, 2.0);",
-        "  vec3 check = mix(uColorA, uColorB, c);",
-        "  vec3 rgb = mix(check, tex.rgb, tex.a);",
-        "  gl_FragColor = vec4(rgb, 1.0);",
-        "}",
-      ].join("\n"),
+      vertexShader: LAYER_VERTEX_SHADER,
+      fragmentShader: CHECKER_FRAGMENT_SHADER,
       side: THREE.DoubleSide,
     });
-    this.plane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.material);
-    this.scene.add(this.plane);
+    this.backgroundPlane = new THREE.Mesh(this.sharedGeometry, this.backgroundMaterial);
+    this.backgroundPlane.position.set(0, 0, -0.02);
+    this.backgroundPlane.renderOrder = -1;
+    this.scene.add(this.backgroundPlane);
+    const first = this.createLayerInternal("layer0", "Layer 0", true, 1, createPixelBuffer(64, 64));
+    this.layers.push(first);
+    this.activeLayerId = first.id;
+    this.layerCounter = 1;
 
     this.resizeObserver = new ResizeObserver(() => this.layout());
     this.resizeObserver.observe(container);
@@ -215,13 +259,243 @@ export class GnumarusCanvasEngine {
     return this.zoom;
   }
 
-  get pixelData(): Uint8ClampedArray {
-    return this.buffer;
+  get activeLayerPixels(): Uint8ClampedArray | null {
+    return this.activeLayer()?.buffer ?? null;
+  }
+
+  private createLayerInternal(
+    id: string,
+    name: string,
+    visible: boolean,
+    opacity: number,
+    buffer: Uint8ClampedArray,
+  ): GnumarusLayer {
+    const texture = new THREE.DataTexture(buffer, this.imageWidth, this.imageHeight);
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.NearestFilter;
+    texture.generateMipmaps = false;
+    texture.flipY = true;
+    texture.needsUpdate = true;
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        uMap: { value: texture },
+        uOpacity: { value: opacity },
+      },
+      vertexShader: LAYER_VERTEX_SHADER,
+      fragmentShader: LAYER_FRAGMENT_SHADER,
+      side: THREE.DoubleSide,
+      transparent: true,
+      depthWrite: false,
+    });
+    const plane = new THREE.Mesh(this.sharedGeometry, material);
+    const stackIndex = this.layers.length;
+    plane.position.set(0, 0, stackIndex * 0.01);
+    plane.renderOrder = stackIndex;
+    plane.visible = visible;
+    this.scene.add(plane);
+    return { id, name, visible, opacity, buffer, texture, material, plane };
+  }
+
+  private refreshLayerStacking(): void {
+    for (let i = 0; i < this.layers.length; i += 1) {
+      const layer = this.layers[i];
+      if (layer === undefined) {
+        continue;
+      }
+      layer.plane.renderOrder = i;
+    }
+    this.layoutSceneTransforms();
+  }
+
+  private findLayer(id: string): GnumarusLayer | null {
+    for (const layer of this.layers) {
+      if (layer.id === id) {
+        return layer;
+      }
+    }
+    return null;
+  }
+
+  private activeLayer(): GnumarusLayer | null {
+    return this.findLayer(this.activeLayerId);
+  }
+
+  getLayers(): GnumarusLayerInfo[] {
+    return this.layers.map((layer) => ({
+      id: layer.id,
+      name: layer.name,
+      visible: layer.visible,
+      opacity: layer.opacity,
+    }));
+  }
+
+  getActiveLayerId(): string {
+    return this.activeLayerId;
+  }
+
+  setActiveLayer(id: string): boolean {
+    if (this.findLayer(id) === null) {
+      return false;
+    }
+    this.activeLayerId = id;
+    this.emitStats();
+    return true;
+  }
+
+  addLayer(): string {
+    const id = `layer${this.layerCounter}`;
+    const name = `Layer ${this.layerCounter}`;
+    this.layerCounter += 1;
+    const layer = this.createLayerInternal(id, name, true, 1, createPixelBuffer(this.imageWidth, this.imageHeight));
+    this.layers.push(layer);
+    this.activeLayerId = id;
+    this.refreshLayerStacking();
+    this.render();
+    this.emitStats();
+    return id;
+  }
+
+  removeLayer(id: string): boolean {
+    if (this.layers.length <= 1) {
+      return false;
+    }
+    const index = this.layers.findIndex((layer) => layer.id === id);
+    if (index < 0) {
+      return false;
+    }
+    const [removed] = this.layers.splice(index, 1);
+    if (removed !== undefined) {
+      this.scene.remove(removed.plane);
+      removed.material.dispose();
+      removed.texture.dispose();
+    }
+    if (this.activeLayerId === id) {
+      const next = this.layers[Math.min(index, this.layers.length - 1)];
+      if (next !== undefined) {
+        this.activeLayerId = next.id;
+      }
+    }
+    this.refreshLayerStacking();
+    this.render();
+    this.emitStats();
+    return true;
+  }
+
+  renameLayer(id: string, name: string): boolean {
+    const layer = this.findLayer(id);
+    const trimmed = name.trim().slice(0, 64);
+    if (layer === null || trimmed.length === 0) {
+      return false;
+    }
+    layer.name = trimmed;
+    this.emitStats();
+    return true;
+  }
+
+  setLayerVisible(id: string, visible: boolean): boolean {
+    const layer = this.findLayer(id);
+    if (layer === null) {
+      return false;
+    }
+    layer.visible = visible;
+    layer.plane.visible = visible;
+    this.render();
+    this.emitStats();
+    return true;
+  }
+
+  setLayerOpacity(id: string, opacity: number): boolean {
+    const layer = this.findLayer(id);
+    if (layer === null) {
+      return false;
+    }
+    const clamped = Math.min(1, Math.max(0, opacity));
+    layer.opacity = clamped;
+    layer.material.uniforms["uOpacity"]!.value = clamped;
+    this.render();
+    return true;
+  }
+
+  /** Move a layer visually up (toward the top) or down. Returns false at the ends. */
+  moveLayer(id: string, direction: "up" | "down"): boolean {
+    const index = this.layers.findIndex((layer) => layer.id === id);
+    const target = direction === "up" ? index + 1 : index - 1;
+    if (index < 0 || target < 0 || target >= this.layers.length) {
+      return false;
+    }
+    const current = this.layers[index];
+    const other = this.layers[target];
+    if (current === undefined || other === undefined) {
+      return false;
+    }
+    this.layers[target] = current;
+    this.layers[index] = other;
+    this.refreshLayerStacking();
+    this.render();
+    this.emitStats();
+    return true;
+  }
+
+  exportLayers(): GnumarusLayerPixels[] {
+    return this.layers.map((layer) => ({
+      id: layer.id,
+      width: this.imageWidth,
+      height: this.imageHeight,
+      buffer: layer.buffer,
+    }));
+  }
+
+  loadProject(inputs: GnumarusProjectLayerInput[]): void {
+    if (inputs.length === 0) {
+      throw new Error("Project has no layers.");
+    }
+    const first = inputs[0];
+    if (first === undefined) {
+      throw new Error("Project has no layers.");
+    }
+    for (const input of inputs) {
+      if (input.width !== first.width || input.height !== first.height) {
+        throw new Error(`Layer size mismatch: ${input.id}`);
+      }
+    }
+    this.imageWidth = first.width;
+    this.imageHeight = first.height;
+    for (const layer of this.layers) {
+      this.scene.remove(layer.plane);
+      layer.material.dispose();
+      layer.texture.dispose();
+    }
+    this.layers = [];
+    let maxSuffix = 0;
+    for (const input of inputs) {
+      const match = /^layer(\d+)$/.exec(input.id);
+      if (match !== null && match[1] !== undefined) {
+        maxSuffix = Math.max(maxSuffix, Number.parseInt(match[1], 10) + 1);
+      }
+      const copy = new Uint8ClampedArray(input.width * input.height * 4);
+      copy.set(input.buffer.subarray(0, input.width * input.height * 4));
+      this.layers.push(
+        this.createLayerInternal(input.id, input.name, input.visible, input.opacity, copy),
+      );
+    }
+    const top = this.layers[this.layers.length - 1];
+    if (top !== undefined) {
+      this.activeLayerId = top.id;
+    }
+    this.layerCounter = Math.max(maxSuffix, this.layers.length);
+    this.history.clear();
+    this.strokeBase = null;
+    this.strokeLayerId = null;
+    this.syncImageUniforms();
+    this.refreshLayerStacking();
+    this.resetView();
+    this.render();
+    this.emitStats();
   }
 
   private syncImageUniforms(): void {
-    const w = this.material.uniforms["uImageW"];
-    const h = this.material.uniforms["uImageH"];
+    const w = this.backgroundMaterial.uniforms["uImageW"];
+    const h = this.backgroundMaterial.uniforms["uImageH"];
     if (w !== undefined) {
       w.value = this.imageWidth;
     }
@@ -233,28 +507,21 @@ export class GnumarusCanvasEngine {
   newProject(width: number, height: number): void {
     this.imageWidth = width;
     this.imageHeight = height;
-    this.buffer = createPixelBuffer(width, height);
+    for (const layer of this.layers) {
+      this.scene.remove(layer.plane);
+      layer.material.dispose();
+      layer.texture.dispose();
+    }
+    this.layers = [];
+    const first = this.createLayerInternal("layer0", "Layer 0", true, 1, createPixelBuffer(width, height));
+    this.layers.push(first);
+    this.activeLayerId = first.id;
+    this.layerCounter = 1;
     this.history.clear();
     this.strokeBase = null;
-    this.texture.image = { data: this.buffer, width, height };
-    this.texture.needsUpdate = true;
+    this.strokeLayerId = null;
     this.syncImageUniforms();
-    this.resetView();
-    this.render();
-    this.emitStats();
-  }
-
-  loadBuffer(width: number, height: number, data: Uint8ClampedArray): void {
-    const copy = new Uint8ClampedArray(width * height * 4);
-    copy.set(data.subarray(0, width * height * 4));
-    this.imageWidth = width;
-    this.imageHeight = height;
-    this.buffer = copy;
-    this.history.clear();
-    this.strokeBase = null;
-    this.texture.image = { data: this.buffer, width, height };
-    this.texture.needsUpdate = true;
-    this.syncImageUniforms();
+    this.refreshLayerStacking();
     this.resetView();
     this.render();
     this.emitStats();
@@ -268,8 +535,17 @@ export class GnumarusCanvasEngine {
   }
 
   clear(): void {
-    clearPixelBuffer(this.buffer);
-    this.texture.needsUpdate = true;
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return;
+    }
+    const base = layer.buffer.slice();
+    clearPixelBuffer(layer.buffer);
+    const diff = computeImageDiff(base, layer.buffer, this.imageWidth, this.imageHeight);
+    if (diff !== null) {
+      this.history.push({ layerId: layer.id, diff });
+    }
+    layer.texture.needsUpdate = true;
     this.render();
     this.onPixelsChanged();
     this.emitStats();
@@ -331,10 +607,11 @@ export class GnumarusCanvasEngine {
   }
 
   undo(): boolean {
-    if (!this.history.undo(this.buffer, this.imageWidth)) {
+    const applied = this.history.undo((layerId) => this.historyLayerFor(layerId));
+    if (!applied) {
       return false;
     }
-    this.texture.needsUpdate = true;
+    this.markLayersDirty();
     this.render();
     this.onPixelsChanged();
     this.emitStats();
@@ -342,14 +619,29 @@ export class GnumarusCanvasEngine {
   }
 
   redo(): boolean {
-    if (!this.history.redo(this.buffer, this.imageWidth)) {
+    const applied = this.history.redo((layerId) => this.historyLayerFor(layerId));
+    if (!applied) {
       return false;
     }
-    this.texture.needsUpdate = true;
+    this.markLayersDirty();
     this.render();
     this.onPixelsChanged();
     this.emitStats();
     return true;
+  }
+
+  private historyLayerFor(layerId: string): { buffer: Uint8ClampedArray; width: number } | null {
+    const layer = this.findLayer(layerId);
+    if (layer === null) {
+      return null;
+    }
+    return { buffer: layer.buffer, width: this.imageWidth };
+  }
+
+  private markLayersDirty(): void {
+    for (const layer of this.layers) {
+      layer.texture.needsUpdate = true;
+    }
   }
 
   applyCheckerSettings(settings: GnumarusCheckerSettings): void {
@@ -366,9 +658,9 @@ export class GnumarusCanvasEngine {
       this.checkerColorB = settings.colorB;
       this.checkerColorBVec.set(colorB.r / 255, colorB.g / 255, colorB.b / 255);
     }
-    this.material.uniforms["uMode"]!.value = this.checkerMode === "screen" ? 1 : 0;
-    this.material.uniforms["uSizeX"]!.value = this.checkerSizeX;
-    this.material.uniforms["uSizeY"]!.value = this.checkerSizeY;
+    this.backgroundMaterial.uniforms["uMode"]!.value = this.checkerMode === "screen" ? 1 : 0;
+    this.backgroundMaterial.uniforms["uSizeX"]!.value = this.checkerSizeX;
+    this.backgroundMaterial.uniforms["uSizeY"]!.value = this.checkerSizeY;
     this.render();
   }
 
@@ -411,9 +703,15 @@ export class GnumarusCanvasEngine {
     }
     this.disposed = true;
     this.resizeObserver.disconnect();
-    this.plane.geometry.dispose();
-    this.material.dispose();
-    this.texture.dispose();
+    for (const layer of this.layers) {
+      this.scene.remove(layer.plane);
+      layer.material.dispose();
+      layer.texture.dispose();
+    }
+    this.layers = [];
+    this.scene.remove(this.backgroundPlane);
+    this.backgroundMaterial.dispose();
+    this.sharedGeometry.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
@@ -464,12 +762,17 @@ export class GnumarusCanvasEngine {
       if (pixel === null) {
         return;
       }
+      const layer = this.activeLayer();
+      if (layer === null) {
+        return;
+      }
       this.drawing = true;
       canvas.setPointerCapture(event.pointerId);
       this.lastPixel = pixel;
-      this.strokeBase = this.buffer.slice();
-      setPixel(this.buffer, this.imageWidth, this.imageHeight, pixel.x, pixel.y, this.color);
-      this.texture.needsUpdate = true;
+      this.strokeBase = layer.buffer.slice();
+      this.strokeLayerId = layer.id;
+      setPixel(layer.buffer, this.imageWidth, this.imageHeight, pixel.x, pixel.y, this.color);
+      layer.texture.needsUpdate = true;
       this.render();
       this.onPixelsChanged();
       this.emitStats();
@@ -507,8 +810,12 @@ export class GnumarusCanvasEngine {
         return;
       }
       if (this.drawing && this.lastPixel !== null && pixel !== null) {
+        const layer = this.activeLayer();
+        if (layer === null) {
+          return;
+        }
         drawPixelLine(
-          this.buffer,
+          layer.buffer,
           this.imageWidth,
           this.imageHeight,
           this.lastPixel.x,
@@ -518,19 +825,23 @@ export class GnumarusCanvasEngine {
           this.color,
         );
         this.lastPixel = pixel;
-        this.texture.needsUpdate = true;
+        layer.texture.needsUpdate = true;
         this.render();
         this.onPixelsChanged();
       }
       this.emitStats();
     });
     const endStroke = (): void => {
-      if (this.strokeBase !== null) {
-        const diff = computeImageDiff(this.strokeBase, this.buffer, this.imageWidth, this.imageHeight);
-        this.strokeBase = null;
-        if (diff !== null) {
-          this.history.push(diff);
+      if (this.strokeBase !== null && this.strokeLayerId !== null) {
+        const layer = this.findLayer(this.strokeLayerId);
+        if (layer !== null) {
+          const diff = computeImageDiff(this.strokeBase, layer.buffer, this.imageWidth, this.imageHeight);
+          if (diff !== null) {
+            this.history.push({ layerId: layer.id, diff });
+          }
         }
+        this.strokeBase = null;
+        this.strokeLayerId = null;
       }
       this.drawing = false;
       this.panning = false;
@@ -647,7 +958,7 @@ export class GnumarusCanvasEngine {
     const height = Math.max(1, Math.floor(rect.height));
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     this.renderer.setPixelRatio(dpr);
-    this.material.uniforms["uPixelRatio"]!.value = dpr;
+    this.backgroundMaterial.uniforms["uPixelRatio"]!.value = dpr;
     this.renderer.setSize(width, height, false);
     this.layoutScene();
     this.render();
@@ -662,13 +973,24 @@ export class GnumarusCanvasEngine {
     this.camera.top = height / 2;
     this.camera.bottom = -height / 2;
     this.camera.updateProjectionMatrix();
-    this.plane.scale.set(
-      this.imageWidth * this.zoom * (this.flipX ? -1 : 1),
-      this.imageHeight * this.zoom * (this.flipY ? -1 : 1),
-      1,
-    );
-    this.plane.rotation.z = -this.rotation;
-    this.plane.position.set(this.panX, -this.panY, 0);
+    this.layoutSceneTransforms();
+  }
+
+  private layoutSceneTransforms(): void {
+    const flipX = this.flipX ? -1 : 1;
+    const flipY = this.flipY ? -1 : 1;
+    for (let i = 0; i < this.layers.length; i += 1) {
+      const layer = this.layers[i];
+      if (layer === undefined) {
+        continue;
+      }
+      layer.plane.scale.set(this.imageWidth * this.zoom * flipX, this.imageHeight * this.zoom * flipY, 1);
+      layer.plane.rotation.z = -this.rotation;
+      layer.plane.position.set(this.panX, -this.panY, i * 0.01);
+    }
+    this.backgroundPlane.scale.set(this.imageWidth * this.zoom * flipX, this.imageHeight * this.zoom * flipY, 1);
+    this.backgroundPlane.rotation.z = -this.rotation;
+    this.backgroundPlane.position.set(this.panX, -this.panY, -0.02);
   }
 
   private render(): void {
@@ -694,6 +1016,10 @@ export class GnumarusCanvasEngine {
   }
 
   readPixel(x: number, y: number): GnumarusRgba | null {
-    return getPixel(this.buffer, this.imageWidth, this.imageHeight, x, y);
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return null;
+    }
+    return getPixel(layer.buffer, this.imageWidth, this.imageHeight, x, y);
   }
 }

@@ -74,17 +74,27 @@ export function applyImageDiff(
   }
 }
 
+export interface GnumarusHistoryEntry {
+  layerId: string;
+  diff: GnumarusImageDiff;
+}
+
+export interface GnumarusHistoryLayer {
+  buffer: Uint8ClampedArray;
+  width: number;
+}
+
 export class GnumarusHistory {
-  private readonly undoStack: GnumarusImageDiff[] = [];
-  private readonly redoStack: GnumarusImageDiff[] = [];
+  private readonly undoStack: GnumarusHistoryEntry[] = [];
+  private readonly redoStack: GnumarusHistoryEntry[] = [];
   private readonly maxEntries: number;
 
   constructor(maxEntries = 100) {
     this.maxEntries = Math.max(1, Math.floor(maxEntries));
   }
 
-  push(diff: GnumarusImageDiff): void {
-    this.undoStack.push(diff);
+  push(entry: GnumarusHistoryEntry): void {
+    this.undoStack.push(entry);
     while (this.undoStack.length > this.maxEntries) {
       this.undoStack.shift();
     }
@@ -99,24 +109,36 @@ export class GnumarusHistory {
     return this.redoStack.length > 0;
   }
 
-  undo(buffer: Uint8ClampedArray, width: number): boolean {
-    const diff = this.undoStack.pop();
-    if (diff === undefined) {
-      return false;
+  undo(findLayer: (layerId: string) => GnumarusHistoryLayer | null): boolean {
+    for (;;) {
+      const entry = this.undoStack.pop();
+      if (entry === undefined) {
+        return false;
+      }
+      const layer = findLayer(entry.layerId);
+      if (layer === null) {
+        continue;
+      }
+      applyImageDiff(layer.buffer, layer.width, entry.diff, "before");
+      this.redoStack.push(entry);
+      return true;
     }
-    applyImageDiff(buffer, width, diff, "before");
-    this.redoStack.push(diff);
-    return true;
   }
 
-  redo(buffer: Uint8ClampedArray, width: number): boolean {
-    const diff = this.redoStack.pop();
-    if (diff === undefined) {
-      return false;
+  redo(findLayer: (layerId: string) => GnumarusHistoryLayer | null): boolean {
+    for (;;) {
+      const entry = this.redoStack.pop();
+      if (entry === undefined) {
+        return false;
+      }
+      const layer = findLayer(entry.layerId);
+      if (layer === null) {
+        continue;
+      }
+      applyImageDiff(layer.buffer, layer.width, entry.diff, "after");
+      this.undoStack.push(entry);
+      return true;
     }
-    applyImageDiff(buffer, width, diff, "after");
-    this.undoStack.push(diff);
-    return true;
   }
 
   clear(): void {
