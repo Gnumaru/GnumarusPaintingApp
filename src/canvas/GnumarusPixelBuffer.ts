@@ -139,6 +139,61 @@ export function resizePixelBuffer(
   return next;
 }
 
+export interface GnumarusAlphaBoundingBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Find the smallest axis-aligned box containing every pixel whose alpha is
+ * strictly greater than `threshold`. Returns null when no pixel passes
+ * (fully transparent under the threshold). The box edges are tight: each
+ * border row and column holds at least one passing pixel.
+ */
+export function findAlphaBoundingBox(
+  buffer: Uint8ClampedArray,
+  width: number,
+  height: number,
+  threshold: number,
+): GnumarusAlphaBoundingBox | null {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) {
+    return null;
+  }
+  if (buffer.length < width * height * 4) {
+    return null;
+  }
+  const limit = Math.min(254, Math.max(0, Math.floor(threshold)));
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y += 1) {
+    const row = y * width * 4;
+    for (let x = 0; x < width; x += 1) {
+      if (buffer[row + x * 4 + 3] > limit) {
+        if (x < minX) {
+          minX = x;
+        }
+        if (x > maxX) {
+          maxX = x;
+        }
+        if (y < minY) {
+          minY = y;
+        }
+        if (y > maxY) {
+          maxY = y;
+        }
+      }
+    }
+  }
+  if (maxX < 0) {
+    return null;
+  }
+  return { left: minX, top: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+}
+
 export function clearPixelBuffer(buffer: Uint8ClampedArray, locked: GnumarusChannelLock | undefined = undefined): void {
   if (locked === undefined || areAllChannelsUnlocked(locked)) {
     buffer.fill(0);

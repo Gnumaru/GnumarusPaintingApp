@@ -12,6 +12,7 @@ import {
   drawCubicBezierCoverage,
   drawLineSegment,
   drawPixelLine,
+  findAlphaBoundingBox,
   floodFill,
   getPixel,
   parseBlendMode,
@@ -489,5 +490,22 @@ describe("GnumarusPixelBuffer", () => {
     const soft = getPixel(smooth, 8, 8, 3, 2);
     expect(soft).not.toBeNull();
     expect(soft!.r).toBeGreaterThan(0);
+  });
+
+  it("finds the tight alpha bounding box", () => {
+    const buffer = createPixelBuffer(8, 8);
+    expect(findAlphaBoundingBox(buffer, 8, 8, 0)).toBeNull();
+    setPixel(buffer, 8, 8, 3, 2, { r: 255, g: 0, b: 0, a: 255 }, undefined);
+    setPixel(buffer, 8, 8, 5, 6, { r: 0, g: 255, b: 0, a: 128 }, undefined);
+    expect(findAlphaBoundingBox(buffer, 8, 8, 0)).toEqual({ left: 3, top: 2, width: 3, height: 5 });
+    expect(findAlphaBoundingBox(buffer, 8, 8, 200)).toEqual({ left: 3, top: 2, width: 1, height: 1 });
+    expect(findAlphaBoundingBox(buffer, 8, 8, 254)).toEqual({ left: 3, top: 2, width: 1, height: 1 });
+    const faint = createPixelBuffer(4, 4);
+    setPixel(faint, 4, 4, 1, 1, { r: 255, g: 255, b: 255, a: 100 }, undefined);
+    expect(findAlphaBoundingBox(faint, 4, 4, 200)).toBeNull();
+    expect(findAlphaBoundingBox(faint, 4, 4, 99)).toEqual({ left: 1, top: 1, width: 1, height: 1 });
+    const full = createPixelBuffer(4, 4);
+    full.fill(255);
+    expect(findAlphaBoundingBox(full, 4, 4, 254)).toEqual({ left: 0, top: 0, width: 4, height: 4 });
   });
 });

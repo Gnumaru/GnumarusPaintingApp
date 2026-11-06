@@ -111,10 +111,28 @@ export interface GnumarusResizeRecord {
   afterBuffer: Uint8ClampedArray;
 }
 
+export interface GnumarusFitTransformRecord {
+  contentId: string;
+  before: GnumarusLayerTransform;
+  after: GnumarusLayerTransform;
+}
+
+export interface GnumarusFitRecord {
+  textureId: string;
+  beforeWidth: number;
+  beforeHeight: number;
+  beforeBuffer: Uint8ClampedArray;
+  afterWidth: number;
+  afterHeight: number;
+  afterBuffer: Uint8ClampedArray;
+  transforms: GnumarusFitTransformRecord[];
+}
+
 export type GnumarusHistoryEntry =
   | { type: "stroke"; layerId: string; diff: GnumarusImageDiff }
   | { type: "merge"; merge: GnumarusMergeRecord }
-  | { type: "resize"; resize: GnumarusResizeRecord };
+  | { type: "resize"; resize: GnumarusResizeRecord }
+  | { type: "fit"; fit: GnumarusFitRecord };
 
 export interface GnumarusHistoryLayer {
   buffer: Uint8ClampedArray;
@@ -150,6 +168,13 @@ export class GnumarusHistory {
     findLayer: (layerId: string) => GnumarusHistoryLayer | null,
     restoreLayer: (snapshot: GnumarusMergedLayerSnapshot) => void,
     applyResize?: (layerId: string, width: number, height: number, buffer: Uint8ClampedArray) => boolean,
+    applyFit?: (
+      textureId: string,
+      width: number,
+      height: number,
+      buffer: Uint8ClampedArray,
+      transforms: Array<{ contentId: string; transform: GnumarusLayerTransform }>,
+    ) => boolean,
   ): boolean {
     for (;;) {
       const entry = this.undoStack.pop();
@@ -181,6 +206,23 @@ export class GnumarusHistory {
         this.redoStack.push(entry);
         return true;
       }
+      if (entry.type === "fit") {
+        if (applyFit === undefined) {
+          continue;
+        }
+        const ok = applyFit(
+          entry.fit.textureId,
+          entry.fit.beforeWidth,
+          entry.fit.beforeHeight,
+          entry.fit.beforeBuffer,
+          entry.fit.transforms.map((record) => ({ contentId: record.contentId, transform: { ...record.before } })),
+        );
+        if (!ok) {
+          continue;
+        }
+        this.redoStack.push(entry);
+        return true;
+      }
       const lower = findLayer(entry.merge.lowerLayerId);
       if (lower === null) {
         continue;
@@ -198,6 +240,13 @@ export class GnumarusHistory {
     findLayer: (layerId: string) => GnumarusHistoryLayer | null,
     removeLayer: (layerId: string) => void,
     applyResize?: (layerId: string, width: number, height: number, buffer: Uint8ClampedArray) => boolean,
+    applyFit?: (
+      textureId: string,
+      width: number,
+      height: number,
+      buffer: Uint8ClampedArray,
+      transforms: Array<{ contentId: string; transform: GnumarusLayerTransform }>,
+    ) => boolean,
   ): boolean {
     for (;;) {
       const entry = this.redoStack.pop();
@@ -222,6 +271,23 @@ export class GnumarusHistory {
           entry.resize.afterWidth,
           entry.resize.afterHeight,
           entry.resize.afterBuffer,
+        );
+        if (!ok) {
+          continue;
+        }
+        this.undoStack.push(entry);
+        return true;
+      }
+      if (entry.type === "fit") {
+        if (applyFit === undefined) {
+          continue;
+        }
+        const ok = applyFit(
+          entry.fit.textureId,
+          entry.fit.afterWidth,
+          entry.fit.afterHeight,
+          entry.fit.afterBuffer,
+          entry.fit.transforms.map((record) => ({ contentId: record.contentId, transform: { ...record.after } })),
         );
         if (!ok) {
           continue;

@@ -129,3 +129,6 @@
 - [x] New layers start with empty cells (no auto content/texture association; paint or Select content modal materializes; owned Texture N kept for resize/save/undo)
 - [x] Unit tests (vitest) — 148 passed (no logic change to pure modules)
 - [x] E2E test (Playwright): previous 92 + new-layer empty cells (paint materializes + modal assignment) — 93 passed
+- [x] Fit texture to size in layer and cell context menus with alpha threshold modal, apparent-position-preserving crop, undo support
+- [x] Unit tests (vitest) — 154 passed (alpha bbox, crop transform shift, fit history undo/redo)
+- [x] E2E test (Playwright): previous 93 + fit via cell menu (crop + apparent position + undo/redo) and via layer menu (threshold clamp + no-ops + disabled on empty) — 95 passed

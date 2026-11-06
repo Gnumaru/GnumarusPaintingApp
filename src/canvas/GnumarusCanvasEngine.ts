@@ -9,6 +9,7 @@ import {
   drawCubicBezier,
   drawCubicBezierCoverage,
   drawLineSegment,
+  findAlphaBoundingBox,
   floodFill,
   getPixel,
   parseBrushShape,
@@ -220,6 +221,30 @@ export interface GnumarusProjectLayerInput {
   buffer: Uint8ClampedArray;
   transform: GnumarusLayerTransform;
   lockedChannels: GnumarusChannelLock;
+}
+
+/**
+ * Shift a cell content transform so its texture keeps the same apparent
+ * project position after the texture is cropped to `box` (a sub-rectangle
+ * of the old `oldWidth` x `oldHeight` buffer). Rotation and flips are
+ * preserved; only the center offset changes. The shift accounts for the
+ * content's own flips and rotation.
+ */
+export function shiftTransformForCrop(
+  transform: GnumarusLayerTransform,
+  oldWidth: number,
+  oldHeight: number,
+  box: { left: number; top: number; width: number; height: number },
+): GnumarusLayerTransform {
+  const shiftX = (box.left + (box.width - oldWidth) / 2) * (transform.flipX ? -1 : 1);
+  const shiftY = (box.top + (box.height - oldHeight) / 2) * (transform.flipY ? -1 : 1);
+  const cos = Math.cos(transform.rotation);
+  const sin = Math.sin(transform.rotation);
+  return {
+    ...transform,
+    x: transform.x + cos * shiftX - sin * shiftY,
+    y: transform.y + sin * shiftX + cos * shiftY,
+  };
 }
 
 const LAYER_VERTEX_SHADER = [
@@ -1043,6 +1068,19 @@ export class GnumarusCanvasEngine {
     return this.cells.get(animationCellKey(layerId, frame)) ?? null;
   }
 
+  /** Texture id of a cell's content, or null when the cell is empty, textureless or dangling. */
+  getCellTextureId(layerId: string, frame: number): string | null {
+    const contentId = this.cells.get(animationCellKey(layerId, frame));
+    if (contentId === undefined) {
+      return null;
+    }
+    const content = this.contents.get(contentId);
+    if (content === undefined || content.textureId === null) {
+      return null;
+    }
+    return this.textures.has(content.textureId) ? content.textureId : null;
+  }
+
   getAnimationMatrix(): GnumarusAnimationMatrixView {
     const rows: GnumarusMatrixRowView[] = [...this.layers].reverse().map((layer) => ({
       layerId: layer.id,
@@ -1833,6 +1871,95 @@ export class GnumarusCanvasEngine {
     this.onPixelsChanged();
     this.onLayersChanged?.();
     this.emitStats();
+    return true;
+  }
+
+  /**
+   * Crop a texture to the smallest box containing every pixel with alpha
+   * strictly greater than `threshold` (integer 0..254, clamped). Every cell
+   * content referencing the texture has its transform shifted so the
+   * remaining pixels keep the same apparent project position.
+   * Returns false for missing textures, fully transparent textures and
+   * already-tight textures (no history entry in those cases).
+   * Successful crops are undoable.
+   */
+  fitTextureToSize(textureId: string, threshold: number): boolean {
+    const entry = this.textures.get(textureId);
+    if (entry === undefined) {
+      return false;
+    }
+    const limit = Number.isFinite(threshold) ? Math.min(254, Math.max(0, Math.floor(threshold))) : 0;
+    const box = findAlphaBoundingBox(entry.buffer, entry.width, entry.height, limit);
+    if (box === null) {
+      return false;
+    }
+    if (box.left === 0 && box.top === 0 && box.width === entry.width && box.height === entry.height) {
+      return false;
+    }
+    const beforeWidth = entry.width;
+    const beforeHeight = entry.height;
+    const beforeBuffer = entry.buffer.slice();
+    const afterBuffer = new Uint8ClampedArray(box.width * box.height * 4);
+    for (let y = 0; y < box.height; y += 1) {
+      const src = ((box.top + y) * beforeWidth + box.left) * 4;
+      afterBuffer.set(entry.buffer.subarray(src, src + box.width * 4), y * box.width * 4);
+    }
+    const transforms = [...this.contents.values()]
+      .filter((content) => content.textureId === textureId)
+      .map((content) => ({
+        contentId: content.id,
+        before: { ...content.transform },
+        after: shiftTransformForCrop(content.transform, beforeWidth, beforeHeight, box),
+      }));
+    if (!this.setTexturePixels(textureId, box.width, box.height, afterBuffer)) {
+      return false;
+    }
+    for (const record of transforms) {
+      const content = this.contents.get(record.contentId);
+      if (content !== undefined) {
+        content.transform = { ...record.after };
+      }
+    }
+    this.history.push({
+      type: "fit",
+      fit: {
+        textureId,
+        beforeWidth,
+        beforeHeight,
+        beforeBuffer,
+        afterWidth: box.width,
+        afterHeight: box.height,
+        afterBuffer: afterBuffer.slice(),
+        transforms,
+      },
+    });
+    this.markTextureViewsDirty(textureId);
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return true;
+  }
+
+  private applyFitToSize(
+    textureId: string,
+    width: number,
+    height: number,
+    buffer: Uint8ClampedArray,
+    transforms: Array<{ contentId: string; transform: GnumarusLayerTransform }>,
+  ): boolean {
+    const copy = new Uint8ClampedArray(buffer);
+    if (!this.setTexturePixels(textureId, width, height, copy)) {
+      return false;
+    }
+    for (const item of transforms) {
+      const content = this.contents.get(item.contentId);
+      if (content !== undefined) {
+        content.transform = { ...item.transform };
+      }
+    }
     return true;
   }
 
@@ -3503,6 +3630,8 @@ export class GnumarusCanvasEngine {
       (layerId) => this.historyLayerFor(layerId),
       (snapshot) => this.insertLayerSnapshot(snapshot),
       (layerId, width, height, buffer) => this.applyLayerResize(layerId, width, height, buffer),
+      (textureId, width, height, buffer, transforms) =>
+        this.applyFitToSize(textureId, width, height, buffer, transforms),
     );
     if (!applied) {
       return false;
@@ -3523,6 +3652,8 @@ export class GnumarusCanvasEngine {
         this.removeLayerFull(layerId);
       },
       (layerId, width, height, buffer) => this.applyLayerResize(layerId, width, height, buffer),
+      (textureId, width, height, buffer, transforms) =>
+        this.applyFitToSize(textureId, width, height, buffer, transforms),
     );
     if (!applied) {
       return false;

@@ -814,6 +814,8 @@ export class GnumarusShell extends LitElement {
     matrixMenu: { type: Object },
     contentPickerTarget: { type: Object },
     texturePickerContentId: { type: String },
+    fitTextureTarget: { type: Object },
+    fitThreshold: { type: Number },
     checkerColorA: { type: String },
     checkerColorB: { type: String },
     defaultFrameDuration: { type: Number },
@@ -888,6 +890,8 @@ export class GnumarusShell extends LitElement {
     | null;
   declare contentPickerTarget: { layerId: string; frame: number } | null;
   declare texturePickerContentId: string | null;
+  declare fitTextureTarget: { textureId: string; textureName: string } | null;
+  declare fitThreshold: number;
   declare checkerColorA: string;
   declare checkerColorB: string;
   declare defaultFrameDuration: number;
@@ -965,6 +969,8 @@ export class GnumarusShell extends LitElement {
     this.matrixMenu = null;
     this.contentPickerTarget = null;
     this.texturePickerContentId = null;
+    this.fitTextureTarget = null;
+    this.fitThreshold = 0;
     this.checkerColorA = DEFAULT_CHECKER_SETTINGS.colorA;
     this.checkerColorB = DEFAULT_CHECKER_SETTINGS.colorB;
     this.defaultFrameDuration = DEFAULT_ANIMATION_FRAME_DURATION;
@@ -1444,6 +1450,17 @@ export class GnumarusShell extends LitElement {
                 >
                   Reset transform
                 </button>
+                <button
+                  ?disabled=${this.contextMenuLayerId === null ||
+                  this.engine?.getCellTextureId(this.contextMenuLayerId, this.engine.getCurrentFrame()) === null}
+                  @click=${(): void => {
+                    if (this.contextMenuLayerId !== null) {
+                      this.onOpenFitTextureFromLayer(this.contextMenuLayerId);
+                    }
+                  }}
+                >
+                  Fit texture to size
+                </button>
               </div>
             `
           : html``}
@@ -1482,6 +1499,18 @@ export class GnumarusShell extends LitElement {
         <div class="dialog-actions">
           <button @click=${(): void => this.closeResizeDialog()}>Cancel</button>
           <button @click=${(): void => this.confirmResize()}>Resize</button>
+        </div>
+      </dialog>
+      <dialog id="fitTextureDialog">
+        <h3>Fit texture to size</h3>
+        <p>Crops transparent borders on all four sides. Pixels with alpha up to the threshold count as empty.</p>
+        <label
+          >Alpha threshold
+          <input type="number" id="fitThreshold" min="0" max="254" step="1" .value=${String(this.fitThreshold)} />
+        </label>
+        <div class="dialog-actions">
+          <button @click=${(): void => this.closeFitTextureDialog()}>Cancel</button>
+          <button @click=${(): void => this.confirmFitTexture()}>OK</button>
         </div>
       </dialog>
       <dialog id="settingsDialog">
@@ -2137,15 +2166,19 @@ export class GnumarusShell extends LitElement {
         </div>
       `;
     }
-    const matrix = this.engine.getAnimationMatrix();
-    void matrix;
+    const menu = this.matrixMenu;
+    const cellTextureId =
+      menu.kind === "cell" ? this.engine.getCellTextureId(menu.layerId, menu.frame) : null;
     return html`
       <div class="context-blocker" @click=${(): void => this.closeMatrixMenu()} @contextmenu=${(event: Event): void => {
         event.preventDefault();
         this.closeMatrixMenu();
       }}></div>
-      <div class="context-menu" style="left: ${this.matrixMenu.x}px; top: ${this.matrixMenu.y}px;">
+      <div class="context-menu" style="left: ${menu.x}px; top: ${menu.y}px;">
         <button @click=${(): void => this.onOpenContentPicker()}>Select content</button>
+        <button ?disabled=${cellTextureId === null} @click=${(): void => this.onOpenFitTextureFromCell()}>
+          Fit texture to size
+        </button>
       </div>
     `;
   }
@@ -4234,6 +4267,78 @@ export class GnumarusShell extends LitElement {
     } else {
       this.statusMessage = "Layer transform reset failed";
     }
+  }
+
+  private fitTextureDisplayName(textureId: string): string {
+    const found = this.engine?.getAnimationMatrix().textures.find((entry) => entry.id === textureId);
+    return found?.name ?? textureId;
+  }
+
+  private onOpenFitTextureFromLayer(layerId: string): void {
+    if (this.engine === null) {
+      this.closeLayerMenu();
+      return;
+    }
+    const textureId = this.engine.getCellTextureId(layerId, this.engine.getCurrentFrame());
+    this.closeLayerMenu();
+    if (textureId === null) {
+      this.statusMessage = "Nothing to fit: the layer has no texture on this frame";
+      return;
+    }
+    this.openFitTextureDialog(textureId);
+  }
+
+  private onOpenFitTextureFromCell(): void {
+    const target = this.matrixCellTarget();
+    this.closeMatrixMenu();
+    if (target === null || this.engine === null) {
+      return;
+    }
+    const textureId = this.engine.getCellTextureId(target.layerId, target.frame);
+    if (textureId === null) {
+      this.statusMessage = "Nothing to fit: the cell has no texture";
+      return;
+    }
+    this.openFitTextureDialog(textureId);
+  }
+
+  private openFitTextureDialog(textureId: string): void {
+    if (this.engine === null) {
+      return;
+    }
+    this.fitTextureTarget = { textureId, textureName: this.fitTextureDisplayName(textureId) };
+    this.fitThreshold = 0;
+    this.requestUpdate();
+    const dialog = this.shadowRoot?.getElementById("fitTextureDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+  }
+
+  private closeFitTextureDialog(): void {
+    const dialog = this.shadowRoot?.getElementById("fitTextureDialog") as HTMLDialogElement | null;
+    dialog?.close();
+    this.fitTextureTarget = null;
+  }
+
+  private confirmFitTexture(): void {
+    const target = this.fitTextureTarget;
+    if (target === null || this.engine === null) {
+      this.closeFitTextureDialog();
+      return;
+    }
+    const input = this.shadowRoot?.getElementById("fitThreshold") as HTMLInputElement | null;
+    const raw = Number(input?.value ?? "0");
+    const threshold = Number.isFinite(raw) ? Math.min(254, Math.max(0, Math.floor(raw))) : 0;
+    this.fitThreshold = threshold;
+    if (this.engine.fitTextureToSize(target.textureId, threshold)) {
+      this.refreshLayers();
+      this.dirty = true;
+      const fitted = this.engine.exportTextures().find((entry) => entry.id === target.textureId);
+      this.statusMessage =
+        fitted === undefined ? "Texture fitted to size" : `Texture fitted to ${fitted.width} x ${fitted.height}`;
+    } else {
+      this.statusMessage = "Nothing to fit: texture is empty or already fits";
+    }
+    this.closeFitTextureDialog();
   }
 
   private onRenameCommit(id: string): void {

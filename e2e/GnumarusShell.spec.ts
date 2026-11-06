@@ -1282,6 +1282,60 @@ test("new layers start with empty cells until painting or content assignment", a
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
 });
 
+test("fit texture to size crops transparent borders and keeps apparent position", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  const cell = matrix.locator('[data-testid="anim-cell"][data-matrix-layer="layer0"][data-matrix-frame="0"]');
+  await cell.click({ button: "right" });
+  await page.getByRole("button", { name: "Fit texture to size" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#fitTextureDialog");
+  await expect(dialog).toBeVisible();
+  const threshold = dialog.locator("input#fitThreshold");
+  await expect(threshold).toHaveValue("0");
+  await threshold.fill("0");
+  await dialog.getByRole("button", { name: "OK" }).click();
+  await expect(page.locator('gnumarus-shell [data-layer-id="layer0"]')).toContainText("1×1");
+  expect(await readPixel(page, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  expect(await readPixel(page, 0, 0)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  await page.keyboard.press("Control+z");
+  await expect(page.locator('gnumarus-shell [data-layer-id="layer0"]')).toContainText("64×64");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  await page.keyboard.press("Control+y");
+  await expect(page.locator('gnumarus-shell [data-layer-id="layer0"]')).toContainText("1×1");
+  expect(await readPixel(page, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+});
+
+test("fit texture to size from the layer menu honors the threshold and no-ops", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
+  const row = page.locator('gnumarus-shell [data-layer-id="layer0"]');
+  await row.click({ button: "right" });
+  await page.getByRole("button", { name: "Fit texture to size" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#fitTextureDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator("input#fitThreshold").fill("999");
+  await dialog.getByRole("button", { name: "OK" }).click();
+  await expect(row).toContainText("1×1");
+  await row.click({ button: "right" });
+  await page.getByRole("button", { name: "Fit texture to size" }).click();
+  await expect(page.locator("gnumarus-shell dialog#fitTextureDialog")).toBeVisible();
+  await page.locator("gnumarus-shell dialog#fitTextureDialog").getByRole("button", { name: "OK" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Nothing to fit");
+  await page.getByRole("button", { name: "Add layer" }).click();
+  const emptyRow = page.locator('gnumarus-shell [data-layer-id="layer1"]');
+  await emptyRow.click({ button: "right" });
+  await expect(page.getByRole("button", { name: "Fit texture to size" })).toBeDisabled();
+  await page.keyboard.press("Escape");
+});
+
 test("cell context menu opens adjacent to the clicked cell and inside the viewport", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

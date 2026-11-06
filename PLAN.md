@@ -207,3 +207,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - `insertLayerAt` no longer creates a shared content or associates cells: every cell of a new layer starts empty (like new frames), keeping only the owned `Texture N` entry so resize/save/undo keep working.
 - Painting or transforming an empty cell materializes content plus a `texN` texture on demand via `ensureCellContent`; assigning via the `Select content` modal associates existing or new content.
 - Initial project, legacy load and merge-undo paths still create/restore their contents as before.
+## 37. Fit texture to size (implemented)
+- New `Fit texture to size` item in the layer context menu (fits the layer's texture at the current frame) and in the cell context menu (fits that cell's content texture); disabled when the target has no texture.
+- Clicking opens a modal with an integer field 0..254 plus `Cancel` and `OK`. On `OK` the texture is cropped on all four sides until the border rows/columns contain at least one pixel with alpha strictly greater than the parameter; fully transparent textures and already-tight textures are no-ops with a status message.
+- Every cell content referencing the cropped texture has its transform shifted (`shiftTransformForCrop`, accounting for each content's own flip/rotation) so the remaining pixels keep the same apparent project position.
+- Undoable via a new `fit` history entry carrying texture before/after buffers plus affected content transforms before/after; unit tests for the pure alpha bounding-box helper and the transform shift plus E2E for both menus, threshold clamping, apparent position, no-ops and undo/redo.

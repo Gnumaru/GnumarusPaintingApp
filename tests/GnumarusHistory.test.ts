@@ -133,6 +133,61 @@ describe("GnumarusHistory", () => {
     expect(computeImageDiff(buffer, before, 4, 4)).toBeNull();
   });
 
+  it("undoes and redoes a fit with content transforms", () => {
+    const history = new GnumarusHistory();
+    let texture = { width: 4, height: 4, buffer: createPixelBuffer(4, 4) };
+    setPixel(texture.buffer, 4, 4, 2, 1, BLACK);
+    const transforms = new Map<string, { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean }>();
+    transforms.set("content1", { x: 0, y: 0, rotation: 0, flipX: false, flipY: false });
+    const fitEntry = {
+      type: "fit" as const,
+      fit: {
+        textureId: "tex1",
+        beforeWidth: 4,
+        beforeHeight: 4,
+        beforeBuffer: texture.buffer.slice(),
+        afterWidth: 1,
+        afterHeight: 1,
+        afterBuffer: texture.buffer.subarray((1 * 4 + 2) * 4, (1 * 4 + 2) * 4 + 4).slice(),
+        transforms: [
+          {
+            contentId: "content1",
+            before: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+            after: { x: 0.5, y: -0.5, rotation: 0, flipX: false, flipY: false },
+          },
+        ],
+      },
+    };
+    texture = { width: 1, height: 1, buffer: fitEntry.fit.afterBuffer.slice() };
+    transforms.set("content1", { ...fitEntry.fit.transforms[0]!.after });
+    history.push(fitEntry);
+    const applyFit = (
+      textureId: string,
+      width: number,
+      height: number,
+      buffer: Uint8ClampedArray,
+      items: Array<{ contentId: string; transform: { x: number } }>,
+    ): boolean => {
+      if (textureId !== "tex1") {
+        return false;
+      }
+      texture = { width, height, buffer: buffer.slice() };
+      for (const item of items) {
+        const current = transforms.get(item.contentId);
+        if (current !== undefined) {
+          transforms.set(item.contentId, { ...current, x: item.transform.x });
+        }
+      }
+      return true;
+    };
+    expect(history.undo(() => null, () => {}, undefined, applyFit)).toBe(true);
+    expect(texture).toMatchObject({ width: 4, height: 4 });
+    expect(transforms.get("content1")).toMatchObject({ x: 0 });
+    expect(history.redo(() => null, () => {}, undefined, applyFit)).toBe(true);
+    expect(texture).toMatchObject({ width: 1, height: 1 });
+    expect(transforms.get("content1")).toMatchObject({ x: 0.5 });
+  });
+
   it("undoes and redoes a merge", () => {
     const layers = new Map<string, Uint8ClampedArray>();
     layers.set("lower", createPixelBuffer(4, 4));
