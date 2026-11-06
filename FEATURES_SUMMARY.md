@@ -9,6 +9,8 @@
 - Tool options bar immediately below the menu bar: pencil shows brush size/shape/anti-aliasing/stabilizer/blend; line and curve show width/shape/anti-aliasing/blend; bucket shows blend; loupe and transform show exactly `the <tool-name> tool does not have any setting or helper button`.
 - Custom color picker (no browser picker): models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV (Oklab-based) and ARD; alpha axis on every model (0..255); hue axes 0..360; ARD Diagonal 0..360 and Ratio 0..255; every other axis is a percentage with one decimal. Each axis has a draggable gradient bar showing its own 0..max gradient plus an editable numeric input beside it. Always-visible HSV section on top: hue ring with draggable indicator plus saturation/value triangle (white left, full-saturation right, black bottom) with its own indicator; dragging either updates the live color in every model.
 - Pixel grid over the active layer, following its transform; hidden below 200 percent zoom; minimum zoom configurable 200..6400 percent, default 1000 percent, in Edit > Settings.
+- Canvas view shortcuts: `4`/`6` (main + numpad) rotate by the configurable step, `5` resets rotation, `1` sets zoom 100%, `2` fits the rotated canvas on screen; rotation step 1..90 degrees, default 15, in Edit > Settings.
+- Shift+Left-drag with pencil/line/curve resizes the tool live from horizontal movement (right bigger, left smaller) with a real-time tip preview; no painting starts.
 - Canvas background: checkerboard (default, configurable) or solid color (configurable) in Edit > Settings.
 - Settings with per-setting reset arrows shown only when non-default.
 - Final preview: floating resizable window with internal zoom and any-button drag pan of the flattened PNG-like render.

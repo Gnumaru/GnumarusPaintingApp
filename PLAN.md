@@ -144,6 +144,11 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Pure stateful filter `GnumarusPixelPerfectStroke` in `src/canvas/GnumarusPixelPerfect.ts` (per-stroke painted set + paint order with tombstones, revisit-always-paints, consecutive-duplicate suppression across walk segment joints, recent-window (4) exception for crossings, Bresenham/cubic walkers mirroring the rasterizer candidate order). Engine applies it after stabilizer quantization, for accumulate on (per-pixel `setPixel`) and off (mask bits + one repaint); locks/blend/history unchanged.
 - Unit tests for the filter (straights intact, corner/stair eating with `drainRemoved`, crossings, OOB, walker parity with `drawPixelLine`/`drawCubicBezier`); E2E for checkbox gating, pencil thinning + control contrast, crossings, curve thinning + undo.
 
+## 26. View shortcuts + shift-drag tool size (implemented)
+- `4`/`6` (main + numpad) rotate the canvas by a configurable step, default 15 degrees; `5` (main + numpad) resets canvas rotation only; `1` (main) sets zoom 100%; `2` (main) fits the rotated canvas bbox exactly on screen (fit zoom plus centered pan, same integer-floor rule as Reset Canvas Transform).
+- New `rotationStepDeg` setting 1..90 in Settings (Canvas view section) with per-setting reset arrow, `Reset defaults` support and localStorage persistence, pushed to the engine via `setRotationStepDeg`.
+- Shift+Left-drag with pencil/line/curve adjusts that tool's size live from horizontal movement only (right bigger, left smaller, 20 screen px per unit, clamped 0.1..64); the brush tip preview resizes in real time and the shell options + status follow through `onToolSizeChanged`; no painting starts.
+
 ## 11. Custom color picker (implemented)
 - Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).
 - Every model carries an alpha axis; RGBA axes span 0..255. ARD Diagonal spans 0..360 and Ratio 0..255.

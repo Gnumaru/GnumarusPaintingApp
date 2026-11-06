@@ -5,6 +5,7 @@ import {
   layerPixelToScreen,
   normalizeRotation,
   projectToLayerPixel,
+  rotatedBounds,
   screenToImagePixel,
   screenToLayerPixel,
   type GnumarusLayerTransform,
@@ -124,5 +125,17 @@ describe("GnumarusViewportMath", () => {
         expect(back, `view-rot layer=${JSON.stringify(layer)} pixel=${ix},${iy}`).toEqual({ x: ix, y: iy });
       }
     }
+  });
+
+  it("computes rotated bboxes for fit zoom", () => {
+    expect(rotatedBounds(64, 64, 0)).toEqual({ width: 64, height: 64 });
+    const quarter = rotatedBounds(64, 32, Math.PI / 2);
+    expect(quarter.width).toBeCloseTo(32, 10);
+    expect(quarter.height).toBeCloseTo(64, 10);
+    const diagonal = rotatedBounds(64, 64, Math.PI / 4);
+    expect(diagonal.width).toBeCloseTo(64 * Math.SQRT2, 8);
+    expect(diagonal.height).toBeCloseTo(64 * Math.SQRT2, 8);
+    // Sign of rotation does not matter for the bbox.
+    expect(rotatedBounds(64, 32, -Math.PI / 2)).toEqual(quarter);
   });
 });

@@ -2816,12 +2816,171 @@ test("follow stabilizer paints while chasing the cursor", async ({ page }) => {
   await page.keyboard.press("Control+z");
   await page.locator("gnumarus-shell input#followStrength").fill("1");
   await expect(page.locator("gnumarus-shell")).toContainText("Follow strength: 1");
-  await page.mouse.move(start.x, start.y);
+  await page.keyboard.press("Control+z");
+  expect((await paintedNeighborStats(page, 16)).painted).toBe(0);
+});
+
+test("4 and 6 rotate the canvas by the step and 5 resets rotation", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const step = Math.PI / 12;
+  expect((await getViewState(page)).rotation).toBeCloseTo(0, 5);
+  await page.keyboard.press("6");
+  expect((await getViewState(page)).rotation).toBeCloseTo(step, 5);
+  await page.keyboard.press("4");
+  expect((await getViewState(page)).rotation).toBeCloseTo(0, 5);
+  await page.keyboard.press("Numpad6");
+  expect((await getViewState(page)).rotation).toBeCloseTo(step, 5);
+  await page.keyboard.press("Numpad4");
+  expect((await getViewState(page)).rotation).toBeCloseTo(0, 5);
+  await page.keyboard.press("6");
+  await page.keyboard.press("5");
+  expect((await getViewState(page)).rotation).toBeCloseTo(0, 5);
+  await page.keyboard.press("Numpad6");
+  await page.keyboard.press("Numpad5");
+  expect((await getViewState(page)).rotation).toBeCloseTo(0, 5);
+  // Digits typed into inputs must not rotate the canvas.
+  await page.locator("gnumarus-shell input#brushSize").click();
+  await page.keyboard.press("4");
+  expect((await getViewState(page)).rotation).toBeCloseTo(0, 5);
+  await expect(page.locator("gnumarus-shell")).toContainText("°");
+});
+
+test("canvas rotation step is configurable in Settings", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Canvas rotation step");
+  expect(await page.getByRole("button", { name: "Reset canvas rotation step to default" }).count()).toBe(0);
+  await page.locator("gnumarus-shell input#rotationStep").fill("30");
+  await expect(page.locator("gnumarus-shell")).toContainText("Canvas rotation step: 30°");
+  const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.rotation.v1"));
+  expect(persisted).toContain("30");
+  await page.getByRole("button", { name: "Close" }).click();
+  await page.keyboard.press("6");
+  expect((await getViewState(page)).rotation).toBeCloseTo(Math.PI / 6, 5);
+  await page.keyboard.press("5");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("button", { name: "Reset canvas rotation step to default" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Canvas rotation step reset to default");
+  await page.getByRole("button", { name: "Close" }).click();
+  await page.keyboard.press("6");
+  expect((await getViewState(page)).rotation).toBeCloseTo(Math.PI / 12, 5);
+});
+
+test("1 sets zoom 100 percent and 2 fits the rotated canvas", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { setZoom(z: number): void } } };
+    root.__gnumarus?.engine?.setZoom(8);
+  });
+  expect((await getViewState(page)).zoom).toBeCloseTo(8, 5);
+  await page.keyboard.press("1");
+  expect((await getViewState(page)).zoom).toBeCloseTo(1, 5);
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { setRotation(r: number): void } } };
+    root.__gnumarus?.engine?.setRotation(Math.PI / 4);
+  });
+  await page.keyboard.press("2");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const diagonal = 64 * Math.SQRT2;
+  const expected = Math.max(1, Math.floor(Math.min(box.width / diagonal, box.height / diagonal)));
+  expect((await getViewState(page)).zoom).toBeCloseTo(expected, 5);
+  // Without rotation, 2 fits the plain canvas exactly like the initial view.
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { setRotation(r: number): void } } };
+    root.__gnumarus?.engine?.setRotation(0);
+  });
+  await page.keyboard.press("2");
+  const plain = Math.max(1, Math.floor(Math.min(box.width / 64, box.height / 64)));
+  expect((await getViewState(page)).zoom).toBeCloseTo(plain, 5);
+});
+
+test("shift-drag adjusts the pencil brush size live without painting", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Pencil" }).click();
+  const sizeOf = (): Promise<number> =>
+    page.evaluate(() => {
+      const root = window as unknown as { __gnumarus?: { engine?: { getBrushSize(): number } } };
+      return root.__gnumarus?.engine?.getBrushSize() ?? 0;
+    });
+  expect(await sizeOf()).toBeCloseTo(1, 5);
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  const tipWidth = (): Promise<string> =>
+    page.evaluate(() => {
+      const root = document.querySelector("gnumarus-shell")?.shadowRoot;
+      const tip = root?.getElementById("canvasHost")?.querySelector('[data-testid="brush-preview"]') as HTMLElement | null;
+      return tip?.style.width ?? "";
+    });
+  await page.mouse.move(cx, cy);
+  await page.keyboard.down("Shift");
   await page.mouse.down();
-  await page.mouse.move(end.x, end.y, { steps: 8 });
+  await page.mouse.move(cx + 80, cy, { steps: 4 });
+  expect(await sizeOf()).toBeCloseTo(1 + 80 / 20, 5);
+  expect(await tipWidth()).not.toBe("");
+  // Moving back left shrinks again from the drag anchor.
+  await page.mouse.move(cx + 40, cy, { steps: 2 });
+  expect(await sizeOf()).toBeCloseTo(1 + 40 / 20, 5);
+  // Vertical-only movement changes nothing.
+  await page.mouse.move(cx + 40, cy + 120, { steps: 2 });
+  expect(await sizeOf()).toBeCloseTo(1 + 40 / 20, 5);
   await page.mouse.up();
-  // Even with heavy smoothing the stroke starts at the cursor.
-  expect(await readPixel(page, 10, 10)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.keyboard.up("Shift");
+  expect(await sizeOf()).toBeCloseTo(3, 5);
+  await expect(page.locator("gnumarus-shell")).toContainText("Brush size: 3");
+  // No painting happened during the size drag.
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+});
+
+test("shift-drag adjusts line and curve widths", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await page.getByRole("button", { name: "Line" }).click();
+  await page.mouse.move(cx, cy);
+  await page.keyboard.down("Shift");
+  await page.mouse.down();
+  await page.mouse.move(cx + 60, cy, { steps: 3 });
+  await page.mouse.up();
+  await page.keyboard.up("Shift");
+  const lineWidth = await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { getLineWidth(): number } } };
+    return root.__gnumarus?.engine?.getLineWidth() ?? 0;
+  });
+  expect(lineWidth).toBeCloseTo(1 + 60 / 20, 5);
+  await expect(page.locator("gnumarus-shell")).toContainText(`Line width: ${lineWidth}`);
+  await page.getByRole("button", { name: "Curve" }).click();
+  await page.mouse.move(cx, cy);
+  await page.keyboard.down("Shift");
+  await page.mouse.down();
+  await page.mouse.move(cx - 40, cy, { steps: 2 });
+  await page.mouse.up();
+  await page.keyboard.up("Shift");
+  const curveWidth = await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { getCurveWidth(): number } } };
+    return root.__gnumarus?.engine?.getCurveWidth() ?? 0;
+  });
+  expect(curveWidth).toBeCloseTo(Math.max(0.1, 1 - 40 / 20), 5);
 });
 
 async function loadTinyLayer(

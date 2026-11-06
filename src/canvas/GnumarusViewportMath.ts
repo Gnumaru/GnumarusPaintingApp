@@ -208,3 +208,13 @@ export function normalizeRotation(radians: number): number {
   }
   return result;
 }
+
+/** Axis-aligned bbox of a width x height image rotated by radians. Flips preserve the bbox. */
+export function rotatedBounds(width: number, height: number, rotation: number): { width: number; height: number } {
+  const cos = Math.abs(Math.cos(rotation));
+  const sin = Math.abs(Math.sin(rotation));
+  return {
+    width: width * cos + height * sin,
+    height: width * sin + height * cos,
+  };
+}

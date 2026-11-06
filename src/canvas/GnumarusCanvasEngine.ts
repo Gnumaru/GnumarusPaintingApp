@@ -48,6 +48,7 @@ import {
   normalizeRotation,
   projectToLayerPixel,
   projectToScreen,
+  rotatedBounds,
   screenToLayerPixel,
   screenToProject,
 } from "./GnumarusViewportMath";
@@ -67,6 +68,10 @@ import {
   DEFAULT_GRID_SETTINGS,
   shouldShowPixelGrid,
 } from "../settings/GnumarusGridSettings";
+import {
+  clampRotationStepDeg,
+  DEFAULT_ROTATION_SETTINGS,
+} from "../settings/GnumarusRotationSettings";
 import {
   animationCellKey,
   clampFrameDurationMs,
@@ -267,15 +272,22 @@ export const GRID_FRAGMENT_SHADER = [
   "}",
 ].join("\n");
 
+export type GnumarusSizedTool = "pencil" | "line" | "curve";
+export type GnumarusToolSizeKind = "brush" | "line" | "curve";
+
 export interface GnumarusEngineOptions {
   onStats: (stats: GnumarusEngineStats) => void;
   onPixelsChanged: () => void;
   onToolChanged?: (tool: GnumarusCanvasTool) => void;
   onLayersChanged?: () => void;
+  onToolSizeChanged?: (kind: GnumarusToolSizeKind, size: number) => void;
   checker?: GnumarusCheckerSettings;
   gridMinZoom?: number;
   background?: GnumarusBackgroundSettings;
 }
+
+/** Screen pixels of horizontal drag per tool-size unit for shift-drag resizing. */
+export const GNUMARUS_SIZE_DRAG_PX_PER_UNIT = 20;
 
 function checkerHexToVec(hex: string): THREE.Vector3 {
   const parsed = parseHexColor(hex) ?? { r: 199, g: 199, b: 199, a: 255 };
@@ -320,6 +332,7 @@ export class GnumarusCanvasEngine {
   private panX = 0;
   private panY = 0;
   private rotation = 0;
+  private rotationStepDeg = DEFAULT_ROTATION_SETTINGS.stepDeg;
   private flipX = false;
   private flipY = false;
   private tool: GnumarusCanvasTool = "pencil";
@@ -372,6 +385,8 @@ export class GnumarusCanvasEngine {
   private drawing = false;
   private panning = false;
   private spaceDown = false;
+  /** Shift+Left-drag tool-size gesture state (pencil/line/curve only). */
+  private sizeDrag: { tool: GnumarusSizedTool; startClientX: number; startSize: number } | null = null;
   private strokeBase: Uint8ClampedArray | null = null;
   private strokeLayerId: string | null = null;
   /** Coverage mask for non-accumulating pencil strokes (union semantics). */
@@ -397,6 +412,7 @@ export class GnumarusCanvasEngine {
   private readonly onPixelsChanged: () => void;
   private readonly onToolChanged: ((tool: GnumarusCanvasTool) => void) | undefined;
   private readonly onLayersChanged: (() => void) | undefined;
+  private readonly onToolSizeChanged: ((kind: GnumarusToolSizeKind, size: number) => void) | undefined;
 
   constructor(container: HTMLElement, options: GnumarusEngineOptions) {
     this.container = container;
@@ -404,6 +420,7 @@ export class GnumarusCanvasEngine {
     this.onPixelsChanged = options.onPixelsChanged;
     this.onToolChanged = options.onToolChanged;
     this.onLayersChanged = options.onLayersChanged;
+    this.onToolSizeChanged = options.onToolSizeChanged;
     const initialChecker = options.checker ?? DEFAULT_CHECKER_SETTINGS;
     this.checkerMode = initialChecker.mode;
     this.checkerSizeX = clampCheckerSize(initialChecker.sizeX);
@@ -3149,6 +3166,50 @@ export class GnumarusCanvasEngine {
     this.emitStats();
   }
 
+  getRotationStepDeg(): number {
+    return this.rotationStepDeg;
+  }
+
+  setRotationStepDeg(degrees: number): boolean {
+    const clamped = clampRotationStepDeg(degrees);
+    if (clamped === this.rotationStepDeg) {
+      return false;
+    }
+    this.rotationStepDeg = clamped;
+    return true;
+  }
+
+  /** Rotate the canvas by degrees (clockwise-positive). */
+  rotateByDegrees(degrees: number): void {
+    if (!Number.isFinite(degrees) || degrees === 0) {
+      return;
+    }
+    this.setRotation(this.rotation + (degrees * Math.PI) / 180);
+  }
+
+  /** Reset canvas rotation to zero, keeping zoom, pan and flips. */
+  resetRotation(): void {
+    this.setRotation(0);
+  }
+
+  /** Fit the rotated canvas bbox on screen: fit zoom plus centered pan. */
+  zoomToFit(): void {
+    const rect = this.container.getBoundingClientRect();
+    const bounds = rotatedBounds(this.imageWidth, this.imageHeight, this.rotation);
+    if (rect.width > 0 && rect.height > 0 && bounds.width > 0 && bounds.height > 0) {
+      const fit = Math.min(rect.width / bounds.width, rect.height / bounds.height);
+      this.zoom = clampZoom(Math.max(1, Math.floor(fit)));
+    } else {
+      this.zoom = 8;
+    }
+    this.panX = 0;
+    this.panY = 0;
+    this.layoutScene();
+    this.render();
+    this.updatePreviews();
+    this.emitStats();
+  }
+
   setFlip(flipX: boolean, flipY: boolean): void {
     this.flipX = flipX;
     this.flipY = flipY;
@@ -3171,6 +3232,7 @@ export class GnumarusCanvasEngine {
       this.stabilizerTarget = null;
       this.stopFollowLoop();
     }
+    this.sizeDrag = null;
     this.resetPencilPixelPerfect();
     this.updatePreviews();
     this.onToolChanged?.(tool);
@@ -3467,6 +3529,18 @@ export class GnumarusCanvasEngine {
       if (event.button !== 0) {
         return;
       }
+      if (
+        event.shiftKey &&
+        (this.tool === "pencil" || this.tool === "line" || this.tool === "curve")
+      ) {
+        // Shift+Left-drag resizes the active size tool from horizontal
+        // movement only; no painting starts.
+        const startSize =
+          this.tool === "pencil" ? this.brushSize : this.tool === "line" ? this.lineWidth : this.curveWidth;
+        this.sizeDrag = { tool: this.tool, startClientX: event.clientX, startSize };
+        canvas.setPointerCapture(event.pointerId);
+        return;
+      }
       if (this.tool === "transform") {
         // Left-drag with the transform tool moves the active layer.
         const layer = this.activeLayer();
@@ -3726,6 +3800,24 @@ export class GnumarusCanvasEngine {
         this.emitStats();
         return;
       }
+      if (this.sizeDrag !== null) {
+        // Horizontal movement only: right grows, left shrinks, vertical is ignored.
+        const size = clampBrushSizeFloat(
+          this.sizeDrag.startSize + (event.clientX - this.sizeDrag.startClientX) / GNUMARUS_SIZE_DRAG_PX_PER_UNIT,
+        );
+        if (this.sizeDrag.tool === "pencil") {
+          if (this.setBrushSize(size)) {
+            this.onToolSizeChanged?.("brush", size);
+          }
+        } else if (this.sizeDrag.tool === "line") {
+          if (this.setLineWidth(size)) {
+            this.onToolSizeChanged?.("line", size);
+          }
+        } else if (this.setCurveWidth(size)) {
+          this.onToolSizeChanged?.("curve", size);
+        }
+        return;
+      }
       if (this.tool === "pencil" && this.stabilizerMode !== "none") {
         const floatTarget = this.clientToLayerImageFloat(event.clientX, event.clientY);
         if (floatTarget !== null) {
@@ -3802,6 +3894,7 @@ export class GnumarusCanvasEngine {
       this.transformStart = null;
       this.loupeAnchor = null;
       this.lastPixel = null;
+      this.sizeDrag = null;
       this.resetPencilPixelPerfect();
       // Keep the stabilizer focus for hover preview; let follow mode converge.
       if (this.stabilizerMode === "follow") {
@@ -3907,6 +4000,26 @@ export class GnumarusCanvasEngine {
         }
         if (event.key === "t" || event.key === "T") {
           this.setTool("transform");
+          return;
+        }
+        if (event.code === "Digit4" || event.code === "Numpad4") {
+          this.rotateByDegrees(-this.rotationStepDeg);
+          return;
+        }
+        if (event.code === "Digit6" || event.code === "Numpad6") {
+          this.rotateByDegrees(this.rotationStepDeg);
+          return;
+        }
+        if (event.code === "Digit5" || event.code === "Numpad5") {
+          this.resetRotation();
+          return;
+        }
+        if (event.code === "Digit1") {
+          this.setZoom(1);
+          return;
+        }
+        if (event.code === "Digit2") {
+          this.zoomToFit();
           return;
         }
         if (event.key === "Escape" && this.tool === "line" && this.lineAnchor !== null) {

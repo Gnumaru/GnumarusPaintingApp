@@ -45,6 +45,13 @@ import {
   parseGridSettings,
   serializeGridSettings,
 } from "../settings/GnumarusGridSettings";
+import {
+  DEFAULT_ROTATION_SETTINGS,
+  ROTATION_SETTINGS_STORAGE_KEY,
+  clampRotationStepDeg,
+  parseRotationSettings,
+  serializeRotationSettings,
+} from "../settings/GnumarusRotationSettings";
 import { compositeFinalImage } from "../preview/GnumarusFinalRender";
 import { decodePngToBuffer, encodeBufferToPngBlob } from "../project/GnumarusPngCodec";
 import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
@@ -729,6 +736,7 @@ export class GnumarusShell extends LitElement {
     checkerSizeX: { type: Number },
     checkerSizeY: { type: Number },
     gridMinZoom: { type: Number },
+    rotationStepDeg: { type: Number },
     backgroundMode: { type: String },
     backgroundColor: { type: String },
     previewOpen: { type: Boolean },
@@ -793,6 +801,7 @@ export class GnumarusShell extends LitElement {
   declare checkerSizeX: number;
   declare checkerSizeY: number;
   declare gridMinZoom: number;
+  declare rotationStepDeg: number;
   declare backgroundMode: GnumarusBackgroundMode;
   declare backgroundColor: string;
   declare previewOpen: boolean;
@@ -868,6 +877,7 @@ export class GnumarusShell extends LitElement {
     this.checkerSizeX = DEFAULT_CHECKER_SETTINGS.sizeX;
     this.checkerSizeY = DEFAULT_CHECKER_SETTINGS.sizeY;
     this.gridMinZoom = DEFAULT_GRID_SETTINGS.minZoom;
+    this.rotationStepDeg = DEFAULT_ROTATION_SETTINGS.stepDeg;
     this.backgroundMode = DEFAULT_BACKGROUND_SETTINGS.mode;
     this.backgroundColor = DEFAULT_BACKGROUND_SETTINGS.color;
     this.previewOpen = false;
@@ -1547,6 +1557,31 @@ export class GnumarusShell extends LitElement {
               </button>`
             : html``}
         </div>
+        <div class="settings-section">Canvas view</div>
+        <div class="setting-row">
+          <label
+            >Canvas rotation step (degrees)
+            <input
+              type="number"
+              id="rotationStep"
+              min="1"
+              max="90"
+              step="1"
+              .value=${String(this.rotationStepDeg)}
+              @input=${(): void => this.applyRotationFromDialog()}
+            />
+          </label>
+          ${this.rotationStepDeg !== DEFAULT_ROTATION_SETTINGS.stepDeg
+            ? html`<button
+                class="reset-btn"
+                aria-label="Reset canvas rotation step to default"
+                title="Reset to default"
+                @click=${(): void => this.resetRotationStepToDefault()}
+              >
+                ↻
+              </button>`
+            : html``}
+        </div>
         <div class="settings-section">Animation</div>
         <div class="setting-row">
           <label
@@ -1974,6 +2009,8 @@ export class GnumarusShell extends LitElement {
     this.checkerColorB = storedChecker.colorB;
     const storedGrid = this.loadGridSettings();
     this.gridMinZoom = storedGrid.minZoom;
+    const storedRotation = this.loadRotationSettings();
+    this.rotationStepDeg = storedRotation.stepDeg;
     const storedBackground = this.loadBackgroundSettings();
     this.backgroundMode = storedBackground.mode;
     this.backgroundColor = storedBackground.color;
@@ -2008,8 +2045,21 @@ export class GnumarusShell extends LitElement {
           this.dirty = true;
           void this.refreshPreview();
         },
+        onToolSizeChanged: (kind, size): void => {
+          if (kind === "brush") {
+            this.brushSize = size;
+            this.statusMessage = `Brush size: ${size}`;
+          } else if (kind === "line") {
+            this.lineWidth = size;
+            this.statusMessage = `Line width: ${size}`;
+          } else {
+            this.curveWidth = size;
+            this.statusMessage = `Curve width: ${size}`;
+          }
+        },
       });
       this.engine.setColor(this.colorValue);
+      this.engine.setRotationStepDeg(this.rotationStepDeg);
       this.engine.setStabilizerMode(this.stabilizerMode);
       this.engine.setRopeLength(this.ropeLength);
       this.engine.setFollowStrength(this.followStrength);
@@ -2305,6 +2355,50 @@ export class GnumarusShell extends LitElement {
     this.engine?.setGridMinZoom(minZoom);
     this.persistGrid();
     this.statusMessage = `Pixel grid minimum zoom: ${Math.round(minZoom * 100)}%`;
+  }
+
+  private loadRotationSettings(): { stepDeg: number } {
+    try {
+      const stored = window.localStorage.getItem(ROTATION_SETTINGS_STORAGE_KEY);
+      if (stored !== null) {
+        return parseRotationSettings(stored);
+      }
+    } catch {
+      // Corrupt or unavailable storage falls back to defaults.
+    }
+    return { ...DEFAULT_ROTATION_SETTINGS };
+  }
+
+  private persistRotation(): void {
+    try {
+      window.localStorage.setItem(
+        ROTATION_SETTINGS_STORAGE_KEY,
+        serializeRotationSettings({ stepDeg: this.rotationStepDeg }),
+      );
+    } catch {
+      // Storage failures must not break the settings flow.
+    }
+  }
+
+  private currentDialogRotationStep(): number {
+    const input = this.shadowRoot?.getElementById("rotationStep") as HTMLInputElement | null;
+    const parsed = Number(input?.value ?? String(DEFAULT_ROTATION_SETTINGS.stepDeg));
+    return clampRotationStepDeg(Number.isFinite(parsed) ? Math.floor(parsed) : DEFAULT_ROTATION_SETTINGS.stepDeg);
+  }
+
+  private applyRotationFromDialog(): void {
+    const stepDeg = this.currentDialogRotationStep();
+    this.rotationStepDeg = stepDeg;
+    this.engine?.setRotationStepDeg(stepDeg);
+    this.persistRotation();
+    this.statusMessage = `Canvas rotation step: ${stepDeg}°`;
+  }
+
+  private resetRotationStepToDefault(): void {
+    this.rotationStepDeg = DEFAULT_ROTATION_SETTINGS.stepDeg;
+    this.engine?.setRotationStepDeg(this.rotationStepDeg);
+    this.persistRotation();
+    this.statusMessage = "Canvas rotation step reset to default";
   }
 
   private loadBackgroundSettings(): GnumarusBackgroundSettings {
@@ -2900,6 +2994,9 @@ export class GnumarusShell extends LitElement {
     this.backgroundColor = backgroundSettings.color;
     this.engine?.applyBackgroundSettings(backgroundSettings);
     this.persistBackground();
+    this.rotationStepDeg = DEFAULT_ROTATION_SETTINGS.stepDeg;
+    this.engine?.setRotationStepDeg(this.rotationStepDeg);
+    this.persistRotation();
     this.statusMessage = "Settings reset to defaults";
   }
 
