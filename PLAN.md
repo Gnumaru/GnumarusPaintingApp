@@ -197,3 +197,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Textures named `Texture 1`, `Texture 2`, ... via unified `textureNameCounter` instead of `Layer N pixels`.
 - Layer-owned textures (id `layer0`, etc.) and `texN` textures all use the same name sequence; `renameLayer` no longer renames its owned texture.
 - `createDefaultProject` and legacy migration create `Texture N` names in order; load recomputes the name counter from max `Texture N` to avoid duplicates; merge undo restores the original texture name via snapshot.
+
+## 35. Cell context menu position (implemented)
+- Symptom: right-click on a matrix cell rendered the menu ~245px above the cell instead of adjacent to it.
+- Cause: `openMatrixCellMenu` clamped `y` to `innerHeight - 300` even though the single-item menu is only ~40px tall; the matrix sits at the bottom of the screen so the clamp always pushed the menu far up. Same pattern affected frame/layer menus.
+- Fix: store the raw cursor position and, after render (`updated()` → `fitContextMenusToViewport()`), shift the fixed-position menu left/up only by the measured overflow amount so it stays adjacent to the cursor while remaining fully inside the viewport.

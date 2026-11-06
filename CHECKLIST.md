@@ -123,3 +123,6 @@
 - [x] Texture naming Texture N instead of Layer N pixels (unified counter, renameLayer no longer renames texture, defaults and migration use Texture N)
 - [x] Unit tests (vitest): updated project format expectations to Texture 1 — 148 passed
 - [x] E2E test (Playwright): full suite with Texture N naming — 91 passed
+- [x] Cell context menu position: store cursor position, post-render shift by measured overflow so menu stays adjacent to the cell and inside the viewport
+- [x] Unit tests (vitest) — 148 passed (no logic change, rendering only)
+- [x] E2E test (Playwright): previous 91 + cell menu adjacency/viewport regression — 92 passed

@@ -2150,6 +2150,46 @@ export class GnumarusShell extends LitElement {
     `;
   }
 
+  protected updated(): void {
+    this.fitContextMenusToViewport();
+  }
+
+  /** Shift fixed-position context menus left/up only by the measured overflow so they stay adjacent to the cursor. */
+  private fitContextMenusToViewport(): void {
+    const root = this.shadowRoot;
+    if (root === null || root === undefined) {
+      return;
+    }
+    const margin = 8;
+    for (const node of Array.from(root.querySelectorAll(".context-menu"))) {
+      const menu = node as HTMLElement;
+      const rect = menu.getBoundingClientRect();
+      if (rect.width <= 0 && rect.height <= 0) {
+        continue;
+      }
+      let shiftX = 0;
+      let shiftY = 0;
+      if (rect.right > window.innerWidth - margin) {
+        shiftX = rect.right - (window.innerWidth - margin);
+      } else if (rect.left < margin) {
+        shiftX = rect.left - margin;
+      }
+      if (rect.bottom > window.innerHeight - margin) {
+        shiftY = rect.bottom - (window.innerHeight - margin);
+      } else if (rect.top < margin) {
+        shiftY = rect.top - margin;
+      }
+      if (shiftX !== 0) {
+        const current = Number.parseFloat(menu.style.left || "0") || 0;
+        menu.style.left = `${current - shiftX}px`;
+      }
+      if (shiftY !== 0) {
+        const current = Number.parseFloat(menu.style.top || "0") || 0;
+        menu.style.top = `${current - shiftY}px`;
+      }
+    }
+  }
+
   firstUpdated(): void {
     this.fsSupported = isFileSystemAccessSupported();
     window.addEventListener("keydown", this.onGlobalKeyDown);
@@ -3568,12 +3608,12 @@ export class GnumarusShell extends LitElement {
 
   private openMatrixCellMenu(layerId: string, frame: number, clientX: number, clientY: number): void {
     this.closeLayerMenu();
-    this.matrixMenu = { kind: "cell", layerId, frame, x: Math.min(clientX, window.innerWidth - 340), y: Math.min(clientY, window.innerHeight - 300) };
+    this.matrixMenu = { kind: "cell", layerId, frame, x: clientX, y: clientY };
   }
 
   private openMatrixFrameMenu(frame: number, clientX: number, clientY: number): void {
     this.closeLayerMenu();
-    this.matrixMenu = { kind: "frame", frame, x: Math.min(clientX, window.innerWidth - 200), y: Math.min(clientY, window.innerHeight - 200) };
+    this.matrixMenu = { kind: "frame", frame, x: clientX, y: clientY };
   }
 
   private closeMatrixMenu(): void {
@@ -4166,8 +4206,8 @@ export class GnumarusShell extends LitElement {
 
   private openLayerMenu(id: string, clientX: number, clientY: number): void {
     this.contextMenuLayerId = id;
-    this.contextMenuX = Math.min(clientX, window.innerWidth - 180);
-    this.contextMenuY = Math.min(clientY, window.innerHeight - 200);
+    this.contextMenuX = clientX;
+    this.contextMenuY = clientY;
   }
 
   private closeLayerMenu(): void {

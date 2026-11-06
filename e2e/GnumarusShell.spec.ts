@@ -1252,6 +1252,30 @@ test("new content texture picker offers no, new and existing textures with thumb
   await expect(cell).not.toHaveAttribute("aria-label", /empty/);
 });
 
+test("cell context menu opens adjacent to the clicked cell and inside the viewport", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  const cell = matrix.locator('[data-testid="anim-cell"][data-matrix-frame="1"]').first();
+  const cellBox = await cell.boundingBox();
+  expect(cellBox).not.toBeNull();
+  await cell.click({ button: "right" });
+  const menu = page.locator("gnumarus-shell .context-menu");
+  await expect(menu).toBeVisible();
+  const menuBox = await menu.boundingBox();
+  expect(menuBox).not.toBeNull();
+  if (cellBox === null || menuBox === null) {
+    throw new Error("missing bounding box");
+  }
+  const viewport = page.viewportSize() ?? { width: 1280, height: 720 };
+  expect(menuBox.x).toBeGreaterThanOrEqual(0);
+  expect(menuBox.y).toBeGreaterThanOrEqual(0);
+  expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(viewport.width);
+  expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(viewport.height);
+  expect(Math.abs(menuBox.y - cellBox.y)).toBeLessThan(80);
+});
+
 test("frames can be removed but never the last one", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
