@@ -140,7 +140,7 @@ const GNUMARUS_SHORTCUTS: GnumarusShortcutSection[] = [
       { keys: "N", action: "Line tool" },
       { keys: "C", action: "Curve tool" },
       { keys: "Z", action: "Loupe tool" },
-      { keys: "T", action: "Transform tool" },
+      { keys: "T", action: "Non-destructive cell transform tool" },
       { keys: "E", action: "Toggle eraser blend mode" },
       { keys: "Hold Ctrl", action: "Temporary eyedropper (release to restore the previous tool)" },
       { keys: "Escape", action: "Cancel line/curve in progress; close menus and rename fields" },
@@ -1279,8 +1279,8 @@ export class GnumarusShell extends LitElement {
           </button>
           <button
             class=${this.tool === "transform" ? "active" : ""}
-            title="Transform (left-drag move, right-drag rotate, middle-click flip layer)"
-            aria-label="Transform"
+            title="Non-destructive cell transform (left-drag move, right-drag rotate, middle-click flip layer)"
+            aria-label="Non-destructive cell transform"
             @click=${(): void => {
               this.tool = "transform";
               this.engine?.setTool("transform");
@@ -1600,7 +1600,7 @@ export class GnumarusShell extends LitElement {
       ${this.renderAnimationMatrix()}
       ${this.renderMatrixMenu()}
       <div class="statusbar" ?hidden=${this.uiHidden}>
-        <span>${this.tool}</span>
+        <span>${this.toolDisplayName(this.tool)}</span>
         <span>${this.colorValue}</span>
         <span>${this.cursorText}</span>
         <span>${this.canvasText}</span>
@@ -1981,6 +1981,11 @@ export class GnumarusShell extends LitElement {
     `;
   }
 
+  /** User-facing name of a tool. The internal id stays unchanged. */
+  private toolDisplayName(tool: GnumarusCanvasTool): string {
+    return tool === "transform" ? "non-destructive cell transform" : tool;
+  }
+
   private renderBlendModeOption() {
     return html`
       <label
@@ -2191,8 +2196,10 @@ export class GnumarusShell extends LitElement {
       `;
     }
     return html`
-      <div class="tool-options" data-testid="tool-options" aria-label="${this.tool} options" ?hidden=${this.uiHidden}>
-        <span class="tool-options-empty">the ${this.tool} tool does not have any setting or helper button</span>
+      <div class="tool-options" data-testid="tool-options" aria-label="${this.toolDisplayName(this.tool)} options" ?hidden=${this.uiHidden}>
+        <span class="tool-options-empty"
+          >the ${this.toolDisplayName(this.tool)} tool does not have any setting or helper button</span
+        >
       </div>
     `;
   }

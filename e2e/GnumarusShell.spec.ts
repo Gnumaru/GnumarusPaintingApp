@@ -628,11 +628,11 @@ test("merge down links the upper texture when the lower content has none", async
   expect((await getLayers(page)).layers.map((layer) => layer.id)).toEqual(["layer0", "layer1"]);
 });
 
-test("transform tool moves, rotates and flips the active layer", async ({ page }) => {
+test("non-destructive cell transform tool moves, rotates and flips the active layer", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.keyboard.press("t");
-  await expect(page.locator("gnumarus-shell")).toContainText("transform");
+  await expect(page.locator("gnumarus-shell")).toContainText("non-destructive cell transform");
   const canvas = page.locator("gnumarus-shell canvas");
   const box = await canvas.boundingBox();
   if (box === null) {
@@ -1607,7 +1607,7 @@ test("toolbar icons fill buttons without growing them", async ({ page }) => {
     Eyedropper: { w: 35, h: 26 },
     Line: { w: 30, h: 25 },
     Curve: { w: 35, h: 29 },
-    Transform: { w: 31, h: 29 },
+    "Non-destructive cell transform": { w: 31, h: 29 },
     "Final preview": { w: 32, h: 29 },
   };
   for (const box of boxes) {
@@ -2057,8 +2057,8 @@ test("tool options bar shows drawing settings and empty labels otherwise", async
   await expect(options).not.toContainText("does not have any setting");
   await page.getByRole("button", { name: "Loupe" }).click();
   await expect(options).toContainText("the loupe tool does not have any setting or helper button");
-  await page.getByRole("button", { name: "Transform" }).click();
-  await expect(options).toContainText("the transform tool does not have any setting or helper button");
+  await page.getByRole("button", { name: "Non-destructive cell transform" }).click();
+  await expect(options).toContainText("the non-destructive cell transform tool does not have any setting or helper button");
   await page.getByRole("button", { name: "Pencil" }).click();
   await expect(options).toContainText("Brush size");
   const icon = await page.evaluate(() => {
@@ -3834,6 +3834,7 @@ test("Help menu lists every keyboard shortcut in a modal", async ({ page }) => {
     await expect(dialog.getByRole("heading", { name: heading })).toBeVisible();
   }
   await expect(dialog).toContainText("Merge active layer down");
+  await expect(dialog).toContainText("Non-destructive cell transform tool");
   await expect(dialog).toContainText("Temporary eyedropper");
   await expect(dialog).toContainText("Reset current cell texture to transparent");
   await expect(dialog).toContainText("Resize tool live");

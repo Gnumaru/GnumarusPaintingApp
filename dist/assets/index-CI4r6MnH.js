@@ -4572,7 +4572,7 @@ void main() {
               </div>
             </div>
           `:R``}
-    `}};customElements.define(`gnumarus-color-picker`,rp);var ip=[{title:`File`,entries:[{keys:`Ctrl+S (Cmd+S on macOS)`,action:`Save (reuses the chosen folder, otherwise shows the folder picker)`},{keys:`Ctrl+E (Cmd+E on macOS)`,action:`Merge active layer down (same as Merge Down)`}]},{title:`History`,entries:[{keys:`Ctrl+Z`,action:`Undo`},{keys:`Ctrl+Y or Shift+Ctrl+Z`,action:`Redo`}]},{title:`Layers`,entries:[{keys:`PageUp`,action:`Select layer above (wraps around)`},{keys:`PageDown`,action:`Select layer below (wraps around)`},{keys:`ArrowUp`,action:`Select layer above (wraps around)`},{keys:`ArrowDown`,action:`Select layer below (wraps around)`},{keys:`Shift+ArrowUp`,action:`Move active layer up (wraps around)`},{keys:`Shift+ArrowDown`,action:`Move active layer down (wraps around)`},{keys:`Insert`,action:`Insert layer above the active layer`},{keys:`Delete`,action:`Reset current cell texture to transparent`}]},{title:`Frames`,entries:[{keys:`ArrowLeft`,action:`Select previous frame (wraps around)`},{keys:`ArrowRight`,action:`Select next frame (wraps around)`},{keys:`Shift+ArrowLeft`,action:`Move current frame left (wraps around)`},{keys:`Shift+ArrowRight`,action:`Move current frame right (wraps around)`}]},{title:`Tools`,entries:[{keys:`B`,action:`Pencil tool`},{keys:`G or F`,action:`Bucket fill tool`},{keys:`N`,action:`Line tool`},{keys:`C`,action:`Curve tool`},{keys:`Z`,action:`Loupe tool`},{keys:`T`,action:`Transform tool`},{keys:`E`,action:`Toggle eraser blend mode`},{keys:`Hold Ctrl`,action:`Temporary eyedropper (release to restore the previous tool)`},{keys:`Escape`,action:`Cancel line/curve in progress; close menus and rename fields`}]},{title:`View`,entries:[{keys:`1 (main keyboard)`,action:`Zoom to 100%`},{keys:`2 (main keyboard)`,action:`Fit rotated canvas on screen`},{keys:`4 (main and numpad)`,action:`Rotate canvas counterclockwise by step`},{keys:`6 (main and numpad)`,action:`Rotate canvas clockwise by step`},{keys:`5 (main and numpad)`,action:`Reset canvas rotation`},{keys:`Ctrl+Alt+=`,action:`Zoom in (numpad + also works)`},{keys:`Ctrl+Alt+-`,action:`Zoom out (numpad - also works)`},{keys:`Hold Space and drag`,action:`Pan canvas`},{keys:`Shift+Left-drag (pencil, line, curve)`,action:`Resize tool live from horizontal movement`}]},{title:`Interface`,entries:[{keys:`Tab`,action:`Hide/show all interface chrome except the canvas`}]}],ap=class extends Se{static styles=o`
+    `}};customElements.define(`gnumarus-color-picker`,rp);var ip=[{title:`File`,entries:[{keys:`Ctrl+S (Cmd+S on macOS)`,action:`Save (reuses the chosen folder, otherwise shows the folder picker)`},{keys:`Ctrl+E (Cmd+E on macOS)`,action:`Merge active layer down (same as Merge Down)`}]},{title:`History`,entries:[{keys:`Ctrl+Z`,action:`Undo`},{keys:`Ctrl+Y or Shift+Ctrl+Z`,action:`Redo`}]},{title:`Layers`,entries:[{keys:`PageUp`,action:`Select layer above (wraps around)`},{keys:`PageDown`,action:`Select layer below (wraps around)`},{keys:`ArrowUp`,action:`Select layer above (wraps around)`},{keys:`ArrowDown`,action:`Select layer below (wraps around)`},{keys:`Shift+ArrowUp`,action:`Move active layer up (wraps around)`},{keys:`Shift+ArrowDown`,action:`Move active layer down (wraps around)`},{keys:`Insert`,action:`Insert layer above the active layer`},{keys:`Delete`,action:`Reset current cell texture to transparent`}]},{title:`Frames`,entries:[{keys:`ArrowLeft`,action:`Select previous frame (wraps around)`},{keys:`ArrowRight`,action:`Select next frame (wraps around)`},{keys:`Shift+ArrowLeft`,action:`Move current frame left (wraps around)`},{keys:`Shift+ArrowRight`,action:`Move current frame right (wraps around)`}]},{title:`Tools`,entries:[{keys:`B`,action:`Pencil tool`},{keys:`G or F`,action:`Bucket fill tool`},{keys:`N`,action:`Line tool`},{keys:`C`,action:`Curve tool`},{keys:`Z`,action:`Loupe tool`},{keys:`T`,action:`Non-destructive cell transform tool`},{keys:`E`,action:`Toggle eraser blend mode`},{keys:`Hold Ctrl`,action:`Temporary eyedropper (release to restore the previous tool)`},{keys:`Escape`,action:`Cancel line/curve in progress; close menus and rename fields`}]},{title:`View`,entries:[{keys:`1 (main keyboard)`,action:`Zoom to 100%`},{keys:`2 (main keyboard)`,action:`Fit rotated canvas on screen`},{keys:`4 (main and numpad)`,action:`Rotate canvas counterclockwise by step`},{keys:`6 (main and numpad)`,action:`Rotate canvas clockwise by step`},{keys:`5 (main and numpad)`,action:`Reset canvas rotation`},{keys:`Ctrl+Alt+=`,action:`Zoom in (numpad + also works)`},{keys:`Ctrl+Alt+-`,action:`Zoom out (numpad - also works)`},{keys:`Hold Space and drag`,action:`Pan canvas`},{keys:`Shift+Left-drag (pencil, line, curve)`,action:`Resize tool live from horizontal movement`}]},{title:`Interface`,entries:[{keys:`Tab`,action:`Hide/show all interface chrome except the canvas`}]}],ap=class extends Se{static styles=o`
     :host {
       display: flex;
       flex-direction: column;
@@ -5412,8 +5412,8 @@ void main() {
           </button>
           <button
             class=${this.tool===`transform`?`active`:``}
-            title="Transform (left-drag move, right-drag rotate, middle-click flip layer)"
-            aria-label="Transform"
+            title="Non-destructive cell transform (left-drag move, right-drag rotate, middle-click flip layer)"
+            aria-label="Non-destructive cell transform"
             @click=${()=>{this.tool=`transform`,this.engine?.setTool(`transform`)}}
           >
             <span class="tool-icon">⤢</span>
@@ -5638,7 +5638,7 @@ void main() {
       ${this.renderAnimationMatrix()}
       ${this.renderMatrixMenu()}
       <div class="statusbar" ?hidden=${this.uiHidden}>
-        <span>${this.tool}</span>
+        <span>${this.toolDisplayName(this.tool)}</span>
         <span>${this.colorValue}</span>
         <span>${this.cursorText}</span>
         <span>${this.canvasText}</span>
@@ -5971,7 +5971,7 @@ void main() {
         </div>
       </dialog>
       ${this.renderContentPickerDialog()} ${this.renderTexturePickerDialog()}
-    `}renderBlendModeOption(){return R`
+    `}toolDisplayName(e){return e===`transform`?`non-destructive cell transform`:e}renderBlendModeOption(){return R`
       <label
         >Blend mode
         <select id="blendMode" .value=${this.blendMode} @change=${()=>this.applyBlendModeFromDialog()}>
@@ -6152,8 +6152,10 @@ void main() {
           ${this.renderBlendModeOption()}
         </div>
       `:R`
-      <div class="tool-options" data-testid="tool-options" aria-label="${this.tool} options" ?hidden=${this.uiHidden}>
-        <span class="tool-options-empty">the ${this.tool} tool does not have any setting or helper button</span>
+      <div class="tool-options" data-testid="tool-options" aria-label="${this.toolDisplayName(this.tool)} options" ?hidden=${this.uiHidden}>
+        <span class="tool-options-empty"
+          >the ${this.toolDisplayName(this.tool)} tool does not have any setting or helper button</span
+        >
       </div>
     `}renderAnimationMatrix(){if(this.engine===null)return R``;let e=this.engine.getAnimationMatrix(),t=`120px repeat(${e.frameCount}, 76px)`;return R`
       <div class="anim-matrix" data-testid="animation-matrix" aria-label="Animation matrix" ?hidden=${this.uiHidden}>

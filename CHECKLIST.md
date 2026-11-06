@@ -144,3 +144,6 @@
 - [x] Preview shows the canvas background (solid fill or matching checkerboard, refreshed on settings change)
 - [x] Unit tests (vitest) — 159 passed (preview background solid/checker/invalid)
 - [x] E2E test (Playwright): previous 99 + preview canvas background (checker default, live solid switch, live checkerboard switch, paint composite) — 100 passed
+- [x] Rename transform tool display label to non-destructive cell transform (toolbar, options bar, status bar, shortcuts modal, docs, E2E)
+- [x] Unit tests (vitest) — 159 passed (no logic change)
+- [x] E2E test (Playwright): previous 99 + renamed tool button/empty-state/status expectations — 99 passed

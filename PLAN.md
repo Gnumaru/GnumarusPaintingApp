@@ -226,3 +226,7 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - The final preview window renders the same background as the canvas: solid mode fills the flattened image with the solid color; checkerboard mode draws the same image-space squares (or screen-space squares in preview pixels) with the configured sizes and colors.
 - `compositeFinalImage` gains an optional background argument (default keeps transparent output so existing behavior/tests are unchanged); the shell passes the engine's live checker/background settings on every preview refresh, including when those settings change while the preview is open.
 - Unit tests for solid fill, checker pattern/sizes/phase and invalid input (all green); E2E for solid + checkerboard preview pixels with live settings changes while the preview stays open (green).
+
+## 41. Rename transform tool display name (implemented)
+- User-facing name of the `transform` tool is "non-destructive cell transform" (toolbar button label/title, tool options empty-state text and aria-label, status bar, shortcuts reference); internal tool id stays `transform` so engine/shell behavior and the `T` shortcut are unchanged.
+- Updated the affected E2E expectations (tool options empty label, toolbar button name, status text, toolbar icon map, shortcuts modal entry); unit tests unaffected (no logic change).

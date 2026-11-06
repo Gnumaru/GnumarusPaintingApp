@@ -4083,7 +4083,7 @@ export class GnumarusCanvasEngine {
             this.setFlip(!this.flipX, this.flipY);
           }
         } else {
-          // Middle click with the transform tool flips the active layer.
+          // Middle click with the non-destructive cell transform tool flips the active layer.
           const layer = this.activeLayer();
           if (layer !== null) {
             if (event.shiftKey) {
@@ -4135,7 +4135,7 @@ export class GnumarusCanvasEngine {
         return;
       }
       if (this.tool === "transform") {
-        // Left-drag with the transform tool moves the active layer.
+        // Left-drag with the non-destructive cell transform tool moves the active layer.
         const layer = this.activeLayer();
         if (layer === null) {
           return;
