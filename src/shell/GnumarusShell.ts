@@ -55,6 +55,15 @@ import {
   type GnumarusBlendMode,
   type GnumarusBrushShape,
 } from "../canvas/GnumarusPixelBuffer";
+import {
+  GNUMARUS_DEFAULT_FOLLOW_STRENGTH,
+  GNUMARUS_DEFAULT_ROPE_LENGTH,
+  GNUMARUS_DEFAULT_STABILIZER_MODE,
+  clampFollowStrength,
+  clampRopeLength,
+  parseStabilizerMode,
+  type GnumarusStabilizerMode,
+} from "../canvas/GnumarusStabilizer";
 import { parseHexToRgbaBytes, rgbaBytesToHex } from "../color/GnumarusColorModels";
 import { type GnumarusTexturePixels } from "../animation/GnumarusAnimationModel";
 import {
@@ -746,6 +755,9 @@ export class GnumarusShell extends LitElement {
     brushSize: { type: Number },
     brushShape: { type: String },
     pencilAntialias: { type: Boolean },
+    stabilizerMode: { type: String },
+    ropeLength: { type: Number },
+    followStrength: { type: Number },
     blendMode: { type: String },
     accumulate: { type: Boolean },
     lineWidth: { type: Number },
@@ -810,6 +822,9 @@ export class GnumarusShell extends LitElement {
   declare brushSize: number;
   declare brushShape: GnumarusBrushShape;
   declare pencilAntialias: boolean;
+  declare stabilizerMode: GnumarusStabilizerMode;
+  declare ropeLength: number;
+  declare followStrength: number;
   declare blendMode: GnumarusBlendMode;
   declare accumulate: boolean;
   declare lineWidth: number;
@@ -878,6 +893,9 @@ export class GnumarusShell extends LitElement {
     this.brushSize = 1;
     this.brushShape = "square";
     this.pencilAntialias = false;
+    this.stabilizerMode = GNUMARUS_DEFAULT_STABILIZER_MODE;
+    this.ropeLength = GNUMARUS_DEFAULT_ROPE_LENGTH;
+    this.followStrength = GNUMARUS_DEFAULT_FOLLOW_STRENGTH;
     this.blendMode = "normal";
     this.accumulate = true;
     this.lineWidth = 1;
@@ -1604,6 +1622,55 @@ export class GnumarusShell extends LitElement {
     `;
   }
 
+  private renderStabilizerOption() {
+    return html`
+      <label
+        >Stabilizer
+        <select
+          id="stabilizerMode"
+          .value=${this.stabilizerMode}
+          @change=${(): void => this.applyStabilizerModeFromDialog()}
+        >
+          <option value="none">None</option>
+          <option value="rope">Rope</option>
+          <option value="follow">Follow</option>
+        </select>
+      </label>
+      ${this.stabilizerMode === "rope"
+        ? html`
+            <label
+              >Rope length
+              <input
+                type="number"
+                id="ropeLength"
+                min="1"
+                max="200"
+                step="1"
+                .value=${String(this.ropeLength)}
+                @input=${(): void => this.applyRopeLengthFromDialog()}
+              />
+            </label>
+          `
+        : html``}
+      ${this.stabilizerMode === "follow"
+        ? html`
+            <label
+              >Follow strength
+              <input
+                type="number"
+                id="followStrength"
+                min="0.01"
+                max="1"
+                step="0.01"
+                .value=${String(this.followStrength)}
+                @input=${(): void => this.applyFollowStrengthFromDialog()}
+              />
+            </label>
+          `
+        : html``}
+    `;
+  }
+
   private renderToolOptions() {
     if (this.tool === "pencil") {
       return html`
@@ -1636,7 +1703,7 @@ export class GnumarusShell extends LitElement {
             />
             Anti-aliasing
           </label>
-          ${this.renderBlendModeOption()} ${this.renderAccumulateOption()}
+          ${this.renderStabilizerOption()} ${this.renderBlendModeOption()} ${this.renderAccumulateOption()}
         </div>
       `;
     }
@@ -1917,6 +1984,9 @@ export class GnumarusShell extends LitElement {
         },
       });
       this.engine.setColor(this.colorValue);
+      this.engine.setStabilizerMode(this.stabilizerMode);
+      this.engine.setRopeLength(this.ropeLength);
+      this.engine.setFollowStrength(this.followStrength);
       this.refreshLayers();
       // The engine fits the zoom during construction, before the animation
       // matrix above the status bar takes part in the layout. Re-fit once the
@@ -2423,6 +2493,68 @@ export class GnumarusShell extends LitElement {
     this.pencilAntialias = enabled;
     this.engine?.setPencilAntialias(enabled);
     this.statusMessage = `Pencil anti-aliasing: ${enabled ? "on" : "off"}`;
+  }
+
+  /** Test hook: set the brush stabilizer mode (none/rope/follow, defaults to none). */
+  setStabilizerMode(mode: GnumarusStabilizerMode): void {
+    const parsed = parseStabilizerMode(mode);
+    this.stabilizerMode = parsed;
+    this.engine?.setStabilizerMode(parsed);
+    this.statusMessage = `Stabilizer: ${parsed}`;
+  }
+
+  /** Test hook: set the rope leash length in layer pixels (1..200, clamped). */
+  setRopeLength(length: number): void {
+    const clamped = clampRopeLength(length);
+    this.ropeLength = clamped;
+    this.engine?.setRopeLength(clamped);
+    this.statusMessage = `Rope length: ${clamped}`;
+  }
+
+  /** Test hook: set the follow chase strength (0.01..1, clamped). */
+  setFollowStrength(strength: number): void {
+    const clamped = clampFollowStrength(strength);
+    this.followStrength = clamped;
+    this.engine?.setFollowStrength(clamped);
+    this.statusMessage = `Follow strength: ${clamped}`;
+  }
+
+  private currentDialogStabilizerMode(): GnumarusStabilizerMode {
+    const select = this.shadowRoot?.getElementById("stabilizerMode") as HTMLSelectElement | null;
+    return parseStabilizerMode(select?.value ?? "none");
+  }
+
+  private currentDialogRopeLength(): number {
+    const input = this.shadowRoot?.getElementById("ropeLength") as HTMLInputElement | null;
+    const parsed = Number(input?.value ?? String(GNUMARUS_DEFAULT_ROPE_LENGTH));
+    return clampRopeLength(Number.isFinite(parsed) ? parsed : GNUMARUS_DEFAULT_ROPE_LENGTH);
+  }
+
+  private currentDialogFollowStrength(): number {
+    const input = this.shadowRoot?.getElementById("followStrength") as HTMLInputElement | null;
+    const parsed = Number(input?.value ?? String(GNUMARUS_DEFAULT_FOLLOW_STRENGTH));
+    return clampFollowStrength(Number.isFinite(parsed) ? parsed : GNUMARUS_DEFAULT_FOLLOW_STRENGTH);
+  }
+
+  private applyStabilizerModeFromDialog(): void {
+    const mode = this.currentDialogStabilizerMode();
+    this.stabilizerMode = mode;
+    this.engine?.setStabilizerMode(mode);
+    this.statusMessage = `Stabilizer: ${mode}`;
+  }
+
+  private applyRopeLengthFromDialog(): void {
+    const length = this.currentDialogRopeLength();
+    this.ropeLength = length;
+    this.engine?.setRopeLength(length);
+    this.statusMessage = `Rope length: ${length}`;
+  }
+
+  private applyFollowStrengthFromDialog(): void {
+    const strength = this.currentDialogFollowStrength();
+    this.followStrength = strength;
+    this.engine?.setFollowStrength(strength);
+    this.statusMessage = `Follow strength: ${strength}`;
   }
 
   /** Test hook: set the shared paint blend mode (normal/copy/eraser, defaults to normal). */

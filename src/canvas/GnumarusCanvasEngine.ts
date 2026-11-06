@@ -23,6 +23,18 @@ import {
   type GnumarusRgba,
 } from "./GnumarusPixelBuffer";
 import {
+  GNUMARUS_DEFAULT_FOLLOW_STRENGTH,
+  GNUMARUS_DEFAULT_ROPE_LENGTH,
+  GNUMARUS_DEFAULT_STABILIZER_MODE,
+  clampFollowStrength,
+  clampRopeLength,
+  parseStabilizerMode,
+  stabilizerDistance,
+  stabilizerFollowStep,
+  stabilizerRopeStep,
+  type GnumarusStabilizerMode,
+} from "./GnumarusStabilizer";
+import {
   clampZoom,
   IDENTITY_LAYER_TRANSFORM,
   layerImageToProject,
@@ -320,6 +332,12 @@ export class GnumarusCanvasEngine {
   private brushSize = 1;
   private brushShape: GnumarusBrushShape = "square";
   private pencilAntialias = false;
+  private stabilizerMode: GnumarusStabilizerMode = GNUMARUS_DEFAULT_STABILIZER_MODE;
+  private ropeLength = GNUMARUS_DEFAULT_ROPE_LENGTH;
+  private followStrength = GNUMARUS_DEFAULT_FOLLOW_STRENGTH;
+  private stabilizerPos: { x: number; y: number } | null = null;
+  private stabilizerTarget: { x: number; y: number } | null = null;
+  private followLoopId: number | null = null;
   private lineWidth = 1;
   private lineShape: GnumarusBrushShape = "square";
   private lineAntialias = false;
@@ -334,11 +352,13 @@ export class GnumarusCanvasEngine {
   private curveDragCurrent: { x: number; y: number; clientX: number; clientY: number } | null = null;
   private lastMouseClient: { x: number; y: number } | null = null;
   private readonly previewTip: HTMLDivElement;
+  private readonly previewStabilizer: HTMLDivElement;
   private readonly previewSvg: SVGSVGElement;
   private readonly previewLine: SVGLineElement;
   private readonly previewCurve: SVGPathElement;
   private readonly previewHandleA: SVGLineElement;
   private readonly previewHandleB: SVGLineElement;
+  private readonly previewStabilizerLine: SVGLineElement;
   private readonly previewMarkers: SVGCircleElement[];
   private drawing = false;
   private panning = false;
@@ -425,6 +445,19 @@ export class GnumarusCanvasEngine {
     this.previewTip.style.boxSizing = "border-box";
     this.previewTip.style.zIndex = "5";
     container.appendChild(this.previewTip);
+    this.previewStabilizer = document.createElement("div");
+    this.previewStabilizer.setAttribute("data-testid", "stabilizer-preview");
+    this.previewStabilizer.style.position = "absolute";
+    this.previewStabilizer.style.pointerEvents = "none";
+    this.previewStabilizer.style.display = "none";
+    this.previewStabilizer.style.width = "10px";
+    this.previewStabilizer.style.height = "10px";
+    this.previewStabilizer.style.border = "2px solid #00e5ff";
+    this.previewStabilizer.style.borderRadius = "50%";
+    this.previewStabilizer.style.boxShadow = "0 0 0 1px #000000";
+    this.previewStabilizer.style.boxSizing = "border-box";
+    this.previewStabilizer.style.zIndex = "7";
+    container.appendChild(this.previewStabilizer);
     this.previewSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     this.previewSvg.setAttribute("data-testid", "line-preview");
     this.previewSvg.style.position = "absolute";
@@ -455,6 +488,14 @@ export class GnumarusCanvasEngine {
     };
     this.previewHandleA = makeHandle("curve-handle-a");
     this.previewHandleB = makeHandle("curve-handle-b");
+    this.previewStabilizerLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    this.previewStabilizerLine.setAttribute("data-testid", "stabilizer-rope");
+    this.previewStabilizerLine.setAttribute("stroke", "#00e5ff");
+    this.previewStabilizerLine.setAttribute("stroke-width", "1");
+    this.previewStabilizerLine.setAttribute("stroke-dasharray", "4 3");
+    this.previewStabilizerLine.setAttribute("opacity", "0.9");
+    this.previewStabilizerLine.style.display = "none";
+    this.previewSvg.appendChild(this.previewStabilizerLine);
     this.previewMarkers = [];
     for (let i = 0; i < 4; i += 1) {
       const marker = document.createElementNS("http://www.w3.org/2000/svg", "circle");
@@ -741,6 +782,9 @@ export class GnumarusCanvasEngine {
       return false;
     }
     this.currentFrame = frame;
+    this.stabilizerPos = null;
+    this.stabilizerTarget = null;
+    this.stopFollowLoop();
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
     this.render();
@@ -752,6 +796,9 @@ export class GnumarusCanvasEngine {
   addFrame(): number {
     this.frameCount += 1;
     this.currentFrame = this.frameCount - 1;
+    this.stabilizerPos = null;
+    this.stabilizerTarget = null;
+    this.stopFollowLoop();
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
     this.render();
@@ -793,6 +840,9 @@ export class GnumarusCanvasEngine {
     } else if (this.currentFrame >= this.frameCount) {
       this.currentFrame = this.frameCount - 1;
     }
+    this.stabilizerPos = null;
+    this.stabilizerTarget = null;
+    this.stopFollowLoop();
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
     this.render();
@@ -1108,8 +1158,12 @@ export class GnumarusCanvasEngine {
       return false;
     }
     this.activeLayerId = id;
+    this.stabilizerPos = null;
+    this.stabilizerTarget = null;
+    this.stopFollowLoop();
     this.updateGrid();
     this.render();
+    this.updatePreviews();
     this.emitStats();
     return true;
   }
@@ -1640,6 +1694,9 @@ export class GnumarusCanvasEngine {
     this.history.clear();
     this.strokeBase = null;
     this.strokeLayerId = null;
+    this.stabilizerPos = null;
+    this.stabilizerTarget = null;
+    this.stopFollowLoop();
     this.syncImageUniforms();
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
@@ -1784,6 +1841,9 @@ export class GnumarusCanvasEngine {
     this.history.clear();
     this.strokeBase = null;
     this.strokeLayerId = null;
+    this.stabilizerPos = null;
+    this.stabilizerTarget = null;
+    this.stopFollowLoop();
     this.syncImageUniforms();
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
@@ -1816,6 +1876,9 @@ export class GnumarusCanvasEngine {
     this.cells.clear();
     this.lineAnchor = null;
     this.resetCurveState();
+    this.stabilizerPos = null;
+    this.stabilizerTarget = null;
+    this.stopFollowLoop();
     this.hidePreviews();
     this.frameDurations.clear();
     this.defaultFrameDuration = GNUMARUS_DEFAULT_FRAME_DURATION_MS;
@@ -1958,6 +2021,78 @@ export class GnumarusCanvasEngine {
     this.emitStats();
     this.updatePreviews();
     return true;
+  }
+
+  getStabilizerMode(): GnumarusStabilizerMode {
+    return this.stabilizerMode;
+  }
+
+  getRopeLength(): number {
+    return this.ropeLength;
+  }
+
+  getFollowStrength(): number {
+    return this.followStrength;
+  }
+
+  /** Current paint focus in layer-image space, or null when stabilization is idle. */
+  getStabilizerPos(): { x: number; y: number } | null {
+    return this.stabilizerPos === null ? null : { x: this.stabilizerPos.x, y: this.stabilizerPos.y };
+  }
+
+  setStabilizerMode(mode: GnumarusStabilizerMode): boolean {
+    const parsed = parseStabilizerMode(mode);
+    if (parsed === this.stabilizerMode) {
+      return false;
+    }
+    this.stabilizerMode = parsed;
+    if (parsed === "none") {
+      this.stabilizerPos = null;
+      this.stabilizerTarget = null;
+      this.stopFollowLoop();
+    }
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  setRopeLength(length: number): boolean {
+    const clamped = clampRopeLength(length);
+    if (clamped === this.ropeLength) {
+      return false;
+    }
+    this.ropeLength = clamped;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  setFollowStrength(strength: number): boolean {
+    const clamped = clampFollowStrength(strength);
+    if (clamped === this.followStrength) {
+      return false;
+    }
+    this.followStrength = clamped;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  private isStabilizing(): boolean {
+    return this.tool === "pencil" && this.stabilizerMode !== "none";
+  }
+
+  private stabilizerStep(
+    current: { x: number; y: number },
+    target: { x: number; y: number },
+  ): { x: number; y: number } {
+    if (this.stabilizerMode === "rope") {
+      return stabilizerRopeStep(current, target, this.ropeLength);
+    }
+    if (this.stabilizerMode === "follow") {
+      return stabilizerFollowStep(current, target, this.followStrength);
+    }
+    return { x: target.x, y: target.y };
   }
 
   getLineWidth(): number {
@@ -2134,6 +2269,137 @@ export class GnumarusCanvasEngine {
   }
 
   /**
+   * Paint one stabilized pencil segment `from -> to` in layer-image space.
+   * Uses the same brush/AA/blend/accumulate paths as unstabilized strokes.
+   */
+  private paintStabilizedSegment(
+    tex: { buffer: Uint8ClampedArray; width: number; height: number },
+    locked: GnumarusChannelLock,
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+  ): void {
+    // Quantize like toImagePixel for the aliased path so stabilized strokes
+    // land on the same pixels as unstabilized ones (pixel x covers [x, x+1)).
+    const qx0 = this.pencilAntialias ? from.x : Math.floor(from.x);
+    const qy0 = this.pencilAntialias ? from.y : Math.floor(from.y);
+    const qx1 = this.pencilAntialias ? to.x : Math.floor(to.x);
+    const qy1 = this.pencilAntialias ? to.y : Math.floor(to.y);
+    if (!this.accumulate && this.strokeBase !== null && this.strokeMask !== null) {
+      stampSegmentCoverage(
+        this.strokeMask,
+        tex.width,
+        tex.height,
+        qx0,
+        qy0,
+        qx1,
+        qy1,
+        this.brushSize,
+        this.brushShape,
+        this.pencilAntialias,
+      );
+      this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked);
+      return;
+    }
+    // The aliased rasterizer walks integer pixels with Bresenham and only
+    // terminates on integer endpoints (see drawCubicBezier).
+    // The smoothed path keeps floats.
+    drawLineSegment(
+      tex.buffer,
+      tex.width,
+      tex.height,
+      qx0,
+      qy0,
+      qx1,
+      qy1,
+      this.brushSize,
+      this.brushShape,
+      this.pencilAntialias,
+      this.color,
+      locked,
+      this.blendMode,
+    );
+  }
+
+  private stopFollowLoop(): void {
+    if (this.followLoopId !== null) {
+      cancelAnimationFrame(this.followLoopId);
+      this.followLoopId = null;
+    }
+  }
+
+  private ensureFollowLoop(): void {
+    if (this.stabilizerMode !== "follow" || this.followLoopId !== null || this.disposed) {
+      return;
+    }
+    if (this.stabilizerPos === null || this.stabilizerTarget === null) {
+      return;
+    }
+    if (stabilizerDistance(this.stabilizerPos, this.stabilizerTarget) < 1e-3) {
+      return;
+    }
+    this.followLoopId = requestAnimationFrame(() => {
+      this.followLoopId = null;
+      this.followTick();
+    });
+  }
+
+  /**
+   * Catch-up tick for follow mode: the paint focus keeps chasing the last
+   * cursor target even between pointer events, painting while the button
+   * is held and updating only the preview while hovering.
+   */
+  private followTick(): void {
+    if (this.disposed || this.stabilizerMode !== "follow") {
+      return;
+    }
+    const pos = this.stabilizerPos;
+    const target = this.stabilizerTarget;
+    if (pos === null || target === null) {
+      return;
+    }
+    if (stabilizerDistance(pos, target) < 1e-3) {
+      this.updatePreviews();
+      return;
+    }
+    const next = stabilizerFollowStep(pos, target, this.followStrength);
+    this.stabilizerPos = next;
+    if (this.drawing && this.strokeLayerId !== null) {
+      const layer = this.activeLayer();
+      const tex = this.textures.get(this.strokeLayerId);
+      if (layer !== null && tex !== undefined) {
+        this.paintStabilizedSegment(tex, layer.lockedChannels, pos, next);
+        this.markTextureViewsDirty(tex.id);
+        this.render();
+        this.onPixelsChanged();
+      }
+    }
+    this.updatePreviews();
+    this.ensureFollowLoop();
+  }
+
+  /**
+   * Map a layer-image point back to client coordinates for the stabilizer
+   * overlay. Returns null when the layer or view is unavailable.
+   */
+  private stabilizerPosToClient(point: { x: number; y: number }): { x: number; y: number } | null {
+    const layer = this.activeLayer();
+    if (layer === null || layer.width < 1 || layer.height < 1) {
+      return null;
+    }
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return null;
+    }
+    const project = layerImageToProject(point.x, point.y, layer.width, layer.height, layer.transform);
+    return projectToScreen(
+      project.x,
+      project.y,
+      { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      this.viewTransform(),
+    );
+  }
+
+  /**
    * Draw the pending line through (x, y). When no anchor exists, arm it and
    * return 0 without drawing. Otherwise draws the segment, clears the anchor
    * and returns true when pixels changed.
@@ -2303,6 +2569,35 @@ export class GnumarusCanvasEngine {
     return `rgba(${this.color.r}, ${this.color.g}, ${this.color.b}, ${alpha})`;
   }
 
+  /** Position the stabilizer focus dot and rope line for the pencil tool. */
+  private updateStabilizerOverlay(): void {
+    const mouse = this.lastMouseClient;
+    if (!this.isStabilizing() || mouse === null || this.stabilizerPos === null) {
+      this.previewStabilizer.style.display = "none";
+      this.previewStabilizerLine.style.display = "none";
+      return;
+    }
+    const focusClient = this.stabilizerPosToClient(this.stabilizerPos);
+    if (focusClient === null) {
+      this.previewStabilizer.style.display = "none";
+      this.previewStabilizerLine.style.display = "none";
+      return;
+    }
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const dotSize = 10;
+    this.previewStabilizer.style.display = "block";
+    this.previewStabilizer.style.left = `${focusClient.x - rect.left - dotSize / 2}px`;
+    this.previewStabilizer.style.top = `${focusClient.y - rect.top - dotSize / 2}px`;
+    // Rope line from the raw cursor to the paint focus; also useful for
+    // follow mode as a lag indicator.
+    this.previewSvg.style.display = "block";
+    this.previewStabilizerLine.style.display = "block";
+    this.previewStabilizerLine.setAttribute("x1", String(mouse.x - rect.left));
+    this.previewStabilizerLine.setAttribute("y1", String(mouse.y - rect.top));
+    this.previewStabilizerLine.setAttribute("x2", String(focusClient.x - rect.left));
+    this.previewStabilizerLine.setAttribute("y2", String(focusClient.y - rect.top));
+  }
+
   /** Refresh the brush tip and line/curve overlays for the last mouse position. */
   private updatePreviews(): void {
     if (this.disposed) {
@@ -2336,11 +2631,17 @@ export class GnumarusCanvasEngine {
     this.previewCurve.style.display = "none";
     this.previewHandleA.style.display = "none";
     this.previewHandleB.style.display = "none";
+    this.previewStabilizerLine.style.display = "none";
     for (const marker of this.previewMarkers) {
       marker.style.display = "none";
     }
+    this.updateStabilizerOverlay();
     if (mouse === null) {
-      this.previewSvg.style.display = "none";
+      // Keep the stabilizer dot hidden when the mouse leaves; the overlay
+      // helper already hid it, but the svg may still be needed for nothing.
+      if (this.previewStabilizerLine.style.display !== "block") {
+        this.previewSvg.style.display = "none";
+      }
       return;
     }
     const rect = this.renderer.domElement.getBoundingClientRect();
@@ -2371,7 +2672,10 @@ export class GnumarusCanvasEngine {
       return;
     }
     if (this.tool !== "curve") {
-      this.previewSvg.style.display = "none";
+      // Preserve the stabilizer rope overlay for the pencil tool.
+      if (this.previewStabilizerLine.style.display !== "block") {
+        this.previewSvg.style.display = "none";
+      }
       return;
     }
     if (this.curvePhase === "dragging" && this.curveP0 !== null) {
@@ -2449,16 +2753,20 @@ export class GnumarusCanvasEngine {
       placeMarker(3, this.curveP3.clientX, this.curveP3.clientY);
       return;
     }
-    this.previewSvg.style.display = "none";
+    if (this.previewStabilizerLine.style.display !== "block") {
+      this.previewSvg.style.display = "none";
+    }
   }
 
   private hidePreviews(): void {
     this.previewTip.style.display = "none";
+    this.previewStabilizer.style.display = "none";
     this.previewSvg.style.display = "none";
     this.previewLine.style.display = "none";
     this.previewCurve.style.display = "none";
     this.previewHandleA.style.display = "none";
     this.previewHandleB.style.display = "none";
+    this.previewStabilizerLine.style.display = "none";
     for (const marker of this.previewMarkers) {
       marker.style.display = "none";
     }
@@ -2641,6 +2949,11 @@ export class GnumarusCanvasEngine {
     }
     if (tool !== "curve") {
       this.resetCurveState();
+    }
+    if (tool !== "pencil") {
+      this.stabilizerPos = null;
+      this.stabilizerTarget = null;
+      this.stopFollowLoop();
     }
     this.updatePreviews();
     this.onToolChanged?.(tool);
@@ -2851,10 +3164,14 @@ export class GnumarusCanvasEngine {
       return;
     }
     this.disposed = true;
+    this.stopFollowLoop();
     this.resizeObserver.disconnect();
     this.lineAnchor = null;
     this.lastMouseClient = null;
+    this.stabilizerPos = null;
+    this.stabilizerTarget = null;
     this.previewTip.remove();
+    this.previewStabilizer.remove();
     this.previewSvg.remove();
     for (const layer of this.layers) {
       this.scene.remove(layer.plane);
@@ -3064,6 +3381,36 @@ export class GnumarusCanvasEngine {
       }
       this.syncLayerRender(layer);
       this.refreshLayerStacking();
+      this.lastMouseClient = { x: event.clientX, y: event.clientY };
+      if (this.isStabilizing()) {
+        const pixel = this.toImagePixel(event.clientX, event.clientY);
+        if (pixel === null) {
+          return;
+        }
+        const floatPos = this.clientToLayerImageFloat(event.clientX, event.clientY);
+        if (floatPos === null) {
+          return;
+        }
+        const tex = ensured.texture;
+        this.drawing = true;
+        canvas.setPointerCapture(event.pointerId);
+        this.lastPixel = null;
+        this.stabilizerPos = { x: floatPos.x, y: floatPos.y };
+        this.stabilizerTarget = { x: floatPos.x, y: floatPos.y };
+        this.strokeBase = tex.buffer.slice();
+        this.strokeLayerId = tex.id;
+        if (!this.accumulate) {
+          this.strokeMask = new Uint8Array(tex.width * tex.height);
+        }
+        this.paintStabilizedSegment(tex, layer.lockedChannels, this.stabilizerPos, this.stabilizerPos);
+        this.markTextureViewsDirty(tex.id);
+        this.render();
+        this.onPixelsChanged();
+        this.onLayersChanged?.();
+        this.emitStats();
+        this.updatePreviews();
+        return;
+      }
       const pixel = this.toImagePixel(event.clientX, event.clientY);
       if (pixel === null) {
         return;
@@ -3188,6 +3535,41 @@ export class GnumarusCanvasEngine {
         this.emitStats();
         return;
       }
+      if (this.tool === "pencil" && this.stabilizerMode !== "none") {
+        const floatTarget = this.clientToLayerImageFloat(event.clientX, event.clientY);
+        if (floatTarget !== null) {
+          if (this.stabilizerPos === null) {
+            this.stabilizerPos = { x: floatTarget.x, y: floatTarget.y };
+            this.stabilizerTarget = { x: floatTarget.x, y: floatTarget.y };
+            this.updatePreviews();
+          } else {
+            this.stabilizerTarget = { x: floatTarget.x, y: floatTarget.y };
+            const next = this.stabilizerStep(this.stabilizerPos, this.stabilizerTarget);
+            if (stabilizerDistance(this.stabilizerPos, next) > 1e-9) {
+              const prev = this.stabilizerPos;
+              this.stabilizerPos = next;
+              if (this.drawing && this.strokeLayerId !== null) {
+                const layer = this.activeLayer();
+                const tex = this.strokeLayerId === null ? undefined : this.textures.get(this.strokeLayerId);
+                if (layer !== null && tex !== undefined) {
+                  this.paintStabilizedSegment(tex, layer.lockedChannels, prev, next);
+                  this.markTextureViewsDirty(tex.id);
+                  this.render();
+                  this.onPixelsChanged();
+                }
+              }
+              this.updatePreviews();
+            } else {
+              this.updatePreviews();
+            }
+          }
+          if (this.stabilizerMode === "follow") {
+            this.ensureFollowLoop();
+          }
+        }
+        this.emitStats();
+        return;
+      }
       if (this.drawing && this.lastPixel !== null && pixel !== null) {
         const layer = this.activeLayer();
         if (layer === null || this.strokeLayerId === null) {
@@ -3259,6 +3641,11 @@ export class GnumarusCanvasEngine {
       this.transformStart = null;
       this.loupeAnchor = null;
       this.lastPixel = null;
+      // Keep the stabilizer focus for hover preview; let follow mode converge.
+      if (this.stabilizerMode === "follow") {
+        this.ensureFollowLoop();
+      }
+      this.updatePreviews();
     };
     canvas.addEventListener("pointerup", endStroke);
     canvas.addEventListener("pointerup", (event: PointerEvent) => {
@@ -3288,6 +3675,9 @@ export class GnumarusCanvasEngine {
     canvas.addEventListener("pointerleave", () => {
       this.cursor = null;
       this.lastMouseClient = null;
+      this.stabilizerPos = null;
+      this.stabilizerTarget = null;
+      this.stopFollowLoop();
       this.hidePreviews();
       this.emitStats();
     });

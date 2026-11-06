@@ -131,6 +131,13 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Dragging the triangle sets the current color to the gradient point (S = x fraction, V = 1 - y fraction, hue kept from a tracked value that survives achromatic colors); dragging the ring sets only the hue (S/V kept); alpha is always preserved; model axes/hex stay in sync.
 - Keyboard support on both controls; pure geometry/color helpers unit-tested.
 
+## 24. Brush stabilizer (implemented)
+- Pencil options gain a Stabilizer dropdown: `none` (default, no stabilization), `rope` (leash), `follow` (smoothing chase).
+- Rope mode: paint focus stays until the cursor exceeds the configurable rope length (1..200 layer pixels, default 20); beyond that the focus is dragged so the cursor-focus distance stays equal to the rope length.
+- Follow mode: paint focus chases the cursor every pointer move plus a `requestAnimationFrame` catch-up loop while the button is held or the preview is converging; one step is `pos + (target - pos) * strength`, so speed is proportional to strength and to distance (farther moves faster). Strength 0.01..1.0, default 0.2; 1.0 is nearly instant (like none).
+- Engine stores mode/rope/strength plus float focus/target in layer-image space; stabilized strokes paint `oldFocus -> newFocus` with the same brush/AA/blend/accumulate paths (aliased segments floored to match `toImagePixel`, fixing a Bresenham non-termination with floats); hover also tracks for preview. A stabilizer dot plus rope line overlay shows the true paint focus.
+- Shell shows Rope length only for rope and Follow strength only for follow, with test hooks and status messages. Pure math lives in `src/canvas/GnumarusStabilizer.ts` with unit tests; E2E covers dropdown, conditional inputs, and painting with each mode.
+
 ## 11. Custom color picker (implemented)
 - Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).
 - Every model carries an alpha axis; RGBA axes span 0..255. ARD Diagonal spans 0..360 and Ratio 0..255.

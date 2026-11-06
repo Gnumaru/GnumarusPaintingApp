@@ -2686,3 +2686,140 @@ async function getMatrixFrame(page: import("@playwright/test").Page): Promise<nu
     return root.__gnumarus?.engine?.getCurrentFrame() ?? -1;
   });
 }
+
+test("pencil stabilizer dropdown defaults to none with conditional rope and follow settings", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Pencil" }).click();
+  const options = page.locator('gnumarus-shell [data-testid="tool-options"]');
+  await expect(options).toContainText("Stabilizer");
+  const mode = page.locator("gnumarus-shell select#stabilizerMode");
+  await expect(mode).toHaveValue("none");
+  await expect(page.locator("gnumarus-shell input#ropeLength")).toHaveCount(0);
+  await expect(page.locator("gnumarus-shell input#followStrength")).toHaveCount(0);
+  const engineMode = (): Promise<string> =>
+    page.evaluate(() => {
+      const root = window as unknown as { __gnumarus?: { engine?: { getStabilizerMode(): string } } };
+      return root.__gnumarus?.engine?.getStabilizerMode() ?? "missing";
+    });
+  expect(await engineMode()).toBe("none");
+
+  await mode.selectOption("rope");
+  await expect(page.locator("gnumarus-shell")).toContainText("Stabilizer: rope");
+  expect(await engineMode()).toBe("rope");
+  await expect(page.locator("gnumarus-shell input#ropeLength")).toBeVisible();
+  await expect(page.locator("gnumarus-shell input#followStrength")).toHaveCount(0);
+  await page.locator("gnumarus-shell input#ropeLength").fill("25");
+  await expect(page.locator("gnumarus-shell")).toContainText("Rope length: 25");
+
+  await mode.selectOption("follow");
+  await expect(page.locator("gnumarus-shell")).toContainText("Stabilizer: follow");
+  expect(await engineMode()).toBe("follow");
+  await expect(page.locator("gnumarus-shell input#followStrength")).toBeVisible();
+  await expect(page.locator("gnumarus-shell input#ropeLength")).toHaveCount(0);
+  await page.locator("gnumarus-shell input#followStrength").fill("0.5");
+  await expect(page.locator("gnumarus-shell")).toContainText("Follow strength: 0.5");
+
+  await mode.selectOption("none");
+  await expect(page.locator("gnumarus-shell input#ropeLength")).toHaveCount(0);
+  await expect(page.locator("gnumarus-shell input#followStrength")).toHaveCount(0);
+});
+
+test("rope stabilizer holds the focus within the rope and pulls beyond it", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.locator("gnumarus-shell select#stabilizerMode").selectOption("rope");
+  await page.locator("gnumarus-shell input#ropeLength").fill("10");
+  await setPencil(page, "#ff0000");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const state = await getViewState(page);
+  const toScreen = (lx: number, ly: number): { x: number; y: number } =>
+    layerPixelToScreen(
+      lx,
+      ly,
+      { left: box.x, top: box.y, width: box.width, height: box.height },
+      64,
+      64,
+      { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false },
+      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+    );
+  const start = toScreen(20, 32);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  // Small move inside the 10px rope: the focus must not move.
+  const inside = toScreen(24, 32);
+  await page.mouse.move(inside.x, inside.y, { steps: 4 });
+  const focusInside = await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { getStabilizerPos(): { x: number; y: number } | null } } };
+    return root.__gnumarus?.engine?.getStabilizerPos() ?? null;
+  });
+  expect(focusInside).not.toBeNull();
+  expect(focusInside!.x).toBeCloseTo(20.5, 0);
+  // Far move beyond the rope: the focus is dragged toward the cursor.
+  const far = toScreen(50, 32);
+  await page.mouse.move(far.x, far.y, { steps: 4 });
+  const focusFar = await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { getStabilizerPos(): { x: number; y: number } | null } } };
+    return root.__gnumarus?.engine?.getStabilizerPos() ?? null;
+  });
+  expect(focusFar).not.toBeNull();
+  expect(focusFar!.x).toBeGreaterThan(focusInside!.x + 5);
+  await page.mouse.up();
+  expect(await readPixel(page, 20, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  const previewVisible = await page.evaluate(() => {
+    const root = document.querySelector("gnumarus-shell")?.shadowRoot;
+    const dot = root?.getElementById("canvasHost")?.querySelector('[data-testid="stabilizer-preview"]') as HTMLElement | null;
+    return dot?.style.display ?? "missing";
+  });
+  expect(previewVisible).toBe("block");
+  await page.keyboard.press("Control+z");
+});
+
+test("follow stabilizer paints while chasing the cursor", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.locator("gnumarus-shell select#stabilizerMode").selectOption("follow");
+  await page.locator("gnumarus-shell input#followStrength").fill("1");
+  await expect(page.locator("gnumarus-shell")).toContainText("Follow strength: 1");
+  await setPencil(page, "#ff0000");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const state = await getViewState(page);
+  const toScreen = (lx: number, ly: number): { x: number; y: number } =>
+    layerPixelToScreen(
+      lx,
+      ly,
+      { left: box.x, top: box.y, width: box.width, height: box.height },
+      64,
+      64,
+      { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false },
+      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+    );
+  const start = toScreen(10, 10);
+  const end = toScreen(20, 10);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 8 });
+  await page.mouse.up();
+  // Strength 1 snaps instantly, so both ends are painted like without stabilization.
+  expect(await readPixel(page, 10, 10)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 20, 10)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.keyboard.press("Control+z");
+  await page.locator("gnumarus-shell input#followStrength").fill("0.01");
+  await expect(page.locator("gnumarus-shell")).toContainText("Follow strength: 0.01");
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 8 });
+  await page.mouse.up();
+  // Even with heavy smoothing the stroke starts at the cursor.
+  expect(await readPixel(page, 10, 10)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
