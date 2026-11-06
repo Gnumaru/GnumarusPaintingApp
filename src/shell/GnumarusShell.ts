@@ -3010,6 +3010,7 @@ export class GnumarusShell extends LitElement {
     this.backgroundColor = settings.color;
     this.engine?.applyBackgroundSettings(settings);
     this.persistBackground();
+    void this.refreshPreview();
     this.statusMessage =
       settings.mode === "solid" ? `Canvas background: solid ${settings.color}` : "Canvas background: checkerboard";
   }
@@ -3018,6 +3019,7 @@ export class GnumarusShell extends LitElement {
     this.backgroundMode = DEFAULT_BACKGROUND_SETTINGS.mode;
     this.engine?.setBackgroundMode(this.backgroundMode);
     this.persistBackground();
+    void this.refreshPreview();
     this.statusMessage = "Background mode reset to default";
   }
 
@@ -3025,6 +3027,7 @@ export class GnumarusShell extends LitElement {
     this.backgroundColor = DEFAULT_BACKGROUND_SETTINGS.color;
     this.engine?.setBackgroundColor(this.backgroundColor);
     this.persistBackground();
+    void this.refreshPreview();
     this.statusMessage = "Background color reset to default";
   }
 
@@ -3038,6 +3041,7 @@ export class GnumarusShell extends LitElement {
       colorB: this.checkerColorB,
     });
     this.persistChecker();
+    void this.refreshPreview();
     this.statusMessage = "Checkerboard mode reset to default";
   }
 
@@ -3051,6 +3055,7 @@ export class GnumarusShell extends LitElement {
       colorB: this.checkerColorB,
     });
     this.persistChecker();
+    void this.refreshPreview();
     this.statusMessage = "Checker width reset to default";
   }
 
@@ -3064,6 +3069,7 @@ export class GnumarusShell extends LitElement {
       colorB: this.checkerColorB,
     });
     this.persistChecker();
+    void this.refreshPreview();
     this.statusMessage = "Checker height reset to default";
   }
 
@@ -3077,6 +3083,7 @@ export class GnumarusShell extends LitElement {
       colorB: this.checkerColorB,
     });
     this.persistChecker();
+    void this.refreshPreview();
     this.statusMessage = "Checker color A reset to default";
   }
 
@@ -3090,6 +3097,7 @@ export class GnumarusShell extends LitElement {
       colorB: this.checkerColorB,
     });
     this.persistChecker();
+    void this.refreshPreview();
     this.statusMessage = "Checker color B reset to default";
   }
 
@@ -3453,6 +3461,7 @@ export class GnumarusShell extends LitElement {
       colorB: this.checkerColorB,
     });
     this.persistChecker();
+    void this.refreshPreview();
     this.statusMessage = `Checker color A: ${six}`;
   }
 
@@ -3471,6 +3480,7 @@ export class GnumarusShell extends LitElement {
       colorB: this.checkerColorB,
     });
     this.persistChecker();
+    void this.refreshPreview();
     this.statusMessage = `Checker color B: ${six}`;
   }
 
@@ -3483,6 +3493,7 @@ export class GnumarusShell extends LitElement {
     this.backgroundColor = six;
     this.engine?.applyBackgroundSettings({ mode: this.backgroundMode, color: this.backgroundColor });
     this.persistBackground();
+    void this.refreshPreview();
     this.statusMessage = `Canvas background: ${this.backgroundMode === "solid" ? `solid ${six}` : "checkerboard"}`;
   }
 
@@ -3520,6 +3531,7 @@ export class GnumarusShell extends LitElement {
     this.checkerColorB = settings.colorB;
     this.engine?.applyCheckerSettings(settings);
     this.persistChecker();
+    void this.refreshPreview();
     this.statusMessage = `Checkerboard: ${settings.mode}-space, ${settings.sizeX}x${settings.sizeY}px`;
   }
 
@@ -3546,6 +3558,7 @@ export class GnumarusShell extends LitElement {
     this.persistRotation();
     this.toastDurationSec = DEFAULT_TOAST_SETTINGS.durationSec;
     this.persistToast();
+    void this.refreshPreview();
     this.statusMessage = "Settings reset to defaults";
   }
 
@@ -3663,7 +3676,17 @@ export class GnumarusShell extends LitElement {
         opacity: info.opacity,
       };
     });
-    const flat = compositeFinalImage(size.width, size.height, inputs);
+    const checker = this.engine.getCheckerSettings();
+    const background = this.engine.getBackgroundSettings();
+    const flat = compositeFinalImage(size.width, size.height, inputs, {
+      mode: background.mode,
+      checkerMode: checker.mode,
+      sizeX: checker.sizeX,
+      sizeY: checker.sizeY,
+      colorA: checker.colorA,
+      colorB: checker.colorB,
+      color: background.color,
+    });
     canvas.width = size.width;
     canvas.height = size.height;
     const ctx = canvas.getContext("2d");

@@ -141,3 +141,6 @@
 - [x] Merge down relink: empty lower cell links the upper content, textureless lower content links the upper texture; undoable
 - [x] Unit tests (vitest) — 156 passed (keep-layer + relink merge history undo/redo)
 - [x] E2E test (Playwright): previous 97 + empty-lower link (remove + undo/redo) + textureless-lower link (keep + undo/redo) — 99 passed
+- [x] Preview shows the canvas background (solid fill or matching checkerboard, refreshed on settings change)
+- [x] Unit tests (vitest) — 159 passed (preview background solid/checker/invalid)
+- [x] E2E test (Playwright): previous 99 + preview canvas background (checker default, live solid switch, live checkerboard switch, paint composite) — 100 passed

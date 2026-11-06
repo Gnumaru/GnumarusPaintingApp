@@ -58,4 +58,52 @@ describe("GnumarusFinalRender", () => {
     expect(flat[at(2, 1)]).toBe(255);
     expect(flat[at(1, 1)]).toBe(0);
   });
+
+  it("fills solid backgrounds opaquely under layers", () => {
+    const buffer = createPixelBuffer(2, 2);
+    setPixel(buffer, 2, 2, 1, 1, { r: 255, g: 0, b: 0, a: 255 });
+    const flat = compositeFinalImage(
+      2,
+      2,
+      [
+        { width: 2, height: 2, buffer, transform: { ...IDENTITY_LAYER_TRANSFORM }, visible: true, opacity: 1 },
+      ],
+      { mode: "solid", checkerMode: "image", sizeX: 16, sizeY: 16, colorA: "#000000", colorB: "#ffffff", color: "#00ff00" },
+    );
+    const at = (x: number, y: number): number => (y * 2 + x) * 4;
+    expect(Array.from(flat.subarray(at(0, 0), at(0, 0) + 4))).toEqual([0, 255, 0, 255]);
+    expect(Array.from(flat.subarray(at(1, 1), at(1, 1) + 4))).toEqual([255, 0, 0, 255]);
+  });
+
+  it("draws matching image-space checkerboard squares", () => {
+    const flat = compositeFinalImage(4, 4, [], {
+      mode: "checkerboard",
+      checkerMode: "image",
+      sizeX: 2,
+      sizeY: 2,
+      colorA: "#ffffff",
+      colorB: "#000000",
+      color: "#808080",
+    });
+    const at = (x: number, y: number): number => (y * 4 + x) * 4;
+    // Matches the canvas shader (origin at the bottom): top-left is B, top row alternates every 2px.
+    expect(Array.from(flat.subarray(at(0, 0), at(0, 0) + 3))).toEqual([0, 0, 0]);
+    expect(Array.from(flat.subarray(at(2, 0), at(2, 0) + 3))).toEqual([255, 255, 255]);
+    expect(Array.from(flat.subarray(at(0, 3), at(0, 3) + 3))).toEqual([255, 255, 255]);
+    expect(Array.from(flat.subarray(at(2, 3), at(2, 3) + 3))).toEqual([0, 0, 0]);
+    expect(flat[at(0, 0) + 3]).toBe(255);
+  });
+
+  it("ignores invalid background colors and keeps transparency", () => {
+    const flat = compositeFinalImage(2, 2, [], {
+      mode: "solid",
+      checkerMode: "image",
+      sizeX: 16,
+      sizeY: 16,
+      colorA: "#ffffff",
+      colorB: "not-a-color",
+      color: "also-bad",
+    });
+    expect(Array.from(flat)).toEqual(new Array(16).fill(0));
+  });
 });

@@ -221,3 +221,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Merge down composites the current-frame visible transformed pixels of the active cell content over the transformed texture of the below layer's current cell content (unchanged sampling, opacity and lock masking).
 - The merged (upper) layer is removed only when all of its cells in every other frame are empty or hold textureless contents; otherwise the layer is kept, only the current cell's content is dissociated (cell becomes empty) and the other frames stay untouched.
 - All paths stay single-entry undoable: the history merge record carries a removed-layer flag, the dissociated cell, the associated lower cell and the texture link, with associate/dissociate/set-texture callbacks; unit tests for keep-layer and relink undo/redo plus E2E for multi-frame keep, empty-lower link and textureless-lower link (each with undo/redo).
+
+## 40. Preview shows the canvas background (implemented)
+- The final preview window renders the same background as the canvas: solid mode fills the flattened image with the solid color; checkerboard mode draws the same image-space squares (or screen-space squares in preview pixels) with the configured sizes and colors.
+- `compositeFinalImage` gains an optional background argument (default keeps transparent output so existing behavior/tests are unchanged); the shell passes the engine's live checker/background settings on every preview refresh, including when those settings change while the preview is open.
+- Unit tests for solid fill, checker pattern/sizes/phase and invalid input (all green); E2E for solid + checkerboard preview pixels with live settings changes while the preview stays open (green).

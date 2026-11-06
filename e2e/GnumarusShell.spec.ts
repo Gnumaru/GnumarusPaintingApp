@@ -3841,3 +3841,53 @@ test("Help menu lists every keyboard shortcut in a modal", async ({ page }) => {
   await dialog.getByRole("button", { name: "Close" }).click();
   await expect(dialog).toBeHidden();
 });
+
+test("final preview shows the canvas background", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
+  await page.getByRole("button", { name: "Final preview" }).click();
+  const preview = page.locator('gnumarus-shell [data-testid="final-preview"]');
+  await expect(preview).toBeVisible();
+  const previewCanvas = page.locator("gnumarus-shell canvas#previewCanvas");
+  await expect(previewCanvas).toBeVisible();
+  const previewPixel = (x: number, y: number): Promise<number[] | null> =>
+    page.evaluate(([px, py]: number[]) => {
+      const root = document.querySelector("gnumarus-shell")?.shadowRoot ?? null;
+      const canvas = root?.getElementById("previewCanvas") as HTMLCanvasElement | null;
+      const ctx = canvas?.getContext("2d") ?? null;
+      if (ctx === null) {
+        return null;
+      }
+      const data = ctx.getImageData(px, py, 1, 1).data;
+      return [data[0], data[1], data[2], data[3]];
+    }, [x, y]);
+  // Default 16px checkerboard: top-left square uses the second checker color.
+  await expect.poll(() => previewPixel(0, 0)).toEqual([148, 148, 148, 255]);
+  // Painted pixels still composite over the background.
+  expect(await previewPixel(32, 32)).toEqual([0, 0, 0, 255]);
+  // Drag the preview window aside so the menu bar stays clickable, then
+  // switch to a solid background and watch the open preview update live.
+  const header = preview.locator(".preview-header");
+  const headerBox = await header.boundingBox();
+  if (headerBox === null) {
+    throw new Error("preview header has no bounding box");
+  }
+  await page.mouse.move(headerBox.x + 40, headerBox.y + headerBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(headerBox.x + 540, headerBox.y + headerBox.height / 2 + 80, { steps: 8 });
+  await page.mouse.up();
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.locator("gnumarus-shell select#backgroundMode").selectOption("solid");
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { setBackgroundColor(hex: string): void } } };
+    root.__gnumarus?.shell?.setBackgroundColor("#ff0000");
+  });
+  await expect.poll(() => previewPixel(0, 0)).toEqual([255, 0, 0, 255]);
+  expect(await previewPixel(32, 32)).toEqual([0, 0, 0, 255]);
+  // Switching back to checkerboard updates the open preview too.
+  await page.locator("gnumarus-shell select#backgroundMode").selectOption("checkerboard");
+  await expect.poll(() => previewPixel(0, 0)).toEqual([148, 148, 148, 255]);
+  await page.locator("gnumarus-shell dialog#settingsDialog").getByRole("button", { name: "Close", exact: true }).click();
+});
