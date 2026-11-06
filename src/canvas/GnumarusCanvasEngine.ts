@@ -1112,6 +1112,50 @@ export class GnumarusCanvasEngine {
     return contentId;
   }
 
+  /** Create a textureless content and attach it to the cell (for the content picker flow). */
+  createEmptyContentForCell(layerId: string, frame: number): string | null {
+    if (this.findLayer(layerId) === null) {
+      return null;
+    }
+    if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
+      return null;
+    }
+    const contentId = this.nextContentId();
+    this.contents.set(contentId, {
+      id: contentId,
+      name: `Content ${this.contentCounter - 1}`,
+      textureId: null,
+      transform: { ...IDENTITY_LAYER_TRANSFORM },
+    });
+    this.cells.set(animationCellKey(layerId, frame), contentId);
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return contentId;
+  }
+
+  /** Create a new empty project-sized texture without attaching it to any content. */
+  createEmptyTexture(): string {
+    const textureId = this.nextTextureId();
+    this.textures.set(textureId, {
+      id: textureId,
+      name: `Texture ${this.textureCounter - 1}`,
+      width: this.imageWidth,
+      height: this.imageHeight,
+      buffer: createPixelBuffer(this.imageWidth, this.imageHeight),
+    });
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return textureId;
+  }
+
   dissociateCellContent(layerId: string, frame: number): boolean {
     const key = animationCellKey(layerId, frame);
     if (!this.cells.has(key)) {

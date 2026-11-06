@@ -116,3 +116,7 @@
 - [x] Toast display time setting 0.5..2.0s default 1.0s in Settings Interface section with reset arrow, click selection also shows toast, layer auto names start at 1, frames renamable like layers (inline + dialog + menu, persisted in project.json)
 - [x] Unit tests (vitest): pixel buffer, color models, stabilizer, pixel perfect, rotation settings, toast settings, animation model (frame names insert/swap/ensure), channel lock, layer resize, grid settings, pixel grid shader, background settings, final render, viewport math (rotated bounds), project format (frame names), mapping, checker, history — 148 passed
 - [x] E2E test (Playwright): previous 87 + click toast + toast duration setting + layer names start at 1 + frame rename — 91 passed
+- [ ] Cell content picker modal: single `Select content` menu item, content modal (No content, New content, sorted contents with thumbnails), texture modal for new content (No texture, New texture, sorted textures with thumbnails)
+- [x] Cell content picker modal: single `Select content` menu item, content modal (No content, New content, sorted contents with thumbnails), texture modal for new content (No texture, New texture, sorted textures with thumbnails)
+- [x] Unit tests (vitest): previous 148 pass (engine picker methods covered via E2E, no WebGL in unit)
+- [x] E2E test (Playwright): previous 91 with rewritten cell/content picker flows — 91 passed

@@ -712,6 +712,59 @@ export class GnumarusShell extends LitElement {
       padding: 6px 12px;
       cursor: pointer;
     }
+    .picker-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 8px;
+      max-height: 320px;
+      overflow-y: auto;
+      min-width: 320px;
+      max-width: min(560px, 80vw);
+      padding: 4px;
+      margin: 8px 0;
+    }
+    .picker-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      background: #1e1e1e;
+      color: #e6e6e6;
+      border: 1px solid #555;
+      border-radius: 6px;
+      padding: 8px 6px;
+      cursor: pointer;
+      font-size: 12px;
+      min-height: 96px;
+    }
+    .picker-item:hover {
+      background: #0e639c;
+      border-color: #0e639c;
+    }
+    .picker-item .picker-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 100%;
+    }
+    .picker-thumb {
+      width: 48px;
+      height: 48px;
+      image-rendering: pixelated;
+      background: transparent;
+      border: 1px solid #111;
+    }
+    .picker-empty {
+      width: 48px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px dashed #555;
+      border-radius: 4px;
+      font-size: 20px;
+      color: #9a9a9a;
+    }
     .error {
       color: #ffb3b3;
     }
@@ -759,6 +812,8 @@ export class GnumarusShell extends LitElement {
     contextMenuX: { type: Number },
     contextMenuY: { type: Number },
     matrixMenu: { type: Object },
+    contentPickerTarget: { type: Object },
+    texturePickerContentId: { type: String },
     checkerColorA: { type: String },
     checkerColorB: { type: String },
     defaultFrameDuration: { type: Number },
@@ -831,6 +886,8 @@ export class GnumarusShell extends LitElement {
     | { kind: "cell"; layerId: string; frame: number; x: number; y: number }
     | { kind: "frame"; frame: number; x: number; y: number }
     | null;
+  declare contentPickerTarget: { layerId: string; frame: number } | null;
+  declare texturePickerContentId: string | null;
   declare checkerColorA: string;
   declare checkerColorB: string;
   declare defaultFrameDuration: number;
@@ -906,6 +963,8 @@ export class GnumarusShell extends LitElement {
     this.contextMenuX = 0;
     this.contextMenuY = 0;
     this.matrixMenu = null;
+    this.contentPickerTarget = null;
+    this.texturePickerContentId = null;
     this.checkerColorA = DEFAULT_CHECKER_SETTINGS.colorA;
     this.checkerColorB = DEFAULT_CHECKER_SETTINGS.colorB;
     this.defaultFrameDuration = DEFAULT_ANIMATION_FRAME_DURATION;
@@ -1734,6 +1793,7 @@ export class GnumarusShell extends LitElement {
           <button @click=${(): void => this.confirmFrameRename()}>Rename</button>
         </div>
       </dialog>
+      ${this.renderContentPickerDialog()} ${this.renderTexturePickerDialog()}
     `;
   }
 
@@ -2078,49 +2138,16 @@ export class GnumarusShell extends LitElement {
       `;
     }
     const matrix = this.engine.getAnimationMatrix();
-    const menuLayerId = this.matrixMenu.layerId;
-    const menuFrame = this.matrixMenu.frame;
-    const cell = matrix.rows
-      .flatMap((row) => row.cells)
-      .find((entry) => entry.layerId === menuLayerId && entry.frame === menuFrame);
-    const contentId = cell?.contentId ?? null;
-    const content = matrix.contents.find((entry) => entry.id === contentId) ?? null;
+    void matrix;
     return html`
       <div class="context-blocker" @click=${(): void => this.closeMatrixMenu()} @contextmenu=${(event: Event): void => {
         event.preventDefault();
         this.closeMatrixMenu();
       }}></div>
       <div class="context-menu" style="left: ${this.matrixMenu.x}px; top: ${this.matrixMenu.y}px;">
-        <button @click=${(): void => this.onNewCellContent()}>New content</button>
-        <button ?disabled=${contentId === null} @click=${(): void => this.onDissociateCellContent()}>
-          Dissociate content
-        </button>
-        ${matrix.contents.map(
-          (entry) => html`
-            <button ?disabled=${entry.id === contentId} @click=${(): void => this.onAssociateCellContent(entry.id)}>
-              Use content "${entry.name}"
-            </button>
-          `,
-        )}
-        <button ?disabled=${content === null || content.textureId === null} @click=${(): void => this.onDissociateContentTexture()}>
-          Dissociate texture${content !== null && content.textureId !== null ? ` (${this.textureName(content.textureId, matrix)})` : ""}
-        </button>
-        ${matrix.textures.map(
-          (texture) => html`
-            <button
-              ?disabled=${content?.textureId === texture.id}
-              @click=${(): void => this.onAssociateContentTexture(texture.id)}
-            >
-              Use texture "${texture.name}"
-            </button>
-          `,
-        )}
+        <button @click=${(): void => this.onOpenContentPicker()}>Select content</button>
       </div>
     `;
-  }
-
-  private textureName(textureId: string, matrix: { textures: Array<{ id: string; name: string }> }): string {
-    return matrix.textures.find((entry) => entry.id === textureId)?.name ?? textureId;
   }
 
   firstUpdated(): void {
@@ -3560,37 +3587,199 @@ export class GnumarusShell extends LitElement {
     return { layerId: this.matrixMenu.layerId, frame: this.matrixMenu.frame };
   }
 
-  private onNewCellContent(): void {
+  private sortedContents(): Array<{
+    id: string;
+    name: string;
+    textureId: string | null;
+    width: number;
+    height: number;
+  }> {
+    if (this.engine === null) {
+      return [];
+    }
+    return [...this.engine.getAnimationMatrix().contents].sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
+  }
+
+  private sortedTextures(): Array<{ id: string; name: string; width: number; height: number }> {
+    if (this.engine === null) {
+      return [];
+    }
+    return [...this.engine.getAnimationMatrix().textures].sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
+  }
+
+  private thumbnailDataUrl(textureId: string): string | null {
+    if (this.engine === null) {
+      return null;
+    }
+    const entry = this.engine.exportTextures().find((item) => item.id === textureId);
+    if (entry === undefined || entry.width < 1 || entry.height < 1) {
+      return null;
+    }
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = entry.width;
+      canvas.height = entry.height;
+      const ctx = canvas.getContext("2d");
+      if (ctx === null) {
+        return null;
+      }
+      const image = new ImageData(new Uint8ClampedArray(entry.buffer), entry.width, entry.height);
+      ctx.putImageData(image, 0, 0);
+      return canvas.toDataURL();
+    } catch {
+      return null;
+    }
+  }
+
+  private renderContentPickerDialog() {
+    const contents = this.sortedContents();
+    return html`
+      <dialog id="contentPickerDialog" @close=${(): void => this.onContentPickerClosed()}>
+        <h3>Select content</h3>
+        <div class="picker-grid" data-testid="content-picker-grid">
+          <button
+            class="picker-item"
+            data-testid="content-picker-none"
+            @click=${(): void => this.onContentPickerSelect("none")}
+          >
+            <span class="picker-empty" aria-hidden="true">∅</span>
+            <span class="picker-name">No content</span>
+          </button>
+          <button
+            class="picker-item"
+            data-testid="content-picker-new"
+            @click=${(): void => this.onContentPickerSelect("new")}
+          >
+            <span class="picker-empty" aria-hidden="true">+</span>
+            <span class="picker-name">New content</span>
+          </button>
+          ${contents.map((content) => {
+            const url = content.textureId === null ? null : this.thumbnailDataUrl(content.textureId);
+            return html`
+              <button
+                class="picker-item"
+                data-testid="content-picker-item"
+                data-content-id=${content.id}
+                title=${content.name}
+                @click=${(): void => this.onContentPickerSelect(content.id)}
+              >
+                ${url !== null
+                  ? html`<img class="picker-thumb" src=${url} alt="" data-texture-id=${content.textureId ?? ""} />`
+                  : html`<span class="picker-empty" aria-hidden="true">∅</span>`}
+                <span class="picker-name">${content.name}</span>
+              </button>
+            `;
+          })}
+        </div>
+        <div class="dialog-actions">
+          <button @click=${(): void => this.closeContentPicker()}>Cancel</button>
+        </div>
+      </dialog>
+    `;
+  }
+
+  private renderTexturePickerDialog() {
+    const textures = this.sortedTextures();
+    return html`
+      <dialog id="texturePickerDialog" @close=${(): void => this.onTexturePickerClosed()}>
+        <h3>Select texture</h3>
+        <div class="picker-grid" data-testid="texture-picker-grid">
+          <button
+            class="picker-item"
+            data-testid="texture-picker-none"
+            @click=${(): void => this.onTexturePickerSelect("none")}
+          >
+            <span class="picker-empty" aria-hidden="true">∅</span>
+            <span class="picker-name">No texture</span>
+          </button>
+          <button
+            class="picker-item"
+            data-testid="texture-picker-new"
+            @click=${(): void => this.onTexturePickerSelect("new")}
+          >
+            <span class="picker-empty" aria-hidden="true">+</span>
+            <span class="picker-name">New texture</span>
+          </button>
+          ${textures.map((texture) => {
+            const url = this.thumbnailDataUrl(texture.id);
+            return html`
+              <button
+                class="picker-item"
+                data-testid="texture-picker-item"
+                data-texture-id=${texture.id}
+                title=${texture.name}
+                @click=${(): void => this.onTexturePickerSelect(texture.id)}
+              >
+                ${url !== null
+                  ? html`<img class="picker-thumb" src=${url} alt="" data-texture-id=${texture.id} />`
+                  : html`<span class="picker-empty" aria-hidden="true">∅</span>`}
+                <span class="picker-name">${texture.name}</span>
+              </button>
+            `;
+          })}
+        </div>
+        <div class="dialog-actions">
+          <button @click=${(): void => this.closeTexturePicker()}>Cancel</button>
+        </div>
+      </dialog>
+    `;
+  }
+
+  private onOpenContentPicker(): void {
     const target = this.matrixCellTarget();
     this.closeMatrixMenu();
     if (target === null || this.engine === null) {
       return;
     }
-    const contentId = this.engine.createCellContent(target.layerId, target.frame);
-    if (contentId !== null) {
+    this.contentPickerTarget = { ...target };
+    this.requestUpdate();
+    const dialog = this.shadowRoot?.getElementById("contentPickerDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+  }
+
+  private onContentPickerClosed(): void {
+    this.contentPickerTarget = null;
+  }
+
+  private closeContentPicker(): void {
+    const dialog = this.shadowRoot?.getElementById("contentPickerDialog") as HTMLDialogElement | null;
+    dialog?.close();
+    this.contentPickerTarget = null;
+  }
+
+  private onContentPickerSelect(contentId: string): void {
+    const target = this.contentPickerTarget;
+    if (target === null || this.engine === null) {
+      this.closeContentPicker();
+      return;
+    }
+    if (contentId === "none") {
+      if (this.engine.dissociateCellContent(target.layerId, target.frame)) {
+        this.refreshLayers();
+        this.dirty = true;
+        this.statusMessage = "Cell content dissociated";
+      } else {
+        this.statusMessage = "Cell is already empty";
+      }
+      this.closeContentPicker();
+      return;
+    }
+    if (contentId === "new") {
+      const created = this.engine.createEmptyContentForCell(target.layerId, target.frame);
+      if (created === null) {
+        this.statusMessage = "Failed to create content";
+        this.closeContentPicker();
+        return;
+      }
       this.refreshLayers();
       this.dirty = true;
       this.statusMessage = "Cell content created";
-    }
-  }
-
-  private onDissociateCellContent(): void {
-    const target = this.matrixCellTarget();
-    this.closeMatrixMenu();
-    if (target === null || this.engine === null) {
-      return;
-    }
-    if (this.engine.dissociateCellContent(target.layerId, target.frame)) {
-      this.refreshLayers();
-      this.dirty = true;
-      this.statusMessage = "Cell content dissociated";
-    }
-  }
-
-  private onAssociateCellContent(contentId: string): void {
-    const target = this.matrixCellTarget();
-    this.closeMatrixMenu();
-    if (target === null || this.engine === null) {
+      this.closeContentPicker();
+      this.openTexturePicker(created);
       return;
     }
     if (this.engine.associateCellContent(target.layerId, target.frame, contentId)) {
@@ -3600,32 +3789,51 @@ export class GnumarusShell extends LitElement {
     } else {
       this.statusMessage = "Cell already uses that content";
     }
+    this.closeContentPicker();
   }
 
-  private matrixContentTarget(): string | null {
-    if (this.matrixMenu === null || this.matrixMenu.kind !== "cell" || this.engine === null) {
-      return null;
-    }
-    return this.engine.getCellContentId(this.matrixMenu.layerId, this.matrixMenu.frame);
-  }
-
-  private onDissociateContentTexture(): void {
-    const contentId = this.matrixContentTarget();
-    this.closeMatrixMenu();
-    if (contentId === null || this.engine === null) {
+  private openTexturePicker(contentId: string): void {
+    if (this.engine === null) {
       return;
     }
-    if (this.engine.dissociateContentTexture(contentId)) {
-      this.refreshLayers();
-      this.dirty = true;
-      this.statusMessage = "Content dissociated from its texture";
-    }
+    this.texturePickerContentId = contentId;
+    this.requestUpdate();
+    const dialog = this.shadowRoot?.getElementById("texturePickerDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
   }
 
-  private onAssociateContentTexture(textureId: string): void {
-    const contentId = this.matrixContentTarget();
-    this.closeMatrixMenu();
+  private onTexturePickerClosed(): void {
+    this.texturePickerContentId = null;
+  }
+
+  private closeTexturePicker(): void {
+    const dialog = this.shadowRoot?.getElementById("texturePickerDialog") as HTMLDialogElement | null;
+    dialog?.close();
+    this.texturePickerContentId = null;
+  }
+
+  private onTexturePickerSelect(textureId: string): void {
+    const contentId = this.texturePickerContentId;
     if (contentId === null || this.engine === null) {
+      this.closeTexturePicker();
+      return;
+    }
+    if (textureId === "none") {
+      this.statusMessage = "Content left without texture";
+      this.refreshLayers();
+      this.closeTexturePicker();
+      return;
+    }
+    if (textureId === "new") {
+      const created = this.engine.createEmptyTexture();
+      if (this.engine.associateContentTexture(contentId, created)) {
+        this.refreshLayers();
+        this.dirty = true;
+        this.statusMessage = "Content associated with texture";
+      } else {
+        this.statusMessage = "Failed to associate texture";
+      }
+      this.closeTexturePicker();
       return;
     }
     if (this.engine.associateContentTexture(contentId, textureId)) {
@@ -3635,6 +3843,7 @@ export class GnumarusShell extends LitElement {
     } else {
       this.statusMessage = "Content already uses that texture";
     }
+    this.closeTexturePicker();
   }
 
   private currentDialogDefaultFrameDuration(): number {

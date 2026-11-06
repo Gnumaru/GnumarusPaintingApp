@@ -1164,7 +1164,7 @@ test("new frames start empty and painting a frame does not leak into others", as
   expect(state.rows[0]?.cells[0]?.contentId).not.toBe(state.rows[0]?.cells[1]?.contentId);
 });
 
-test("cell context menu creates, dissociates and associates shared contents", async ({ page }) => {
+test("cell Select content modal creates, dissociates and associates shared contents", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
@@ -1172,7 +1172,17 @@ test("cell context menu creates, dissociates and associates shared contents", as
   const cell = matrix.locator('[data-testid="anim-cell"][data-matrix-frame="1"]');
   await expect(cell).toHaveAttribute("aria-label", /empty/);
   await cell.click({ button: "right" });
-  await page.getByRole("button", { name: "New content" }).click();
+  await page.getByRole("button", { name: "Select content" }).click();
+  const contentGrid = page.locator('gnumarus-shell [data-testid="content-picker-grid"]');
+  await expect(contentGrid).toBeVisible();
+  await expect(page.locator('gnumarus-shell [data-testid="content-picker-none"]')).toBeVisible();
+  await expect(page.locator('gnumarus-shell [data-testid="content-picker-new"]')).toBeVisible();
+  await page.locator('gnumarus-shell [data-testid="content-picker-new"]').click();
+  const textureGrid = page.locator('gnumarus-shell [data-testid="texture-picker-grid"]');
+  await expect(textureGrid).toBeVisible();
+  await expect(page.locator('gnumarus-shell [data-testid="texture-picker-none"]')).toBeVisible();
+  await expect(page.locator('gnumarus-shell [data-testid="texture-picker-new"]')).toBeVisible();
+  await page.locator('gnumarus-shell [data-testid="texture-picker-new"]').click();
   await expect(cell).not.toHaveAttribute("aria-label", /empty/);
   let state = await getMatrix(page);
   const freshId = state.rows[0]?.cells[1]?.contentId;
@@ -1183,38 +1193,63 @@ test("cell context menu creates, dissociates and associates shared contents", as
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   const firstCell = matrix.locator('[data-testid="anim-cell"][data-matrix-frame="0"]');
   await firstCell.click({ button: "right" });
-  await page.getByRole("button", { name: `Use content "${state.rows[0]?.cells[1]?.contentName ?? ""}"` }).click();
+  await page.getByRole("button", { name: "Select content" }).click();
+  await expect(page.locator('gnumarus-shell [data-testid="content-picker-grid"]')).toBeVisible();
+  const freshName = state.rows[0]?.cells[1]?.contentName ?? "";
+  expect(freshName.length).toBeGreaterThan(0);
+  const items = page.locator('gnumarus-shell [data-testid="content-picker-item"]');
+  const names = await items.evaluateAll((elements) =>
+    elements.map((el) => el.querySelector(".picker-name")?.textContent?.trim() ?? ""),
+  );
+  const sorted = [...names].sort((a, b) => a.localeCompare(b));
+  expect(names).toEqual(sorted);
+  expect(names).toContain(freshName);
+  await page.locator(`gnumarus-shell [data-testid="content-picker-item"][data-content-id="${freshId}"]`).click();
   state = await getMatrix(page);
   expect(state.rows[0]?.cells[0]?.contentId).toBe(freshId);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
   await firstCell.click({ button: "right" });
-  await page.getByRole("button", { name: "Dissociate content" }).click();
+  await page.getByRole("button", { name: "Select content" }).click();
+  await page.locator('gnumarus-shell [data-testid="content-picker-none"]').click();
   state = await getMatrix(page);
   expect(state.rows[0]?.cells[0]?.contentId).toBeNull();
   expect(await readPixel(page, 32, 32)).toBeNull();
 });
 
-test("content texture can be dissociated and associated with another texture", async ({ page }) => {
+test("new content texture picker offers no, new and existing textures with thumbnails", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await paintCenter(page);
   await page.getByRole("button", { name: "Add layer" }).click();
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
-  const cell = matrix.locator('[data-testid="anim-cell"][data-matrix-layer="layer1"][data-matrix-frame="0"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  const cell = matrix.locator('[data-testid="anim-cell"][data-matrix-layer="layer1"][data-matrix-frame="1"]');
+  await expect(cell).toHaveAttribute("aria-label", /empty/);
   await cell.click({ button: "right" });
-  await page.getByRole("button", { name: "Dissociate texture" }).click();
+  await page.getByRole("button", { name: "Select content" }).click();
+  await page.locator('gnumarus-shell [data-testid="content-picker-new"]').click();
+  const textureGrid = page.locator('gnumarus-shell [data-testid="texture-picker-grid"]');
+  await expect(textureGrid).toBeVisible();
+  await expect(page.locator('gnumarus-shell [data-testid="texture-picker-none"]')).toBeVisible();
+  await expect(page.locator('gnumarus-shell [data-testid="texture-picker-new"]')).toBeVisible();
+  const textureItems = page.locator('gnumarus-shell [data-testid="texture-picker-item"]');
+  expect(await textureItems.count()).toBeGreaterThanOrEqual(2);
+  const textureNames = await textureItems.evaluateAll((elements) =>
+    elements.map((el) => el.querySelector(".picker-name")?.textContent?.trim() ?? ""),
+  );
+  expect(textureNames).toEqual([...textureNames].sort((a, b) => a.localeCompare(b)));
+  for (const name of textureNames) {
+    const thumb = textureItems.filter({ hasText: name }).locator("img.picker-thumb");
+    await expect(thumb.first()).toBeVisible();
+    const src = await thumb.first().getAttribute("src");
+    expect(src?.startsWith("data:image/png")).toBe(true);
+  }
+  await page.locator('gnumarus-shell [data-testid="texture-picker-none"]').click();
   let state = await getMatrix(page);
-  const layer1Content = state.rows.find((row) => row.layerId === "layer1")?.cells[0]?.contentId;
-  expect(typeof layer1Content).toBe("string");
-  expect(state.contents.find((entry) => entry.id === layer1Content)?.textureId).toBeNull();
-  const layer1Cell = matrix.locator('[data-testid="anim-cell"][data-matrix-layer="layer1"][data-matrix-frame="0"]');
-  await layer1Cell.click();
-  expect(await readPixel(page, 0, 0)).toBeNull();
-  await layer1Cell.click({ button: "right" });
-  await page.getByRole("button", { name: /Use texture "Layer 1 pixels"/ }).click();
-  state = await getMatrix(page);
-  expect(state.contents.find((entry) => entry.id === layer1Content)?.textureId).toBe("layer0");
-  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  const createdId = state.rows.find((row) => row.layerId === "layer1")?.cells[1]?.contentId;
+  expect(typeof createdId).toBe("string");
+  expect(state.contents.find((entry) => entry.id === createdId)?.textureId).toBeNull();
+  await expect(cell).not.toHaveAttribute("aria-label", /empty/);
 });
 
 test("frames can be removed but never the last one", async ({ page }) => {
