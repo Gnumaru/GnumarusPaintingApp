@@ -17,7 +17,7 @@ describe("GnumarusProjectFormat", () => {
     expect(project.animation.frames).toBe(1);
     expect(project.animation.frameNames).toEqual(["Frame 1"]);
     expect(project.animation.textures).toEqual([
-      { id: "layer0", name: "Layer 1 pixels", width: 64, height: 64, file: textureFilePath("layer0") },
+      { id: "layer0", name: "Texture 1", width: 64, height: 64, file: textureFilePath("layer0") },
     ]);
     expect(project.animation.contents).toEqual([
       {
@@ -49,7 +49,7 @@ describe("GnumarusProjectFormat", () => {
     expect(parsed.animation.defaultFrameDuration).toBe(100);
     expect(parsed.animation.frameDurations).toEqual([]);
     expect(parsed.animation.textures).toEqual([
-      { id: "layer0", name: "Layer 1 pixels", width: 64, height: 64, file: "cells/layer0_frame0.png" },
+      { id: "layer0", name: "Texture 1", width: 64, height: 64, file: "cells/layer0_frame0.png" },
     ]);
     expect(parsed.animation.cells).toEqual([{ layer: "layer0", frame: 0, content: "content1" }]);
     const reparsed = parseProject(serializeProject(parsed));

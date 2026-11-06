@@ -192,3 +192,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Clicking `Select content` opens a modal with a vertically scrolling grid of names plus thumbnails for every cell content, alphabetically sorted. First grid item is always `No content` (dissociates the cell), second is `New content` (creates a new empty content, assigns it to the cell, then opens the texture picker), remaining items are the project contents alphabetically sorted. Choosing an item applies it to the cell and closes the modal.
 - `New content` opens a second similar modal to choose a texture: first item `No texture` (leaves the new content textureless), second `New texture` (creates a new empty project-sized texture and assigns it to the new content), remaining items are the project textures alphabetically sorted with thumbnails. Choosing applies the texture to the new content (already assigned to the cell) and closes the modal.
 - Thumbnails render the texture RGBA buffers via 2D canvas `putImageData` converted to data URLs with pixelated rendering; empty contents and `No content`/`No texture` show a placeholder.
+
+## 34. Texture naming Texture N (implemented)
+- Textures named `Texture 1`, `Texture 2`, ... via unified `textureNameCounter` instead of `Layer N pixels`.
+- Layer-owned textures (id `layer0`, etc.) and `texN` textures all use the same name sequence; `renameLayer` no longer renames its owned texture.
+- `createDefaultProject` and legacy migration create `Texture N` names in order; load recomputes the name counter from max `Texture N` to avoid duplicates; merge undo restores the original texture name via snapshot.

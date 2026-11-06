@@ -21,6 +21,7 @@
 - Toast display time configurable 0.5..2.0 seconds (float, default 1.0) in Edit > Settings Interface section with per-setting reset arrow, persisted in the browser.
 - Layer resize: per-layer width/height 1..1024 via Resize button + dialog; expand fills transparent right and below, shrink crops right and below, top-left preserved; undoable.
 - Channel lock: per-layer R/G/B/A lock toggles; paint, clear and Merge Down write only unlocked channels (locked channels keep old values).
+- Textures named `Texture 1`, `Texture 2`, ... (independent of layer names; renaming a layer no longer renames its texture).
 - Undo/redo for image edits and layer resizes (`Ctrl+Z` / `Ctrl+Y`), region-based history tagged per texture.
 - Project directory holds `project.json` (layers, frames, frameNames, contents, textures, cells) plus `textures/*.png` (legacy `cells/*.png` opens via automatic migration).
 - WebGL2-only canvas (Three.js) with nearest-neighbor scaling, zoom, rotation + mirror view transform, and pan.

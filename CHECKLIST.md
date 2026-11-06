@@ -120,3 +120,6 @@
 - [x] Cell content picker modal: single `Select content` menu item, content modal (No content, New content, sorted contents with thumbnails), texture modal for new content (No texture, New texture, sorted textures with thumbnails)
 - [x] Unit tests (vitest): previous 148 pass (engine picker methods covered via E2E, no WebGL in unit)
 - [x] E2E test (Playwright): previous 91 with rewritten cell/content picker flows — 91 passed
+- [x] Texture naming Texture N instead of Layer N pixels (unified counter, renameLayer no longer renames texture, defaults and migration use Texture N)
+- [x] Unit tests (vitest): updated project format expectations to Texture 1 — 148 passed
+- [x] E2E test (Playwright): full suite with Texture N naming — 91 passed

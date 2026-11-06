@@ -116,7 +116,7 @@ export function createDefaultProject(width: number, height: number): GnumarusPro
       defaultFrameDuration: GNUMARUS_DEFAULT_FRAME_DURATION_MS,
       frameDurations: [],
       frameNames: [defaultFrameName(0)],
-      textures: [{ id: "layer0", name: "Layer 1 pixels", width, height, file: textureFilePath("layer0") }],
+      textures: [{ id: "layer0", name: "Texture 1", width, height, file: textureFilePath("layer0") }],
       contents: [
         {
           id: "content1",
@@ -340,7 +340,7 @@ function migrateLegacyLayersToAnimation(
     const legacyCell = layer.cells?.[0];
     textures.push({
       id: layer.id,
-      name: `${layer.name} pixels`,
+      name: `Texture ${index + 1}`,
       width,
       height,
       file: legacyCell?.file ?? textureFilePath(layer.id),

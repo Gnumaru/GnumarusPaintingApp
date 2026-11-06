@@ -157,6 +157,7 @@ describe("GnumarusHistory", () => {
         upper: {
           id: "upper",
           name: "Upper",
+          textureName: "Texture 9",
           visible: true,
           opacity: 1,
           width: 4,

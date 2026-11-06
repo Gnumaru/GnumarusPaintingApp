@@ -341,6 +341,7 @@ export class GnumarusCanvasEngine {
   private frameNameCounter = 2;
   private contentCounter = 1;
   private textureCounter = 1;
+  private textureNameCounter = 1;
   private imageWidth: number;
   private imageHeight: number;
   private zoom: number;
@@ -604,9 +605,10 @@ export class GnumarusCanvasEngine {
     this.layers.push(first);
     this.activeLayerId = first.id;
     this.layerCounter = 1;
+    this.textureNameCounter = 1;
     this.textures.set("layer0", {
       id: "layer0",
-      name: "Layer 1 pixels",
+      name: this.nextTextureName(),
       width: 64,
       height: 64,
       buffer: first.buffer,
@@ -801,6 +803,10 @@ export class GnumarusCanvasEngine {
 
   private nextTextureId(): string {
     return `tex${this.textureCounter++}`;
+  }
+
+  private nextTextureName(): string {
+    return `Texture ${this.textureNameCounter++}`;
   }
 
   private contentDisplaySize(content: GnumarusCellContent): { width: number; height: number } {
@@ -1090,7 +1096,7 @@ export class GnumarusCanvasEngine {
     const textureId = this.nextTextureId();
     this.textures.set(textureId, {
       id: textureId,
-      name: `Texture ${this.textureCounter - 1}`,
+      name: this.nextTextureName(),
       width: this.imageWidth,
       height: this.imageHeight,
       buffer: createPixelBuffer(this.imageWidth, this.imageHeight),
@@ -1142,7 +1148,7 @@ export class GnumarusCanvasEngine {
     const textureId = this.nextTextureId();
     this.textures.set(textureId, {
       id: textureId,
-      name: `Texture ${this.textureCounter - 1}`,
+      name: this.nextTextureName(),
       width: this.imageWidth,
       height: this.imageHeight,
       buffer: createPixelBuffer(this.imageWidth, this.imageHeight),
@@ -1254,7 +1260,7 @@ export class GnumarusCanvasEngine {
       const textureId = this.nextTextureId();
       texture = {
         id: textureId,
-        name: `Texture ${this.textureCounter - 1}`,
+        name: this.nextTextureName(),
         width: this.imageWidth,
         height: this.imageHeight,
         buffer: createPixelBuffer(this.imageWidth, this.imageHeight),
@@ -1388,7 +1394,7 @@ export class GnumarusCanvasEngine {
     this.layers.splice(clamped, 0, layer);
     this.textures.set(id, {
       id,
-      name: `${name} pixels`,
+      name: this.nextTextureName(),
       width: this.imageWidth,
       height: this.imageHeight,
       buffer: layer.buffer,
@@ -1482,7 +1488,7 @@ export class GnumarusCanvasEngine {
     );
     this.textures.set(snapshot.id, {
       id: snapshot.id,
-      name: `${snapshot.name} pixels`,
+      name: snapshot.textureName,
       width: snapshot.width,
       height: snapshot.height,
       buffer,
@@ -1575,6 +1581,7 @@ export class GnumarusCanvasEngine {
     const snapshot: GnumarusMergedLayerSnapshot = {
       id: upper.id,
       name: upper.name,
+      textureName: ownedEntry.name,
       visible: upper.visible,
       opacity: upper.opacity,
       width: ownedEntry.width,
@@ -1621,10 +1628,6 @@ export class GnumarusCanvasEngine {
       return false;
     }
     layer.name = trimmed;
-    const owned = this.textures.get(id);
-    if (owned !== undefined) {
-      owned.name = `${trimmed} pixels`;
-    }
     this.emitStats();
     this.onLayersChanged?.();
     return true;
@@ -1855,6 +1858,7 @@ export class GnumarusCanvasEngine {
     this.imageHeight = Math.max(1, Math.floor(projectHeight));
     this.clearAllLayers();
     let maxSuffix = 0;
+    this.textureNameCounter = 1;
     for (const input of inputs) {
       const match = /^layer(\d+)$/.exec(input.id);
       if (match !== null && match[1] !== undefined) {
@@ -1878,7 +1882,7 @@ export class GnumarusCanvasEngine {
       this.layers.push(layer);
       this.textures.set(input.id, {
         id: input.id,
-        name: `${input.name} pixels`,
+        name: this.nextTextureName(),
         width: input.width,
         height: input.height,
         buffer: copy,
@@ -2055,9 +2059,17 @@ export class GnumarusCanvasEngine {
         maxTexture = Math.max(maxTexture, Number.parseInt(match[1], 10) + 1);
       }
     }
+    let maxTextureName = 0;
+    for (const texture of data.textures) {
+      const match = /^Texture (\d+)$/.exec(texture.name);
+      if (match?.[1] !== undefined) {
+        maxTextureName = Math.max(maxTextureName, Number.parseInt(match[1], 10) + 1);
+      }
+    }
     this.layerCounter = Math.max(maxLayer, data.layers.length);
     this.contentCounter = Math.max(maxContent, data.contents.length + 1, 1);
     this.textureCounter = Math.max(maxTexture, 1);
+    this.textureNameCounter = Math.max(maxTextureName, data.textures.length + 1, 1);
     const top = this.layers[this.layers.length - 1];
     if (top !== undefined) {
       this.activeLayerId = top.id;
@@ -2116,13 +2128,14 @@ export class GnumarusCanvasEngine {
     this.imageWidth = width;
     this.imageHeight = height;
     this.clearAllLayers();
+    this.textureNameCounter = 1;
     const first = this.createLayerInternal("layer0", "Layer 1", true, 1, createPixelBuffer(width, height), width, height, {
       ...IDENTITY_LAYER_TRANSFORM,
     });
     this.layers.push(first);
     this.textures.set("layer0", {
       id: "layer0",
-      name: "Layer 1 pixels",
+      name: this.nextTextureName(),
       width,
       height,
       buffer: first.buffer,

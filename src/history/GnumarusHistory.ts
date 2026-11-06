@@ -80,6 +80,7 @@ export function applyImageDiff(
 export interface GnumarusMergedLayerSnapshot {
   id: string;
   name: string;
+  textureName: string;
   visible: boolean;
   opacity: number;
   width: number;

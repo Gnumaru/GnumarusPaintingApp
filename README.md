@@ -25,6 +25,7 @@ Classic desktop-like painting app (top menu bar, central canvas, bottom status b
 - Frame durations and playback: each frame may carry an explicit duration in milliseconds via its header menu (Set/Clear, 1..60000 ms); frames without one use the project default (100 ms, configurable in Edit > Settings Animation section with reset arrow, stored in `project.json`); play/stop transport in the matrix corner plays from the current frame, looping until stopped.
 - Layer resize: per-layer width/height 1..1024 via Resize button; expand fills transparent right and below, shrink crops right and below; undoable.
 - Channel lock: per-layer R/G/B/A toggles; paint, clear and Merge Down write only unlocked channels. Example: alpha locked + paint keeps old alpha; green locked + cyan paint yields blue.
+- Textures named `Texture 1`, `Texture 2`, ... independent of layer names.
 - Directory projects via the File System Access API (Chromium derivatives): `project.json` metadata plus `textures/*.png` cell images (legacy `cells/*.png` projects open via automatic migration).
 - WebGL2-only rendering with an explicit error message when unavailable. No WebGL1 fallback.
 
