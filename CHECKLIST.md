@@ -135,3 +135,6 @@
 - [x] Help menu with Shortcuts item opening a modal listing all keyboard shortcuts grouped by area
 - [x] Unit tests (vitest) — 154 passed (no logic change to pure modules)
 - [x] E2E test (Playwright): previous 95 + Help > Shortcuts modal contents and open/close — 96 passed
+- [x] Frame-aware merge down: layer removed only when all other-frame cells are empty/textureless, else dissociate current cell and keep layer; undoable
+- [x] Unit tests (vitest) — 155 passed (keep-layer merge history undo/redo)
+- [x] E2E test (Playwright): previous 96 + multi-frame merge keep (composite, dissociate, untouched frames, undo/redo) — 97 passed

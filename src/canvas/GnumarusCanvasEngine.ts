@@ -1547,9 +1547,12 @@ export class GnumarusCanvasEngine {
   /**
    * Merge the layer into the one immediately below it, sampling the upper
    * layer through its own size and transform and using its opacity.
-   * Operates on the current frame's resolved pixels. The removed layer's
-   * cells and any contents detached from its texture are recorded so undo
-   * restores them. The result is a single undoable history entry.
+   * Operates on the current frame's resolved pixels.
+   * The merged layer is removed only when all of its cells in every other
+   * frame are empty or hold textureless contents; otherwise the layer is
+   * kept, only the current cell's content is dissociated (the cell becomes
+   * empty) and the other frames stay untouched. Either way the result is a
+   * single undoable history entry.
    */
   mergeDown(id: string): boolean {
     const index = this.layers.findIndex((layer) => layer.id === id);
@@ -1597,18 +1600,26 @@ export class GnumarusCanvasEngine {
       }
     }
     const diff = computeImageDiff(base, lowerEntry.buffer, lowerEntry.width, lowerEntry.height);
-    const upperCells: Array<{ frame: number; content: string }> = [];
-    for (const [key, contentId] of this.cells) {
-      if (key.startsWith(`${id}\n`)) {
-        const separator = key.lastIndexOf("\n");
-        upperCells.push({ frame: Number.parseInt(key.slice(separator + 1), 10), content: contentId });
+    const currentCellKey = animationCellKey(id, this.currentFrame);
+    const currentContentId = this.cells.get(currentCellKey) ?? null;
+    let keepLayer = false;
+    for (let frame = 0; frame < this.frameCount; frame += 1) {
+      if (frame === this.currentFrame) {
+        continue;
       }
-    }
-    const detachedContents: string[] = [];
-    for (const content of this.contents.values()) {
-      if (content.textureId === id) {
-        detachedContents.push(content.id);
+      const otherContentId = this.cells.get(animationCellKey(id, frame));
+      if (otherContentId === undefined) {
+        continue;
       }
+      const otherContent = this.contents.get(otherContentId);
+      if (otherContent === undefined || otherContent.textureId === null) {
+        continue;
+      }
+      if (!this.textures.has(otherContent.textureId)) {
+        continue;
+      }
+      keepLayer = true;
+      break;
     }
     const snapshot: GnumarusMergedLayerSnapshot = {
       id: upper.id,
@@ -1622,15 +1633,46 @@ export class GnumarusCanvasEngine {
       lockedChannels: { ...upper.lockedChannels },
       stackIndex: index,
       buffer: ownedEntry.buffer.slice(),
-      cells: upperCells,
-      detachedContents,
+      cells: [],
+      detachedContents: [],
     };
-    this.removeLayerFull(id);
-    this.activeLayerId = lower.id;
-    this.history.push({
-      type: "merge",
-      merge: { lowerLayerId: lowerOwner, lowerDiff: diff, upper: snapshot },
-    });
+    if (keepLayer) {
+      this.cells.delete(currentCellKey);
+      this.activeLayerId = lower.id;
+      this.history.push({
+        type: "merge",
+        merge: {
+          lowerLayerId: lowerOwner,
+          lowerDiff: diff,
+          upper: snapshot,
+          removedLayer: false,
+          dissociatedCell:
+            currentContentId === null ? null : { layer: id, frame: this.currentFrame, content: currentContentId },
+        },
+      });
+    } else {
+      const upperCells: Array<{ frame: number; content: string }> = [];
+      for (const [key, contentId] of this.cells) {
+        if (key.startsWith(`${id}\n`)) {
+          const separator = key.lastIndexOf("\n");
+          upperCells.push({ frame: Number.parseInt(key.slice(separator + 1), 10), content: contentId });
+        }
+      }
+      const detachedContents: string[] = [];
+      for (const content of this.contents.values()) {
+        if (content.textureId === id) {
+          detachedContents.push(content.id);
+        }
+      }
+      snapshot.cells = upperCells;
+      snapshot.detachedContents = detachedContents;
+      this.removeLayerFull(id);
+      this.activeLayerId = lower.id;
+      this.history.push({
+        type: "merge",
+        merge: { lowerLayerId: lowerOwner, lowerDiff: diff, upper: snapshot, removedLayer: true, dissociatedCell: null },
+      });
+    }
     this.markTextureViewsDirty(lowerOwner);
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
@@ -1638,6 +1680,30 @@ export class GnumarusCanvasEngine {
     this.onPixelsChanged();
     this.onLayersChanged?.();
     this.emitStats();
+    return true;
+  }
+
+  /** Re-associate a cell content (history undo of a keep-layer merge). */
+  private associateCellForHistory(layerId: string, frame: number, contentId: string): boolean {
+    if (this.findLayer(layerId) === null || !this.contents.has(contentId)) {
+      return false;
+    }
+    if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
+      return false;
+    }
+    this.cells.set(animationCellKey(layerId, frame), contentId);
+    this.syncAllLayerRenders();
+    return true;
+  }
+
+  /** Dissociate a cell content (history redo of a keep-layer merge). */
+  private dissociateCellForHistory(layerId: string, frame: number): boolean {
+    const key = animationCellKey(layerId, frame);
+    if (!this.cells.has(key)) {
+      return false;
+    }
+    this.cells.delete(key);
+    this.syncAllLayerRenders();
     return true;
   }
 
@@ -3632,6 +3698,7 @@ export class GnumarusCanvasEngine {
       (layerId, width, height, buffer) => this.applyLayerResize(layerId, width, height, buffer),
       (textureId, width, height, buffer, transforms) =>
         this.applyFitToSize(textureId, width, height, buffer, transforms),
+      (layerId, frame, contentId) => this.associateCellForHistory(layerId, frame, contentId),
     );
     if (!applied) {
       return false;
@@ -3654,6 +3721,7 @@ export class GnumarusCanvasEngine {
       (layerId, width, height, buffer) => this.applyLayerResize(layerId, width, height, buffer),
       (textureId, width, height, buffer, transforms) =>
         this.applyFitToSize(textureId, width, height, buffer, transforms),
+      (layerId, frame) => this.dissociateCellForHistory(layerId, frame),
     );
     if (!applied) {
       return false;

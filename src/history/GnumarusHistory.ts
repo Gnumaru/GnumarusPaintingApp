@@ -99,6 +99,10 @@ export interface GnumarusMergeRecord {
   lowerLayerId: string;
   lowerDiff: GnumarusImageDiff | null;
   upper: GnumarusMergedLayerSnapshot;
+  /** False when the merged layer was kept and only one cell was dissociated. */
+  removedLayer: boolean;
+  /** Present when removedLayer is false: the cell dissociated by the merge. */
+  dissociatedCell: { layer: string; frame: number; content: string } | null;
 }
 
 export interface GnumarusResizeRecord {
@@ -175,6 +179,7 @@ export class GnumarusHistory {
       buffer: Uint8ClampedArray,
       transforms: Array<{ contentId: string; transform: GnumarusLayerTransform }>,
     ) => boolean,
+    associateCell?: (layerId: string, frame: number, contentId: string) => boolean,
   ): boolean {
     for (;;) {
       const entry = this.undoStack.pop();
@@ -230,7 +235,16 @@ export class GnumarusHistory {
       if (entry.merge.lowerDiff !== null) {
         applyImageDiff(lower.buffer, lower.width, entry.merge.lowerDiff, "before");
       }
-      restoreLayer(entry.merge.upper);
+      if (entry.merge.removedLayer) {
+        restoreLayer(entry.merge.upper);
+      } else if (entry.merge.dissociatedCell !== null && associateCell !== undefined) {
+        const cell = entry.merge.dissociatedCell;
+        if (!associateCell(cell.layer, cell.frame, cell.content)) {
+          continue;
+        }
+      } else if (!entry.merge.removedLayer) {
+        continue;
+      }
       this.redoStack.push(entry);
       return true;
     }
@@ -247,6 +261,7 @@ export class GnumarusHistory {
       buffer: Uint8ClampedArray,
       transforms: Array<{ contentId: string; transform: GnumarusLayerTransform }>,
     ) => boolean,
+    dissociateCell?: (layerId: string, frame: number) => boolean,
   ): boolean {
     for (;;) {
       const entry = this.redoStack.pop();
@@ -302,7 +317,16 @@ export class GnumarusHistory {
       if (entry.merge.lowerDiff !== null) {
         applyImageDiff(lower.buffer, lower.width, entry.merge.lowerDiff, "after");
       }
-      removeLayer(entry.merge.upper.id);
+      if (entry.merge.removedLayer) {
+        removeLayer(entry.merge.upper.id);
+      } else if (entry.merge.dissociatedCell !== null && dissociateCell !== undefined) {
+        const cell = entry.merge.dissociatedCell;
+        if (!dissociateCell(cell.layer, cell.frame)) {
+          continue;
+        }
+      } else if (!entry.merge.removedLayer) {
+        continue;
+      }
       this.undoStack.push(entry);
       return true;
     }

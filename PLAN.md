@@ -216,3 +216,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Clicking opens a modal with an integer field 0..254 plus `Cancel` and `OK`. On `OK` the texture is cropped on all four sides until the border rows/columns contain at least one pixel with alpha strictly greater than the parameter; fully transparent textures and already-tight textures are no-ops with a status message.
 - Every cell content referencing the cropped texture has its transform shifted (`shiftTransformForCrop`, accounting for each content's own flip/rotation) so the remaining pixels keep the same apparent project position.
 - Undoable via a new `fit` history entry carrying texture before/after buffers plus affected content transforms before/after; unit tests for the pure alpha bounding-box helper and the transform shift plus E2E for both menus, threshold clamping, apparent position, no-ops and undo/redo.
+
+## 39. Frame-aware merge down (implemented)
+- Merge down composites the current-frame visible transformed pixels of the active cell content over the transformed texture of the below layer's current cell content (unchanged sampling, opacity and lock masking).
+- The merged (upper) layer is removed only when all of its cells in every other frame are empty or hold textureless contents; otherwise the layer is kept, only the current cell's content is dissociated (cell becomes empty) and the other frames stay untouched.
+- Both paths stay single-entry undoable: the history merge record gains a removed-layer flag plus the dissociated cell, with associate/dissociate cell callbacks; unit test for keep-layer undo/redo plus E2E for multi-frame keep (dissociate + untouched frames + undo/redo).

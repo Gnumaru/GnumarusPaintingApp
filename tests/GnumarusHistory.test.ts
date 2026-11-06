@@ -209,6 +209,8 @@ describe("GnumarusHistory", () => {
       merge: {
         lowerLayerId: "lower",
         lowerDiff,
+        removedLayer: true,
+        dissociatedCell: null,
         upper: {
           id: "upper",
           name: "Upper",
@@ -241,5 +243,66 @@ describe("GnumarusHistory", () => {
     ).toBe(true);
     expect(layers.has("upper")).toBe(false);
     expect(computeImageDiff(layers.get("lower") ?? createPixelBuffer(4, 4), upperBuffer, 4, 4)).toBeNull();
+  });
+
+  it("undoes and redoes a keep-layer merge by re-associating the cell", () => {
+    const lower = createPixelBuffer(4, 4);
+    const cells = new Map<string, string>();
+    const history = new GnumarusHistory();
+    const target = createPixelBuffer(4, 4);
+    setPixel(target, 4, 4, 1, 1, BLACK);
+    const lowerDiff = computeImageDiff(lower, target, 4, 4);
+    expect(lowerDiff).not.toBeNull();
+    history.push({
+      type: "merge",
+      merge: {
+        lowerLayerId: "lower",
+        lowerDiff,
+        removedLayer: false,
+        dissociatedCell: { layer: "upper", frame: 2, content: "content9" },
+        upper: {
+          id: "upper",
+          name: "Upper",
+          textureName: "Texture 9",
+          visible: true,
+          opacity: 1,
+          width: 4,
+          height: 4,
+          transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+          lockedChannels: { r: false, g: false, b: false, a: false },
+          stackIndex: 1,
+          buffer: createPixelBuffer(4, 4),
+          cells: [
+            { frame: 0, content: "content9" },
+            { frame: 2, content: "content9" },
+          ],
+          detachedContents: [],
+        },
+      },
+    });
+    const find = () => ({ buffer: lower, width: 4 });
+    const associate = (layerId: string, frame: number, contentId: string): boolean => {
+      cells.set(`${layerId}\n${frame}`, contentId);
+      return true;
+    };
+    const dissociate = (layerId: string, frame: number): boolean => {
+      const key = `${layerId}\n${frame}`;
+      if (!cells.has(key)) {
+        return false;
+      }
+      cells.delete(key);
+      return true;
+    };
+    lower.set(target);
+    cells.delete("upper\n2");
+
+    expect(history.undo(find, () => {}, undefined, undefined, associate)).toBe(true);
+    expect(computeImageDiff(lower, createPixelBuffer(4, 4), 4, 4)).toBeNull();
+    expect(cells.get("upper\n2")).toBe("content9");
+
+    expect(history.canRedo()).toBe(true);
+    expect(history.redo(find, () => {}, undefined, undefined, dissociate)).toBe(true);
+    expect(computeImageDiff(lower, target, 4, 4)).toBeNull();
+    expect(cells.has("upper\n2")).toBe(false);
   });
 });
