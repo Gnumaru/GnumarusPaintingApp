@@ -202,3 +202,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Symptom: right-click on a matrix cell rendered the menu ~245px above the cell instead of adjacent to it.
 - Cause: `openMatrixCellMenu` clamped `y` to `innerHeight - 300` even though the single-item menu is only ~40px tall; the matrix sits at the bottom of the screen so the clamp always pushed the menu far up. Same pattern affected frame/layer menus.
 - Fix: store the raw cursor position and, after render (`updated()` → `fitContextMenusToViewport()`), shift the fixed-position menu left/up only by the measured overflow amount so it stays adjacent to the cursor while remaining fully inside the viewport.
+
+## 36. New layers start with empty cells (implemented)
+- `insertLayerAt` no longer creates a shared content or associates cells: every cell of a new layer starts empty (like new frames), keeping only the owned `Texture N` entry so resize/save/undo keep working.
+- Painting or transforming an empty cell materializes content plus a `texN` texture on demand via `ensureCellContent`; assigning via the `Select content` modal associates existing or new content.
+- Initial project, legacy load and merge-undo paths still create/restore their contents as before.

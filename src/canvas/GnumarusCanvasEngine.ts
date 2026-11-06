@@ -1399,17 +1399,11 @@ export class GnumarusCanvasEngine {
       height: this.imageHeight,
       buffer: layer.buffer,
     });
-    layer.renderTextureId = id;
-    const contentId = this.nextContentId();
-    this.contents.set(contentId, {
-      id: contentId,
-      name: `Content ${this.contentCounter - 1}`,
-      textureId: id,
-      transform: { ...IDENTITY_LAYER_TRANSFORM },
-    });
-    for (let frame = 0; frame < this.frameCount; frame += 1) {
-      this.cells.set(animationCellKey(id, frame), contentId);
-    }
+    // New layer cells start empty (like new frames): no content is created
+    // and no cell is associated until the user paints or picks a content
+    // via the Select content menu. The owned texture above is kept so
+    // resize/save/undo keep working; painting materializes tex textures
+    // on demand via ensureCellContent.
     this.activeLayerId = id;
     this.syncAllLayerRenders();
     this.refreshLayerStacking();

@@ -126,3 +126,6 @@
 - [x] Cell context menu position: store cursor position, post-render shift by measured overflow so menu stays adjacent to the cell and inside the viewport
 - [x] Unit tests (vitest) — 148 passed (no logic change, rendering only)
 - [x] E2E test (Playwright): previous 91 + cell menu adjacency/viewport regression — 92 passed
+- [x] New layers start with empty cells (no auto content/texture association; paint or Select content modal materializes; owned Texture N kept for resize/save/undo)
+- [x] Unit tests (vitest) — 148 passed (no logic change to pure modules)
+- [x] E2E test (Playwright): previous 92 + new-layer empty cells (paint materializes + modal assignment) — 93 passed

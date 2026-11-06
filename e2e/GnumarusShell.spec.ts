@@ -1252,6 +1252,36 @@ test("new content texture picker offers no, new and existing textures with thumb
   await expect(cell).not.toHaveAttribute("aria-label", /empty/);
 });
 
+test("new layers start with empty cells until painting or content assignment", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  await page.getByRole("button", { name: "Add layer" }).click();
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  const newCell = matrix.locator('[data-testid="anim-cell"][data-matrix-layer="layer1"][data-matrix-frame="0"]');
+  await expect(newCell).toHaveAttribute("aria-label", /empty/);
+  expect(await readPixel(page, 32, 32)).toBeNull();
+  await page.locator('gnumarus-shell [data-layer-id="layer0"] .layer-name').click();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  await page.locator('gnumarus-shell [data-layer-id="layer1"] .layer-name').click();
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  await expect(newCell).not.toHaveAttribute("aria-label", /empty/);
+  await page.getByRole("button", { name: "Add layer" }).click();
+  const emptyCell = matrix.locator('[data-testid="anim-cell"][data-matrix-layer="layer2"][data-matrix-frame="0"]');
+  await expect(emptyCell).toHaveAttribute("aria-label", /empty/);
+  let state = await getMatrix(page);
+  const sharedId = state.rows.find((row) => row.layerId === "layer0")?.cells[0]?.contentId;
+  expect(typeof sharedId).toBe("string");
+  await emptyCell.click({ button: "right" });
+  await page.getByRole("button", { name: "Select content" }).click();
+  await page.locator(`gnumarus-shell [data-testid="content-picker-item"][data-content-id="${sharedId}"]`).click();
+  state = await getMatrix(page);
+  expect(state.rows.find((row) => row.layerId === "layer2")?.cells[0]?.contentId).toBe(sharedId);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+});
+
 test("cell context menu opens adjacent to the clicked cell and inside the viewport", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
