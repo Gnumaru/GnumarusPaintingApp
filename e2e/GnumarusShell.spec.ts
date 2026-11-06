@@ -259,7 +259,7 @@ test("Edit > Reset Canvas Transform restores the default view", async ({ page })
   expect(await getViewState(page)).toEqual({ zoom: fit, rotation: 0, flipX: false, flipY: false });
 });
 
-test("loupe Ctrl+middle-click resets the transform", async ({ page }) => {
+test("loupe Alt+middle-click resets the transform", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.getByRole("button", { name: "Loupe" }).click();
@@ -274,10 +274,21 @@ test("loupe Ctrl+middle-click resets the transform", async ({ page }) => {
   if (box === null) {
     throw new Error("canvas has no bounding box");
   }
+  await page.keyboard.down("Alt");
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "middle" });
+  await page.keyboard.up("Alt");
+  expect((await getViewState(page)).rotation).toBeCloseTo(0, 5);
+  // Ctrl+middle-click no longer resets the transform.
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { setRotation(r: number): void } };
+    };
+    root.__gnumarus?.engine?.setRotation(1.2);
+  });
   await page.keyboard.down("Control");
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "middle" });
   await page.keyboard.up("Control");
-  expect((await getViewState(page)).rotation).toBeCloseTo(0, 5);
+  expect((await getViewState(page)).rotation).toBeCloseTo(1.2, 5);
 });
 
 test("undo and redo restore image pixels via menu and shortcuts", async ({ page }) => {
@@ -1319,11 +1330,12 @@ test("toolbar icons fill buttons without growing them", async ({ page }) => {
       };
     });
   });
-  expect(boxes).toHaveLength(7);
+  expect(boxes).toHaveLength(8);
   const expected: Record<string, { w: number; h: number }> = {
     Pencil: { w: 33, h: 25 },
     Loupe: { w: 30, h: 25 },
     "Bucket fill": { w: 35, h: 26 },
+    Eyedropper: { w: 35, h: 26 },
     Line: { w: 30, h: 25 },
     Curve: { w: 35, h: 29 },
     Transform: { w: 31, h: 29 },
@@ -3197,4 +3209,100 @@ test("curve pixel perfect is gated to 1px without AA and keeps curves thin", asy
   expect(stats.max).toBeLessThanOrEqual(2);
   await page.keyboard.press("Control+z");
   expect((await paintedNeighborStats(page, 16)).painted).toBe(0);
+});
+
+test("F selects the bucket tool", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await expect(page.locator("gnumarus-shell")).toContainText("pencil");
+  await page.keyboard.press("f");
+  await expect(page.locator("gnumarus-shell")).toContainText("bucket");
+  await page.keyboard.press("b");
+  await expect(page.locator("gnumarus-shell")).toContainText("pencil");
+  await page.keyboard.press("F");
+  await expect(page.locator("gnumarus-shell")).toContainText("bucket");
+});
+
+test("layer context menu resets the layer transform", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          setLayerTransform(id: string, transform: { x: number; rotation: number; flipX: boolean }): boolean;
+        };
+      };
+    };
+    root.__gnumarus?.engine?.setLayerTransform("layer0", { x: 5, rotation: 0.5, flipX: true });
+  });
+  let transform = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getLayers(): Array<{ transform: { x: number } }> } };
+    };
+    return root.__gnumarus?.engine?.getLayers()[0]?.transform ?? null;
+  });
+  expect(transform).toMatchObject({ x: 5, flipX: true });
+  const row0 = page.locator('gnumarus-shell [data-layer-id="layer0"]');
+  await row0.click({ button: "right" });
+  await page.getByRole("button", { name: "Reset transform" }).click();
+  transform = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getLayers(): Array<{ transform: { x: number } }> } };
+    };
+    return root.__gnumarus?.engine?.getLayers()[0]?.transform ?? null;
+  });
+  expect(transform).toEqual({ x: 0, y: 0, rotation: 0, flipX: false, flipY: false });
+  await expect(page.locator("gnumarus-shell")).toContainText("Layer transform reset");
+});
+
+test("eyedropper copies the clicked pixel color", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await page.mouse.click(cx, cy);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await setPencil(page, "#0000ff");
+  await page.getByRole("button", { name: "Eyedropper" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("eyedropper");
+  await page.mouse.click(cx, cy);
+  await expect(page.locator("gnumarus-shell")).toContainText("Eyedropper: #ff0000");
+  // The picked color paints like any chosen color.
+  await page.keyboard.press("Delete");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  await page.keyboard.press("b");
+  await page.mouse.click(cx, cy);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("holding Ctrl temporarily switches to the eyedropper", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await page.mouse.click(cx, cy);
+  await setPencil(page, "#0000ff");
+  await page.keyboard.down("Control");
+  await expect(page.locator("gnumarus-shell")).toContainText("eyedropper");
+  await page.mouse.click(cx, cy);
+  await expect(page.locator("gnumarus-shell")).toContainText("Eyedropper: #ff0000");
+  await page.keyboard.up("Control");
+  await expect(page.locator("gnumarus-shell")).toContainText("pencil");
+  // Painting after release uses the picked color with the restored tool.
+  await page.keyboard.press("Delete");
+  await page.mouse.click(cx, cy);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });

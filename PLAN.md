@@ -149,6 +149,12 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - New `rotationStepDeg` setting 1..90 in Settings (Canvas view section) with per-setting reset arrow, `Reset defaults` support and localStorage persistence, pushed to the engine via `setRotationStepDeg`.
 - Shift+Left-drag with pencil/line/curve adjusts that tool's size live from horizontal movement only (right bigger, left smaller, 20 screen px per unit, clamped 0.1..64); the brush tip preview resizes in real time and the shell options + status follow through `onToolSizeChanged`; no painting starts.
 
+## 27. Eyedropper, bucket shortcut, layer reset transform, alt+middleclick (implemented)
+- `F` selects the bucket tool.
+- Layer context menu gains `Reset transform` (rotation, flips and position back to identity via `resetLayerTransform`, undoable: no, like other transform edits; marks dirty).
+- Canvas/layer transform reset gesture moved from Ctrl+middleclick to Alt+middleclick (loupe resets the view, transform resets the active layer).
+- New eyedropper tool (toolbar button, monochrome drop glyph): click copies the clicked active-cell pixel RGBA into the paint color via `onEyedropperPick` + `setPencilColor`; never paints, records history or materializes empty cells. Holding Ctrl temporarily switches to eyedropper and releasing Ctrl restores the previous tool (manual tool changes cancel the temp mode; repeat keydown guarded; Ctrl combos unaffected).
+
 ## 11. Custom color picker (implemented)
 - Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).
 - Every model carries an alpha axis; RGBA axes span 0..255. ARD Diagonal spans 0..360 and Ratio 0..255.

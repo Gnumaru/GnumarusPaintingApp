@@ -1021,6 +1021,31 @@ export class GnumarusShell extends LitElement {
             </span>
           </button>
           <button
+            class=${this.tool === "eyedropper" ? "active" : ""}
+            title="Eyedropper (click a pixel to copy its color, hold Ctrl for temporary access)"
+            aria-label="Eyedropper"
+            @click=${(): void => {
+              this.tool = "eyedropper";
+              this.engine?.setTool("eyedropper");
+            }}
+          >
+            <span class="tool-icon"
+              ><svg
+                viewBox="0 0 16 16"
+                width="13"
+                height="13"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M8 1.8S4.8 6.2 4.8 9.4a3.2 3.2 0 0 0 6.4 0C11.2 6.2 8 1.8 8 1.8z" />
+              </svg>
+            </span>
+          </button>
+          <button
             class=${this.tool === "line" ? "active" : ""}
             title="Line (click start point, click end point)"
             aria-label="Line"
@@ -1319,6 +1344,15 @@ export class GnumarusShell extends LitElement {
                   }}
                 >
                   Merge Down
+                </button>
+                <button
+                  @click=${(): void => {
+                    if (this.contextMenuLayerId !== null) {
+                      this.onResetLayerTransform(this.contextMenuLayerId);
+                    }
+                  }}
+                >
+                  Reset transform
                 </button>
               </div>
             `
@@ -2044,6 +2078,10 @@ export class GnumarusShell extends LitElement {
         onPixelsChanged: (): void => {
           this.dirty = true;
           void this.refreshPreview();
+        },
+        onEyedropperPick: (hex): void => {
+          this.setPencilColor(hex);
+          this.statusMessage = `Eyedropper: ${hex}`;
         },
         onToolSizeChanged: (kind, size): void => {
           if (kind === "brush") {
@@ -3519,6 +3557,17 @@ export class GnumarusShell extends LitElement {
       this.statusMessage = "Layers merged";
     } else {
       this.statusMessage = "Nothing below to merge with";
+    }
+  }
+
+  private onResetLayerTransform(id: string): void {
+    this.closeLayerMenu();
+    if (this.engine?.resetLayerTransform(id) === true) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = "Layer transform reset";
+    } else {
+      this.statusMessage = "Layer transform reset failed";
     }
   }
 

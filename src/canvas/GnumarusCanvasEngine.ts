@@ -86,6 +86,7 @@ import {
   type GnumarusBackgroundMode,
   type GnumarusBackgroundSettings,
 } from "../settings/GnumarusBackgroundSettings";
+import { rgbaBytesToHex } from "../color/GnumarusColorModels";
 import {
   computeImageDiff,
   GnumarusHistory,
@@ -105,7 +106,7 @@ export interface GnumarusEngineStats {
   cursorY: number | null;
 }
 
-export type GnumarusCanvasTool = "pencil" | "bucket" | "line" | "curve" | "loupe" | "transform";
+export type GnumarusCanvasTool = "pencil" | "bucket" | "line" | "curve" | "loupe" | "transform" | "eyedropper";
 
 export interface GnumarusLayerInfo {
   id: string;
@@ -281,6 +282,7 @@ export interface GnumarusEngineOptions {
   onToolChanged?: (tool: GnumarusCanvasTool) => void;
   onLayersChanged?: () => void;
   onToolSizeChanged?: (kind: GnumarusToolSizeKind, size: number) => void;
+  onEyedropperPick?: (hex: string) => void;
   checker?: GnumarusCheckerSettings;
   gridMinZoom?: number;
   background?: GnumarusBackgroundSettings;
@@ -336,6 +338,9 @@ export class GnumarusCanvasEngine {
   private flipX = false;
   private flipY = false;
   private tool: GnumarusCanvasTool = "pencil";
+  /** Previous tool while Ctrl temporarily holds the eyedropper, or null. */
+  private toolBeforeEyedropper: GnumarusCanvasTool | null = null;
+  private tempEyedropper = false;
   private rotating = false;
   private lastPointerAngle: number | null = null;
   private loupeZooming = false;
@@ -413,6 +418,7 @@ export class GnumarusCanvasEngine {
   private readonly onToolChanged: ((tool: GnumarusCanvasTool) => void) | undefined;
   private readonly onLayersChanged: (() => void) | undefined;
   private readonly onToolSizeChanged: ((kind: GnumarusToolSizeKind, size: number) => void) | undefined;
+  private readonly onEyedropperPick: ((hex: string) => void) | undefined;
 
   constructor(container: HTMLElement, options: GnumarusEngineOptions) {
     this.container = container;
@@ -421,6 +427,7 @@ export class GnumarusCanvasEngine {
     this.onToolChanged = options.onToolChanged;
     this.onLayersChanged = options.onLayersChanged;
     this.onToolSizeChanged = options.onToolSizeChanged;
+    this.onEyedropperPick = options.onEyedropperPick;
     const initialChecker = options.checker ?? DEFAULT_CHECKER_SETTINGS;
     this.checkerMode = initialChecker.mode;
     this.checkerSizeX = clampCheckerSize(initialChecker.sizeX);
@@ -3220,6 +3227,11 @@ export class GnumarusCanvasEngine {
   }
 
   setTool(tool: GnumarusCanvasTool): void {
+    if (this.tempEyedropper && tool !== "eyedropper") {
+      // Manual tool change cancels the Ctrl-held temporary eyedropper.
+      this.tempEyedropper = false;
+      this.toolBeforeEyedropper = null;
+    }
     this.tool = tool;
     if (tool !== "line") {
       this.lineAnchor = null;
@@ -3240,6 +3252,53 @@ export class GnumarusCanvasEngine {
 
   getViewState(): { zoom: number; rotation: number; flipX: boolean; flipY: boolean } {
     return { zoom: this.zoom, rotation: this.rotation, flipX: this.flipX, flipY: this.flipY };
+  }
+
+  /** Holding Ctrl temporarily switches to the eyedropper, stashing the tool. */
+  beginTempEyedropper(): void {
+    if (this.tempEyedropper || this.tool === "eyedropper") {
+      return;
+    }
+    this.toolBeforeEyedropper = this.tool;
+    this.tempEyedropper = true;
+    this.setTool("eyedropper");
+  }
+
+  /** Releasing Ctrl restores the tool stashed by `beginTempEyedropper`. */
+  endTempEyedropper(): void {
+    if (!this.tempEyedropper) {
+      return;
+    }
+    const previous = this.toolBeforeEyedropper;
+    this.tempEyedropper = false;
+    this.toolBeforeEyedropper = null;
+    if (previous !== null) {
+      this.setTool(previous);
+    }
+  }
+
+  /**
+   * Copy the active cell pixel under the client point into the paint color.
+   * Never paints, records history or materializes empty cells. Returns false
+   * when there is no pixel to sample.
+   */
+  pickColorAt(clientX: number, clientY: number): boolean {
+    const pixel = this.toImagePixel(clientX, clientY);
+    if (pixel === null) {
+      return false;
+    }
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return false;
+    }
+    const sampled = getPixel(layer.buffer, layer.width, layer.height, pixel.x, pixel.y);
+    if (sampled === null) {
+      return false;
+    }
+    this.onEyedropperPick?.(
+      rgbaBytesToHex({ r: sampled.r, g: sampled.g, b: sampled.b, a: sampled.a }),
+    );
+    return true;
   }
 
   undo(): boolean {
@@ -3472,8 +3531,8 @@ export class GnumarusCanvasEngine {
     canvas.addEventListener("pointerdown", (event: PointerEvent) => {
       if (event.button === 1 && (this.tool === "loupe" || this.tool === "transform")) {
         event.preventDefault();
-        if (event.ctrlKey) {
-          // Ctrl+middle-click resets the transform.
+        if (event.altKey) {
+          // Alt+middle-click resets the transform.
           if (this.tool === "loupe") {
             this.resetViewTransform();
           } else {
@@ -3581,6 +3640,11 @@ export class GnumarusCanvasEngine {
           return;
         }
         this.bucketFillAt(pixel.x, pixel.y);
+        return;
+      }
+      if (this.tool === "eyedropper") {
+        // Single click copies the clicked pixel color into the paint color.
+        this.pickColorAt(event.clientX, event.clientY);
         return;
       }
       if (this.tool === "line") {
@@ -3977,12 +4041,20 @@ export class GnumarusCanvasEngine {
           target instanceof HTMLSelectElement
         );
       })();
+      if (event.key === "Control" && !event.repeat && !event.altKey && !event.metaKey && !inField) {
+        this.beginTempEyedropper();
+        return;
+      }
       if (!event.ctrlKey && !event.altKey && !event.metaKey && !inField) {
         if (event.key === "b" || event.key === "B") {
           this.setTool("pencil");
           return;
         }
         if (event.key === "g" || event.key === "G") {
+          this.setTool("bucket");
+          return;
+        }
+        if (event.key === "f" || event.key === "F") {
           this.setTool("bucket");
           return;
         }
@@ -4068,6 +4140,9 @@ export class GnumarusCanvasEngine {
       if (event.code === "Space") {
         this.spaceDown = false;
         this.panning = false;
+      }
+      if (event.key === "Control") {
+        this.endTempEyedropper();
       }
     });
   }
