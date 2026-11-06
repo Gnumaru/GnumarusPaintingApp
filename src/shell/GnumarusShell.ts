@@ -85,6 +85,87 @@ import {
 } from "../animation/GnumarusAnimationModel";
 import "../color/GnumarusColorPicker";
 
+interface GnumarusShortcutEntry {
+  keys: string;
+  action: string;
+}
+
+interface GnumarusShortcutSection {
+  title: string;
+  entries: GnumarusShortcutEntry[];
+}
+
+const GNUMARUS_SHORTCUTS: GnumarusShortcutSection[] = [
+  {
+    title: "File",
+    entries: [
+      { keys: "Ctrl+S (Cmd+S on macOS)", action: "Save (reuses the chosen folder, otherwise shows the folder picker)" },
+      { keys: "Ctrl+E (Cmd+E on macOS)", action: "Merge active layer down (same as Merge Down)" },
+    ],
+  },
+  {
+    title: "History",
+    entries: [
+      { keys: "Ctrl+Z", action: "Undo" },
+      { keys: "Ctrl+Y or Shift+Ctrl+Z", action: "Redo" },
+    ],
+  },
+  {
+    title: "Layers",
+    entries: [
+      { keys: "PageUp", action: "Select layer above (wraps around)" },
+      { keys: "PageDown", action: "Select layer below (wraps around)" },
+      { keys: "ArrowUp", action: "Select layer above (wraps around)" },
+      { keys: "ArrowDown", action: "Select layer below (wraps around)" },
+      { keys: "Shift+ArrowUp", action: "Move active layer up (wraps around)" },
+      { keys: "Shift+ArrowDown", action: "Move active layer down (wraps around)" },
+      { keys: "Insert", action: "Insert layer above the active layer" },
+      { keys: "Delete", action: "Reset current cell texture to transparent" },
+    ],
+  },
+  {
+    title: "Frames",
+    entries: [
+      { keys: "ArrowLeft", action: "Select previous frame (wraps around)" },
+      { keys: "ArrowRight", action: "Select next frame (wraps around)" },
+      { keys: "Shift+ArrowLeft", action: "Move current frame left (wraps around)" },
+      { keys: "Shift+ArrowRight", action: "Move current frame right (wraps around)" },
+    ],
+  },
+  {
+    title: "Tools",
+    entries: [
+      { keys: "B", action: "Pencil tool" },
+      { keys: "G or F", action: "Bucket fill tool" },
+      { keys: "N", action: "Line tool" },
+      { keys: "C", action: "Curve tool" },
+      { keys: "Z", action: "Loupe tool" },
+      { keys: "T", action: "Transform tool" },
+      { keys: "E", action: "Toggle eraser blend mode" },
+      { keys: "Hold Ctrl", action: "Temporary eyedropper (release to restore the previous tool)" },
+      { keys: "Escape", action: "Cancel line/curve in progress; close menus and rename fields" },
+    ],
+  },
+  {
+    title: "View",
+    entries: [
+      { keys: "1 (main keyboard)", action: "Zoom to 100%" },
+      { keys: "2 (main keyboard)", action: "Fit rotated canvas on screen" },
+      { keys: "4 (main and numpad)", action: "Rotate canvas counterclockwise by step" },
+      { keys: "6 (main and numpad)", action: "Rotate canvas clockwise by step" },
+      { keys: "5 (main and numpad)", action: "Reset canvas rotation" },
+      { keys: "Ctrl+Alt+=", action: "Zoom in (numpad + also works)" },
+      { keys: "Ctrl+Alt+-", action: "Zoom out (numpad - also works)" },
+      { keys: "Hold Space and drag", action: "Pan canvas" },
+      { keys: "Shift+Left-drag (pencil, line, curve)", action: "Resize tool live from horizontal movement" },
+    ],
+  },
+  {
+    title: "Interface",
+    entries: [{ keys: "Tab", action: "Hide/show all interface chrome except the canvas" }],
+  },
+];
+
 export class GnumarusShell extends LitElement {
   static styles = css`
     :host {
@@ -712,6 +793,33 @@ export class GnumarusShell extends LitElement {
       padding: 6px 12px;
       cursor: pointer;
     }
+    .shortcuts-list {
+      max-height: min(60vh, 420px);
+      min-width: min(480px, 80vw);
+      overflow-y: auto;
+      margin: 8px 0;
+    }
+    .shortcuts-list h4 {
+      margin: 12px 0 4px 0;
+    }
+    .shortcuts-list h4:first-child {
+      margin-top: 0;
+    }
+    .shortcuts-list table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+    .shortcuts-list td {
+      padding: 3px 8px 3px 0;
+      vertical-align: top;
+    }
+    .shortcuts-list kbd {
+      background: #1e1e1e;
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 1px 6px;
+      white-space: nowrap;
+    }
     .picker-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
@@ -785,6 +893,7 @@ export class GnumarusShell extends LitElement {
     statusMessage: { type: String },
     fileMenuOpen: { type: Boolean },
     editMenuOpen: { type: Boolean },
+    helpMenuOpen: { type: Boolean },
     webglError: { type: String },
     fsSupported: { type: Boolean },
     newWidth: { type: Number },
@@ -856,6 +965,7 @@ export class GnumarusShell extends LitElement {
   declare statusMessage: string;
   declare fileMenuOpen: boolean;
   declare editMenuOpen: boolean;
+  declare helpMenuOpen: boolean;
   declare webglError: string;
   declare fsSupported: boolean;
   declare newWidth: number;
@@ -938,6 +1048,7 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = "Ready";
     this.fileMenuOpen = false;
     this.editMenuOpen = false;
+    this.helpMenuOpen = false;
     this.webglError = "";
     this.fsSupported = true;
     this.newWidth = 64;
@@ -1009,6 +1120,7 @@ export class GnumarusShell extends LitElement {
             @click=${(): void => {
               this.fileMenuOpen = !this.fileMenuOpen;
               this.editMenuOpen = false;
+              this.helpMenuOpen = false;
             }}
           >
             File
@@ -1029,6 +1141,7 @@ export class GnumarusShell extends LitElement {
             @click=${(): void => {
               this.editMenuOpen = !this.editMenuOpen;
               this.fileMenuOpen = false;
+              this.helpMenuOpen = false;
             }}
           >
             Edit
@@ -1040,6 +1153,25 @@ export class GnumarusShell extends LitElement {
                   <button ?disabled=${!this.canRedo} @click=${(): void => this.doRedo()}>Redo</button>
                   <button @click=${(): void => this.openSettingsDialog()}>Settings</button>
                   <button @click=${(): void => this.resetCanvasTransform()}>Reset Canvas Transform</button>
+                </div>
+              `
+            : html``}
+        </div>
+        <div class="menu">
+          <button
+            class=${this.helpMenuOpen ? "active" : ""}
+            @click=${(): void => {
+              this.helpMenuOpen = !this.helpMenuOpen;
+              this.fileMenuOpen = false;
+              this.editMenuOpen = false;
+            }}
+          >
+            Help
+          </button>
+          ${this.helpMenuOpen
+            ? html`
+                <div class="dropdown">
+                  <button @click=${(): void => this.openShortcutsDialog()}>Shortcuts</button>
                 </div>
               `
             : html``}
@@ -1511,6 +1643,29 @@ export class GnumarusShell extends LitElement {
         <div class="dialog-actions">
           <button @click=${(): void => this.closeFitTextureDialog()}>Cancel</button>
           <button @click=${(): void => this.confirmFitTexture()}>OK</button>
+        </div>
+      </dialog>
+      <dialog id="shortcutsDialog">
+        <h3>Keyboard shortcuts</h3>
+        <div class="shortcuts-list">
+          ${GNUMARUS_SHORTCUTS.map(
+            (section) => html`
+              <h4>${section.title}</h4>
+              <table>
+                ${section.entries.map(
+                  (entry) => html`
+                    <tr>
+                      <td><kbd>${entry.keys}</kbd></td>
+                      <td>${entry.action}</td>
+                    </tr>
+                  `,
+                )}
+              </table>
+            `,
+          )}
+        </div>
+        <div class="dialog-actions">
+          <button @click=${(): void => this.closeShortcutsDialog()}>Close</button>
         </div>
       </dialog>
       <dialog id="settingsDialog">
@@ -4339,6 +4494,18 @@ export class GnumarusShell extends LitElement {
       this.statusMessage = "Nothing to fit: texture is empty or already fits";
     }
     this.closeFitTextureDialog();
+  }
+
+  private openShortcutsDialog(): void {
+    this.helpMenuOpen = false;
+    this.requestUpdate();
+    const dialog = this.shadowRoot?.getElementById("shortcutsDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+  }
+
+  private closeShortcutsDialog(): void {
+    const dialog = this.shadowRoot?.getElementById("shortcutsDialog") as HTMLDialogElement | null;
+    dialog?.close();
   }
 
   private onRenameCommit(id: string): void {

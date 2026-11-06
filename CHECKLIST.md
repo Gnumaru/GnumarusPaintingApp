@@ -132,3 +132,6 @@
 - [x] Fit texture to size in layer and cell context menus with alpha threshold modal, apparent-position-preserving crop, undo support
 - [x] Unit tests (vitest) — 154 passed (alpha bbox, crop transform shift, fit history undo/redo)
 - [x] E2E test (Playwright): previous 93 + fit via cell menu (crop + apparent position + undo/redo) and via layer menu (threshold clamp + no-ops + disabled on empty) — 95 passed
+- [x] Help menu with Shortcuts item opening a modal listing all keyboard shortcuts grouped by area
+- [x] Unit tests (vitest) — 154 passed (no logic change to pure modules)
+- [x] E2E test (Playwright): previous 95 + Help > Shortcuts modal contents and open/close — 96 passed

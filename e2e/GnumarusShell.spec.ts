@@ -3695,3 +3695,23 @@ test("frames can be renamed like layers", async ({ page }) => {
   await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click();
   await expect(page.locator('gnumarus-shell [data-testid="toast"]')).toContainText("Outro");
 });
+
+test("Help menu lists every keyboard shortcut in a modal", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Help" }).click();
+  await page.getByRole("button", { name: "Shortcuts" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#shortcutsDialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("Keyboard shortcuts");
+  for (const heading of ["File", "History", "Layers", "Frames", "Tools", "View", "Interface"]) {
+    await expect(dialog.getByRole("heading", { name: heading })).toBeVisible();
+  }
+  await expect(dialog).toContainText("Merge active layer down");
+  await expect(dialog).toContainText("Temporary eyedropper");
+  await expect(dialog).toContainText("Reset current cell texture to transparent");
+  await expect(dialog).toContainText("Resize tool live");
+  await expect(dialog).toContainText("Hide/show all interface chrome");
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await expect(dialog).toBeHidden();
+});
