@@ -75,13 +75,18 @@ import {
 import {
   animationCellKey,
   clampFrameDurationMs,
+  defaultFrameName,
   effectiveFrameDurationMs,
+  ensureFrameNames,
   GNUMARUS_DEFAULT_FRAME_DURATION_MS,
   insertFrameCells,
   insertFrameDurations,
+  insertFrameNames,
+  normalizeFrameName,
   resolveAnimationFrame,
   swapFrameCells,
   swapFrameDurations,
+  swapFrameNames,
   type GnumarusResolvedCell,
   type GnumarusTexturePixels,
 } from "../animation/GnumarusAnimationModel";
@@ -174,6 +179,7 @@ export interface GnumarusAnimationMatrixView {
   frameCount: number;
   currentFrame: number;
   activeLayerId: string;
+  frameNames: string[];
   rows: GnumarusMatrixRowView[];
   contents: Array<{
     id: string;
@@ -201,6 +207,7 @@ export interface GnumarusAnimationProjectData {
   currentFrame: number;
   defaultFrameDuration: number;
   frameDurations: Array<{ frame: number; duration: number }>;
+  frameNames: string[];
 }
 
 export interface GnumarusProjectLayerInput {
@@ -330,6 +337,8 @@ export class GnumarusCanvasEngine {
   private currentFrame = 0;
   private frameDurations = new Map<number, number>();
   private defaultFrameDuration = GNUMARUS_DEFAULT_FRAME_DURATION_MS;
+  private frameNames: string[] = [defaultFrameName(0)];
+  private frameNameCounter = 2;
   private contentCounter = 1;
   private textureCounter = 1;
   private imageWidth: number;
@@ -589,7 +598,7 @@ export class GnumarusCanvasEngine {
     this.gridPlane.renderOrder = 1000;
     this.gridPlane.visible = false;
     this.scene.add(this.gridPlane);
-    const first = this.createLayerInternal("layer0", "Layer 0", true, 1, createPixelBuffer(64, 64), 64, 64, {
+    const first = this.createLayerInternal("layer0", "Layer 1", true, 1, createPixelBuffer(64, 64), 64, 64, {
       ...IDENTITY_LAYER_TRANSFORM,
     });
     this.layers.push(first);
@@ -597,7 +606,7 @@ export class GnumarusCanvasEngine {
     this.layerCounter = 1;
     this.textures.set("layer0", {
       id: "layer0",
-      name: "Layer 0 pixels",
+      name: "Layer 1 pixels",
       width: 64,
       height: 64,
       buffer: first.buffer,
@@ -611,6 +620,8 @@ export class GnumarusCanvasEngine {
     this.cells.set(animationCellKey("layer0", 0), "content1");
     this.frameCount = 1;
     this.currentFrame = 0;
+    this.frameNames = [defaultFrameName(0)];
+    this.frameNameCounter = 2;
     this.contentCounter = 2;
     this.textureCounter = 1;
     this.syncAllLayerRenders();
@@ -837,15 +848,17 @@ export class GnumarusCanvasEngine {
 
   /**
    * Insert an empty frame at position `at`, shifting that frame and later
-   * ones up by one slot (cells and explicit durations follow). Selects the
+   * ones up by one slot (cells, names and explicit durations follow). Selects the
    * new frame. Returns the new frame index, or -1 for invalid positions.
    */
   insertFrame(at: number): number {
     if (!Number.isInteger(at) || at < 0 || at > this.frameCount) {
       return -1;
     }
+    const name = `Frame ${this.frameNameCounter++}`;
     this.cells = insertFrameCells(this.cells, at);
     this.frameDurations = insertFrameDurations(this.frameDurations, at);
+    this.frameNames = insertFrameNames(this.frameNames, at, name);
     this.frameCount += 1;
     this.currentFrame = at;
     this.stabilizerPos = null;
@@ -875,6 +888,7 @@ export class GnumarusCanvasEngine {
     }
     this.cells = swapFrameCells(this.cells, frame, target);
     this.frameDurations = swapFrameDurations(this.frameDurations, frame, target);
+    this.frameNames = swapFrameNames(this.frameNames, frame, target);
     this.currentFrame = target;
     this.stabilizerPos = null;
     this.stabilizerTarget = null;
@@ -915,6 +929,7 @@ export class GnumarusCanvasEngine {
       keptDurations.set(at > frame ? at - 1 : at, duration);
     }
     this.frameDurations = keptDurations;
+    this.frameNames = [...this.frameNames.slice(0, frame), ...this.frameNames.slice(frame + 1)];
     this.frameCount -= 1;
     if (this.currentFrame > frame) {
       this.currentFrame -= 1;
@@ -928,6 +943,35 @@ export class GnumarusCanvasEngine {
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
     this.render();
+    this.emitStats();
+    this.onLayersChanged?.();
+    return true;
+  }
+
+  /** Display name for a frame index, falling back to the default when out of range. */
+  getFrameName(frame: number): string {
+    if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
+      return defaultFrameName(frame);
+    }
+    return this.frameNames[frame] ?? defaultFrameName(frame);
+  }
+
+  getFrameNames(): string[] {
+    return [...this.frameNames];
+  }
+
+  renameFrame(frame: number, name: string): boolean {
+    if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
+      return false;
+    }
+    const trimmed = normalizeFrameName(name);
+    if (trimmed === null) {
+      return false;
+    }
+    if (this.frameNames[frame] === trimmed) {
+      return false;
+    }
+    this.frameNames[frame] = trimmed;
     this.emitStats();
     this.onLayersChanged?.();
     return true;
@@ -1013,6 +1057,7 @@ export class GnumarusCanvasEngine {
       frameCount: this.frameCount,
       currentFrame: this.currentFrame,
       activeLayerId: this.activeLayerId,
+      frameNames: [...this.frameNames],
       rows,
       contents: [...this.contents.values()].map((content) => {
         const size = this.contentDisplaySize(content);
@@ -1215,6 +1260,7 @@ export class GnumarusCanvasEngine {
       currentFrame: this.currentFrame,
       defaultFrameDuration: this.defaultFrameDuration,
       frameDurations: [...this.frameDurations.entries()].map(([frame, duration]) => ({ frame, duration })),
+      frameNames: [...this.frameNames],
     };
   }
 
@@ -1282,7 +1328,7 @@ export class GnumarusCanvasEngine {
 
   private insertLayerAt(at: number): string {
     const id = `layer${this.layerCounter}`;
-    const name = `Layer ${this.layerCounter}`;
+    const name = `Layer ${this.layerCounter + 1}`;
     this.layerCounter += 1;
     const layer = this.createLayerInternal(
       id,
@@ -1813,6 +1859,8 @@ export class GnumarusCanvasEngine {
     this.layerCounter = Math.max(maxSuffix, this.layers.length);
     this.frameCount = 1;
     this.currentFrame = 0;
+    this.frameNames = [defaultFrameName(0)];
+    this.frameNameCounter = 2;
     this.history.clear();
     this.strokeBase = null;
     this.strokeLayerId = null;
@@ -1847,6 +1895,7 @@ export class GnumarusCanvasEngine {
       currentFrame: number;
       defaultFrameDuration?: number;
       frameDurations?: Array<{ frame: number; duration: number }>;
+      frameNames?: string[];
     },
   ): void {
     if (data.layers.length === 0) {
@@ -1922,6 +1971,14 @@ export class GnumarusCanvasEngine {
     this.frameCount = data.frames;
     this.currentFrame = Math.min(Math.max(0, Math.floor(data.currentFrame)), data.frames - 1);
     this.defaultFrameDuration = clampFrameDurationMs(data.defaultFrameDuration ?? GNUMARUS_DEFAULT_FRAME_DURATION_MS);
+    this.frameNames = ensureFrameNames(data.frames, data.frameNames ?? []);
+    this.frameNameCounter = data.frames + 1;
+    for (const name of this.frameNames) {
+      const match = /^Frame (\d+)$/.exec(name);
+      if (match?.[1] !== undefined) {
+        this.frameNameCounter = Math.max(this.frameNameCounter, Number.parseInt(match[1], 10) + 1);
+      }
+    }
     this.frameDurations = new Map<number, number>();
     for (const entry of data.frameDurations ?? []) {
       if (
@@ -2007,19 +2064,21 @@ export class GnumarusCanvasEngine {
     this.hidePreviews();
     this.frameDurations.clear();
     this.defaultFrameDuration = GNUMARUS_DEFAULT_FRAME_DURATION_MS;
+    this.frameNames = [defaultFrameName(0)];
+    this.frameNameCounter = 2;
   }
 
   newProject(width: number, height: number): void {
     this.imageWidth = width;
     this.imageHeight = height;
     this.clearAllLayers();
-    const first = this.createLayerInternal("layer0", "Layer 0", true, 1, createPixelBuffer(width, height), width, height, {
+    const first = this.createLayerInternal("layer0", "Layer 1", true, 1, createPixelBuffer(width, height), width, height, {
       ...IDENTITY_LAYER_TRANSFORM,
     });
     this.layers.push(first);
     this.textures.set("layer0", {
       id: "layer0",
-      name: "Layer 0 pixels",
+      name: "Layer 1 pixels",
       width,
       height,
       buffer: first.buffer,
@@ -2038,6 +2097,8 @@ export class GnumarusCanvasEngine {
     this.textureCounter = 1;
     this.frameCount = 1;
     this.currentFrame = 0;
+    this.frameNames = [defaultFrameName(0)];
+    this.frameNameCounter = 2;
     this.history.clear();
     this.strokeBase = null;
     this.strokeLayerId = null;

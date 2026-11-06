@@ -1211,7 +1211,7 @@ test("content texture can be dissociated and associated with another texture", a
   await layer1Cell.click();
   expect(await readPixel(page, 0, 0)).toBeNull();
   await layer1Cell.click({ button: "right" });
-  await page.getByRole("button", { name: /Use texture "Layer 0 pixels"/ }).click();
+  await page.getByRole("button", { name: /Use texture "Layer 1 pixels"/ }).click();
   state = await getMatrix(page);
   expect(state.contents.find((entry) => entry.id === layer1Content)?.textureId).toBe("layer0");
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
@@ -2627,7 +2627,7 @@ test("PageUp and PageDown select layers with wrap-around and toast", async ({ pa
   await page.keyboard.press("PageUp");
   state = await getLayers(page);
   expect(state.active).toBe("layer0");
-  await expect(toast).toContainText("1/3: Layer 0");
+  await expect(toast).toContainText("1/3: Layer 1");
   await page.keyboard.press("PageUp");
   state = await getLayers(page);
   expect(state.active).toBe("layer1");
@@ -2635,15 +2635,15 @@ test("PageUp and PageDown select layers with wrap-around and toast", async ({ pa
   await page.keyboard.press("PageUp");
   state = await getLayers(page);
   expect(state.active).toBe("layer2");
-  await expect(toast).toContainText("3/3: Layer 2");
+  await expect(toast).toContainText("3/3: Layer 3");
   await page.keyboard.press("PageUp");
   state = await getLayers(page);
   expect(state.active).toBe("layer0");
-  await expect(toast).toContainText("1/3: Layer 0");
+  await expect(toast).toContainText("1/3: Layer 1");
   await page.keyboard.press("PageDown");
   state = await getLayers(page);
   expect(state.active).toBe("layer2");
-  await expect(toast).toContainText("3/3: Layer 2");
+  await expect(toast).toContainText("3/3: Layer 3");
   await page.keyboard.press("PageDown");
   state = await getLayers(page);
   expect(state.active).toBe("layer1");
@@ -3466,4 +3466,89 @@ test("arrow keys stay out of inputs and the color picker", async ({ page }) => {
   expect((await getLayers(page)).layers.map((layer) => layer.id)).toEqual(
     before.layers.map((layer) => layer.id),
   );
+});
+
+test("clicking layers and frames also shows the toast", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Add layer" }).click();
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  const toast = page.locator('gnumarus-shell [data-testid="toast"]');
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  await expect(toast).toContainText("Frame 1/2:");
+  await page.locator('gnumarus-shell [data-layer-id="layer0"] .layer-name').click();
+  await expect(toast).toContainText("1/2:");
+  await page.locator('gnumarus-shell [data-layer-id="layer1"] .layer-name').click();
+  await expect(toast).toContainText("2/2:");
+  await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click();
+  await expect(toast).toContainText("Frame 2/2:");
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  await expect(toast).toContainText("Frame 1/2:");
+  const cell = matrix.locator('[data-testid="anim-cell"][data-matrix-layer="layer0"][data-matrix-frame="1"]');
+  await cell.click();
+  await expect(toast).toBeVisible();
+});
+
+test("toast display time is configurable between 0.5 and 2 seconds", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const input = page.locator("gnumarus-shell input#toastDuration");
+  await expect(input).toBeVisible();
+  await expect(input).toHaveValue("1");
+  await input.fill("0.1");
+  await expect(page.locator("gnumarus-shell")).toContainText("Toast display time: 0.5 s");
+  await expect(input).toHaveValue("0.5");
+  await input.fill("5");
+  await expect(page.locator("gnumarus-shell")).toContainText("Toast display time: 2 s");
+  await expect(input).toHaveValue("2");
+  await input.fill("1.5");
+  await expect(page.locator("gnumarus-shell")).toContainText("Toast display time: 1.5 s");
+  await expect(page.locator('gnumarus-shell button[aria-label="Reset toast display time to default"]')).toBeVisible();
+  await page.locator('gnumarus-shell button[aria-label="Reset toast display time to default"]').click();
+  await expect(input).toHaveValue("1");
+  await page.getByRole("button", { name: "Close" }).click();
+  const duration = await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { toastDurationSec: number } } };
+    return root.__gnumarus?.shell?.toastDurationSec ?? -1;
+  });
+  expect(duration).toBe(1);
+});
+
+test("automatic layer names start at 1", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  let state = await getLayers(page);
+  expect(state.layers[0]?.name).toBe("Layer 1");
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await page.getByRole("button", { name: "Add layer" }).click();
+  state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.name)).toEqual(["Layer 1", "Layer 2", "Layer 3"]);
+});
+
+test("frames can be renamed like layers", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await expect(matrix.locator('[data-testid="anim-frame"][data-frame="0"]')).toContainText("Frame 1");
+  await expect(matrix.locator('[data-testid="anim-frame"][data-frame="1"]')).toContainText("Frame 2");
+  const header = matrix.locator('[data-testid="anim-frame"][data-frame="1"]');
+  await header.dblclick();
+  const renameInput = matrix.locator('[data-testid="anim-frame-rename"][data-frame="1"]');
+  await expect(renameInput).toBeVisible();
+  await renameInput.fill("Intro");
+  await renameInput.press("Enter");
+  await expect(matrix.locator('[data-testid="anim-frame"][data-frame="1"]')).toContainText("Intro");
+  await expect(page.locator("gnumarus-shell")).toContainText("Frame renamed");
+  await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Rename frame…" }).click();
+  await page.locator("gnumarus-shell input#frameRename").fill("Outro");
+  await page.getByRole("button", { name: "Rename", exact: true }).click();
+  await expect(matrix.locator('[data-testid="anim-frame"][data-frame="1"]')).toContainText("Outro");
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click();
+  await expect(page.locator('gnumarus-shell [data-testid="toast"]')).toContainText("Outro");
 });

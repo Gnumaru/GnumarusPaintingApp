@@ -168,3 +168,21 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Every axis gets a draggable gradient bar plus an editable numeric input beside it. Non-RGBA, non-hue axes are percentages with one decimal; hue axes span 0..360. Each bar renders the gradient of its own axis from minimum to maximum (e.g. HSL hue bar runs red 0 through the spectrum back to red 360).
 - OKHSL/OKHSV use our own Oklab-based implementation (no new dependencies). Other models preserve the current alpha.
 - Fixed frozen sliders: axis edits force a re-render even when the output hex is unchanged (e.g. editing hue/saturation while value is zero), so thumbs and inputs always follow the edited values.
+
+## 29. Toast display time setting (implemented)
+- New `GnumarusToastSettings` (`src/settings/GnumarusToastSettings.ts`): `durationSec` float 0.5..2.0, default 1.0, `localStorage` persisted, clamped, `durationMs` legacy accepted.
+- Settings gains an Interface section with numeric input (min 0.5 max 2.0 step 0.1) plus per-setting reset arrow and `Reset defaults` support.
+- `showToast` uses `clampToastDurationSec * 1000`; test hooks `setToastDurationSec`.
+
+## 30. Click selection also shows the toast (implemented)
+- Layers panel click (`onSelectLayer`), frame header click (`onSelectFrame`) and matrix cell click (`onCellClick`) now show the same toast as the keyboard shortcuts.
+- Cell clicks changing both layer and frame show a combined `pos/total: layer — Frame i/n: frame` message; single changes show the respective toast.
+
+## 31. Automatic layer names start at 1 (implemented)
+- Initial layer is `Layer 1` (`layer0` id kept for compatibility, `Layer 1 pixels` texture); `insertLayerAt` names new layers `Layer ${counter + 1}` so ids `layer0, layer1, layer2` map to names `Layer 1, Layer 2, Layer 3`.
+- `createDefaultProject` and `newProject` updated; old projects load unchanged.
+
+## 32. Named frames (implemented)
+- Engine stores `frameNames: string[]` plus `frameNameCounter` for unique defaults (`Frame 1, Frame 2, ...`); pure helpers `defaultFrameName`, `normalizeFrameName` (trim 1..64), `ensureFrameNames`, `insertFrameNames`, `swapFrameNames` in `GnumarusAnimationModel`.
+- `insertFrame` inserts `Frame ${counter++}`, `removeFrame` splices, `moveFrame` swaps names; `renameFrame` validates; `getFrameName(s)` accessors; matrix view carries `frameNames`; `export/loadAnimationProject` round-trips `frameNames`; `project.json` gains required `frameNames` (legacy migrates to defaults, invalid rejected).
+- UI: frame headers show names (double-click inline rename, Enter commits, Escape/blur cancels, context menu `Rename frame…` plus dialog); status bar `Frame i/n: name` and toasts `Frame i/n: name`; aria labels/titles include names.

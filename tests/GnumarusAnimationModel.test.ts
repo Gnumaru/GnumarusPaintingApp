@@ -2,12 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   animationCellKey,
   clampFrameDurationMs,
+  defaultFrameName,
   effectiveFrameDurationMs,
+  ensureFrameNames,
   insertFrameCells,
   insertFrameDurations,
+  insertFrameNames,
+  normalizeFrameName,
   resolveAnimationFrame,
   swapFrameCells,
   swapFrameDurations,
+  swapFrameNames,
   GNUMARUS_DEFAULT_FRAME_DURATION_MS,
   GNUMARUS_MAX_FRAME_DURATION_MS,
   GNUMARUS_MIN_FRAME_DURATION_MS,
@@ -152,5 +157,28 @@ describe("GnumarusAnimationModel", () => {
     expect(partial.get(0)).toBe(150);
     expect(partial.get(1)).toBeUndefined();
     expect(swapFrameDurations(new Map(), 0, 1).size).toBe(0);
+  });
+
+  it("builds default frame names and normalizes custom names", () => {
+    expect(defaultFrameName(0)).toBe("Frame 1");
+    expect(defaultFrameName(2)).toBe("Frame 3");
+    expect(normalizeFrameName("  My Frame  ")).toBe("My Frame");
+    expect(normalizeFrameName("   ")).toBeNull();
+    expect(normalizeFrameName("")).toBeNull();
+    const long = "x".repeat(100);
+    expect(normalizeFrameName(long)?.length).toBe(64);
+  });
+
+  it("ensures frame names with defaults", () => {
+    expect(ensureFrameNames(1)).toEqual(["Frame 1"]);
+    expect(ensureFrameNames(3, ["A"])).toEqual(["A", "Frame 2", "Frame 3"]);
+    expect(ensureFrameNames(2, ["  ", "B"])).toEqual(["Frame 1", "B"]);
+  });
+
+  it("inserts and swaps frame names", () => {
+    expect(insertFrameNames(["Frame 1", "Frame 2"], 1, "Frame 3")).toEqual(["Frame 1", "Frame 3", "Frame 2"]);
+    expect(insertFrameNames(["Frame 1"], 0, "Frame 2")).toEqual(["Frame 2", "Frame 1"]);
+    expect(swapFrameNames(["A", "B", "C"], 0, 2)).toEqual(["C", "B", "A"]);
+    expect(swapFrameNames(["A", "B"], 1, 1)).toEqual(["A", "B"]);
   });
 });

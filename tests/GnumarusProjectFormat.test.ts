@@ -15,8 +15,9 @@ describe("GnumarusProjectFormat", () => {
     expect(project.app).toBe(GNUMARUS_APP_ID);
     expect(project.layers.length).toBe(1);
     expect(project.animation.frames).toBe(1);
+    expect(project.animation.frameNames).toEqual(["Frame 1"]);
     expect(project.animation.textures).toEqual([
-      { id: "layer0", name: "Layer 0 pixels", width: 64, height: 64, file: textureFilePath("layer0") },
+      { id: "layer0", name: "Layer 1 pixels", width: 64, height: 64, file: textureFilePath("layer0") },
     ]);
     expect(project.animation.contents).toEqual([
       {
@@ -38,16 +39,17 @@ describe("GnumarusProjectFormat", () => {
         version: 1,
         width: 64,
         height: 64,
-        layers: [{ id: "layer0", name: "Layer 0", visible: true, opacity: 1, cells: [{ frame: 0, file: "cells/layer0_frame0.png" }] }],
+        layers: [{ id: "layer0", name: "Layer 1", visible: true, opacity: 1, cells: [{ frame: 0, file: "cells/layer0_frame0.png" }] }],
       }),
     );
     expect(parsed.layers[0]).toMatchObject({ id: "layer0" });
     expect(parsed.layers[0]?.width).toBeUndefined();
     expect(parsed.animation.frames).toBe(1);
+    expect(parsed.animation.frameNames).toEqual(["Frame 1"]);
     expect(parsed.animation.defaultFrameDuration).toBe(100);
     expect(parsed.animation.frameDurations).toEqual([]);
     expect(parsed.animation.textures).toEqual([
-      { id: "layer0", name: "Layer 0 pixels", width: 64, height: 64, file: "cells/layer0_frame0.png" },
+      { id: "layer0", name: "Layer 1 pixels", width: 64, height: 64, file: "cells/layer0_frame0.png" },
     ]);
     expect(parsed.animation.cells).toEqual([{ layer: "layer0", frame: 0, content: "content1" }]);
     const reparsed = parseProject(serializeProject(parsed));
@@ -87,6 +89,7 @@ describe("GnumarusProjectFormat", () => {
   it("round-trips shared contents across frames", () => {
     const project = createDefaultProject(8, 8);
     project.animation.frames = 3;
+    project.animation.frameNames = ["Frame 1", "Frame 2", "Frame 3"];
     project.animation.contents.push({
       id: "content2",
       name: "Content 2",
@@ -184,5 +187,44 @@ describe("GnumarusProjectFormat", () => {
     expect(() =>
       parseProject(serializeProject({ ...ok, animation: { ...ok.animation, defaultFrameDuration: "fast" as unknown as number } })),
     ).toThrow(GnumarusProjectError);
+    expect(() =>
+      parseProject(
+        serializeProject({
+          ...ok,
+          animation: { ...ok.animation, frameNames: ["", "Frame 2"].slice(0, 1) },
+        }),
+      ),
+    ).toThrow(GnumarusProjectError);
+    expect(() =>
+      parseProject(
+        JSON.stringify({
+          ...JSON.parse(serializeProject(ok)) as Record<string, unknown>,
+          animation: {
+            ...ok.animation,
+            frames: 2,
+            frameNames: ["only-one"],
+          },
+        }),
+      ),
+    ).toThrow(GnumarusProjectError);
+  });
+
+  it("migrates projects without frame names to defaults", () => {
+    const raw = JSON.parse(serializeProject(createDefaultProject(8, 8))) as {
+      animation: Record<string, unknown>;
+    } & Record<string, unknown>;
+    const animation = raw.animation;
+    delete animation["frameNames"];
+    const parsed = parseProject(JSON.stringify(raw));
+    expect(parsed.animation.frameNames).toEqual(["Frame 1"]);
+  });
+
+  it("round-trips custom frame names", () => {
+    const project = createDefaultProject(8, 8);
+    project.animation.frames = 2;
+    project.animation.frameNames = ["Intro", "Outro"];
+    project.animation.cells.push({ layer: "layer0", frame: 1, content: "content1" });
+    const parsed = parseProject(serializeProject(project));
+    expect(parsed.animation.frameNames).toEqual(["Intro", "Outro"]);
   });
 });

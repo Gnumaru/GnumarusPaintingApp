@@ -52,6 +52,13 @@ import {
   parseRotationSettings,
   serializeRotationSettings,
 } from "../settings/GnumarusRotationSettings";
+import {
+  DEFAULT_TOAST_SETTINGS,
+  TOAST_SETTINGS_STORAGE_KEY,
+  clampToastDurationSec,
+  parseToastSettings,
+  serializeToastSettings,
+} from "../settings/GnumarusToastSettings";
 import { compositeFinalImage } from "../preview/GnumarusFinalRender";
 import { decodePngToBuffer, encodeBufferToPngBlob } from "../project/GnumarusPngCodec";
 import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
@@ -760,6 +767,8 @@ export class GnumarusShell extends LitElement {
     playing: { type: Boolean },
     uiHidden: { type: Boolean },
     toastMessage: { type: String },
+    toastDurationSec: { type: Number },
+    renamingFrame: { type: Number },
     brushSize: { type: Number },
     brushShape: { type: String },
     pencilAntialias: { type: Boolean },
@@ -830,6 +839,8 @@ export class GnumarusShell extends LitElement {
   declare playing: boolean;
   declare uiHidden: boolean;
   declare toastMessage: string;
+  declare toastDurationSec: number;
+  declare renamingFrame: number | null;
   declare brushSize: number;
   declare brushShape: GnumarusBrushShape;
   declare pencilAntialias: boolean;
@@ -904,6 +915,8 @@ export class GnumarusShell extends LitElement {
     this.playTimer = null;
     this.uiHidden = false;
     this.toastMessage = "";
+    this.toastDurationSec = DEFAULT_TOAST_SETTINGS.durationSec;
+    this.renamingFrame = null;
     this.brushSize = 1;
     this.brushShape = "square";
     this.pencilAntialias = false;
@@ -1659,6 +1672,31 @@ export class GnumarusShell extends LitElement {
               </button>`
             : html``}
         </div>
+        <div class="settings-section">Interface</div>
+        <div class="setting-row">
+          <label
+            >Toast display time (seconds)
+            <input
+              type="number"
+              id="toastDuration"
+              min="0.5"
+              max="2"
+              step="0.1"
+              .value=${String(this.toastDurationSec)}
+              @input=${(): void => this.applyToastFromDialog()}
+            />
+          </label>
+          ${Math.abs(this.toastDurationSec - DEFAULT_TOAST_SETTINGS.durationSec) > 1e-9
+            ? html`<button
+                class="reset-btn"
+                aria-label="Reset toast display time to default"
+                title="Reset to default"
+                @click=${(): void => this.resetToastDurationToDefault()}
+              >
+                ↻
+              </button>`
+            : html``}
+        </div>
         <div class="dialog-actions">
           <button @click=${(): void => this.resetCheckerDefaults()}>Reset defaults</button>
           <button @click=${(): void => this.closeSettingsDialog()}>Close</button>
@@ -1683,6 +1721,17 @@ export class GnumarusShell extends LitElement {
           <button @click=${(): void => this.closeFrameDurationDialog()}>Cancel</button>
           <button @click=${(): void => this.clearFrameDuration()}>Clear</button>
           <button @click=${(): void => this.confirmFrameDuration()}>Set</button>
+        </div>
+      </dialog>
+      <dialog id="frameRenameDialog">
+        <h3>Rename frame</h3>
+        <label
+          >Frame name
+          <input type="text" id="frameRename" maxlength="64" .value=${this.frameRenameValue()} />
+        </label>
+        <div class="dialog-actions">
+          <button @click=${(): void => this.closeFrameRenameDialog()}>Cancel</button>
+          <button @click=${(): void => this.confirmFrameRename()}>Rename</button>
         </div>
       </dialog>
     `;
@@ -1926,20 +1975,41 @@ export class GnumarusShell extends LitElement {
             ${Array.from({ length: matrix.frameCount }, (_unused, frame) => {
               const current = frame === matrix.currentFrame;
               const duration = this.engine?.getEffectiveFrameDuration(frame) ?? 0;
+              const frameName = matrix.frameNames[frame] ?? `Frame ${frame + 1}`;
+              const isRenaming = this.renamingFrame === frame;
               return html`
                 <div class="anim-frame-header ${current ? "current" : ""}">
-                  <button
-                    data-testid="anim-frame"
-                    data-frame=${frame}
-                    aria-label="Frame ${frame + 1}${current ? ", current" : ""}, ${duration} milliseconds"
-                    title="Frame ${frame + 1}${current ? " (current)" : ""} — ${duration} ms"
-                    @click=${(): void => this.onSelectFrame(frame)}
-                    @contextmenu=${(event: MouseEvent): void => {
-                      event.preventDefault();
-                      this.openMatrixFrameMenu(frame, event.clientX, event.clientY);
-                    }}
-                    >${frame + 1}</button
-                  >
+                  ${isRenaming
+                    ? html`<input
+                        data-testid="anim-frame-rename"
+                        data-frame=${frame}
+                        .value=${frameName}
+                        maxlength="64"
+                        aria-label="Rename frame ${frame + 1}"
+                        @click=${(event: Event): void => event.stopPropagation()}
+                        @keydown=${(event: KeyboardEvent): void => {
+                          if (event.key === "Enter") {
+                            this.onFrameRenameCommit(frame);
+                          } else if (event.key === "Escape") {
+                            this.onFrameRenameCancel();
+                          }
+                          event.stopPropagation();
+                        }}
+                        @blur=${(): void => this.onFrameRenameCommit(frame)}
+                      />`
+                    : html`<button
+                        data-testid="anim-frame"
+                        data-frame=${frame}
+                        aria-label="Frame ${frame + 1}${current ? ", current" : ""}: ${frameName}, ${duration} milliseconds"
+                        title="Frame ${frame + 1}${current ? " (current)" : ""}: ${frameName} — ${duration} ms"
+                        @click=${(): void => this.onSelectFrame(frame)}
+                        @dblclick=${(): void => this.onFrameRenameStart(frame)}
+                        @contextmenu=${(event: MouseEvent): void => {
+                          event.preventDefault();
+                          this.openMatrixFrameMenu(frame, event.clientX, event.clientY);
+                        }}
+                        >${frameName}</button
+                      >`}
                 </div>
               `;
             })}
@@ -2002,6 +2072,7 @@ export class GnumarusShell extends LitElement {
           <button @click=${(): void => this.onAddFrameBefore(frame)}>Add frame before</button>
           <button @click=${(): void => this.onAddFrameAfter(frame)}>Add frame after</button>
           <button @click=${(): void => this.onOpenFrameDuration()}>Set frame duration…</button>
+          <button @click=${(): void => this.onRenameFrameFromMenu()}>Rename frame…</button>
           <button ?disabled=${count <= 1} @click=${(): void => this.onRemoveFrame(frame)}>Remove frame</button>
         </div>
       `;
@@ -2068,6 +2139,8 @@ export class GnumarusShell extends LitElement {
     const storedBackground = this.loadBackgroundSettings();
     this.backgroundMode = storedBackground.mode;
     this.backgroundColor = storedBackground.color;
+    const storedToast = this.loadToastSettings();
+    this.toastDurationSec = storedToast.durationSec;
     const host = this.shadowRoot?.getElementById("canvasHost") ?? null;
     if (host === null) {
       this.webglError = "Canvas host is missing.";
@@ -2184,6 +2257,12 @@ export class GnumarusShell extends LitElement {
       if (this.contextMenuLayerId !== null) {
         this.closeLayerMenu();
       }
+      if (this.renamingFrame !== null) {
+        this.renamingFrame = null;
+      }
+      if (this.renamingId !== null) {
+        this.renamingId = null;
+      }
       return;
     }
     if (event.ctrlKey || event.altKey || event.metaKey) {
@@ -2290,10 +2369,20 @@ export class GnumarusShell extends LitElement {
     if (this.toastTimer !== null) {
       window.clearTimeout(this.toastTimer);
     }
+    const delayMs = Math.round(clampToastDurationSec(this.toastDurationSec) * 1000);
     this.toastTimer = window.setTimeout(() => {
       this.toastMessage = "";
       this.toastTimer = null;
-    }, 2000);
+    }, delayMs);
+  }
+
+  private layerToastFor(index: number, total: number, name: string): string {
+    return `${index + 1}/${total}: ${name}`;
+  }
+
+  private frameToastFor(frame: number, count: number): string {
+    const name = this.engine?.getFrameName(frame) ?? `Frame ${frame + 1}`;
+    return `Frame ${frame + 1}/${count}: ${name}`;
   }
 
   /** Select the layer above (direction 1) or below (direction -1), wrapping around. */
@@ -2309,7 +2398,7 @@ export class GnumarusShell extends LitElement {
       return;
     }
     this.refreshLayers();
-    this.showToast(`${next + 1}/${this.layers.length}: ${target.name}`);
+    this.showToast(this.layerToastFor(next, this.layers.length, target.name));
   }
 
   private insertLayerAboveActive(): void {
@@ -2334,7 +2423,7 @@ export class GnumarusShell extends LitElement {
     const next = (this.engine.getCurrentFrame() + direction + count) % count;
     if (this.engine.setCurrentFrame(next)) {
       this.refreshLayers();
-      this.showToast(`Frame ${next + 1}/${count}`);
+      this.showToast(this.frameToastFor(next, count));
     }
   }
 
@@ -2543,6 +2632,65 @@ export class GnumarusShell extends LitElement {
     this.engine?.setRotationStepDeg(this.rotationStepDeg);
     this.persistRotation();
     this.statusMessage = "Canvas rotation step reset to default";
+  }
+
+  private loadToastSettings(): { durationSec: number } {
+    try {
+      const stored = window.localStorage.getItem(TOAST_SETTINGS_STORAGE_KEY);
+      if (stored !== null) {
+        return parseToastSettings(stored);
+      }
+    } catch {
+      // Corrupt or unavailable storage falls back to defaults.
+    }
+    return { ...DEFAULT_TOAST_SETTINGS };
+  }
+
+  private persistToast(): void {
+    try {
+      window.localStorage.setItem(
+        TOAST_SETTINGS_STORAGE_KEY,
+        serializeToastSettings({ durationSec: this.toastDurationSec }),
+      );
+    } catch {
+      // Storage failures must not break the settings flow.
+    }
+  }
+
+  private currentDialogToastDuration(): number {
+    const input = this.shadowRoot?.getElementById("toastDuration") as HTMLInputElement | null;
+    const parsed = Number(input?.value ?? String(DEFAULT_TOAST_SETTINGS.durationSec));
+    return clampToastDurationSec(Number.isFinite(parsed) ? parsed : DEFAULT_TOAST_SETTINGS.durationSec);
+  }
+
+  private applyToastFromDialog(): void {
+    this.toastDurationSec = this.currentDialogToastDuration();
+    this.persistToast();
+    this.statusMessage = `Toast display time: ${this.toastDurationSec} s`;
+  }
+
+  private resetToastDurationToDefault(): void {
+    this.toastDurationSec = DEFAULT_TOAST_SETTINGS.durationSec;
+    this.persistToast();
+    this.statusMessage = "Toast display time reset to default";
+  }
+
+  /** Test hook: set the toast display time in seconds (0.5..2.0, clamped). */
+  setToastDurationSec(value: number): void {
+    this.toastDurationSec = clampToastDurationSec(value);
+    this.persistToast();
+    this.statusMessage = `Toast display time: ${this.toastDurationSec} s`;
+  }
+
+  /** Test hook: rename a frame (trimmed 1..64 chars). */
+  renameFrame(frame: number, name: string): boolean {
+    if (this.engine?.renameFrame(frame, name) === true) {
+      this.dirty = true;
+      this.statusMessage = "Frame renamed";
+      this.refreshLayers();
+      return true;
+    }
+    return false;
   }
 
   private loadBackgroundSettings(): GnumarusBackgroundSettings {
@@ -3141,6 +3289,8 @@ export class GnumarusShell extends LitElement {
     this.rotationStepDeg = DEFAULT_ROTATION_SETTINGS.stepDeg;
     this.engine?.setRotationStepDeg(this.rotationStepDeg);
     this.persistRotation();
+    this.toastDurationSec = DEFAULT_TOAST_SETTINGS.durationSec;
+    this.persistToast();
     this.statusMessage = "Settings reset to defaults";
   }
 
@@ -3279,7 +3429,7 @@ export class GnumarusShell extends LitElement {
       this.layers = [];
       this.activeLayerId = "";
       this.layerText = "-";
-      this.frameText = "Frame 1/1";
+      this.frameText = "Frame 1/1: Frame 1";
       return;
     }
     this.layers = this.engine.getLayers();
@@ -3288,7 +3438,9 @@ export class GnumarusShell extends LitElement {
     const current = index < 0 ? undefined : this.layers[index];
     this.layerText =
       current === undefined ? "-" : `${current.name} (${this.layers.length - index}/${this.layers.length})`;
-    this.frameText = `Frame ${this.engine.getCurrentFrame() + 1}/${this.engine.getFrameCount()}`;
+    const frame = this.engine.getCurrentFrame();
+    const count = this.engine.getFrameCount();
+    this.frameText = `Frame ${frame + 1}/${count}: ${this.engine.getFrameName(frame)}`;
     this.defaultFrameDuration = this.engine.getDefaultFrameDuration();
     if (this.previewOpen) {
       void this.refreshPreview();
@@ -3299,9 +3451,30 @@ export class GnumarusShell extends LitElement {
     if (this.engine === null) {
       return;
     }
-    this.engine.setActiveLayer(layerId);
-    this.engine.setCurrentFrame(frame);
+    const oldLayer = this.engine.getActiveLayerId();
+    const oldFrame = this.engine.getCurrentFrame();
+    const layerChanged = layerId !== oldLayer;
+    const frameChanged = frame !== oldFrame;
+    if (!layerChanged && !frameChanged) {
+      return;
+    }
+    if (layerChanged) {
+      this.engine.setActiveLayer(layerId);
+    }
+    if (frameChanged) {
+      this.engine.setCurrentFrame(frame);
+    }
     this.refreshLayers();
+    const activeIndex = this.layers.findIndex((layer) => layer.id === this.engine?.getActiveLayerId());
+    const active = activeIndex < 0 ? undefined : this.layers[activeIndex];
+    const count = this.engine.getFrameCount();
+    if (layerChanged && frameChanged && active !== undefined) {
+      this.showToast(`${this.layerToastFor(activeIndex, this.layers.length, active.name)} — ${this.frameToastFor(frame, count)}`);
+    } else if (layerChanged && active !== undefined) {
+      this.showToast(this.layerToastFor(activeIndex, this.layers.length, active.name));
+    } else if (frameChanged) {
+      this.showToast(this.frameToastFor(frame, count));
+    }
   }
 
   private onSelectFrame(frame: number): void {
@@ -3312,6 +3485,7 @@ export class GnumarusShell extends LitElement {
       this.refreshLayers();
       this.dirty = true;
       this.statusMessage = `Frame ${frame + 1} selected`;
+      this.showToast(this.frameToastFor(frame, this.engine.getFrameCount()));
     }
   }
 
@@ -3551,6 +3725,87 @@ export class GnumarusShell extends LitElement {
     }
   }
 
+  private frameRenameTarget: number | null = null;
+
+  private frameRenameValue(): string {
+    if (this.frameRenameTarget === null || this.engine === null) {
+      return "";
+    }
+    return this.engine.getFrameName(this.frameRenameTarget);
+  }
+
+  private onFrameRenameStart(frame: number): void {
+    this.renamingFrame = frame;
+  }
+
+  private onFrameRenameCancel(): void {
+    this.renamingFrame = null;
+  }
+
+  private onFrameRenameCommit(frame: number): void {
+    if (this.renamingFrame !== frame) {
+      return;
+    }
+    this.renamingFrame = null;
+    const input = this.shadowRoot?.querySelector(`[data-testid="anim-frame-rename"][data-frame="${frame}"]`);
+    const name = input instanceof HTMLInputElement ? input.value : "";
+    if (name.trim().length === 0) {
+      this.refreshLayers();
+      return;
+    }
+    if (this.engine?.renameFrame(frame, name) === true) {
+      this.dirty = true;
+      this.statusMessage = "Frame renamed";
+    }
+    this.refreshLayers();
+  }
+
+  private onRenameFrameFromMenu(): void {
+    if (this.matrixMenu === null || this.matrixMenu.kind !== "frame") {
+      this.closeMatrixMenu();
+      return;
+    }
+    const frame = this.matrixMenu.frame;
+    this.closeMatrixMenu();
+    this.openFrameRenameDialog(frame);
+  }
+
+  private openFrameRenameDialog(frame: number): void {
+    if (this.engine === null) {
+      return;
+    }
+    this.frameRenameTarget = frame;
+    this.requestUpdate();
+    const dialog = this.shadowRoot?.getElementById("frameRenameDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+  }
+
+  private closeFrameRenameDialog(): void {
+    const dialog = this.shadowRoot?.getElementById("frameRenameDialog") as HTMLDialogElement | null;
+    dialog?.close();
+    this.frameRenameTarget = null;
+  }
+
+  private confirmFrameRename(): void {
+    const target = this.frameRenameTarget;
+    if (target === null || this.engine === null) {
+      this.closeFrameRenameDialog();
+      return;
+    }
+    const input = this.shadowRoot?.getElementById("frameRename") as HTMLInputElement | null;
+    const name = input?.value ?? "";
+    if (name.trim().length === 0) {
+      this.closeFrameRenameDialog();
+      return;
+    }
+    if (this.engine.renameFrame(target, name)) {
+      this.dirty = true;
+      this.statusMessage = "Frame renamed";
+    }
+    this.refreshLayers();
+    this.closeFrameRenameDialog();
+  }
+
   private togglePlayback(): void {
     if (this.engine === null) {
       return;
@@ -3625,6 +3880,11 @@ export class GnumarusShell extends LitElement {
     }
     this.engine.setActiveLayer(id);
     this.refreshLayers();
+    const index = this.layers.findIndex((layer) => layer.id === id);
+    const target = index < 0 ? undefined : this.layers[index];
+    if (target !== undefined) {
+      this.showToast(this.layerToastFor(index, this.layers.length, target.name));
+    }
   }
 
   private onToggleVisible(id: string, visible: boolean): void {
@@ -3811,6 +4071,7 @@ export class GnumarusShell extends LitElement {
         currentFrame: project.animation.currentFrame,
         defaultFrameDuration: project.animation.defaultFrameDuration,
         frameDurations: project.animation.frameDurations.map((entry) => ({ ...entry })),
+        frameNames: [...project.animation.frameNames],
       });
       this.refreshLayers();
       this.directoryHandle = dir;
@@ -3872,6 +4133,7 @@ export class GnumarusShell extends LitElement {
           currentFrame: exported.currentFrame,
           defaultFrameDuration: exported.defaultFrameDuration,
           frameDurations: exported.frameDurations.map((entry) => ({ ...entry })),
+          frameNames: [...exported.frameNames],
           textures: texturesMeta,
           contents: contentsMeta,
           cells: exported.cells.map((cell) => ({ ...cell })),
