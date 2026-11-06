@@ -1,7 +1,7 @@
 # FEATURES_SUMMARY — Gnumaru's Painting and Animation App (v1 MVP)
 
 - Desktop app shell: top menu bar (File > New/Open/Save, Edit > Undo/Redo/Settings/Reset Canvas Transform), left toolbar, central canvas, right layers panel, bottom status bar.
-- Pixel-art pencil (`B`): solid color, brush size 0.1..64 with square/circle tip plus anti-aliasing toggle in the tool options bar (integer-rounded when off, true float when on), live tip preview following the mouse, paint blend mode (normal/copy/eraser), Accumulate toggle for uniform non-accumulating strokes, stabilizer dropdown (`none` default, `rope` with configurable 1..200 rope length, `follow` with configurable 0.01..1.0 strength) with paint-focus dot plus rope-line overlay.
+- Pixel-art pencil (`B`): solid color, brush size 0.1..64 with square/circle tip plus anti-aliasing toggle in the tool options bar (integer-rounded when off, true float when on), live tip preview following the mouse, paint blend mode (normal/copy/eraser), Accumulate toggle for uniform non-accumulating strokes, stabilizer dropdown (`none` default, `rope` with configurable 1..200 rope length, `follow` with typed 1..100 strength used as typed / 100) with paint-focus dot plus rope-line overlay.
 - Bucket fill (`G`): click fills the contiguous region of identical RGBA color with the current solid color (4-way, channel-lock aware, undoable); monochrome line-bucket toolbar glyph matching the other tools.
 - Line tool: two clicks define a segment with width 0.1..64, square/circle ends and optional anti-aliasing (integer-rounded when off, true float when on); tip preview plus rubber-band preview; undoable; shortcut `N`.
 - Curve tool: press-drag-release sets start/end, then one click sets the start control point and a final click sets the end control point; live curve path, control-point markers and thin handle lines while drawing (destroyed after commit/cancel); width 0.1..64, square/circle ends, anti-aliasing; undoable; shortcut `C`.
@@ -21,7 +21,7 @@
 - Project directory holds `project.json` (layers, frames, contents, textures, cells) plus `textures/*.png` (legacy `cells/*.png` opens via automatic migration).
 - WebGL2-only canvas (Three.js) with nearest-neighbor scaling, zoom, rotation + mirror view transform, and pan.
 - Toolbar with pencil (`B`), bucket fill (`G`), line, curve and loupe (zoom/rotate/flip, shortcut `Z`) tools.
-- Tool options bar below the menu bar: pencil exposes brush size (0.1..64), shape, anti-aliasing, stabilizer (`none`/`rope` + rope length 1..200/`follow` + strength 0.01..1.0) and blend; line/curve expose width (0.1..64), shape, anti-aliasing and blend; bucket exposes blend; loupe/transform show an empty-state label.
+- Tool options bar below the menu bar: pencil exposes brush size (0.1..64), shape, anti-aliasing, stabilizer (`none`/`rope` + rope length 1..200/`follow` + typed strength 1..100 used as typed / 100) and blend; line/curve expose width (0.1..64), shape, anti-aliasing and blend; bucket exposes blend; loupe/transform show an empty-state label.
 - Configurable transparency checkerboard: image-space or screen-space, independent width/height (default 16x16, asymmetric like 8x16 supported), two colors, persisted in the browser.
 - Directory projects over File System Access API: `project.json` + `textures/*.png`. File > Save reuses the chosen folder; `Ctrl+S` (`Cmd+S` on macOS) triggers the same save (picker only when no folder chosen yet).
 - Status bar: tool, color, cursor pixel, canvas size, layer, frame, zoom, rotation, flip state, project name, dirty flag, messages.

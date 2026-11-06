@@ -34,10 +34,10 @@ describe("clampRopeLength", () => {
 });
 
 describe("clampFollowStrength", () => {
-  it("clamps to 0.01..1 with default fallback", () => {
-    expect(clampFollowStrength(0.2)).toBeCloseTo(0.2, 10);
-    expect(clampFollowStrength(0)).toBeCloseTo(0.01, 10);
-    expect(clampFollowStrength(5)).toBeCloseTo(1, 10);
+  it("clamps typed 1..100 with default fallback (used as typed / 100)", () => {
+    expect(clampFollowStrength(20)).toBeCloseTo(20, 10);
+    expect(clampFollowStrength(0)).toBeCloseTo(1, 10);
+    expect(clampFollowStrength(500)).toBeCloseTo(100, 10);
     expect(clampFollowStrength(Number.NaN)).toBeCloseTo(GNUMARUS_DEFAULT_FOLLOW_STRENGTH, 10);
   });
 });
@@ -71,26 +71,31 @@ describe("stabilizerRopeStep", () => {
 });
 
 describe("stabilizerFollowStep", () => {
-  it("snaps instantly at strength 1 and stays at strength near 0", () => {
-    expect(stabilizerFollowStep({ x: 0, y: 0 }, { x: 10, y: 4 }, 1)).toEqual({ x: 10, y: 4 });
-    const slow = stabilizerFollowStep({ x: 0, y: 0 }, { x: 10, y: 0 }, 0.01);
+  it("snaps instantly at typed 100 (= 1.0) and crawls at typed 1 (= 0.01)", () => {
+    expect(stabilizerFollowStep({ x: 0, y: 0 }, { x: 10, y: 4 }, 100)).toEqual({ x: 10, y: 4 });
+    const slow = stabilizerFollowStep({ x: 0, y: 0 }, { x: 10, y: 0 }, 1);
     expect(slow.x).toBeCloseTo(0.1, 10);
   });
 
   it("moves proportionally to strength and distance (farther is faster)", () => {
-    const near = stabilizerFollowStep({ x: 0, y: 0 }, { x: 10, y: 0 }, 0.2);
-    const far = stabilizerFollowStep({ x: 0, y: 0 }, { x: 20, y: 0 }, 0.2);
+    const near = stabilizerFollowStep({ x: 0, y: 0 }, { x: 10, y: 0 }, 20);
+    const far = stabilizerFollowStep({ x: 0, y: 0 }, { x: 20, y: 0 }, 20);
     expect(near.x).toBeCloseTo(2, 10);
     expect(far.x).toBeCloseTo(4, 10);
-    const weak = stabilizerFollowStep({ x: 0, y: 0 }, { x: 10, y: 0 }, 0.1);
+    const weak = stabilizerFollowStep({ x: 0, y: 0 }, { x: 10, y: 0 }, 10);
     expect(weak.x).toBeCloseTo(1, 10);
+  });
+
+  it("maps typed 5 to 0.05 of the gap", () => {
+    const step = stabilizerFollowStep({ x: 0, y: 0 }, { x: 100, y: 0 }, 5);
+    expect(step.x).toBeCloseTo(5, 10);
   });
 
   it("converges toward the target over repeated steps", () => {
     let pos = { x: 0, y: 0 };
     const target = { x: 100, y: 0 };
     for (let i = 0; i < 50; i += 1) {
-      pos = stabilizerFollowStep(pos, target, 0.2);
+      pos = stabilizerFollowStep(pos, target, 20);
     }
     expect(pos.x).toBeGreaterThan(99);
     expect(pos.x).toBeLessThanOrEqual(100);

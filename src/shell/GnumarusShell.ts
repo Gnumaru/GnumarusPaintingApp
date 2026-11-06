@@ -1659,9 +1659,9 @@ export class GnumarusShell extends LitElement {
               <input
                 type="number"
                 id="followStrength"
-                min="0.01"
-                max="1"
-                step="0.01"
+                min="1"
+                max="100"
+                step="1"
                 .value=${String(this.followStrength)}
                 @input=${(): void => this.applyFollowStrengthFromDialog()}
               />
@@ -2511,7 +2511,7 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = `Rope length: ${clamped}`;
   }
 
-  /** Test hook: set the follow chase strength (0.01..1, clamped). */
+  /** Test hook: set the follow chase strength (typed 1..100, used as typed / 100, clamped). */
   setFollowStrength(strength: number): void {
     const clamped = clampFollowStrength(strength);
     this.followStrength = clamped;

@@ -9,9 +9,9 @@ export const GNUMARUS_DEFAULT_STABILIZER_MODE: GnumarusStabilizerMode = "none";
 export const GNUMARUS_DEFAULT_ROPE_LENGTH = 20;
 export const GNUMARUS_MIN_ROPE_LENGTH = 1;
 export const GNUMARUS_MAX_ROPE_LENGTH = 200;
-export const GNUMARUS_DEFAULT_FOLLOW_STRENGTH = 0.2;
-export const GNUMARUS_MIN_FOLLOW_STRENGTH = 0.01;
-export const GNUMARUS_MAX_FOLLOW_STRENGTH = 1;
+export const GNUMARUS_DEFAULT_FOLLOW_STRENGTH = 20;
+export const GNUMARUS_MIN_FOLLOW_STRENGTH = 1;
+export const GNUMARUS_MAX_FOLLOW_STRENGTH = 100;
 
 export function parseStabilizerMode(value: unknown): GnumarusStabilizerMode {
   if (value === "rope" || value === "follow" || value === "none") {
@@ -70,17 +70,18 @@ export function stabilizerRopeStep(
 
 /**
  * One follow (smoothing chase) step in layer-image space.
- * The focus moves toward the cursor by `strength` of the remaining gap,
- * so its speed is proportional to the strength and to the distance:
- * the farther the cursor, the faster the focus travels. A strength of 1
- * snaps instantly (nearly no stabilization); lower values lag behind.
+ * The typed strength 1..100 is used as `strength = typed / 100`: the focus
+ * moves toward the cursor by that fraction of the remaining gap, so its
+ * speed is proportional to the strength and to the distance: the farther
+ * the cursor, the faster the focus travels. Typed 100 (= 1.0) snaps
+ * instantly (nearly no stabilization); lower values lag behind.
  */
 export function stabilizerFollowStep(
   current: GnumarusStabilizerPoint,
   target: GnumarusStabilizerPoint,
   strength: number,
 ): GnumarusStabilizerPoint {
-  const clamped = clampFollowStrength(strength);
+  const clamped = clampFollowStrength(strength) / 100;
   const dx = target.x - current.x;
   const dy = target.y - current.y;
   if (!(Math.abs(dx) > 1e-12 || Math.abs(dy) > 1e-12)) {
