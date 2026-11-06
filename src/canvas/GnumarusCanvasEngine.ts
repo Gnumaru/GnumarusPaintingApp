@@ -16,12 +16,18 @@ import {
   parseChannelLock,
   parseHexColor,
   resizePixelBuffer,
+  setPixel,
   stampSegmentCoverage,
   type GnumarusBlendMode,
   type GnumarusBrushShape,
   type GnumarusChannelLock,
   type GnumarusRgba,
 } from "./GnumarusPixelBuffer";
+import {
+  GnumarusPixelPerfectStroke,
+  walkBresenhamLinePixels,
+  walkCubicBezierPixels,
+} from "./GnumarusPixelPerfect";
 import {
   GNUMARUS_DEFAULT_FOLLOW_STRENGTH,
   GNUMARUS_DEFAULT_ROPE_LENGTH,
@@ -332,6 +338,9 @@ export class GnumarusCanvasEngine {
   private brushSize = 1;
   private brushShape: GnumarusBrushShape = "square";
   private pencilAntialias = false;
+  private pencilPixelPerfect = false;
+  private curvePixelPerfect = false;
+  private readonly pencilPixelPerfectStroke = new GnumarusPixelPerfectStroke();
   private stabilizerMode: GnumarusStabilizerMode = GNUMARUS_DEFAULT_STABILIZER_MODE;
   private ropeLength = GNUMARUS_DEFAULT_ROPE_LENGTH;
   private followStrength = GNUMARUS_DEFAULT_FOLLOW_STRENGTH;
@@ -785,6 +794,7 @@ export class GnumarusCanvasEngine {
     this.stabilizerPos = null;
     this.stabilizerTarget = null;
     this.stopFollowLoop();
+    this.resetPencilPixelPerfect();
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
     this.render();
@@ -799,6 +809,7 @@ export class GnumarusCanvasEngine {
     this.stabilizerPos = null;
     this.stabilizerTarget = null;
     this.stopFollowLoop();
+    this.resetPencilPixelPerfect();
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
     this.render();
@@ -843,6 +854,7 @@ export class GnumarusCanvasEngine {
     this.stabilizerPos = null;
     this.stabilizerTarget = null;
     this.stopFollowLoop();
+    this.resetPencilPixelPerfect();
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
     this.render();
@@ -1161,6 +1173,7 @@ export class GnumarusCanvasEngine {
     this.stabilizerPos = null;
     this.stabilizerTarget = null;
     this.stopFollowLoop();
+    this.resetPencilPixelPerfect();
     this.updateGrid();
     this.render();
     this.updatePreviews();
@@ -1697,6 +1710,7 @@ export class GnumarusCanvasEngine {
     this.stabilizerPos = null;
     this.stabilizerTarget = null;
     this.stopFollowLoop();
+    this.resetPencilPixelPerfect();
     this.syncImageUniforms();
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
@@ -1844,6 +1858,7 @@ export class GnumarusCanvasEngine {
     this.stabilizerPos = null;
     this.stabilizerTarget = null;
     this.stopFollowLoop();
+    this.resetPencilPixelPerfect();
     this.syncImageUniforms();
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
@@ -1879,6 +1894,7 @@ export class GnumarusCanvasEngine {
     this.stabilizerPos = null;
     this.stabilizerTarget = null;
     this.stopFollowLoop();
+    this.resetPencilPixelPerfect();
     this.hidePreviews();
     this.frameDurations.clear();
     this.defaultFrameDuration = GNUMARUS_DEFAULT_FRAME_DURATION_MS;
@@ -2021,6 +2037,49 @@ export class GnumarusCanvasEngine {
     this.emitStats();
     this.updatePreviews();
     return true;
+  }
+
+  getPencilPixelPerfect(): boolean {
+    return this.pencilPixelPerfect;
+  }
+
+  getCurvePixelPerfect(): boolean {
+    return this.curvePixelPerfect;
+  }
+
+  setPencilPixelPerfect(enabled: boolean): boolean {
+    const next = enabled === true;
+    if (next === this.pencilPixelPerfect) {
+      return false;
+    }
+    this.pencilPixelPerfect = next;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  setCurvePixelPerfect(enabled: boolean): boolean {
+    const next = enabled === true;
+    if (next === this.curvePixelPerfect) {
+      return false;
+    }
+    this.curvePixelPerfect = next;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  /** Pixel perfect only applies at exactly 1px without anti-aliasing. */
+  private pencilPixelPerfectActive(): boolean {
+    return this.pencilPixelPerfect && this.brushSize === 1 && !this.pencilAntialias;
+  }
+
+  private curvePixelPerfectActive(): boolean {
+    return this.curvePixelPerfect && this.curveWidth === 1 && !this.curveAntialias;
+  }
+
+  private resetPencilPixelPerfect(): void {
+    this.pencilPixelPerfectStroke.reset();
   }
 
   getStabilizerMode(): GnumarusStabilizerMode {
@@ -2269,6 +2328,149 @@ export class GnumarusCanvasEngine {
   }
 
   /**
+   * Paint one integer pencil run `from -> to` (endpoints already quantized).
+   * With pixel perfect active (exactly 1px, no AA) each Bresenham candidate
+   * passes through the per-stroke filter so the line stays 1px thick:
+   * elbows are eaten retroactively (restored from the stroke base snapshot
+   * or cleared from the union mask) while crossings/revisits always paint.
+   * Otherwise uses the standard brush/accumulate paths.
+   */
+  private paintPencilLine(
+    tex: { buffer: Uint8ClampedArray; width: number; height: number },
+    locked: GnumarusChannelLock,
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+  ): void {
+    if (this.pencilPixelPerfectActive()) {
+      const stroke = this.pencilPixelPerfectStroke;
+      const base = this.strokeBase;
+      const mask = this.strokeMask;
+      if (!this.accumulate && base !== null && mask !== null) {
+        walkBresenhamLinePixels(x0, y0, x1, y1, (x: number, y: number): void => {
+          if (!stroke.add(x, y)) {
+            return;
+          }
+          for (const removed of stroke.drainRemoved()) {
+            if (removed.x >= 0 && removed.y >= 0 && removed.x < tex.width && removed.y < tex.height) {
+              mask[removed.y * tex.width + removed.x] = 0;
+            }
+          }
+          if (x < 0 || y < 0 || x >= tex.width || y >= tex.height) {
+            return;
+          }
+          mask[y * tex.width + x] = 255;
+        });
+        this.repaintFromMask(tex, base, mask, locked);
+        return;
+      }
+      if (this.accumulate && base !== null) {
+        walkBresenhamLinePixels(x0, y0, x1, y1, (x: number, y: number): void => {
+          if (!stroke.add(x, y)) {
+            return;
+          }
+          for (const removed of stroke.drainRemoved()) {
+            if (removed.x >= 0 && removed.y >= 0 && removed.x < tex.width && removed.y < tex.height) {
+              const at = (removed.y * tex.width + removed.x) * 4;
+              tex.buffer[at] = base[at]!;
+              tex.buffer[at + 1] = base[at + 1]!;
+              tex.buffer[at + 2] = base[at + 2]!;
+              tex.buffer[at + 3] = base[at + 3]!;
+            }
+          }
+          setPixel(tex.buffer, tex.width, tex.height, x, y, this.color, locked, this.blendMode);
+        });
+        return;
+      }
+    }
+    if (!this.accumulate && this.strokeBase !== null && this.strokeMask !== null) {
+      stampSegmentCoverage(
+        this.strokeMask,
+        tex.width,
+        tex.height,
+        x0,
+        y0,
+        x1,
+        y1,
+        this.brushSize,
+        this.brushShape,
+        this.pencilAntialias,
+      );
+      this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked);
+      return;
+    }
+    drawLineSegment(
+      tex.buffer,
+      tex.width,
+      tex.height,
+      x0,
+      y0,
+      x1,
+      y1,
+      this.brushSize,
+      this.brushShape,
+      this.pencilAntialias,
+      this.color,
+      locked,
+      this.blendMode,
+    );
+  }
+
+  /**
+   * Paint one pixel-perfect cubic commit in rasterizer order. Walks the same
+   * flattened candidate sequence `drawCubicBezier` would rasterize (aliased,
+   * width 1) and paints only pixels passing a fresh per-commit filter, so
+   * joints stay 1px thin while self-intersections still paint. Handles both
+   * accumulate (per-pixel `setPixel`) and mask (union bits + one repaint).
+   */
+  private paintPixelPerfectCurve(
+    tex: { buffer: Uint8ClampedArray; width: number; height: number },
+    locked: GnumarusChannelLock,
+    base: Uint8ClampedArray,
+    p0: { x: number; y: number },
+    c1: { x: number; y: number },
+    c2: { x: number; y: number },
+    p3: { x: number; y: number },
+  ): void {
+    const stroke = new GnumarusPixelPerfectStroke();
+    if (!this.accumulate) {
+      const mask = new Uint8Array(tex.width * tex.height);
+      walkCubicBezierPixels({ p0, c1, c2, p3 }, (x: number, y: number): void => {
+        if (!stroke.add(x, y)) {
+          return;
+        }
+        for (const removed of stroke.drainRemoved()) {
+          if (removed.x >= 0 && removed.y >= 0 && removed.x < tex.width && removed.y < tex.height) {
+            mask[removed.y * tex.width + removed.x] = 0;
+          }
+        }
+        if (x < 0 || y < 0 || x >= tex.width || y >= tex.height) {
+          return;
+        }
+        mask[y * tex.width + x] = 255;
+      });
+      this.repaintFromMask(tex, base, mask, locked);
+      return;
+    }
+    walkCubicBezierPixels({ p0, c1, c2, p3 }, (x: number, y: number): void => {
+      if (!stroke.add(x, y)) {
+        return;
+      }
+      for (const removed of stroke.drainRemoved()) {
+        if (removed.x >= 0 && removed.y >= 0 && removed.x < tex.width && removed.y < tex.height) {
+          const at = (removed.y * tex.width + removed.x) * 4;
+          tex.buffer[at] = base[at]!;
+          tex.buffer[at + 1] = base[at + 1]!;
+          tex.buffer[at + 2] = base[at + 2]!;
+          tex.buffer[at + 3] = base[at + 3]!;
+        }
+      }
+      setPixel(tex.buffer, tex.width, tex.height, x, y, this.color, locked, this.blendMode);
+    });
+  }
+
+  /**
    * Paint one stabilized pencil segment `from -> to` in layer-image space.
    * Uses the same brush/AA/blend/accumulate paths as unstabilized strokes.
    */
@@ -2284,6 +2486,10 @@ export class GnumarusCanvasEngine {
     const qy0 = this.pencilAntialias ? from.y : Math.floor(from.y);
     const qx1 = this.pencilAntialias ? to.x : Math.floor(to.x);
     const qy1 = this.pencilAntialias ? to.y : Math.floor(to.y);
+    if (this.pencilPixelPerfectActive()) {
+      this.paintPencilLine(tex, locked, qx0, qy0, qx1, qy1);
+      return;
+    }
     if (!this.accumulate && this.strokeBase !== null && this.strokeMask !== null) {
       stampSegmentCoverage(
         this.strokeMask,
@@ -2510,7 +2716,17 @@ export class GnumarusCanvasEngine {
     }
     const tex = ensured.texture;
     const base = tex.buffer.slice();
-    if (this.accumulate) {
+    if (this.curvePixelPerfectActive()) {
+      this.paintPixelPerfectCurve(
+        tex,
+        layer.lockedChannels,
+        base,
+        { x: p0.x, y: p0.y },
+        { x: c1.x, y: c1.y },
+        { x: c2x, y: c2y },
+        { x: p3.x, y: p3.y },
+      );
+    } else if (this.accumulate) {
       drawCubicBezier(
         tex.buffer,
         tex.width,
@@ -2955,6 +3171,7 @@ export class GnumarusCanvasEngine {
       this.stabilizerTarget = null;
       this.stopFollowLoop();
     }
+    this.resetPencilPixelPerfect();
     this.updatePreviews();
     this.onToolChanged?.(tool);
   }
@@ -3402,6 +3619,7 @@ export class GnumarusCanvasEngine {
         if (!this.accumulate) {
           this.strokeMask = new Uint8Array(tex.width * tex.height);
         }
+        this.resetPencilPixelPerfect();
         this.paintStabilizedSegment(tex, layer.lockedChannels, this.stabilizerPos, this.stabilizerPos);
         this.markTextureViewsDirty(tex.id);
         this.render();
@@ -3421,38 +3639,11 @@ export class GnumarusCanvasEngine {
       this.lastPixel = pixel;
       this.strokeBase = tex.buffer.slice();
       this.strokeLayerId = tex.id;
-      if (this.accumulate) {
-        drawLineSegment(
-          tex.buffer,
-          tex.width,
-          tex.height,
-          pixel.x,
-          pixel.y,
-          pixel.x,
-          pixel.y,
-          this.brushSize,
-          this.brushShape,
-          this.pencilAntialias,
-          this.color,
-          layer.lockedChannels,
-          this.blendMode,
-        );
-      } else {
+      if (!this.accumulate) {
         this.strokeMask = new Uint8Array(tex.width * tex.height);
-        stampSegmentCoverage(
-          this.strokeMask,
-          tex.width,
-          tex.height,
-          pixel.x,
-          pixel.y,
-          pixel.x,
-          pixel.y,
-          this.brushSize,
-          this.brushShape,
-          this.pencilAntialias,
-        );
-        this.repaintFromMask(tex, this.strokeBase, this.strokeMask, layer.lockedChannels);
       }
+      this.resetPencilPixelPerfect();
+      this.paintPencilLine(tex, layer.lockedChannels, pixel.x, pixel.y, pixel.x, pixel.y);
       this.markTextureViewsDirty(tex.id);
       this.render();
       this.onPixelsChanged();
@@ -3579,37 +3770,7 @@ export class GnumarusCanvasEngine {
         if (tex === undefined) {
           return;
         }
-        if (!this.accumulate && this.strokeBase !== null && this.strokeMask !== null) {
-          stampSegmentCoverage(
-            this.strokeMask,
-            tex.width,
-            tex.height,
-            this.lastPixel.x,
-            this.lastPixel.y,
-            pixel.x,
-            pixel.y,
-            this.brushSize,
-            this.brushShape,
-            this.pencilAntialias,
-          );
-          this.repaintFromMask(tex, this.strokeBase, this.strokeMask, layer.lockedChannels);
-        } else {
-          drawLineSegment(
-            tex.buffer,
-            tex.width,
-            tex.height,
-            this.lastPixel.x,
-            this.lastPixel.y,
-            pixel.x,
-            pixel.y,
-            this.brushSize,
-            this.brushShape,
-            this.pencilAntialias,
-            this.color,
-            layer.lockedChannels,
-            this.blendMode,
-          );
-        }
+        this.paintPencilLine(tex, layer.lockedChannels, this.lastPixel.x, this.lastPixel.y, pixel.x, pixel.y);
         this.lastPixel = pixel;
         this.markTextureViewsDirty(tex.id);
         this.render();
@@ -3641,6 +3802,7 @@ export class GnumarusCanvasEngine {
       this.transformStart = null;
       this.loupeAnchor = null;
       this.lastPixel = null;
+      this.resetPencilPixelPerfect();
       // Keep the stabilizer focus for hover preview; let follow mode converge.
       if (this.stabilizerMode === "follow") {
         this.ensureFollowLoop();
@@ -3678,6 +3840,7 @@ export class GnumarusCanvasEngine {
       this.stabilizerPos = null;
       this.stabilizerTarget = null;
       this.stopFollowLoop();
+      this.resetPencilPixelPerfect();
       this.hidePreviews();
       this.emitStats();
     });

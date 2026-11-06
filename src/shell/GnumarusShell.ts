@@ -755,6 +755,8 @@ export class GnumarusShell extends LitElement {
     brushSize: { type: Number },
     brushShape: { type: String },
     pencilAntialias: { type: Boolean },
+    pencilPixelPerfect: { type: Boolean },
+    curvePixelPerfect: { type: Boolean },
     stabilizerMode: { type: String },
     ropeLength: { type: Number },
     followStrength: { type: Number },
@@ -822,6 +824,8 @@ export class GnumarusShell extends LitElement {
   declare brushSize: number;
   declare brushShape: GnumarusBrushShape;
   declare pencilAntialias: boolean;
+  declare pencilPixelPerfect: boolean;
+  declare curvePixelPerfect: boolean;
   declare stabilizerMode: GnumarusStabilizerMode;
   declare ropeLength: number;
   declare followStrength: number;
@@ -893,6 +897,8 @@ export class GnumarusShell extends LitElement {
     this.brushSize = 1;
     this.brushShape = "square";
     this.pencilAntialias = false;
+    this.pencilPixelPerfect = false;
+    this.curvePixelPerfect = false;
     this.stabilizerMode = GNUMARUS_DEFAULT_STABILIZER_MODE;
     this.ropeLength = GNUMARUS_DEFAULT_ROPE_LENGTH;
     this.followStrength = GNUMARUS_DEFAULT_FOLLOW_STRENGTH;
@@ -1703,6 +1709,16 @@ export class GnumarusShell extends LitElement {
             />
             Anti-aliasing
           </label>
+          <label title="Keeps 1px strokes exactly 1px thick. Only applies at brush size 1 without anti-aliasing."
+            ><input
+              type="checkbox"
+              id="pencilPixelPerfect"
+              .checked=${this.pencilPixelPerfect}
+              ?disabled=${this.brushSize !== 1 || this.pencilAntialias}
+              @change=${(): void => this.applyPencilPixelPerfectFromDialog()}
+            />
+            Pixel perfect
+          </label>
           ${this.renderStabilizerOption()} ${this.renderBlendModeOption()} ${this.renderAccumulateOption()}
         </div>
       `;
@@ -1772,6 +1788,16 @@ export class GnumarusShell extends LitElement {
               @change=${(): void => this.applyCurveAntialiasFromDialog()}
             />
             Anti-aliasing
+          </label>
+          <label title="Keeps 1px curves exactly 1px thick. Only applies at curve width 1 without anti-aliasing."
+            ><input
+              type="checkbox"
+              id="curvePixelPerfect"
+              .checked=${this.curvePixelPerfect}
+              ?disabled=${this.curveWidth !== 1 || this.curveAntialias}
+              @change=${(): void => this.applyCurvePixelPerfectFromDialog()}
+            />
+            Pixel perfect
           </label>
           ${this.renderBlendModeOption()} ${this.renderAccumulateOption()}
         </div>
@@ -1987,6 +2013,8 @@ export class GnumarusShell extends LitElement {
       this.engine.setStabilizerMode(this.stabilizerMode);
       this.engine.setRopeLength(this.ropeLength);
       this.engine.setFollowStrength(this.followStrength);
+      this.engine.setPencilPixelPerfect(this.pencilPixelPerfect);
+      this.engine.setCurvePixelPerfect(this.curvePixelPerfect);
       this.refreshLayers();
       // The engine fits the zoom during construction, before the animation
       // matrix above the status bar takes part in the layout. Re-fit once the
@@ -2493,6 +2521,46 @@ export class GnumarusShell extends LitElement {
     this.pencilAntialias = enabled;
     this.engine?.setPencilAntialias(enabled);
     this.statusMessage = `Pencil anti-aliasing: ${enabled ? "on" : "off"}`;
+  }
+
+  /** Test hook: enable or disable pencil pixel perfect (1px + no AA only). */
+  setPencilPixelPerfect(enabled: boolean): void {
+    const next = enabled === true;
+    this.pencilPixelPerfect = next;
+    this.engine?.setPencilPixelPerfect(next);
+    this.statusMessage = `Pencil pixel perfect: ${next ? "on" : "off"}`;
+  }
+
+  /** Test hook: enable or disable curve pixel perfect (1px + no AA only). */
+  setCurvePixelPerfect(enabled: boolean): void {
+    const next = enabled === true;
+    this.curvePixelPerfect = next;
+    this.engine?.setCurvePixelPerfect(next);
+    this.statusMessage = `Curve pixel perfect: ${next ? "on" : "off"}`;
+  }
+
+  private currentDialogPencilPixelPerfect(): boolean {
+    const input = this.shadowRoot?.getElementById("pencilPixelPerfect") as HTMLInputElement | null;
+    return input?.checked === true;
+  }
+
+  private currentDialogCurvePixelPerfect(): boolean {
+    const input = this.shadowRoot?.getElementById("curvePixelPerfect") as HTMLInputElement | null;
+    return input?.checked === true;
+  }
+
+  private applyPencilPixelPerfectFromDialog(): void {
+    const enabled = this.currentDialogPencilPixelPerfect();
+    this.pencilPixelPerfect = enabled;
+    this.engine?.setPencilPixelPerfect(enabled);
+    this.statusMessage = `Pencil pixel perfect: ${enabled ? "on" : "off"}`;
+  }
+
+  private applyCurvePixelPerfectFromDialog(): void {
+    const enabled = this.currentDialogCurvePixelPerfect();
+    this.curvePixelPerfect = enabled;
+    this.engine?.setCurvePixelPerfect(enabled);
+    this.statusMessage = `Curve pixel perfect: ${enabled ? "on" : "off"}`;
   }
 
   /** Test hook: set the brush stabilizer mode (none/rope/follow, defaults to none). */

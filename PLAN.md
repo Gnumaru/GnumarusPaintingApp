@@ -138,6 +138,12 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Engine stores mode/rope/strength plus float focus/target in layer-image space; stabilized strokes paint `oldFocus -> newFocus` with the same brush/AA/blend/accumulate paths (aliased segments floored to match `toImagePixel`, fixing a Bresenham non-termination with floats); hover also tracks for preview. A stabilizer dot plus rope line overlay shows the true paint focus.
 - Shell shows Rope length only for rope and Follow strength only for follow, with test hooks and status messages. Pure math lives in `src/canvas/GnumarusStabilizer.ts` with unit tests; E2E covers dropdown, conditional inputs, and painting with each mode.
 
+## 25. Pixel perfect pencil + curve (implemented)
+- Pencil and curve options gain a `Pixel perfect` checkbox, off by default. It only takes effect at exactly size/width 1 with anti-aliasing off; otherwise painting is unchanged (checkbox disabled in the UI, engine treats it as off).
+- While active, pencil strokes and curve commits stay exactly 1px thick: each painted pixel has at most 2 painted 8-neighbors within that stroke. Sharp square corners are converted to diagonal corners by retroactively eating the elbow pixel (restored from the stroke base snapshot, or cleared from the union mask when Accumulate is off). Crossing/revisiting your own line always paints, so loops may exceed 2 neighbors.
+- Pure stateful filter `GnumarusPixelPerfectStroke` in `src/canvas/GnumarusPixelPerfect.ts` (per-stroke painted set + paint order with tombstones, revisit-always-paints, consecutive-duplicate suppression across walk segment joints, recent-window (4) exception for crossings, Bresenham/cubic walkers mirroring the rasterizer candidate order). Engine applies it after stabilizer quantization, for accumulate on (per-pixel `setPixel`) and off (mask bits + one repaint); locks/blend/history unchanged.
+- Unit tests for the filter (straights intact, corner/stair eating with `drainRemoved`, crossings, OOB, walker parity with `drawPixelLine`/`drawCubicBezier`); E2E for checkbox gating, pencil thinning + control contrast, crossings, curve thinning + undo.
+
 ## 11. Custom color picker (implemented)
 - Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).
 - Every model carries an alpha axis; RGBA axes span 0..255. ARD Diagonal spans 0..360 and Ratio 0..255.

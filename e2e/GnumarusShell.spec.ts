@@ -2823,3 +2823,219 @@ test("follow stabilizer paints while chasing the cursor", async ({ page }) => {
   // Even with heavy smoothing the stroke starts at the cursor.
   expect(await readPixel(page, 10, 10)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
+
+async function loadTinyLayer(
+  page: import("@playwright/test").Page,
+  size: number,
+): Promise<void> {
+  await page.evaluate((side: number) => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          loadProject(
+            width: number,
+            height: number,
+            inputs: Array<{
+              id: string;
+              name: string;
+              visible: boolean;
+              opacity: number;
+              width: number;
+              height: number;
+              buffer: Uint8ClampedArray;
+              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
+            }>,
+          ): void;
+        };
+      };
+    };
+    root.__gnumarus?.engine?.loadProject(64, 64, [
+      {
+        id: "tiny",
+        name: "Tiny",
+        visible: true,
+        opacity: 1,
+        width: side,
+        height: side,
+        buffer: new Uint8ClampedArray(side * side * 4),
+        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+      },
+    ]);
+  }, size);
+}
+
+async function paintedNeighborStats(
+  page: import("@playwright/test").Page,
+  side: number,
+): Promise<{ max: number; painted: number }> {
+  return page.evaluate((dims: number) => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: { readPixel(x: number, y: number): { r: number; g: number; b: number; a: number } | null };
+      };
+    };
+    const engine = root.__gnumarus?.engine;
+    if (engine === undefined) {
+      throw new Error("engine is unavailable");
+    }
+    const isPainted = (x: number, y: number): boolean => {
+      if (x < 0 || y < 0 || x >= dims || y >= dims) {
+        return false;
+      }
+      return (engine.readPixel(x, y)?.a ?? 0) > 0;
+    };
+    let max = 0;
+    let painted = 0;
+    for (let y = 0; y < dims; y += 1) {
+      for (let x = 0; x < dims; x += 1) {
+        if (!isPainted(x, y)) {
+          continue;
+        }
+        painted += 1;
+        let neighbors = 0;
+        for (let dy = -1; dy <= 1; dy += 1) {
+          for (let dx = -1; dx <= 1; dx += 1) {
+            if (dx === 0 && dy === 0) {
+              continue;
+            }
+            if (isPainted(x + dx, y + dy)) {
+              neighbors += 1;
+            }
+          }
+        }
+        max = Math.max(max, neighbors);
+      }
+    }
+    return { max, painted };
+  }, side);
+}
+
+test("pencil pixel perfect is gated to 1px without AA and thins tight turns", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Pencil" }).click();
+  const options = page.locator('gnumarus-shell [data-testid="tool-options"]');
+  await expect(options).toContainText("Pixel perfect");
+  const pixelPerfect = page.locator("gnumarus-shell input#pencilPixelPerfect");
+  await expect(pixelPerfect).toBeEnabled();
+  await page.locator("gnumarus-shell input#brushSize").fill("3");
+  await expect(pixelPerfect).toBeDisabled();
+  await page.locator("gnumarus-shell input#brushSize").fill("1");
+  await expect(pixelPerfect).toBeEnabled();
+  await page.locator("gnumarus-shell input#pencilAntialias").check();
+  await expect(pixelPerfect).toBeDisabled();
+  await page.locator("gnumarus-shell input#pencilAntialias").uncheck();
+  await expect(pixelPerfect).toBeEnabled();
+
+  await loadTinyLayer(page, 8);
+  await setPencil(page, "#ff0000");
+  await pixelPerfect.check();
+  await expect(page.locator("gnumarus-shell")).toContainText("Pencil pixel perfect: on");
+  const dragUTurn = async (): Promise<void> => {
+    const canvas = page.locator("gnumarus-shell canvas");
+    const box = await canvas.boundingBox();
+    if (box === null) {
+      throw new Error("canvas has no bounding box");
+    }
+    const state = await getViewState(page);
+    const view = { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false };
+    const layer = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false };
+    const rect = { left: box.x, top: box.y, width: box.width, height: box.height };
+    const at = (lx: number, ly: number): { x: number; y: number } =>
+      layerPixelToScreen(lx, ly, rect, 8, 8, view, layer);
+    const p0 = at(1, 2);
+    const p1 = at(6, 2);
+    const p2 = at(6, 4);
+    const p3 = at(1, 4);
+    await page.mouse.move(p0.x, p0.y);
+    await page.mouse.down();
+    await page.mouse.move(p1.x, p1.y, { steps: 8 });
+    await page.mouse.move(p2.x, p2.y, { steps: 4 });
+    await page.mouse.move(p3.x, p3.y, { steps: 8 });
+    await page.mouse.up();
+  };
+  await dragUTurn();
+  let stats = await paintedNeighborStats(page, 8);
+  expect(stats.painted).toBeGreaterThan(0);
+  expect(stats.max).toBeLessThanOrEqual(2);
+  await page.keyboard.press("Delete");
+  await pixelPerfect.uncheck();
+  await expect(page.locator("gnumarus-shell")).toContainText("Pencil pixel perfect: off");
+  await dragUTurn();
+  stats = await paintedNeighborStats(page, 8);
+  expect(stats.painted).toBeGreaterThan(0);
+  expect(stats.max).toBeGreaterThan(2);
+});
+
+test("pencil pixel perfect still paints crossings and revisits", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Pencil" }).click();
+  await loadTinyLayer(page, 8);
+  await setPencil(page, "#ff0000");
+  await page.locator("gnumarus-shell input#pencilPixelPerfect").check();
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const state = await getViewState(page);
+  const view = { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false };
+  const layer = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false };
+  const rect = { left: box.x, top: box.y, width: box.width, height: box.height };
+  const at = (lx: number, ly: number): { x: number; y: number } =>
+    layerPixelToScreen(lx, ly, rect, 8, 8, view, layer);
+  const h0 = at(0, 3);
+  const h1 = at(7, 3);
+  await page.mouse.move(h0.x, h0.y);
+  await page.mouse.down();
+  await page.mouse.move(h1.x, h1.y, { steps: 8 });
+  await page.mouse.up();
+  const v0 = at(3, 0);
+  const v1 = at(3, 7);
+  await page.mouse.move(v0.x, v0.y);
+  await page.mouse.down();
+  await page.mouse.move(v1.x, v1.y, { steps: 8 });
+  await page.mouse.up();
+  // The crossing pixel paints even though its neighborhood exceeds 2.
+  expect(await readPixel(page, 3, 3)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("curve pixel perfect is gated to 1px without AA and keeps curves thin", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadTinyLayer(page, 16);
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Curve" }).click();
+  const pixelPerfect = page.locator("gnumarus-shell input#curvePixelPerfect");
+  await expect(pixelPerfect).toBeEnabled();
+  await page.locator("gnumarus-shell input#curveWidth").fill("2");
+  await expect(pixelPerfect).toBeDisabled();
+  await page.locator("gnumarus-shell input#curveWidth").fill("1");
+  await pixelPerfect.check();
+  await expect(page.locator("gnumarus-shell")).toContainText("Curve pixel perfect: on");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const state = await getViewState(page);
+  const view = { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false };
+  const layer = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false };
+  const rect = { left: box.x, top: box.y, width: box.width, height: box.height };
+  const at = (lx: number, ly: number): { x: number; y: number } =>
+    layerPixelToScreen(lx, ly, rect, 16, 16, view, layer);
+  const start = at(2, 8);
+  const end = at(13, 8);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 8 });
+  await page.mouse.up();
+  await page.mouse.click(at(4, 2).x, at(4, 2).y);
+  await page.mouse.click(at(11, 14).x, at(11, 14).y);
+  const stats = await paintedNeighborStats(page, 16);
+  expect(stats.painted).toBeGreaterThan(0);
+  expect(stats.max).toBeLessThanOrEqual(2);
+  await page.keyboard.press("Control+z");
+  expect((await paintedNeighborStats(page, 16)).painted).toBe(0);
+});
