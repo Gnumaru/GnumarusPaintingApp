@@ -3306,3 +3306,164 @@ test("holding Ctrl temporarily switches to the eyedropper", async ({ page }) => 
   await page.mouse.click(cx, cy);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
+
+test("frame menu adds frames before and after the clicked frame", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  expect(await getMatrix(page)).toMatchObject({ frameCount: 2, currentFrame: 1 });
+  await paintCenter(page);
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Add frame after" }).click();
+  let state = await getMatrix(page);
+  expect(state.frameCount).toBe(3);
+  expect(state.currentFrame).toBe(1);
+  await expect(page.locator("gnumarus-shell")).toContainText("Frame 2 added");
+  expect(state.rows[0]?.cells.map((cell) => cell.contentId !== null)).toEqual([true, false, true]);
+  await matrix.locator('[data-testid="anim-frame"][data-frame="2"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Add frame before" }).click();
+  state = await getMatrix(page);
+  expect(state.frameCount).toBe(4);
+  expect(state.currentFrame).toBe(2);
+  expect(state.rows[0]?.cells.map((cell) => cell.contentId !== null)).toEqual([true, false, false, true]);
+});
+
+test("layer menu adds layers above and below the clicked layer", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Add layer" }).click();
+  let state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.id)).toEqual(["layer0", "layer1"]);
+  await page.locator('gnumarus-shell [data-layer-id="layer0"] .layer-name').click();
+  await page.locator('gnumarus-shell [data-layer-id="layer0"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Add above" }).click();
+  state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.id)).toEqual(["layer0", "layer2", "layer1"]);
+  expect(state.active).toBe("layer2");
+  await expect(page.locator("gnumarus-shell")).toContainText("Layer added");
+  await page.locator('gnumarus-shell [data-layer-id="layer1"] .layer-name').click();
+  await page.locator('gnumarus-shell [data-layer-id="layer1"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Add below" }).click();
+  state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.id)).toEqual(["layer0", "layer2", "layer3", "layer1"]);
+  expect(state.active).toBe("layer3");
+});
+
+test("ArrowLeft and ArrowRight select frames with wraparound", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  expect(await getMatrixFrame(page)).toBe(2);
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  expect(await getMatrixFrame(page)).toBe(0);
+  await page.keyboard.press("ArrowLeft");
+  expect(await getMatrixFrame(page)).toBe(2);
+  await expect(page.locator('gnumarus-shell [data-testid="toast"]')).toContainText("Frame 3/3");
+  await page.keyboard.press("ArrowLeft");
+  expect(await getMatrixFrame(page)).toBe(1);
+  await page.keyboard.press("ArrowRight");
+  expect(await getMatrixFrame(page)).toBe(2);
+  await page.keyboard.press("ArrowRight");
+  expect(await getMatrixFrame(page)).toBe(0);
+  await page.keyboard.press("ArrowRight");
+  expect(await getMatrixFrame(page)).toBe(1);
+});
+
+test("ArrowUp and ArrowDown select layers like PageUp and PageDown", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await page.locator('gnumarus-shell [data-layer-id="layer0"] .layer-name').click();
+  expect((await getLayers(page)).active).toBe("layer0");
+  await page.keyboard.press("ArrowUp");
+  expect((await getLayers(page)).active).toBe("layer1");
+  await expect(page.locator('gnumarus-shell [data-testid="toast"]')).toContainText("2/2");
+  await page.keyboard.press("ArrowUp");
+  expect((await getLayers(page)).active).toBe("layer0");
+  await page.keyboard.press("ArrowDown");
+  expect((await getLayers(page)).active).toBe("layer1");
+  await page.keyboard.press("ArrowDown");
+  expect((await getLayers(page)).active).toBe("layer0");
+});
+
+test("Shift+Up and Shift+Down move layers with wraparound", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Add layer" }).click();
+  expect((await getLayers(page)).layers.map((layer) => layer.id)).toEqual(["layer0", "layer1"]);
+  expect((await getLayers(page)).active).toBe("layer1");
+  await page.keyboard.press("Shift+ArrowDown");
+  let state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.id)).toEqual(["layer1", "layer0"]);
+  expect(state.active).toBe("layer1");
+  await expect(page.locator("gnumarus-shell")).toContainText("Layer moved down");
+  await page.keyboard.press("Shift+ArrowDown");
+  state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.id)).toEqual(["layer0", "layer1"]);
+  expect(state.active).toBe("layer1");
+  await page.keyboard.press("Shift+ArrowUp");
+  state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.id)).toEqual(["layer1", "layer0"]);
+  expect(state.active).toBe("layer1");
+  await page.keyboard.press("Shift+ArrowUp");
+  state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.id)).toEqual(["layer0", "layer1"]);
+  expect(state.active).toBe("layer1");
+});
+
+test("Shift+Left and Shift+Right move frames with wraparound", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  expect(await getMatrixFrame(page)).toBe(0);
+  await page.keyboard.press("Shift+ArrowRight");
+  expect(await getMatrixFrame(page)).toBe(1);
+  await expect(page.locator("gnumarus-shell")).toContainText("Frame moved right");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  expect(await readPixel(page, 32, 32)).toBeNull();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click();
+  await page.keyboard.press("Shift+ArrowRight");
+  expect(await getMatrixFrame(page)).toBe(2);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  await page.keyboard.press("Shift+ArrowRight");
+  expect(await getMatrixFrame(page)).toBe(0);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  await page.keyboard.press("Shift+ArrowLeft");
+  expect(await getMatrixFrame(page)).toBe(2);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+});
+
+test("arrow keys stay out of inputs and the color picker", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Add layer" }).click();
+  const before = await getLayers(page);
+  const frameBefore = await getMatrixFrame(page);
+  await page.locator("gnumarus-shell input#brushSize").click();
+  await page.keyboard.press("ArrowUp");
+  expect((await getLayers(page)).active).toBe(before.active);
+  expect(await getMatrixFrame(page)).toBe(frameBefore);
+  await page.keyboard.press("Escape");
+  const picker = await openPicker(page, "pencilColor");
+  await picker.locator('[data-testid="hsv-triangle"]').focus();
+  await page.keyboard.press("ArrowUp");
+  expect((await getLayers(page)).active).toBe(before.active);
+  expect(await getMatrixFrame(page)).toBe(frameBefore);
+  await picker.locator('[data-testid="hsv-triangle"]').focus();
+  await page.keyboard.down("Shift");
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.up("Shift");
+  expect((await getLayers(page)).active).toBe(before.active);
+  expect((await getLayers(page)).layers.map((layer) => layer.id)).toEqual(
+    before.layers.map((layer) => layer.id),
+  );
+});

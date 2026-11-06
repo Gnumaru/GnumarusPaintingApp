@@ -77,7 +77,11 @@ import {
   clampFrameDurationMs,
   effectiveFrameDurationMs,
   GNUMARUS_DEFAULT_FRAME_DURATION_MS,
+  insertFrameCells,
+  insertFrameDurations,
   resolveAnimationFrame,
+  swapFrameCells,
+  swapFrameDurations,
   type GnumarusResolvedCell,
   type GnumarusTexturePixels,
 } from "../animation/GnumarusAnimationModel";
@@ -828,8 +832,22 @@ export class GnumarusCanvasEngine {
   }
 
   addFrame(): number {
+    return this.insertFrame(this.frameCount);
+  }
+
+  /**
+   * Insert an empty frame at position `at`, shifting that frame and later
+   * ones up by one slot (cells and explicit durations follow). Selects the
+   * new frame. Returns the new frame index, or -1 for invalid positions.
+   */
+  insertFrame(at: number): number {
+    if (!Number.isInteger(at) || at < 0 || at > this.frameCount) {
+      return -1;
+    }
+    this.cells = insertFrameCells(this.cells, at);
+    this.frameDurations = insertFrameDurations(this.frameDurations, at);
     this.frameCount += 1;
-    this.currentFrame = this.frameCount - 1;
+    this.currentFrame = at;
     this.stabilizerPos = null;
     this.stabilizerTarget = null;
     this.stopFollowLoop();
@@ -840,6 +858,34 @@ export class GnumarusCanvasEngine {
     this.emitStats();
     this.onLayersChanged?.();
     return this.currentFrame;
+  }
+
+  /**
+   * Move one frame left (-1) or right (+1), wrapping around the ends.
+   * Selection follows the moved frame. Returns false for invalid frames
+   * and single-frame projects.
+   */
+  moveFrame(frame: number, direction: 1 | -1): boolean {
+    if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount || this.frameCount <= 1) {
+      return false;
+    }
+    const target = (frame + direction + this.frameCount) % this.frameCount;
+    if (target === frame) {
+      return false;
+    }
+    this.cells = swapFrameCells(this.cells, frame, target);
+    this.frameDurations = swapFrameDurations(this.frameDurations, frame, target);
+    this.currentFrame = target;
+    this.stabilizerPos = null;
+    this.stabilizerTarget = null;
+    this.stopFollowLoop();
+    this.resetPencilPixelPerfect();
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.emitStats();
+    this.onLayersChanged?.();
+    return true;
   }
 
   removeFrame(frame: number): boolean {
@@ -1216,6 +1262,24 @@ export class GnumarusCanvasEngine {
     return this.insertLayerAt(at);
   }
 
+  /** Insert a new layer immediately above the given layer and select it. Null for unknown ids. */
+  insertLayerAbove(id: string): string | null {
+    const index = this.layers.findIndex((layer) => layer.id === id);
+    if (index < 0) {
+      return null;
+    }
+    return this.insertLayerAt(index + 1);
+  }
+
+  /** Insert a new layer immediately below the given layer and select it. Null for unknown ids. */
+  insertLayerBelow(id: string): string | null {
+    const index = this.layers.findIndex((layer) => layer.id === id);
+    if (index < 0) {
+      return null;
+    }
+    return this.insertLayerAt(index);
+  }
+
   private insertLayerAt(at: number): string {
     const id = `layer${this.layerCounter}`;
     const name = `Layer ${this.layerCounter}`;
@@ -1534,6 +1598,27 @@ export class GnumarusCanvasEngine {
     }
     this.layers[target] = current;
     this.layers[index] = other;
+    this.refreshLayerStacking();
+    this.render();
+    this.emitStats();
+    return true;
+  }
+
+  /** Move a layer up/down in the stack, wrapping around the ends. */
+  moveLayerWrapping(id: string, direction: "up" | "down"): boolean {
+    const index = this.layers.findIndex((layer) => layer.id === id);
+    if (index < 0 || this.layers.length <= 1) {
+      return false;
+    }
+    const target = direction === "up" ? index + 1 : index - 1;
+    if (target >= 0 && target < this.layers.length) {
+      return this.moveLayer(id, direction);
+    }
+    const [removed] = this.layers.splice(index, 1);
+    if (removed === undefined) {
+      return false;
+    }
+    this.layers.splice(direction === "up" ? 0 : this.layers.length, 0, removed);
     this.refreshLayerStacking();
     this.render();
     this.emitStats();

@@ -155,6 +155,13 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Canvas/layer transform reset gesture moved from Ctrl+middleclick to Alt+middleclick (loupe resets the view, transform resets the active layer).
 - New eyedropper tool (toolbar button, monochrome drop glyph): click copies the clicked active-cell pixel RGBA into the paint color via `onEyedropperPick` + `setPencilColor`; never paints, records history or materializes empty cells. Holding Ctrl temporarily switches to eyedropper and releasing Ctrl restores the previous tool (manual tool changes cancel the temp mode; repeat keydown guarded; Ctrl combos unaffected).
 
+## 28. Frame/layer menus plus arrow-key navigation (implemented)
+- Frame menu gains Add before / Add after (`insertFrame` shifts cells and durations, selects the new empty frame).
+- Layer menu gains Add above / Add below (relative to the clicked layer, selects the new layer).
+- ArrowLeft/Right select the previous/next frame with wraparound; ArrowUp/Down select the layer above/below like PageUp/PageDown (toast included).
+- Shift+Up/Down moves the active layer in the stack with wraparound (`moveLayerWrapping`); Shift+Left/Right moves the current frame with wraparound (`moveFrame` swap, selection follows).
+- Arrow shortcuts stay out of text fields and of the color picker (ring/triangle/bars keep their own Arrow/Shift+Arrow keys); pure cell/duration remap helpers in the animation model are unit-tested.
+
 ## 11. Custom color picker (implemented)
 - Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).
 - Every model carries an alpha axis; RGBA axes span 0..255. ARD Diagonal spans 0..360 and Ratio 0..255.

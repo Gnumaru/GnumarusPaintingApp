@@ -3,7 +3,11 @@ import {
   animationCellKey,
   clampFrameDurationMs,
   effectiveFrameDurationMs,
+  insertFrameCells,
+  insertFrameDurations,
   resolveAnimationFrame,
+  swapFrameCells,
+  swapFrameDurations,
   GNUMARUS_DEFAULT_FRAME_DURATION_MS,
   GNUMARUS_MAX_FRAME_DURATION_MS,
   GNUMARUS_MIN_FRAME_DURATION_MS,
@@ -98,5 +102,55 @@ describe("GnumarusAnimationModel", () => {
     expect(effectiveFrameDurationMs(null, 100)).toBe(100);
     expect(effectiveFrameDurationMs(undefined, 400)).toBe(400);
     expect(effectiveFrameDurationMs(Number.NaN, 100)).toBe(100);
+  });
+
+  it("shifts cells and durations up on frame insertion", () => {
+    const cells = new Map([
+      [animationCellKey("layer0", 0), "a"],
+      [animationCellKey("layer0", 1), "b"],
+      [animationCellKey("layer1", 2), "c"],
+    ]);
+    const shifted = insertFrameCells(cells, 1);
+    expect(shifted.get(animationCellKey("layer0", 0))).toBe("a");
+    expect(shifted.get(animationCellKey("layer0", 1))).toBeUndefined();
+    expect(shifted.get(animationCellKey("layer0", 2))).toBe("b");
+    expect(shifted.get(animationCellKey("layer1", 3))).toBe("c");
+    expect(shifted.size).toBe(3);
+    const durations = insertFrameDurations(
+      new Map([
+        [0, 100],
+        [1, 200],
+      ]),
+      1,
+    );
+    expect(durations.get(0)).toBe(100);
+    expect(durations.get(1)).toBeUndefined();
+    expect(durations.get(2)).toBe(200);
+  });
+
+  it("swaps cells and durations of two frames", () => {
+    const cells = new Map([
+      [animationCellKey("layer0", 0), "a"],
+      [animationCellKey("layer0", 2), "b"],
+    ]);
+    const swapped = swapFrameCells(cells, 0, 2);
+    expect(swapped.get(animationCellKey("layer0", 0))).toBe("b");
+    expect(swapped.get(animationCellKey("layer0", 2))).toBe("a");
+    expect(swapFrameCells(cells, 1, 1)).toEqual(cells);
+    const durations = swapFrameDurations(
+      new Map([
+        [0, 100],
+        [2, 300],
+      ]),
+      0,
+      2,
+    );
+    expect(durations.get(0)).toBe(300);
+    expect(durations.get(2)).toBe(100);
+    // Absence is preserved on either side of the swap.
+    const partial = swapFrameDurations(new Map([[1, 150]]), 0, 1);
+    expect(partial.get(0)).toBe(150);
+    expect(partial.get(1)).toBeUndefined();
+    expect(swapFrameDurations(new Map(), 0, 1).size).toBe(0);
   });
 });

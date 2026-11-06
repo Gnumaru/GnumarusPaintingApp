@@ -1348,6 +1348,24 @@ export class GnumarusShell extends LitElement {
                 <button
                   @click=${(): void => {
                     if (this.contextMenuLayerId !== null) {
+                      this.onAddLayerAbove(this.contextMenuLayerId);
+                    }
+                  }}
+                >
+                  Add above
+                </button>
+                <button
+                  @click=${(): void => {
+                    if (this.contextMenuLayerId !== null) {
+                      this.onAddLayerBelow(this.contextMenuLayerId);
+                    }
+                  }}
+                >
+                  Add below
+                </button>
+                <button
+                  @click=${(): void => {
+                    if (this.contextMenuLayerId !== null) {
                       this.onResetLayerTransform(this.contextMenuLayerId);
                     }
                   }}
@@ -1981,6 +1999,8 @@ export class GnumarusShell extends LitElement {
           this.closeMatrixMenu();
         }}></div>
         <div class="context-menu" style="left: ${this.matrixMenu.x}px; top: ${this.matrixMenu.y}px;">
+          <button @click=${(): void => this.onAddFrameBefore(frame)}>Add frame before</button>
+          <button @click=${(): void => this.onAddFrameAfter(frame)}>Add frame after</button>
           <button @click=${(): void => this.onOpenFrameDuration()}>Set frame duration…</button>
           <button ?disabled=${count <= 1} @click=${(): void => this.onRemoveFrame(frame)}>Remove frame</button>
         </div>
@@ -2190,15 +2210,60 @@ export class GnumarusShell extends LitElement {
       this.insertLayerAboveActive();
       return;
     }
+    if (
+      event.key === "ArrowLeft" ||
+      event.key === "ArrowRight" ||
+      event.key === "ArrowUp" ||
+      event.key === "ArrowDown"
+    ) {
+      if (this.eventInColorPicker(event)) {
+        return;
+      }
+      event.preventDefault();
+      if (event.shiftKey) {
+        if (event.key === "ArrowLeft") {
+          this.moveCurrentFrame(-1);
+        } else if (event.key === "ArrowRight") {
+          this.moveCurrentFrame(1);
+        } else if (event.key === "ArrowUp") {
+          this.moveActiveLayer("up");
+        } else {
+          this.moveActiveLayer("down");
+        }
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        this.selectFrameRelative(-1);
+      } else if (event.key === "ArrowRight") {
+        this.selectFrameRelative(1);
+      } else if (event.key === "ArrowUp") {
+        this.selectLayerRelative(1);
+      } else {
+        this.selectLayerRelative(-1);
+      }
+      return;
+    }
     if (event.key === "e" || event.key === "E") {
       event.preventDefault();
       this.toggleEraserBlend();
     }
   };
 
-  /** Detect text editing focus, piercing shadow DOM retargeting via composedPath. */
-  private eventInField(event: KeyboardEvent): boolean {
+  /** Detect focus inside the custom color picker, whose ring/triangle/bars own the arrow keys. */
+  private eventInColorPicker(event: KeyboardEvent): boolean {
     if (typeof event.composedPath === "function") {
+      for (const node of event.composedPath()) {
+        if (node instanceof Element && node.localName === "gnumarus-color-picker") {
+          return true;
+        }
+      }
+    }
+    const target = event.target;
+    return target instanceof HTMLElement && target.closest("gnumarus-color-picker") !== null;
+  }
+
+  /** Detect text editing focus, piercing shadow DOM retargeting via composedPath. */
+  private eventInField(event: KeyboardEvent): boolean {    if (typeof event.composedPath === "function") {
       for (const node of event.composedPath()) {
         if (
           node instanceof HTMLInputElement ||
@@ -2255,6 +2320,47 @@ export class GnumarusShell extends LitElement {
     this.refreshLayers();
     this.dirty = true;
     this.statusMessage = "Layer added";
+  }
+
+  /** Select the previous/next frame with wraparound. */
+  private selectFrameRelative(direction: 1 | -1): void {
+    if (this.engine === null) {
+      return;
+    }
+    const count = this.engine.getFrameCount();
+    if (count <= 0) {
+      return;
+    }
+    const next = (this.engine.getCurrentFrame() + direction + count) % count;
+    if (this.engine.setCurrentFrame(next)) {
+      this.refreshLayers();
+      this.showToast(`Frame ${next + 1}/${count}`);
+    }
+  }
+
+  /** Move the current frame left/right with wraparound; selection follows. */
+  private moveCurrentFrame(direction: 1 | -1): void {
+    if (this.engine === null) {
+      return;
+    }
+    const from = this.engine.getCurrentFrame();
+    if (this.engine.moveFrame(from, direction)) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = `Frame moved ${direction === 1 ? "right" : "left"}`;
+    }
+  }
+
+  /** Move the active layer up/down with wraparound. */
+  private moveActiveLayer(direction: "up" | "down"): void {
+    if (this.engine === null) {
+      return;
+    }
+    if (this.engine.moveLayerWrapping(this.engine.getActiveLayerId(), direction)) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = `Layer moved ${direction}`;
+    }
   }
 
   private mergeActiveLayerDown(): void {
@@ -3219,6 +3325,32 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = `Frame ${frame + 1} added`;
   }
 
+  private onAddFrameBefore(frame: number): void {
+    this.closeMatrixMenu();
+    if (this.engine === null) {
+      return;
+    }
+    const added = this.engine.insertFrame(frame);
+    if (added >= 0) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = `Frame ${added + 1} added`;
+    }
+  }
+
+  private onAddFrameAfter(frame: number): void {
+    this.closeMatrixMenu();
+    if (this.engine === null) {
+      return;
+    }
+    const added = this.engine.insertFrame(frame + 1);
+    if (added >= 0) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = `Frame ${added + 1} added`;
+    }
+  }
+
   private onRemoveFrame(frame: number): void {
     this.closeMatrixMenu();
     if (this.engine === null) {
@@ -3240,7 +3372,7 @@ export class GnumarusShell extends LitElement {
 
   private openMatrixFrameMenu(frame: number, clientX: number, clientY: number): void {
     this.closeLayerMenu();
-    this.matrixMenu = { kind: "frame", frame, x: Math.min(clientX, window.innerWidth - 200), y: Math.min(clientY, window.innerHeight - 80) };
+    this.matrixMenu = { kind: "frame", frame, x: Math.min(clientX, window.innerWidth - 200), y: Math.min(clientY, window.innerHeight - 200) };
   }
 
   private closeMatrixMenu(): void {
@@ -3531,6 +3663,30 @@ export class GnumarusShell extends LitElement {
     this.refreshLayers();
   }
 
+  private onAddLayerAbove(id: string): void {
+    this.closeLayerMenu();
+    if (this.engine === null) {
+      return;
+    }
+    if (this.engine.insertLayerAbove(id) !== null) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = "Layer added";
+    }
+  }
+
+  private onAddLayerBelow(id: string): void {
+    this.closeLayerMenu();
+    if (this.engine === null) {
+      return;
+    }
+    if (this.engine.insertLayerBelow(id) !== null) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = "Layer added";
+    }
+  }
+
   private onRenameStart(id: string): void {
     this.renamingId = id;
   }
@@ -3542,7 +3698,7 @@ export class GnumarusShell extends LitElement {
   private openLayerMenu(id: string, clientX: number, clientY: number): void {
     this.contextMenuLayerId = id;
     this.contextMenuX = Math.min(clientX, window.innerWidth - 180);
-    this.contextMenuY = Math.min(clientY, window.innerHeight - 60);
+    this.contextMenuY = Math.min(clientY, window.innerHeight - 200);
   }
 
   private closeLayerMenu(): void {

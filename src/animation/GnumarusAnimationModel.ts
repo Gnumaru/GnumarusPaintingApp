@@ -60,6 +60,74 @@ export function effectiveFrameDurationMs(explicitMs: number | null | undefined, 
   return clampFrameDurationMs(explicitMs);
 }
 
+/** Split an animation cell key back into its layer id and frame number. */
+export function parseAnimationCellKey(key: string): { layerId: string; frame: number } {
+  const separator = key.lastIndexOf("\n");
+  return { layerId: key.slice(0, separator), frame: Number.parseInt(key.slice(separator + 1), 10) };
+}
+
+/** Shift every cell at frame >= at up by one slot (frame insertion). */
+export function insertFrameCells(cells: ReadonlyMap<string, string>, at: number): Map<string, string> {
+  const shifted = new Map<string, string>();
+  for (const [key, contentId] of cells) {
+    const { layerId, frame } = parseAnimationCellKey(key);
+    shifted.set(animationCellKey(layerId, frame >= at ? frame + 1 : frame), contentId);
+  }
+  return shifted;
+}
+
+/** Shift every explicit duration at frame >= at up by one slot (frame insertion). */
+export function insertFrameDurations(
+  durations: ReadonlyMap<number, number>,
+  at: number,
+): Map<number, number> {
+  const shifted = new Map<number, number>();
+  for (const [frame, duration] of durations) {
+    shifted.set(frame >= at ? frame + 1 : frame, duration);
+  }
+  return shifted;
+}
+
+/** Swap the cells of two frames (frame move). */
+export function swapFrameCells(
+  cells: ReadonlyMap<string, string>,
+  first: number,
+  second: number,
+): Map<string, string> {
+  if (first === second) {
+    return new Map(cells);
+  }
+  const swapped = new Map<string, string>();
+  for (const [key, contentId] of cells) {
+    const { layerId, frame } = parseAnimationCellKey(key);
+    const target = frame === first ? second : frame === second ? first : frame;
+    swapped.set(animationCellKey(layerId, target), contentId);
+  }
+  return swapped;
+}
+
+/** Swap the explicit durations of two frames, preserving absence on either side. */
+export function swapFrameDurations(
+  durations: ReadonlyMap<number, number>,
+  first: number,
+  second: number,
+): Map<number, number> {
+  const swapped = new Map(durations);
+  const firstValue = swapped.get(first);
+  const secondValue = swapped.get(second);
+  if (secondValue === undefined) {
+    swapped.delete(first);
+  } else {
+    swapped.set(first, secondValue);
+  }
+  if (firstValue === undefined) {
+    swapped.delete(second);
+  } else {
+    swapped.set(second, firstValue);
+  }
+  return swapped;
+}
+
 /**
  * Resolve every layer to the pixels and transform it shows on one frame.
  * Buffers are shared references into the texture pool (no copies), so
