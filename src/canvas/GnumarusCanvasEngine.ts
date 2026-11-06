@@ -1546,8 +1546,11 @@ export class GnumarusCanvasEngine {
 
   /**
    * Merge the layer into the one immediately below it, sampling the upper
-   * layer through its own size and transform and using its opacity.
-   * Operates on the current frame's resolved pixels.
+   * cell's texture through its own size and transform and using its opacity.
+   * Operates on the current frame's resolved pixels. When the below cell has
+   * no usable texture, the upper cell's content (empty below cell) or its
+   * texture (textureless below content) is linked into the lower cell
+   * instead of compositing pixels.
    * The merged layer is removed only when all of its cells in every other
    * frame are empty or hold textureless contents; otherwise the layer is
    * kept, only the current cell's content is dissociated (the cell becomes
@@ -1564,16 +1567,32 @@ export class GnumarusCanvasEngine {
     if (upper === undefined || lower === undefined) {
       return false;
     }
-    const upperOwner = this.ownerTextureId(upper);
-    const lowerOwner = this.ownerTextureId(lower);
-    if (upperOwner === null || lowerOwner === null) {
+    const frame = this.currentFrame;
+    const currentCellKey = animationCellKey(id, frame);
+    const currentContentId = this.cells.get(currentCellKey) ?? null;
+    const upperContent = currentContentId === null ? undefined : this.contents.get(currentContentId);
+    const upperTextureId = upperContent?.textureId ?? null;
+    const upperEntry = upperTextureId === null ? undefined : this.textures.get(upperTextureId);
+    const ownedEntry = this.textures.get(id);
+    if (
+      currentContentId === null ||
+      upperContent === undefined ||
+      upperTextureId === null ||
+      upperEntry === undefined ||
+      ownedEntry === undefined
+    ) {
       return false;
     }
-    const lowerEntry = this.textures.get(lowerOwner);
-    const upperEntry = this.textures.get(upperOwner);
-    const ownedEntry = this.textures.get(id);
-    if (lowerEntry === undefined || upperEntry === undefined || ownedEntry === undefined) {
-      return false;
+    const lowerCellKey = animationCellKey(lower.id, frame);
+    const lowerContentId = this.cells.get(lowerCellKey) ?? null;
+    const lowerContent = lowerContentId === null ? undefined : this.contents.get(lowerContentId);
+    const lowerTextureId = lowerContent?.textureId ?? null;
+    if (lowerTextureId === null) {
+      return this.mergeDownRelink(index, id, lower.id, frame, currentCellKey, currentContentId, upperTextureId, lowerCellKey, lowerContent);
+    }
+    const lowerEntry = this.textures.get(lowerTextureId);
+    if (lowerEntry === undefined) {
+      return this.mergeDownRelink(index, id, lower.id, frame, currentCellKey, currentContentId, upperTextureId, lowerCellKey, lowerContent);
     }
     const base = lowerEntry.buffer.slice();
     for (let y = 0; y < lowerEntry.height; y += 1) {
@@ -1600,27 +1619,8 @@ export class GnumarusCanvasEngine {
       }
     }
     const diff = computeImageDiff(base, lowerEntry.buffer, lowerEntry.width, lowerEntry.height);
-    const currentCellKey = animationCellKey(id, this.currentFrame);
-    const currentContentId = this.cells.get(currentCellKey) ?? null;
-    let keepLayer = false;
-    for (let frame = 0; frame < this.frameCount; frame += 1) {
-      if (frame === this.currentFrame) {
-        continue;
-      }
-      const otherContentId = this.cells.get(animationCellKey(id, frame));
-      if (otherContentId === undefined) {
-        continue;
-      }
-      const otherContent = this.contents.get(otherContentId);
-      if (otherContent === undefined || otherContent.textureId === null) {
-        continue;
-      }
-      if (!this.textures.has(otherContent.textureId)) {
-        continue;
-      }
-      keepLayer = true;
-      break;
-    }
+    const lowerOwner = lowerTextureId;
+    const keepLayer = this.mergeDownKeepsLayer(id);
     const snapshot: GnumarusMergedLayerSnapshot = {
       id: upper.id,
       name: upper.name,
@@ -1646,31 +1646,28 @@ export class GnumarusCanvasEngine {
           lowerDiff: diff,
           upper: snapshot,
           removedLayer: false,
-          dissociatedCell:
-            currentContentId === null ? null : { layer: id, frame: this.currentFrame, content: currentContentId },
+          dissociatedCell: { layer: id, frame: this.currentFrame, content: currentContentId },
+          associatedCell: null,
+          textureLink: null,
         },
       });
     } else {
-      const upperCells: Array<{ frame: number; content: string }> = [];
-      for (const [key, contentId] of this.cells) {
-        if (key.startsWith(`${id}\n`)) {
-          const separator = key.lastIndexOf("\n");
-          upperCells.push({ frame: Number.parseInt(key.slice(separator + 1), 10), content: contentId });
-        }
-      }
-      const detachedContents: string[] = [];
-      for (const content of this.contents.values()) {
-        if (content.textureId === id) {
-          detachedContents.push(content.id);
-        }
-      }
-      snapshot.cells = upperCells;
-      snapshot.detachedContents = detachedContents;
+      const collected = this.collectMergeSnapshotCells(id);
+      snapshot.cells = collected.cells;
+      snapshot.detachedContents = collected.detachedContents;
       this.removeLayerFull(id);
       this.activeLayerId = lower.id;
       this.history.push({
         type: "merge",
-        merge: { lowerLayerId: lowerOwner, lowerDiff: diff, upper: snapshot, removedLayer: true, dissociatedCell: null },
+        merge: {
+          lowerLayerId: lowerOwner,
+          lowerDiff: diff,
+          upper: snapshot,
+          removedLayer: true,
+          dissociatedCell: null,
+          associatedCell: null,
+          textureLink: null,
+        },
       });
     }
     this.markTextureViewsDirty(lowerOwner);
@@ -1680,6 +1677,155 @@ export class GnumarusCanvasEngine {
     this.onPixelsChanged();
     this.onLayersChanged?.();
     this.emitStats();
+    return true;
+  }
+
+  /** True when the layer must survive a merge because another frame holds textured content. */
+  private mergeDownKeepsLayer(id: string): boolean {
+    for (let frame = 0; frame < this.frameCount; frame += 1) {
+      if (frame === this.currentFrame) {
+        continue;
+      }
+      const otherContentId = this.cells.get(animationCellKey(id, frame));
+      if (otherContentId === undefined) {
+        continue;
+      }
+      const otherContent = this.contents.get(otherContentId);
+      if (otherContent === undefined || otherContent.textureId === null) {
+        continue;
+      }
+      if (!this.textures.has(otherContent.textureId)) {
+        continue;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /** Upper cells plus owned-texture contents detached by a layer-removing merge (captured before removal). */
+  private collectMergeSnapshotCells(id: string): {
+    cells: Array<{ frame: number; content: string }>;
+    detachedContents: string[];
+  } {
+    const cells: Array<{ frame: number; content: string }> = [];
+    for (const [key, contentId] of this.cells) {
+      if (key.startsWith(`${id}\n`)) {
+        const separator = key.lastIndexOf("\n");
+        cells.push({ frame: Number.parseInt(key.slice(separator + 1), 10), content: contentId });
+      }
+    }
+    const detachedContents: string[] = [];
+    for (const content of this.contents.values()) {
+      if (content.textureId === id) {
+        detachedContents.push(content.id);
+      }
+    }
+    return { cells, detachedContents };
+  }
+
+  /**
+   * Merge fallback used when the below cell has no usable texture at the
+   * current frame: link the upper cell's content into the empty lower cell,
+   * or link its texture into the textureless lower content, then dissociate
+   * the upper cell. The upper layer is removed only when all its other
+   * frames are empty or textureless (same rule as the composite path).
+   */
+  private mergeDownRelink(
+    index: number,
+    upperId: string,
+    lowerId: string,
+    frame: number,
+    currentCellKey: string,
+    currentContentId: string,
+    upperTextureId: string,
+    lowerCellKey: string,
+    lowerContent: GnumarusCellContent | undefined,
+  ): boolean {
+    const upper = this.findLayer(upperId);
+    const lower = this.findLayer(lowerId);
+    const ownedEntry = this.textures.get(upperId);
+    if (upper === null || lower === null || ownedEntry === undefined) {
+      return false;
+    }
+    const snapshot: GnumarusMergedLayerSnapshot = {
+      id: upper.id,
+      name: upper.name,
+      textureName: ownedEntry.name,
+      visible: upper.visible,
+      opacity: upper.opacity,
+      width: ownedEntry.width,
+      height: ownedEntry.height,
+      transform: { ...upper.transform },
+      lockedChannels: { ...upper.lockedChannels },
+      stackIndex: index,
+      buffer: ownedEntry.buffer.slice(),
+      cells: [],
+      detachedContents: [],
+    };
+    let associatedCell: { layer: string; frame: number; content: string } | null = null;
+    let textureLink: { contentId: string; before: string | null; after: string | null } | null = null;
+    if (lowerContent === undefined) {
+      this.cells.set(lowerCellKey, currentContentId);
+      associatedCell = { layer: lowerId, frame, content: currentContentId };
+    } else {
+      const before = lowerContent.textureId;
+      lowerContent.textureId = upperTextureId;
+      textureLink = { contentId: lowerContent.id, before, after: upperTextureId };
+    }
+    if (this.mergeDownKeepsLayer(upperId)) {
+      this.cells.delete(currentCellKey);
+      this.activeLayerId = lowerId;
+      this.history.push({
+        type: "merge",
+        merge: {
+          lowerLayerId: lowerId,
+          lowerDiff: null,
+          upper: snapshot,
+          removedLayer: false,
+          dissociatedCell: { layer: upperId, frame, content: currentContentId },
+          associatedCell,
+          textureLink,
+        },
+      });
+    } else {
+      const collected = this.collectMergeSnapshotCells(upperId);
+      snapshot.cells = collected.cells;
+      snapshot.detachedContents = collected.detachedContents;
+      this.removeLayerFull(upperId);
+      this.activeLayerId = lowerId;
+      this.history.push({
+        type: "merge",
+        merge: {
+          lowerLayerId: lowerId,
+          lowerDiff: null,
+          upper: snapshot,
+          removedLayer: true,
+          dissociatedCell: null,
+          associatedCell,
+          textureLink,
+        },
+      });
+    }
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return true;
+  }
+
+  /** Point a content at a texture (history undo/redo of a merge texture relink). */
+  private setContentTextureForHistory(contentId: string, textureId: string | null): boolean {
+    const content = this.contents.get(contentId);
+    if (content === undefined) {
+      return false;
+    }
+    if (textureId !== null && !this.textures.has(textureId)) {
+      return false;
+    }
+    content.textureId = textureId;
+    this.syncAllLayerRenders();
     return true;
   }
 
@@ -1705,18 +1851,6 @@ export class GnumarusCanvasEngine {
     this.cells.delete(key);
     this.syncAllLayerRenders();
     return true;
-  }
-
-  /** Texture id whose pixels the layer currently renders (null when empty). */
-  private ownerTextureId(layer: GnumarusLayer): string | null {
-    if (layer.renderTextureId !== null && this.textures.has(layer.renderTextureId)) {
-      return layer.renderTextureId;
-    }
-    const resolved = this.resolveFrame().get(layer.id);
-    if (resolved === undefined || resolved.textureId === null || resolved.buffer === null) {
-      return null;
-    }
-    return resolved.textureId;
   }
 
   renameLayer(id: string, name: string): boolean {
@@ -3699,6 +3833,8 @@ export class GnumarusCanvasEngine {
       (textureId, width, height, buffer, transforms) =>
         this.applyFitToSize(textureId, width, height, buffer, transforms),
       (layerId, frame, contentId) => this.associateCellForHistory(layerId, frame, contentId),
+      (layerId, frame) => this.dissociateCellForHistory(layerId, frame),
+      (contentId, textureId) => this.setContentTextureForHistory(contentId, textureId),
     );
     if (!applied) {
       return false;
@@ -3722,6 +3858,8 @@ export class GnumarusCanvasEngine {
       (textureId, width, height, buffer, transforms) =>
         this.applyFitToSize(textureId, width, height, buffer, transforms),
       (layerId, frame) => this.dissociateCellForHistory(layerId, frame),
+      (layerId, frame, contentId) => this.associateCellForHistory(layerId, frame, contentId),
+      (contentId, textureId) => this.setContentTextureForHistory(contentId, textureId),
     );
     if (!applied) {
       return false;

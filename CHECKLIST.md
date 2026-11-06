@@ -138,3 +138,6 @@
 - [x] Frame-aware merge down: layer removed only when all other-frame cells are empty/textureless, else dissociate current cell and keep layer; undoable
 - [x] Unit tests (vitest) — 155 passed (keep-layer merge history undo/redo)
 - [x] E2E test (Playwright): previous 96 + multi-frame merge keep (composite, dissociate, untouched frames, undo/redo) — 97 passed
+- [x] Merge down relink: empty lower cell links the upper content, textureless lower content links the upper texture; undoable
+- [x] Unit tests (vitest) — 156 passed (keep-layer + relink merge history undo/redo)
+- [x] E2E test (Playwright): previous 97 + empty-lower link (remove + undo/redo) + textureless-lower link (keep + undo/redo) — 99 passed

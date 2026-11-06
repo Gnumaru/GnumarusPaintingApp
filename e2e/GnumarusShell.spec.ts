@@ -554,6 +554,80 @@ test("merge down keeps a layer used by other frames and dissociates only the cur
   expect((await getLayers(page)).layers.map((layer) => layer.id)).toEqual(["layer0", "layer1"]);
 });
 
+test("merge down links the upper content when the lower cell is empty", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Add layer" }).click();
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await setPencil(page, "#0000ff");
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+  const lowerCell = matrix.locator('[data-testid="anim-cell"][data-matrix-layer="layer0"][data-matrix-frame="1"]');
+  await expect(lowerCell).toHaveAttribute("aria-label", /empty/);
+
+  await page.locator('gnumarus-shell [data-layer-id="layer1"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Merge Down" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Layers merged");
+  expect((await getLayers(page)).layers.map((layer) => layer.id)).toEqual(["layer0"]);
+  await expect(lowerCell).not.toHaveAttribute("aria-label", /empty/);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+
+  await page.keyboard.press("Control+z");
+  expect((await getLayers(page)).layers.map((layer) => layer.id)).toEqual(["layer0", "layer1"]);
+  await page.locator('gnumarus-shell [data-layer-id="layer1"] .layer-name').click();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+  await page.locator('gnumarus-shell [data-layer-id="layer0"] .layer-name').click();
+  expect(await readPixel(page, 32, 32)).toBeNull();
+
+  await page.keyboard.press("Control+y");
+  expect((await getLayers(page)).layers.map((layer) => layer.id)).toEqual(["layer0"]);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+});
+
+test("merge down links the upper texture when the lower content has none", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  const lowerCell = matrix.locator('[data-testid="anim-cell"][data-matrix-layer="layer0"][data-matrix-frame="1"]');
+  await lowerCell.click({ button: "right" });
+  await page.getByRole("button", { name: "Select content" }).click();
+  await page.locator('gnumarus-shell [data-testid="content-picker-new"]').click();
+  await page.locator('gnumarus-shell [data-testid="texture-picker-none"]').click();
+  await page.locator('gnumarus-shell [data-layer-id="layer1"] .layer-name').click();
+  await setPencil(page, "#0000ff");
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+
+  await page.locator('gnumarus-shell [data-layer-id="layer1"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Merge Down" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Layers merged");
+  expect((await getLayers(page)).layers.map((layer) => layer.id)).toEqual(["layer0", "layer1"]);
+  const mergedCell = matrix.locator('[data-testid="anim-cell"][data-matrix-layer="layer1"][data-matrix-frame="1"]');
+  await expect(mergedCell).toHaveAttribute("aria-label", /empty/);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  await page.locator('gnumarus-shell [data-layer-id="layer0"] .layer-name').click();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+
+  await page.keyboard.press("Control+z");
+  await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click();
+  await expect(mergedCell).not.toHaveAttribute("aria-label", /empty/);
+  await page.locator('gnumarus-shell [data-layer-id="layer0"] .layer-name').click();
+  expect(await readPixel(page, 32, 32)).toBeNull();
+
+  await page.keyboard.press("Control+y");
+  await expect(mergedCell).toHaveAttribute("aria-label", /empty/);
+  await page.locator('gnumarus-shell [data-layer-id="layer0"] .layer-name').click();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+  expect((await getLayers(page)).layers.map((layer) => layer.id)).toEqual(["layer0", "layer1"]);
+});
+
 test("transform tool moves, rotates and flips the active layer", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

@@ -209,8 +209,6 @@ describe("GnumarusHistory", () => {
       merge: {
         lowerLayerId: "lower",
         lowerDiff,
-        removedLayer: true,
-        dissociatedCell: null,
         upper: {
           id: "upper",
           name: "Upper",
@@ -226,6 +224,10 @@ describe("GnumarusHistory", () => {
           cells: [{ frame: 0, content: "content9" }],
           detachedContents: ["content7"],
         },
+        removedLayer: true,
+        dissociatedCell: null,
+        associatedCell: null,
+        textureLink: null,
       },
     });
     layers.get("lower")?.set(upperBuffer);
@@ -260,6 +262,8 @@ describe("GnumarusHistory", () => {
         lowerDiff,
         removedLayer: false,
         dissociatedCell: { layer: "upper", frame: 2, content: "content9" },
+        associatedCell: null,
+        textureLink: null,
         upper: {
           id: "upper",
           name: "Upper",
@@ -304,5 +308,75 @@ describe("GnumarusHistory", () => {
     expect(history.redo(find, () => {}, undefined, undefined, dissociate)).toBe(true);
     expect(computeImageDiff(lower, target, 4, 4)).toBeNull();
     expect(cells.has("upper\n2")).toBe(false);
+  });
+
+  it("undoes and redoes a relink merge with associated cell and texture link", () => {
+    const lower = createPixelBuffer(4, 4);
+    const cells = new Map<string, string>();
+    const textures = new Map<string, string | null>([
+      ["content9", null],
+      ["contentLower", "texLower"],
+    ]);
+    const history = new GnumarusHistory();
+    history.push({
+      type: "merge",
+      merge: {
+        lowerLayerId: "lower",
+        lowerDiff: null,
+        removedLayer: false,
+        dissociatedCell: { layer: "upper", frame: 1, content: "content9" },
+        associatedCell: { layer: "lower", frame: 1, content: "content9" },
+        textureLink: { contentId: "contentLower", before: null, after: "texUpper" },
+        upper: {
+          id: "upper",
+          name: "Upper",
+          textureName: "Texture 9",
+          visible: true,
+          opacity: 1,
+          width: 4,
+          height: 4,
+          transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+          lockedChannels: { r: false, g: false, b: false, a: false },
+          stackIndex: 1,
+          buffer: createPixelBuffer(4, 4),
+          cells: [{ frame: 0, content: "content9" }],
+          detachedContents: [],
+        },
+      },
+    });
+    const find = () => ({ buffer: lower, width: 4 });
+    const associate = (layerId: string, frame: number, contentId: string): boolean => {
+      cells.set(`${layerId}\n${frame}`, contentId);
+      return true;
+    };
+    const dissociate = (layerId: string, frame: number): boolean => {
+      const key = `${layerId}\n${frame}`;
+      if (!cells.has(key)) {
+        return false;
+      }
+      cells.delete(key);
+      return true;
+    };
+    const setTexture = (contentId: string, textureId: string | null): boolean => {
+      if (!textures.has(contentId)) {
+        return false;
+      }
+      textures.set(contentId, textureId);
+      return true;
+    };
+    cells.delete("upper\n1");
+    cells.set("lower\n1", "content9");
+    textures.set("contentLower", "texUpper");
+
+    expect(history.undo(find, () => {}, undefined, undefined, associate, dissociate, setTexture)).toBe(true);
+    expect(cells.get("upper\n1")).toBe("content9");
+    expect(cells.has("lower\n1")).toBe(false);
+    expect(textures.get("contentLower")).toBeNull();
+
+    expect(history.canRedo()).toBe(true);
+    expect(history.redo(find, () => {}, undefined, undefined, dissociate, associate, setTexture)).toBe(true);
+    expect(cells.has("upper\n1")).toBe(false);
+    expect(cells.get("lower\n1")).toBe("content9");
+    expect(textures.get("contentLower")).toBe("texUpper");
   });
 });

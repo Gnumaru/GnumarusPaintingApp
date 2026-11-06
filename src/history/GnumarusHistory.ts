@@ -103,6 +103,10 @@ export interface GnumarusMergeRecord {
   removedLayer: boolean;
   /** Present when removedLayer is false: the cell dissociated by the merge. */
   dissociatedCell: { layer: string; frame: number; content: string } | null;
+  /** Lower cell associated by the merge (relink when the lower cell had no texture). */
+  associatedCell: { layer: string; frame: number; content: string } | null;
+  /** Lower content texture swap (relink when the lower content had no texture). */
+  textureLink: { contentId: string; before: string | null; after: string | null } | null;
 }
 
 export interface GnumarusResizeRecord {
@@ -180,6 +184,8 @@ export class GnumarusHistory {
       transforms: Array<{ contentId: string; transform: GnumarusLayerTransform }>,
     ) => boolean,
     associateCell?: (layerId: string, frame: number, contentId: string) => boolean,
+    dissociateCell?: (layerId: string, frame: number) => boolean,
+    setContentTexture?: (contentId: string, textureId: string | null) => boolean,
   ): boolean {
     for (;;) {
       const entry = this.undoStack.pop();
@@ -228,6 +234,18 @@ export class GnumarusHistory {
         this.redoStack.push(entry);
         return true;
       }
+      const needsAssociate = !entry.merge.removedLayer;
+      if (needsAssociate && associateCell === undefined) {
+        continue;
+      }
+      const needsDissociateUndo = entry.merge.associatedCell !== null;
+      if (needsDissociateUndo && dissociateCell === undefined) {
+        continue;
+      }
+      const needsTextureUndo = entry.merge.textureLink !== null;
+      if (needsTextureUndo && setContentTexture === undefined) {
+        continue;
+      }
       const lower = findLayer(entry.merge.lowerLayerId);
       if (lower === null) {
         continue;
@@ -237,13 +255,23 @@ export class GnumarusHistory {
       }
       if (entry.merge.removedLayer) {
         restoreLayer(entry.merge.upper);
-      } else if (entry.merge.dissociatedCell !== null && associateCell !== undefined) {
+      } else {
         const cell = entry.merge.dissociatedCell;
-        if (!associateCell(cell.layer, cell.frame, cell.content)) {
+        if (cell === null || associateCell === undefined || !associateCell(cell.layer, cell.frame, cell.content)) {
           continue;
         }
-      } else if (!entry.merge.removedLayer) {
-        continue;
+      }
+      const undone = entry.merge.associatedCell;
+      if (undone !== null) {
+        if (dissociateCell === undefined || !dissociateCell(undone.layer, undone.frame)) {
+          continue;
+        }
+      }
+      const unlinked = entry.merge.textureLink;
+      if (unlinked !== null) {
+        if (setContentTexture === undefined || !setContentTexture(unlinked.contentId, unlinked.before)) {
+          continue;
+        }
       }
       this.redoStack.push(entry);
       return true;
@@ -262,6 +290,8 @@ export class GnumarusHistory {
       transforms: Array<{ contentId: string; transform: GnumarusLayerTransform }>,
     ) => boolean,
     dissociateCell?: (layerId: string, frame: number) => boolean,
+    associateCell?: (layerId: string, frame: number, contentId: string) => boolean,
+    setContentTexture?: (contentId: string, textureId: string | null) => boolean,
   ): boolean {
     for (;;) {
       const entry = this.redoStack.pop();
@@ -310,6 +340,18 @@ export class GnumarusHistory {
         this.undoStack.push(entry);
         return true;
       }
+      const needsDissociateRedo = !entry.merge.removedLayer;
+      if (needsDissociateRedo && dissociateCell === undefined) {
+        continue;
+      }
+      const needsAssociateRedo = entry.merge.associatedCell !== null;
+      if (needsAssociateRedo && associateCell === undefined) {
+        continue;
+      }
+      const needsTextureRedo = entry.merge.textureLink !== null;
+      if (needsTextureRedo && setContentTexture === undefined) {
+        continue;
+      }
       const lower = findLayer(entry.merge.lowerLayerId);
       if (lower === null) {
         continue;
@@ -319,13 +361,23 @@ export class GnumarusHistory {
       }
       if (entry.merge.removedLayer) {
         removeLayer(entry.merge.upper.id);
-      } else if (entry.merge.dissociatedCell !== null && dissociateCell !== undefined) {
+      } else {
         const cell = entry.merge.dissociatedCell;
-        if (!dissociateCell(cell.layer, cell.frame)) {
+        if (cell === null || dissociateCell === undefined || !dissociateCell(cell.layer, cell.frame)) {
           continue;
         }
-      } else if (!entry.merge.removedLayer) {
-        continue;
+      }
+      const redone = entry.merge.associatedCell;
+      if (redone !== null) {
+        if (associateCell === undefined || !associateCell(redone.layer, redone.frame, redone.content)) {
+          continue;
+        }
+      }
+      const relinked = entry.merge.textureLink;
+      if (relinked !== null) {
+        if (setContentTexture === undefined || !setContentTexture(relinked.contentId, relinked.after)) {
+          continue;
+        }
       }
       this.undoStack.push(entry);
       return true;
