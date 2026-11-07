@@ -159,3 +159,6 @@
 - [x] Matrix layer-name context menu with Rename layer dialog + canvas X/Y axis overlay with arrowheads, e2e tests green, docs updated
 - [x] Unit tests (vitest): 160 passed
 - [x] E2E test (Playwright): 109 passed
+- [x] Magenta border on the right/bottom texture edges, e2e test green, docs updated
+- [x] Unit tests (vitest): 160 passed
+- [x] E2E test (Playwright): 109 passed

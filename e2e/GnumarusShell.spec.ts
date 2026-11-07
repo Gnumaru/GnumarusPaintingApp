@@ -4157,8 +4157,11 @@ async function getAxisOverlay(page: import("@playwright/test").Page): Promise<{
   visible: boolean;
   xAxis: { ax: number; ay: number; bx: number; by: number };
   yAxis: { ax: number; ay: number; bx: number; by: number };
+  rightBorder: { ax: number; ay: number; bx: number; by: number };
+  bottomBorder: { ax: number; ay: number; bx: number; by: number };
   xColor: string;
   yColor: string;
+  borderColor: string;
 }> {
   return page.evaluate(() => {
     const root = window as unknown as {
@@ -4168,8 +4171,11 @@ async function getAxisOverlay(page: import("@playwright/test").Page): Promise<{
             visible: boolean;
             xAxis: { ax: number; ay: number; bx: number; by: number };
             yAxis: { ax: number; ay: number; bx: number; by: number };
+            rightBorder: { ax: number; ay: number; bx: number; by: number };
+            bottomBorder: { ax: number; ay: number; bx: number; by: number };
             xColor: string;
             yColor: string;
+            borderColor: string;
           };
         };
       };
@@ -4213,6 +4219,7 @@ test("canvas shows red X and green Y axis lines following the cell transform", a
   expect(axes.visible).toBe(true);
   expect(axes.xColor).toBe("#ff0000");
   expect(axes.yColor).toBe("#00ff00");
+  expect(axes.borderColor).toBe("#ff00ff");
   // X runs along the top edge, Y along the left edge.
   expect(axes.xAxis.ay).toBeCloseTo(axes.xAxis.by, 5);
   expect(axes.xAxis.ax).toBeLessThan(axes.xAxis.bx);
@@ -4222,6 +4229,15 @@ test("canvas shows red X and green Y axis lines following the cell transform", a
   expect(axes.yAxis.by - axes.yAxis.ay).toBeCloseTo(span, 0);
   expect(axes.xAxis.ax).toBeCloseTo(axes.yAxis.ax, 5);
   expect(axes.xAxis.ay).toBeCloseTo(axes.yAxis.ay, 5);
+  // Magenta borders close the rectangle on the right and bottom edges.
+  expect(axes.rightBorder.ax).toBeCloseTo(axes.xAxis.bx, 5);
+  expect(axes.rightBorder.ay).toBeCloseTo(axes.xAxis.by, 5);
+  expect(axes.rightBorder.bx).toBeCloseTo(axes.bottomBorder.bx, 5);
+  expect(axes.rightBorder.by).toBeCloseTo(axes.bottomBorder.by, 5);
+  expect(axes.bottomBorder.ax).toBeCloseTo(axes.yAxis.bx, 5);
+  expect(axes.bottomBorder.ay).toBeCloseTo(axes.yAxis.by, 5);
+  expect(axes.rightBorder.ax).toBeCloseTo(axes.rightBorder.bx, 5);
+  expect(axes.bottomBorder.ay).toBeCloseTo(axes.bottomBorder.by, 5);
   // A 90 degree layer rotation swaps the on-screen axes.
   await page.evaluate(() => {
     const root = window as unknown as {

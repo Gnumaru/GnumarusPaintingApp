@@ -496,6 +496,8 @@ export class GnumarusCanvasEngine {
   private readonly axisXLine: THREE.LineSegments;
   private readonly axisYMaterial: THREE.LineBasicMaterial;
   private readonly axisYLine: THREE.LineSegments;
+  private readonly borderMaterial: THREE.LineBasicMaterial;
+  private readonly borderLine: THREE.LineSegments;
   private readonly onStats: (stats: GnumarusEngineStats) => void;
   private readonly onPixelsChanged: () => void;
   private readonly onToolChanged: ((tool: GnumarusCanvasTool) => void) | undefined;
@@ -710,6 +712,9 @@ export class GnumarusCanvasEngine {
     const axisY = makeAxisLine(0x00ff00);
     this.axisYMaterial = axisY.material;
     this.axisYLine = axisY.line;
+    const border = makeAxisLine(0xff00ff);
+    this.borderMaterial = border.material;
+    this.borderLine = border.line;
     const first = this.createLayerInternal("layer0", "Layer 1", true, 1, createPixelBuffer(64, 64), 64, 64, {
       ...IDENTITY_LAYER_TRANSFORM,
     });
@@ -4507,11 +4512,14 @@ export class GnumarusCanvasEngine {
   /**
    * Cell-image axis segments in container-local CSS pixels, or null when the
    * current cell has no drawable texture. X runs along the top edge, Y along
-   * the left edge, both resolved through the cell transform.
+   * the left edge, both resolved through the cell transform. Right and bottom
+   * carry the plain magenta border.
    */
   private axisOverlaySegments(): {
     x: { ax: number; ay: number; bx: number; by: number };
     y: { ax: number; ay: number; bx: number; by: number };
+    right: { ax: number; ay: number; bx: number; by: number };
+    bottom: { ax: number; ay: number; bx: number; by: number };
   } | null {
     const active = this.activeLayer();
     if (active === null || active.width < 1 || active.height < 1) {
@@ -4531,9 +4539,12 @@ export class GnumarusCanvasEngine {
     const origin = toLocal(0, 0);
     const xEnd = toLocal(active.width, 0);
     const yEnd = toLocal(0, active.height);
+    const far = toLocal(active.width, active.height);
     return {
       x: { ax: origin.x, ay: origin.y, bx: xEnd.x, by: xEnd.y },
       y: { ax: origin.x, ay: origin.y, bx: yEnd.x, by: yEnd.y },
+      right: { ax: xEnd.x, ay: xEnd.y, bx: far.x, by: far.y },
+      bottom: { ax: yEnd.x, ay: yEnd.y, bx: far.x, by: far.y },
     };
   }
 
@@ -4576,6 +4587,30 @@ export class GnumarusCanvasEngine {
     attribute.needsUpdate = true;
   }
 
+  /** Write two plain segments (right + bottom border, no arrowheads). */
+  private writeBorderSegments(
+    line: THREE.LineSegments,
+    right: { ax: number; ay: number; bx: number; by: number },
+    bottom: { ax: number; ay: number; bx: number; by: number },
+    width: number,
+    height: number,
+    z: number,
+  ): void {
+    const toScene = (x: number, y: number): [number, number] => [x - width / 2, height / 2 - y];
+    const [rax, ray] = toScene(right.ax, right.ay);
+    const [rbx, rby] = toScene(right.bx, right.by);
+    const [bax, bay] = toScene(bottom.ax, bottom.ay);
+    const [bbx, bby] = toScene(bottom.bx, bottom.by);
+    const attribute = line.geometry.getAttribute("position") as THREE.BufferAttribute;
+    attribute.setXYZ(0, rax, ray, z);
+    attribute.setXYZ(1, rbx, rby, z);
+    attribute.setXYZ(2, bax, bay, z);
+    attribute.setXYZ(3, bbx, bby, z);
+    attribute.setXYZ(4, bbx, bby, z);
+    attribute.setXYZ(5, bbx, bby, z);
+    attribute.needsUpdate = true;
+  }
+
   /** Position the red X / green Y axis lines over the current cell texture. */
   private updateAxisOverlay(): void {
     if (this.disposed) {
@@ -4585,6 +4620,7 @@ export class GnumarusCanvasEngine {
     if (segments === null) {
       this.axisXLine.visible = false;
       this.axisYLine.visible = false;
+      this.borderLine.visible = false;
       return;
     }
     const rect = this.container.getBoundingClientRect();
@@ -4593,8 +4629,10 @@ export class GnumarusCanvasEngine {
     const z = this.layers.length * 0.01 + 0.03;
     this.writeAxisSegments(this.axisXLine, segments.x, width, height, z);
     this.writeAxisSegments(this.axisYLine, segments.y, width, height, z);
+    this.writeBorderSegments(this.borderLine, segments.right, segments.bottom, width, height, z);
     this.axisXLine.visible = true;
     this.axisYLine.visible = true;
+    this.borderLine.visible = true;
   }
 
   /** Axis overlay state in container-local CSS pixels, for tests and UI. */
@@ -4602,8 +4640,11 @@ export class GnumarusCanvasEngine {
     visible: boolean;
     xAxis: { ax: number; ay: number; bx: number; by: number };
     yAxis: { ax: number; ay: number; bx: number; by: number };
+    rightBorder: { ax: number; ay: number; bx: number; by: number };
+    bottomBorder: { ax: number; ay: number; bx: number; by: number };
     xColor: string;
     yColor: string;
+    borderColor: string;
   } {
     const segments = this.axisOverlaySegments();
     const empty = { ax: 0, ay: 0, bx: 0, by: 0 };
@@ -4611,8 +4652,11 @@ export class GnumarusCanvasEngine {
       visible: segments !== null,
       xAxis: segments === null ? { ...empty } : { ...segments.x },
       yAxis: segments === null ? { ...empty } : { ...segments.y },
+      rightBorder: segments === null ? { ...empty } : { ...segments.right },
+      bottomBorder: segments === null ? { ...empty } : { ...segments.bottom },
       xColor: `#${this.axisXMaterial.color.getHexString()}`,
       yColor: `#${this.axisYMaterial.color.getHexString()}`,
+      borderColor: `#${this.borderMaterial.color.getHexString()}`,
     };
   }
 
@@ -4652,6 +4696,9 @@ export class GnumarusCanvasEngine {
     this.scene.remove(this.axisYLine);
     this.axisYLine.geometry.dispose();
     this.axisYMaterial.dispose();
+    this.scene.remove(this.borderLine);
+    this.borderLine.geometry.dispose();
+    this.borderMaterial.dispose();
     this.resizeObserver.disconnect();
     this.lineAnchor = null;
     this.lastMouseClient = null;
