@@ -17,8 +17,8 @@ declare module "three" {
   }
 
   export class Scene {
-    add(object: Mesh): void;
-    remove(object: Mesh): void;
+    add(object: Mesh | LineSegments): void;
+    remove(object: Mesh | LineSegments): void;
   }
 
   export class OrthographicCamera {
@@ -76,6 +76,40 @@ declare module "three" {
   export class PlaneGeometry {
     constructor(width: number, height: number);
     dispose(): void;
+  }
+
+  export class Color {
+    constructor(color?: number);
+    getHexString(): string;
+  }
+
+  export class LineBasicMaterial {
+    readonly color: Color;
+    constructor(options?: { color?: number; transparent?: boolean; depthWrite?: boolean });
+    dispose(): void;
+  }
+
+  export class BufferAttribute {
+    needsUpdate: boolean;
+    constructor(array: Float32Array, itemSize: number);
+    setXYZ(index: number, x: number, y: number, z: number): this;
+  }
+
+  export class BufferGeometry {
+    constructor();
+    setAttribute(name: string, attribute: BufferAttribute): this;
+    getAttribute(name: string): BufferAttribute;
+    dispose(): void;
+  }
+
+  export class LineSegments {
+    readonly geometry: BufferGeometry;
+    matrixAutoUpdate: boolean;
+    matrixWorldNeedsUpdate: boolean;
+    frustumCulled: boolean;
+    renderOrder: number;
+    visible: boolean;
+    constructor(geometry?: BufferGeometry, material?: LineBasicMaterial);
   }
 
   export class Mesh {

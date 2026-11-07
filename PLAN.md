@@ -244,3 +244,12 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 ## 41. Rename transform tool display name (implemented)
 - User-facing name of the `transform` tool is "non-destructive cell transform" (toolbar button label/title, tool options empty-state text and aria-label, status bar, shortcuts reference); internal tool id stays `transform` so engine/shell behavior and the `T` shortcut are unchanged.
 - Updated the affected E2E expectations (tool options empty label, toolbar button name, status text, toolbar icon map, shortcuts modal entry); unit tests unaffected (no logic change).
+
+## 42. Live final preview during non-destructive transforms (implemented)
+- Root cause: `setLayerTransform`/`resetLayerTransform` fired no callbacks, so the open preview only refreshed when something else (e.g. layer switch via `refreshLayers`) recomposites it.
+- Fix: new optional engine callback `onTransformChanged`, fired on both success paths, wired in the shell to `refreshPreview()` only — same per-move cost class as pencil strokes, no dirty-flag change.
+- E2E: transform drag with the preview open asserts pixels move mid-drag, plus menu Reset transform re-assert.
+
+## 43. Matrix layer rename menu + canvas axis overlay (implemented)
+- Animation matrix layer names get a right-click menu with a single `Rename layer` item, mirroring `Rename frame` (dialog, trim/maxlength guard, dirty + status, refresh).
+- Main canvas shows red X (top edge) and green Y (left edge) axis lines with arrowheads over the current cell texture, transformed with the cell (WebGL lines, hidden when the cell is empty).

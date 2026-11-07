@@ -1002,6 +1002,7 @@ export class GnumarusShell extends LitElement {
   declare matrixMenu:
     | { kind: "cell"; layerId: string; frame: number; x: number; y: number }
     | { kind: "frame"; frame: number; x: number; y: number }
+    | { kind: "layer"; layerId: string; x: number; y: number }
     | null;
   declare contentPickerTarget: { layerId: string; frame: number } | null;
   declare texturePickerContentId: string | null;
@@ -2005,6 +2006,17 @@ export class GnumarusShell extends LitElement {
           <button @click=${(): void => this.confirmFrameRename()}>Rename</button>
         </div>
       </dialog>
+      <dialog id="layerRenameDialog">
+        <h3>Rename layer</h3>
+        <label
+          >Layer name
+          <input type="text" id="layerRename" maxlength="64" .value=${this.layerRenameValue()} />
+        </label>
+        <div class="dialog-actions">
+          <button @click=${(): void => this.closeLayerRenameDialog()}>Cancel</button>
+          <button @click=${(): void => this.confirmLayerRename()}>Rename</button>
+        </div>
+      </dialog>
       ${this.renderContentPickerDialog()} ${this.renderTexturePickerDialog()}
     `;
   }
@@ -2316,7 +2328,21 @@ export class GnumarusShell extends LitElement {
             })}
             ${matrix.rows.map(
               (row) => html`
-                <div class="anim-layer-name" title=${row.layerName}>${row.layerName}</div>
+                <div
+                  class="anim-layer-name"
+                  title=${row.layerName}
+                  data-testid="anim-layer-name"
+                  data-matrix-layer=${row.layerId}
+                  role="button"
+                  tabindex="0"
+                  aria-label="Animation layer ${row.layerName}"
+                  @contextmenu=${(event: MouseEvent): void => {
+                    event.preventDefault();
+                    this.openMatrixLayerMenu(row.layerId, event.clientX, event.clientY);
+                  }}
+                >
+                  ${row.layerName}
+                </div>
                 ${row.cells.map((cell) => {
                   const isActive = cell.layerId === matrix.activeLayerId && cell.frame === matrix.currentFrame;
                   const isCurrent = cell.frame === matrix.currentFrame;
@@ -2375,6 +2401,17 @@ export class GnumarusShell extends LitElement {
           <button @click=${(): void => this.onOpenFrameDuration()}>Set frame duration…</button>
           <button @click=${(): void => this.onRenameFrameFromMenu()}>Rename frame…</button>
           <button ?disabled=${count <= 1} @click=${(): void => this.onRemoveFrame(frame)}>Remove frame</button>
+        </div>
+      `;
+    }
+    if (this.matrixMenu.kind === "layer") {
+      return html`
+        <div class="context-blocker" @click=${(): void => this.closeMatrixMenu()} @contextmenu=${(event: Event): void => {
+          event.preventDefault();
+          this.closeMatrixMenu();
+        }}></div>
+        <div class="context-menu" style="left: ${this.matrixMenu.x}px; top: ${this.matrixMenu.y}px;">
+          <button @click=${(): void => this.onRenameLayerFromMenu()}>Rename layer…</button>
         </div>
       `;
     }
@@ -3884,6 +3921,11 @@ export class GnumarusShell extends LitElement {
     this.matrixMenu = { kind: "cell", layerId, frame, x: clientX, y: clientY };
   }
 
+  private openMatrixLayerMenu(layerId: string, clientX: number, clientY: number): void {
+    this.closeLayerMenu();
+    this.matrixMenu = { kind: "layer", layerId, x: Math.min(clientX, window.innerWidth - 200), y: Math.min(clientY, window.innerHeight - 80) };
+  }
+
   private openMatrixFrameMenu(frame: number, clientX: number, clientY: number): void {
     this.closeLayerMenu();
     this.matrixMenu = { kind: "frame", frame, x: clientX, y: clientY };
@@ -4326,6 +4368,62 @@ export class GnumarusShell extends LitElement {
     }
     this.refreshLayers();
     this.closeFrameRenameDialog();
+  }
+
+  private layerRenameTarget: string | null = null;
+
+  private layerRenameValue(): string {
+    if (this.layerRenameTarget === null || this.engine === null) {
+      return "";
+    }
+    return this.engine.getLayers().find((layer) => layer.id === this.layerRenameTarget)?.name ?? "";
+  }
+
+  private onRenameLayerFromMenu(): void {
+    if (this.matrixMenu === null || this.matrixMenu.kind !== "layer") {
+      this.closeMatrixMenu();
+      return;
+    }
+    const layerId = this.matrixMenu.layerId;
+    this.closeMatrixMenu();
+    this.openLayerRenameDialog(layerId);
+  }
+
+  private openLayerRenameDialog(layerId: string): void {
+    if (this.engine === null) {
+      return;
+    }
+    this.layerRenameTarget = layerId;
+    this.requestUpdate();
+    const dialog = this.shadowRoot?.getElementById("layerRenameDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+  }
+
+  private closeLayerRenameDialog(): void {
+    const dialog = this.shadowRoot?.getElementById("layerRenameDialog") as HTMLDialogElement | null;
+    dialog?.close();
+    this.layerRenameTarget = null;
+  }
+
+  private confirmLayerRename(): void {
+    const target = this.layerRenameTarget;
+    if (target === null || this.engine === null) {
+      this.closeLayerRenameDialog();
+      return;
+    }
+    const input = this.shadowRoot?.getElementById("layerRename") as HTMLInputElement | null;
+    const name = input?.value ?? "";
+    if (name.trim().length === 0) {
+      this.refreshLayers();
+      this.closeLayerRenameDialog();
+      return;
+    }
+    if (this.engine.renameLayer(target, name)) {
+      this.dirty = true;
+      this.statusMessage = "Layer renamed";
+    }
+    this.refreshLayers();
+    this.closeLayerRenameDialog();
   }
 
   private togglePlayback(): void {

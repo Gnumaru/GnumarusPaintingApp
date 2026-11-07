@@ -492,6 +492,10 @@ export class GnumarusCanvasEngine {
   private gridMinZoom: number;
   private readonly gridMaterial: THREE.ShaderMaterial;
   private readonly gridPlane: THREE.Mesh;
+  private readonly axisXMaterial: THREE.LineBasicMaterial;
+  private readonly axisXLine: THREE.LineSegments;
+  private readonly axisYMaterial: THREE.LineBasicMaterial;
+  private readonly axisYLine: THREE.LineSegments;
   private readonly onStats: (stats: GnumarusEngineStats) => void;
   private readonly onPixelsChanged: () => void;
   private readonly onToolChanged: ((tool: GnumarusCanvasTool) => void) | undefined;
@@ -689,6 +693,23 @@ export class GnumarusCanvasEngine {
     this.gridPlane.renderOrder = 1000;
     this.gridPlane.visible = false;
     this.scene.add(this.gridPlane);
+    const makeAxisLine = (color: number): { material: THREE.LineBasicMaterial; line: THREE.LineSegments } => {
+      const material = new THREE.LineBasicMaterial({ color, transparent: true, depthWrite: false });
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(18), 3));
+      const line = new THREE.LineSegments(geometry, material);
+      line.frustumCulled = false;
+      line.renderOrder = 1001;
+      line.visible = false;
+      this.scene.add(line);
+      return { material, line };
+    };
+    const axisX = makeAxisLine(0xff0000);
+    this.axisXMaterial = axisX.material;
+    this.axisXLine = axisX.line;
+    const axisY = makeAxisLine(0x00ff00);
+    this.axisYMaterial = axisY.material;
+    this.axisYLine = axisY.line;
     const first = this.createLayerInternal("layer0", "Layer 1", true, 1, createPixelBuffer(64, 64), 64, 64, {
       ...IDENTITY_LAYER_TRANSFORM,
     });
@@ -1465,6 +1486,7 @@ export class GnumarusCanvasEngine {
     this.stopFollowLoop();
     this.resetPencilPixelPerfect();
     this.updateGrid();
+    this.updateAxisOverlay();
     this.render();
     this.updatePreviews();
     this.emitStats();
@@ -4482,6 +4504,118 @@ export class GnumarusCanvasEngine {
     }
   }
 
+  /**
+   * Cell-image axis segments in container-local CSS pixels, or null when the
+   * current cell has no drawable texture. X runs along the top edge, Y along
+   * the left edge, both resolved through the cell transform.
+   */
+  private axisOverlaySegments(): {
+    x: { ax: number; ay: number; bx: number; by: number };
+    y: { ax: number; ay: number; bx: number; by: number };
+  } | null {
+    const active = this.activeLayer();
+    if (active === null || active.width < 1 || active.height < 1) {
+      return null;
+    }
+    const rect = this.container.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return null;
+    }
+    const local: GnumarusRect = { left: 0, top: 0, width: rect.width, height: rect.height };
+    const view = this.viewTransform();
+    const toLocal = (imageX: number, imageY: number): { x: number; y: number } => {
+      const project = layerImageToProject(imageX, imageY, active.width, active.height, active.transform);
+      const client = projectToScreen(project.x, project.y, local, view);
+      return { x: client.x, y: client.y };
+    };
+    const origin = toLocal(0, 0);
+    const xEnd = toLocal(active.width, 0);
+    const yEnd = toLocal(0, active.height);
+    return {
+      x: { ax: origin.x, ay: origin.y, bx: xEnd.x, by: xEnd.y },
+      y: { ax: origin.x, ay: origin.y, bx: yEnd.x, by: yEnd.y },
+    };
+  }
+
+  /** Write one axis segment plus its end arrowhead into a line geometry. */
+  private writeAxisSegments(
+    line: THREE.LineSegments,
+    segment: { ax: number; ay: number; bx: number; by: number },
+    width: number,
+    height: number,
+    z: number,
+  ): void {
+    const dx = segment.bx - segment.ax;
+    const dy = segment.by - segment.ay;
+    const length = Math.sqrt(dx * dx + dy * dy);
+    let baseX = segment.bx;
+    let baseY = segment.by;
+    let wingX = 0;
+    let wingY = 0;
+    if (length > 1e-6) {
+      const ux = dx / length;
+      const uy = dy / length;
+      const head = Math.min(9, length / 3);
+      baseX = segment.bx - ux * head;
+      baseY = segment.by - uy * head;
+      wingX = -uy * head * 0.45;
+      wingY = ux * head * 0.45;
+    }
+    const toScene = (x: number, y: number): [number, number] => [x - width / 2, height / 2 - y];
+    const [sax, say] = toScene(segment.ax, segment.ay);
+    const [sbx, sby] = toScene(segment.bx, segment.by);
+    const [w1x, w1y] = toScene(baseX + wingX, baseY + wingY);
+    const [w2x, w2y] = toScene(baseX - wingX, baseY - wingY);
+    const attribute = line.geometry.getAttribute("position") as THREE.BufferAttribute;
+    attribute.setXYZ(0, sax, say, z);
+    attribute.setXYZ(1, sbx, sby, z);
+    attribute.setXYZ(2, w1x, w1y, z);
+    attribute.setXYZ(3, sbx, sby, z);
+    attribute.setXYZ(4, w2x, w2y, z);
+    attribute.setXYZ(5, sbx, sby, z);
+    attribute.needsUpdate = true;
+  }
+
+  /** Position the red X / green Y axis lines over the current cell texture. */
+  private updateAxisOverlay(): void {
+    if (this.disposed) {
+      return;
+    }
+    const segments = this.axisOverlaySegments();
+    if (segments === null) {
+      this.axisXLine.visible = false;
+      this.axisYLine.visible = false;
+      return;
+    }
+    const rect = this.container.getBoundingClientRect();
+    const width = Math.max(1, rect.width);
+    const height = Math.max(1, rect.height);
+    const z = this.layers.length * 0.01 + 0.03;
+    this.writeAxisSegments(this.axisXLine, segments.x, width, height, z);
+    this.writeAxisSegments(this.axisYLine, segments.y, width, height, z);
+    this.axisXLine.visible = true;
+    this.axisYLine.visible = true;
+  }
+
+  /** Axis overlay state in container-local CSS pixels, for tests and UI. */
+  getAxisOverlayState(): {
+    visible: boolean;
+    xAxis: { ax: number; ay: number; bx: number; by: number };
+    yAxis: { ax: number; ay: number; bx: number; by: number };
+    xColor: string;
+    yColor: string;
+  } {
+    const segments = this.axisOverlaySegments();
+    const empty = { ax: 0, ay: 0, bx: 0, by: 0 };
+    return {
+      visible: segments !== null,
+      xAxis: segments === null ? { ...empty } : { ...segments.x },
+      yAxis: segments === null ? { ...empty } : { ...segments.y },
+      xColor: `#${this.axisXMaterial.color.getHexString()}`,
+      yColor: `#${this.axisYMaterial.color.getHexString()}`,
+    };
+  }
+
   resetView(): void {
     const rect = this.container.getBoundingClientRect();
     if (rect.width > 0 && rect.height > 0) {
@@ -4512,6 +4646,12 @@ export class GnumarusCanvasEngine {
     this.disposed = true;
     this.stopFollowLoop();
     this.disposeFloatingPlane();
+    this.scene.remove(this.axisXLine);
+    this.axisXLine.geometry.dispose();
+    this.axisXMaterial.dispose();
+    this.scene.remove(this.axisYLine);
+    this.axisYLine.geometry.dispose();
+    this.axisYMaterial.dispose();
     this.resizeObserver.disconnect();
     this.lineAnchor = null;
     this.lastMouseClient = null;
@@ -5419,6 +5559,7 @@ export class GnumarusCanvasEngine {
     );
     this.updateGrid();
     this.syncFloatingPlane();
+    this.updateAxisOverlay();
   }
 
   private render(): void {

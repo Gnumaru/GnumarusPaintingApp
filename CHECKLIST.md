@@ -156,3 +156,6 @@
 - [x] Live final preview during non-destructive transforms (`onTransformChanged`), e2e test green, docs updated
 - [x] Unit tests (vitest): 160 passed
 - [x] E2E test (Playwright): 107 passed
+- [x] Matrix layer-name context menu with Rename layer dialog + canvas X/Y axis overlay with arrowheads, e2e tests green, docs updated
+- [x] Unit tests (vitest): 160 passed
+- [x] E2E test (Playwright): 109 passed

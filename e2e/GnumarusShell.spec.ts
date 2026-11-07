@@ -4152,3 +4152,100 @@ test("final preview follows non-destructive transforms live", async ({ page }) =
   await page.getByRole("button", { name: "Reset transform" }).click();
   await expect.poll(() => previewPixel(32, 32)).toEqual([0, 0, 0, 255]);
 });
+
+async function getAxisOverlay(page: import("@playwright/test").Page): Promise<{
+  visible: boolean;
+  xAxis: { ax: number; ay: number; bx: number; by: number };
+  yAxis: { ax: number; ay: number; bx: number; by: number };
+  xColor: string;
+  yColor: string;
+}> {
+  return page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          getAxisOverlayState(): {
+            visible: boolean;
+            xAxis: { ax: number; ay: number; bx: number; by: number };
+            yAxis: { ax: number; ay: number; bx: number; by: number };
+            xColor: string;
+            yColor: string;
+          };
+        };
+      };
+    };
+    const state = root.__gnumarus?.engine?.getAxisOverlayState();
+    if (state === undefined) {
+      throw new Error("axis overlay state is unavailable");
+    }
+    return state;
+  });
+}
+
+test("matrix layer names rename layers through a context menu", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  const nameCell = matrix.locator('[data-testid="anim-layer-name"][data-matrix-layer="layer0"]');
+  await expect(nameCell).toContainText("Layer 1");
+  await nameCell.click({ button: "right" });
+  await page.getByRole("button", { name: "Rename layer…" }).click();
+  await expect(page.locator("gnumarus-shell dialog#layerRenameDialog")).toBeVisible();
+  await page.locator("gnumarus-shell input#layerRename").fill("Backdrop");
+  await page.getByRole("button", { name: "Rename", exact: true }).click();
+  await expect(nameCell).toContainText("Backdrop");
+  await expect(page.locator('gnumarus-shell [data-layer-id="layer0"] .layer-name')).toContainText("Backdrop");
+  await expect(page.locator("gnumarus-shell")).toContainText("Layer renamed");
+  // Empty names are rejected like in the other rename dialogs.
+  await nameCell.click({ button: "right" });
+  await page.getByRole("button", { name: "Rename layer…" }).click();
+  await page.locator("gnumarus-shell input#layerRename").fill("   ");
+  await page.getByRole("button", { name: "Rename", exact: true }).click();
+  await expect(nameCell).toContainText("Backdrop");
+});
+
+test("canvas shows red X and green Y axis lines following the cell transform", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const zoom = (await getViewState(page)).zoom;
+  const span = 64 * zoom;
+  let axes = await getAxisOverlay(page);
+  expect(axes.visible).toBe(true);
+  expect(axes.xColor).toBe("#ff0000");
+  expect(axes.yColor).toBe("#00ff00");
+  // X runs along the top edge, Y along the left edge.
+  expect(axes.xAxis.ay).toBeCloseTo(axes.xAxis.by, 5);
+  expect(axes.xAxis.ax).toBeLessThan(axes.xAxis.bx);
+  expect(axes.xAxis.bx - axes.xAxis.ax).toBeCloseTo(span, 0);
+  expect(axes.yAxis.ax).toBeCloseTo(axes.yAxis.bx, 5);
+  expect(axes.yAxis.by).toBeGreaterThan(axes.yAxis.ay);
+  expect(axes.yAxis.by - axes.yAxis.ay).toBeCloseTo(span, 0);
+  expect(axes.xAxis.ax).toBeCloseTo(axes.yAxis.ax, 5);
+  expect(axes.xAxis.ay).toBeCloseTo(axes.yAxis.ay, 5);
+  // A 90 degree layer rotation swaps the on-screen axes.
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { setLayerTransform(id: string, transform: { rotation: number }): boolean } };
+    };
+    root.__gnumarus?.engine?.setLayerTransform("layer0", { rotation: Math.PI / 2 });
+  });
+  axes = await getAxisOverlay(page);
+  expect(axes.xAxis.ax).toBeCloseTo(axes.xAxis.bx, 5);
+  expect(axes.xAxis.by).toBeGreaterThan(axes.xAxis.ay);
+  expect(axes.yAxis.ay).toBeCloseTo(axes.yAxis.by, 5);
+  // A horizontal flip mirrors the X arrowhead direction.
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { setLayerTransform(id: string, transform: { rotation: number; flipX: boolean }): boolean } };
+    };
+    root.__gnumarus?.engine?.setLayerTransform("layer0", { rotation: 0, flipX: true });
+  });
+  axes = await getAxisOverlay(page);
+  expect(axes.xAxis.bx).toBeLessThan(axes.xAxis.ax);
+  expect(axes.xAxis.bx - axes.xAxis.ax).toBeCloseTo(-span, 0);
+  // Empty cells hide the axes.
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click();
+  expect((await getAxisOverlay(page)).visible).toBe(false);
+});
