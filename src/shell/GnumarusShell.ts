@@ -143,6 +143,7 @@ const GNUMARUS_SHORTCUTS: GnumarusShortcutSection[] = [
       { keys: "T", action: "Non-destructive cell transform tool" },
       { keys: "E", action: "Toggle eraser blend mode" },
       { keys: "Hold Ctrl", action: "Temporary eyedropper (release to restore the previous tool)" },
+      { keys: "Enter, Return or Esc", action: "Merge floating selection into the cell" },
       { keys: "Escape", action: "Cancel line/curve in progress; close menus and rename fields" },
     ],
   },
@@ -906,6 +907,7 @@ export class GnumarusShell extends LitElement {
     checkerSizeY: { type: Number },
     gridMinZoom: { type: Number },
     rotationStepDeg: { type: Number },
+    floatingActive: { type: Boolean },
     backgroundMode: { type: String },
     backgroundColor: { type: String },
     previewOpen: { type: Boolean },
@@ -978,6 +980,7 @@ export class GnumarusShell extends LitElement {
   declare checkerSizeY: number;
   declare gridMinZoom: number;
   declare rotationStepDeg: number;
+  declare floatingActive: boolean;
   declare backgroundMode: GnumarusBackgroundMode;
   declare backgroundColor: string;
   declare previewOpen: boolean;
@@ -1061,6 +1064,7 @@ export class GnumarusShell extends LitElement {
     this.checkerSizeY = DEFAULT_CHECKER_SETTINGS.sizeY;
     this.gridMinZoom = DEFAULT_GRID_SETTINGS.minZoom;
     this.rotationStepDeg = DEFAULT_ROTATION_SETTINGS.stepDeg;
+    this.floatingActive = false;
     this.backgroundMode = DEFAULT_BACKGROUND_SETTINGS.mode;
     this.backgroundColor = DEFAULT_BACKGROUND_SETTINGS.color;
     this.previewOpen = false;
@@ -1276,6 +1280,28 @@ export class GnumarusShell extends LitElement {
             }}
           >
             <span class="tool-icon">〜</span>
+          </button>
+          <button
+            class=${this.tool === "rectselect" ? "active" : ""}
+            title="Rectangular selection (drag to mark, release cuts to floating)"
+            aria-label="Rectangular selection"
+            @click=${(): void => {
+              this.tool = "rectselect";
+              this.engine?.setTool("rectselect");
+            }}
+          >
+            <span class="tool-icon">▭</span>
+          </button>
+          <button
+            class=${this.tool === "destransform" ? "active" : ""}
+            title="Destructive transform (drag to move selection, Enter merges)"
+            aria-label="Destructive transform"
+            @click=${(): void => {
+              this.tool = "destransform";
+              this.engine?.setTool("destransform");
+            }}
+          >
+            <span class="tool-icon">✛</span>
           </button>
           <button
             class=${this.tool === "transform" ? "active" : ""}
@@ -1983,7 +2009,16 @@ export class GnumarusShell extends LitElement {
 
   /** User-facing name of a tool. The internal id stays unchanged. */
   private toolDisplayName(tool: GnumarusCanvasTool): string {
-    return tool === "transform" ? "non-destructive cell transform" : tool;
+    if (tool === "transform") {
+      return "non-destructive cell transform";
+    }
+    if (tool === "destransform") {
+      return "destructive transform";
+    }
+    if (tool === "rectselect") {
+      return "rectangular selection";
+    }
+    return tool;
   }
 
   private renderBlendModeOption() {
@@ -2192,6 +2227,19 @@ export class GnumarusShell extends LitElement {
       return html`
         <div class="tool-options" data-testid="tool-options" aria-label="Bucket options" ?hidden=${this.uiHidden}>
           ${this.renderBlendModeOption()}
+        </div>
+      `;
+    }
+    if (this.tool === "destransform") {
+      return html`
+        <div class="tool-options" data-testid="tool-options" aria-label="Destructive transform options" ?hidden=${this.uiHidden}>
+          <button
+            ?disabled=${!this.floatingActive}
+            title="Merge the floating selection into the cell (Enter)"
+            @click=${(): void => this.commitFloatingSelection()}
+          >
+            Commit selection
+          </button>
         </div>
       `;
     }
@@ -3713,12 +3761,14 @@ export class GnumarusShell extends LitElement {
     if (this.engine === null) {
       this.layers = [];
       this.activeLayerId = "";
+      this.floatingActive = false;
       this.layerText = "-";
       this.frameText = "Frame 1/1: Frame 1";
       return;
     }
     this.layers = this.engine.getLayers();
     this.activeLayerId = this.engine.getActiveLayerId();
+    this.floatingActive = this.engine.hasFloatingSelection();
     const index = this.layers.findIndex((layer) => layer.id === this.activeLayerId);
     const current = index < 0 ? undefined : this.layers[index];
     this.layerText =
@@ -4451,6 +4501,15 @@ export class GnumarusShell extends LitElement {
       this.statusMessage = "Layer transform reset";
     } else {
       this.statusMessage = "Layer transform reset failed";
+    }
+  }
+
+  /** Merge the floating selection into its home cell, if one is active. */
+  private commitFloatingSelection(): void {
+    if (this.engine?.commitFloating() === true) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = "Floating selection merged";
     }
   }
 

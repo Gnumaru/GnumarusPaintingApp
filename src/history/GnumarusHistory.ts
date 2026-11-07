@@ -156,12 +156,25 @@ export class GnumarusHistory {
     this.maxEntries = Math.max(1, Math.floor(maxEntries));
   }
 
-  push(entry: GnumarusHistoryEntry): void {
+  push(entry: GnumarusHistoryEntry): number {
     this.undoStack.push(entry);
+    let evicted = 0;
     while (this.undoStack.length > this.maxEntries) {
       this.undoStack.shift();
+      evicted += 1;
     }
     this.redoStack.length = 0;
+    return evicted;
+  }
+
+  /** Number of undoable entries (lets owners track entry lifecycles). */
+  undoDepth(): number {
+    return this.undoStack.length;
+  }
+
+  /** Number of redoable entries. */
+  redoDepth(): number {
+    return this.redoStack.length;
   }
 
   canUndo(): boolean {

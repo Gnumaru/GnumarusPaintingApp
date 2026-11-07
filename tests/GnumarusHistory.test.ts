@@ -379,4 +379,21 @@ describe("GnumarusHistory", () => {
     expect(cells.get("lower\n1")).toBe("content9");
     expect(textures.get("contentLower")).toBe("texUpper");
   });
+
+  it("tracks depths and reports evictions", () => {
+    const history = new GnumarusHistory(2);
+    expect(history.undoDepth()).toBe(0);
+    expect(history.redoDepth()).toBe(0);
+    const entry = {
+      type: "stroke" as const,
+      layerId: "layer0",
+      diff: { x: 0, y: 0, w: 1, h: 1, before: new Uint8ClampedArray(4), after: new Uint8ClampedArray(4) },
+    };
+    expect(history.push(entry)).toBe(0);
+    expect(history.undoDepth()).toBe(1);
+    expect(history.push(entry)).toBe(0);
+    expect(history.undoDepth()).toBe(2);
+    expect(history.push(entry)).toBe(1);
+    expect(history.undoDepth()).toBe(2);
+  });
 });

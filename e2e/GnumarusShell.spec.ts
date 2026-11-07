@@ -1599,7 +1599,7 @@ test("toolbar icons fill buttons without growing them", async ({ page }) => {
       };
     });
   });
-  expect(boxes).toHaveLength(8);
+  expect(boxes).toHaveLength(10);
   const expected: Record<string, { w: number; h: number }> = {
     Pencil: { w: 33, h: 25 },
     Loupe: { w: 30, h: 25 },
@@ -1607,6 +1607,8 @@ test("toolbar icons fill buttons without growing them", async ({ page }) => {
     Eyedropper: { w: 35, h: 26 },
     Line: { w: 30, h: 25 },
     Curve: { w: 35, h: 29 },
+    "Rectangular selection": { w: 34, h: 25 },
+    "Destructive transform": { w: 33, h: 25 },
     "Non-destructive cell transform": { w: 31, h: 29 },
     "Final preview": { w: 32, h: 29 },
   };
@@ -3836,6 +3838,7 @@ test("Help menu lists every keyboard shortcut in a modal", async ({ page }) => {
   await expect(dialog).toContainText("Merge active layer down");
   await expect(dialog).toContainText("Non-destructive cell transform tool");
   await expect(dialog).toContainText("Temporary eyedropper");
+  await expect(dialog).toContainText("Merge floating selection into the cell");
   await expect(dialog).toContainText("Reset current cell texture to transparent");
   await expect(dialog).toContainText("Resize tool live");
   await expect(dialog).toContainText("Hide/show all interface chrome");
@@ -3891,4 +3894,174 @@ test("final preview shows the canvas background", async ({ page }) => {
   await page.locator("gnumarus-shell select#backgroundMode").selectOption("checkerboard");
   await expect.poll(() => previewPixel(0, 0)).toEqual([148, 148, 148, 255]);
   await page.locator("gnumarus-shell dialog#settingsDialog").getByRole("button", { name: "Close", exact: true }).click();
+});
+
+async function selectionOverlayDisplay(page: import("@playwright/test").Page): Promise<string> {
+  return page.evaluate(() => {
+    const root = document.querySelector("gnumarus-shell")?.shadowRoot;
+    const rect = root?.getElementById("canvasHost")?.querySelector('[data-testid="selection-rect"]') as SVGPolygonElement | null;
+    return rect?.style.display ?? "missing";
+  });
+}
+
+async function floatingRect(page: import("@playwright/test").Page): Promise<{
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+} | null> {
+  return page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getFloatingRect(): { x: number; y: number; width: number; height: number } | null } };
+    };
+    return root.__gnumarus?.engine?.getFloatingRect() ?? null;
+  });
+}
+
+async function layerScreenTarget(
+  page: import("@playwright/test").Page,
+  lx: number,
+  ly: number,
+): Promise<{ x: number; y: number }> {
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const state = await getViewState(page);
+  return layerPixelToScreen(
+    lx,
+    ly,
+    { left: box.x, top: box.y, width: box.width, height: box.height },
+    64,
+    64,
+    { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false },
+    { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+  );
+}
+
+test("rectangular selection cuts to floating and destructive transform moves and merges", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { setBrushSize(size: number): void } } };
+    root.__gnumarus?.shell?.setBrushSize(3);
+  });
+  const center = await layerScreenTarget(page, 32, 32);
+  await page.mouse.click(center.x, center.y);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.getByRole("button", { name: "Destructive transform" }).click();
+  await expect(page.getByRole("button", { name: "Commit selection" })).toBeDisabled();
+  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  const start = await layerScreenTarget(page, 30, 30);
+  const end = await layerScreenTarget(page, 34, 34);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 4 });
+  await expect.poll(() => selectionOverlayDisplay(page)).toBe("block");
+  await page.mouse.up();
+  expect(await floatingRect(page)).toEqual({ x: 30, y: 30, width: 5, height: 5 });
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  await page.getByRole("button", { name: "Destructive transform" }).click();
+  await expect(page.getByRole("button", { name: "Commit selection" })).toBeEnabled();
+  const grab = await layerScreenTarget(page, 31, 31);
+  const drop = await layerScreenTarget(page, 39, 31);
+  await page.mouse.move(grab.x, grab.y);
+  await page.mouse.down();
+  await page.mouse.move(drop.x, drop.y, { steps: 4 });
+  await page.mouse.up();
+  expect(await floatingRect(page)).toEqual({ x: 38, y: 30, width: 5, height: 5 });
+  await page.getByRole("button", { name: "Commit selection" }).click();
+  expect(await selectionOverlayDisplay(page)).toBe("none");
+  expect(await floatingRect(page)).toBeNull();
+  await expect(page.locator("gnumarus-shell")).toContainText("Floating selection merged");
+  await expect(page.getByRole("button", { name: "Commit selection" })).toBeDisabled();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 40, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 40, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 30, 30)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+});
+
+test("destructive transform auto-selects the whole texture and Esc merges", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.mouse.click((await layerScreenTarget(page, 32, 32)).x, (await layerScreenTarget(page, 32, 32)).y);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  await page.getByRole("button", { name: "Destructive transform" }).click();
+  const center = await layerScreenTarget(page, 32, 32);
+  await page.mouse.move(center.x, center.y);
+  await page.mouse.down();
+  await page.mouse.up();
+  expect(await floatingRect(page)).toEqual({ x: 0, y: 0, width: 64, height: 64 });
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  await page.keyboard.press("Escape");
+  expect(await floatingRect(page)).toBeNull();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+});
+
+test("undo and redo track the floating selection lifecycle", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { setBrushSize(size: number): void } } };
+    root.__gnumarus?.shell?.setBrushSize(3);
+  });
+  const center = await layerScreenTarget(page, 32, 32);
+  await page.mouse.click(center.x, center.y);
+  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  const start = await layerScreenTarget(page, 30, 30);
+  const end = await layerScreenTarget(page, 34, 34);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 4 });
+  await page.mouse.up();
+  expect(await floatingRect(page)).toEqual({ x: 30, y: 30, width: 5, height: 5 });
+  // A later paint is an independent entry: undoing it keeps the selection.
+  await page.keyboard.press("b");
+  await setPencil(page, "#0000ff");
+  const dot = await layerScreenTarget(page, 10, 10);
+  await page.mouse.click(dot.x, dot.y);
+  expect(await readPixel(page, 10, 10)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 10, 10)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await selectionOverlayDisplay(page)).toBe("block");
+  // Undoing the cut itself drops the selection and restores the pixels.
+  await page.keyboard.press("Control+z");
+  expect(await selectionOverlayDisplay(page)).toBe("none");
+  expect(await floatingRect(page)).toBeNull();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  // Redoing the cut brings the hole and the selection back.
+  await page.keyboard.press("Control+y");
+  expect(await selectionOverlayDisplay(page)).toBe("block");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  await page.keyboard.press("Control+y");
+  expect(await readPixel(page, 10, 10)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+});
+
+test("floating selection survives frame switches hidden and merges explicitly", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const center = await layerScreenTarget(page, 32, 32);
+  await page.mouse.click(center.x, center.y);
+  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  const start = await layerScreenTarget(page, 30, 30);
+  const end = await layerScreenTarget(page, 34, 34);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 4 });
+  await page.mouse.up();
+  expect(await floatingRect(page)).toEqual({ x: 30, y: 30, width: 5, height: 5 });
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click();
+  expect(await selectionOverlayDisplay(page)).toBe("none");
+  expect(await floatingRect(page)).toEqual({ x: 30, y: 30, width: 5, height: 5 });
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  expect(await selectionOverlayDisplay(page)).toBe("block");
+  await page.keyboard.press("Enter");
+  expect(await floatingRect(page)).toBeNull();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
 });

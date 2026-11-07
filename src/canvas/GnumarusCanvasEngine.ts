@@ -100,6 +100,7 @@ import { rgbaBytesToHex } from "../color/GnumarusColorModels";
 import {
   computeImageDiff,
   GnumarusHistory,
+  type GnumarusHistoryEntry,
   type GnumarusMergedLayerSnapshot,
 } from "../history/GnumarusHistory";
 
@@ -116,7 +117,32 @@ export interface GnumarusEngineStats {
   cursorY: number | null;
 }
 
-export type GnumarusCanvasTool = "pencil" | "bucket" | "line" | "curve" | "loupe" | "transform" | "eyedropper";
+export type GnumarusCanvasTool =
+  | "pencil"
+  | "bucket"
+  | "line"
+  | "curve"
+  | "loupe"
+  | "transform"
+  | "eyedropper"
+  | "rectselect"
+  | "destransform";
+
+/** Floating selection cut out of a cell texture, without a cell of its own. */
+export interface GnumarusFloatingSelection {
+  buffer: Uint8ClampedArray;
+  width: number;
+  height: number;
+  /** Integer top-left position in home texture pixels (unbounded). */
+  x: number;
+  y: number;
+  layerId: string;
+  frame: number;
+  textureId: string;
+  /** History undo depth right after the cut entry was pushed. */
+  cutDepth: number;
+  active: boolean;
+}
 
 export interface GnumarusLayerInfo {
   id: string;
@@ -425,6 +451,8 @@ export class GnumarusCanvasEngine {
   private readonly previewHandleA: SVGLineElement;
   private readonly previewHandleB: SVGLineElement;
   private readonly previewStabilizerLine: SVGLineElement;
+  private readonly previewSelectWhite: SVGPolygonElement;
+  private readonly previewSelectBlack: SVGPolygonElement;
   private readonly previewMarkers: SVGCircleElement[];
   private drawing = false;
   private panning = false;
@@ -438,6 +466,16 @@ export class GnumarusCanvasEngine {
   private readonly history = new GnumarusHistory(100);
   private lastPixel: { x: number; y: number } | null = null;
   private cursor: { x: number; y: number } | null = null;
+  /** Floating selection cut out of a cell texture (null when none exists). */
+  private floating: GnumarusFloatingSelection | null = null;
+  /** Active rectangular-selection drag in cell image pixels, or null. */
+  private rectDrag: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  /** Active destructive-transform move (grab offset in cell image pixels). */
+  private moveDrag: { grabDX: number; grabDY: number } | null = null;
+  private floatingPlane: THREE.Mesh | null = null;
+  private floatingPlaneFor: GnumarusFloatingSelection | null = null;
+  private floatingMaterial: THREE.ShaderMaterial | null = null;
+  private floatingTexture: THREE.DataTexture | null = null;
   private disposed = false;
   private checkerMode: GnumarusCheckerMode;
   private checkerSizeX: number;
@@ -568,6 +606,29 @@ export class GnumarusCanvasEngine {
     this.previewStabilizerLine.setAttribute("opacity", "0.9");
     this.previewStabilizerLine.style.display = "none";
     this.previewSvg.appendChild(this.previewStabilizerLine);
+    const makeSelectionAnts = (testId: string | null, stroke: string, dashOffset: string): SVGPolygonElement => {
+      const polygon = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+      if (testId !== null) {
+        polygon.setAttribute("data-testid", testId);
+      }
+      polygon.setAttribute("fill", "none");
+      polygon.setAttribute("stroke", stroke);
+      polygon.setAttribute("stroke-width", "1.5");
+      polygon.setAttribute("stroke-dasharray", "6 4");
+      polygon.setAttribute("opacity", "0.95");
+      const march = document.createElementNS("http://www.w3.org/2000/svg", "animate");
+      march.setAttribute("attributeName", "stroke-dashoffset");
+      march.setAttribute("from", "0");
+      march.setAttribute("to", dashOffset);
+      march.setAttribute("dur", "1s");
+      march.setAttribute("repeatCount", "indefinite");
+      polygon.appendChild(march);
+      polygon.style.display = "none";
+      this.previewSvg.appendChild(polygon);
+      return polygon;
+    };
+    this.previewSelectWhite = makeSelectionAnts("selection-rect", "#ffffff", "-20");
+    this.previewSelectBlack = makeSelectionAnts(null, "#000000", "-10");
     this.previewMarkers = [];
     for (let i = 0; i < 4; i += 1) {
       const marker = document.createElementNS("http://www.w3.org/2000/svg", "circle");
@@ -869,6 +930,7 @@ export class GnumarusCanvasEngine {
     this.refreshLayerStacking();
     this.render();
     this.emitStats();
+    this.updateSelectionOverlay();
     this.onLayersChanged?.();
     return true;
   }
@@ -891,6 +953,9 @@ export class GnumarusCanvasEngine {
     this.frameDurations = insertFrameDurations(this.frameDurations, at);
     this.frameNames = insertFrameNames(this.frameNames, at, name);
     this.frameCount += 1;
+    if (this.floating !== null && this.floating.frame >= at) {
+      this.floating.frame += 1;
+    }
     this.currentFrame = at;
     this.stabilizerPos = null;
     this.stabilizerTarget = null;
@@ -900,6 +965,7 @@ export class GnumarusCanvasEngine {
     this.refreshLayerStacking();
     this.render();
     this.emitStats();
+    this.updateSelectionOverlay();
     this.onLayersChanged?.();
     return this.currentFrame;
   }
@@ -920,6 +986,13 @@ export class GnumarusCanvasEngine {
     this.cells = swapFrameCells(this.cells, frame, target);
     this.frameDurations = swapFrameDurations(this.frameDurations, frame, target);
     this.frameNames = swapFrameNames(this.frameNames, frame, target);
+    if (this.floating !== null) {
+      if (this.floating.frame === frame) {
+        this.floating.frame = target;
+      } else if (this.floating.frame === target) {
+        this.floating.frame = frame;
+      }
+    }
     this.currentFrame = target;
     this.stabilizerPos = null;
     this.stabilizerTarget = null;
@@ -929,6 +1002,7 @@ export class GnumarusCanvasEngine {
     this.refreshLayerStacking();
     this.render();
     this.emitStats();
+    this.updateSelectionOverlay();
     this.onLayersChanged?.();
     return true;
   }
@@ -962,6 +1036,13 @@ export class GnumarusCanvasEngine {
     this.frameDurations = keptDurations;
     this.frameNames = [...this.frameNames.slice(0, frame), ...this.frameNames.slice(frame + 1)];
     this.frameCount -= 1;
+    if (this.floating !== null) {
+      if (this.floating.frame === frame) {
+        this.dropFloating();
+      } else if (this.floating.frame > frame) {
+        this.floating.frame -= 1;
+      }
+    }
     if (this.currentFrame > frame) {
       this.currentFrame -= 1;
     } else if (this.currentFrame >= this.frameCount) {
@@ -975,6 +1056,7 @@ export class GnumarusCanvasEngine {
     this.refreshLayerStacking();
     this.render();
     this.emitStats();
+    this.updateSelectionOverlay();
     this.onLayersChanged?.();
     return true;
   }
@@ -1467,7 +1549,9 @@ export class GnumarusCanvasEngine {
 
   /** Fully remove a layer: entry, owned texture, cells; detach referencing contents. */
   private removeLayerFull(id: string): boolean {
-    if (!this.removeLayerSilent(id)) {
+    if (this.floating !== null && (this.floating.layerId === id || this.floating.textureId === id)) {
+      this.dropFloating();
+    }    if (!this.removeLayerSilent(id)) {
       return false;
     }
     for (const content of this.contents.values()) {
@@ -1587,6 +1671,13 @@ export class GnumarusCanvasEngine {
     const lowerContentId = this.cells.get(lowerCellKey) ?? null;
     const lowerContent = lowerContentId === null ? undefined : this.contents.get(lowerContentId);
     const lowerTextureId = lowerContent?.textureId ?? null;
+    if (
+      this.floating !== null &&
+      this.floating.active &&
+      (this.floating.textureId === upperTextureId || this.floating.textureId === lowerTextureId)
+    ) {
+      this.commitFloating();
+    }
     if (lowerTextureId === null) {
       return this.mergeDownRelink(index, id, lower.id, frame, currentCellKey, currentContentId, upperTextureId, lowerCellKey, lowerContent);
     }
@@ -1639,7 +1730,7 @@ export class GnumarusCanvasEngine {
     if (keepLayer) {
       this.cells.delete(currentCellKey);
       this.activeLayerId = lower.id;
-      this.history.push({
+      this.pushHistory({
         type: "merge",
         merge: {
           lowerLayerId: lowerOwner,
@@ -1657,7 +1748,7 @@ export class GnumarusCanvasEngine {
       snapshot.detachedContents = collected.detachedContents;
       this.removeLayerFull(id);
       this.activeLayerId = lower.id;
-      this.history.push({
+      this.pushHistory({
         type: "merge",
         merge: {
           lowerLayerId: lowerOwner,
@@ -1775,7 +1866,7 @@ export class GnumarusCanvasEngine {
     if (this.mergeDownKeepsLayer(upperId)) {
       this.cells.delete(currentCellKey);
       this.activeLayerId = lowerId;
-      this.history.push({
+      this.pushHistory({
         type: "merge",
         merge: {
           lowerLayerId: lowerId,
@@ -1793,7 +1884,7 @@ export class GnumarusCanvasEngine {
       snapshot.detachedContents = collected.detachedContents;
       this.removeLayerFull(upperId);
       this.activeLayerId = lowerId;
-      this.history.push({
+      this.pushHistory({
         type: "merge",
         merge: {
           lowerLayerId: lowerId,
@@ -1960,6 +2051,14 @@ export class GnumarusCanvasEngine {
   }
 
   setLayerTransform(id: string, transform: Partial<GnumarusLayerTransform>): boolean {
+    if (
+      this.floating !== null &&
+      this.floating.active &&
+      this.floating.layerId === id &&
+      this.floating.frame === this.currentFrame
+    ) {
+      this.commitFloating();
+    }
     const ensured = this.ensureCellContent(id, this.currentFrame);
     if (ensured === null) {
       return false;
@@ -1986,6 +2085,14 @@ export class GnumarusCanvasEngine {
   }
 
   resetLayerTransform(id: string): boolean {
+    if (
+      this.floating !== null &&
+      this.floating.active &&
+      this.floating.layerId === id &&
+      this.floating.frame === this.currentFrame
+    ) {
+      this.commitFloating();
+    }
     const ensured = this.ensureCellContent(id, this.currentFrame);
     if (ensured === null) {
       return false;
@@ -2045,6 +2152,7 @@ export class GnumarusCanvasEngine {
     if (clampedWidth === entry.width && clampedHeight === entry.height) {
       return false;
     }
+    this.commitFloatingIfHomeTexture(id);
     const beforeWidth = entry.width;
     const beforeHeight = entry.height;
     const beforeBuffer = entry.buffer.slice();
@@ -2053,7 +2161,7 @@ export class GnumarusCanvasEngine {
     if (!this.setTexturePixels(id, clampedWidth, clampedHeight, nextBuffer)) {
       return false;
     }
-    this.history.push({
+    this.pushHistory({
       type: "resize",
       resize: {
         layerId: id,
@@ -2088,6 +2196,7 @@ export class GnumarusCanvasEngine {
     if (entry === undefined) {
       return false;
     }
+    this.commitFloatingIfHomeTexture(textureId);
     const limit = Number.isFinite(threshold) ? Math.min(254, Math.max(0, Math.floor(threshold))) : 0;
     const box = findAlphaBoundingBox(entry.buffer, entry.width, entry.height, limit);
     if (box === null) {
@@ -2120,7 +2229,7 @@ export class GnumarusCanvasEngine {
         content.transform = { ...record.after };
       }
     }
-    this.history.push({
+    this.pushHistory({
       type: "fit",
       fit: {
         textureId,
@@ -2231,6 +2340,7 @@ export class GnumarusCanvasEngine {
     this.frameNames = [defaultFrameName(0)];
     this.frameNameCounter = 2;
     this.history.clear();
+    this.dropFloating();
     this.strokeBase = null;
     this.strokeLayerId = null;
     this.stabilizerPos = null;
@@ -2396,6 +2506,7 @@ export class GnumarusCanvasEngine {
       this.activeLayerId = top.id;
     }
     this.history.clear();
+    this.dropFloating();
     this.strokeBase = null;
     this.strokeLayerId = null;
     this.stabilizerPos = null;
@@ -2478,6 +2589,7 @@ export class GnumarusCanvasEngine {
     this.frameNames = [defaultFrameName(0)];
     this.frameNameCounter = 2;
     this.history.clear();
+    this.dropFloating();
     this.strokeBase = null;
     this.strokeLayerId = null;
     this.syncImageUniforms();
@@ -3019,6 +3131,293 @@ export class GnumarusCanvasEngine {
   }
 
   /**
+   * Push a history entry, keeping floating-selection bookkeeping coherent:
+   * evictions shift the recorded cut depth, and a detached (undo-deactivated)
+   * floating selection is discarded since its redo chain is gone.
+   */
+  private pushHistory(entry: GnumarusHistoryEntry): void {
+    const evicted = this.history.push(entry);
+    if (this.floating !== null) {
+      this.floating.cutDepth = Math.max(0, this.floating.cutDepth - evicted);
+    }
+    if (this.floating !== null && !this.floating.active) {
+      this.floating = null;
+      this.syncFloatingPlane();
+      this.updatePreviews();
+    }
+  }
+
+  /** Whether a floating selection is currently active (committable, movable). */
+  hasFloatingSelection(): boolean {
+    return this.floating !== null && this.floating.active;
+  }
+
+  /** Floating selection rect in home texture pixels, or null when inactive. */
+  getFloatingRect(): { x: number; y: number; width: number; height: number } | null {
+    const floating = this.floating;
+    if (floating === null || !floating.active) {
+      return null;
+    }
+    return { x: floating.x, y: floating.y, width: floating.width, height: floating.height };
+  }
+
+  /** True when the floating selection belongs to the currently shown cell. */
+  private floatingHomeVisible(): boolean {
+    const floating = this.floating;
+    if (floating === null || !floating.active || floating.frame !== this.currentFrame) {
+      return false;
+    }
+    const layer = this.activeLayer();
+    return layer !== null && layer.id === floating.layerId && layer.renderTextureId === floating.textureId;
+  }
+
+  /** Merge the floating selection first when it lives in the given texture. */
+  private commitFloatingIfHomeTexture(textureId: string): void {
+    if (this.floating !== null && this.floating.active && this.floating.textureId === textureId) {
+      this.commitFloating();
+    }
+  }
+
+  /** Discard the floating selection without merging (content is lost). */
+  private dropFloating(): void {
+    if (this.floating === null && this.floatingPlane === null) {
+      return;
+    }
+    this.floating = null;
+    this.moveDrag = null;
+    this.disposeFloatingPlane();
+    this.updatePreviews();
+  }
+
+  /**
+   * Merge the floating texture back into its home cell texture with an exact
+   * copy paste (a destructive move relocates pixels losslessly), clipped to
+   * the texture. Undoable. Returns false when nothing was merged.
+   */
+  commitFloating(): boolean {
+    const floating = this.floating;
+    if (floating === null || !floating.active) {
+      return false;
+    }
+    const tex = this.textures.get(floating.textureId);
+    if (tex === undefined) {
+      this.floating = null;
+      this.moveDrag = null;
+      this.disposeFloatingPlane();
+      this.updatePreviews();
+      return false;
+    }
+    const base = tex.buffer.slice();
+    for (let y = 0; y < floating.height; y += 1) {
+      for (let x = 0; x < floating.width; x += 1) {
+        const dx = floating.x + x;
+        const dy = floating.y + y;
+        if (dx < 0 || dy < 0 || dx >= tex.width || dy >= tex.height) {
+          continue;
+        }
+        const source = (y * floating.width + x) * 4;
+        const dest = (dy * tex.width + dx) * 4;
+        tex.buffer[dest] = floating.buffer[source]!;
+        tex.buffer[dest + 1] = floating.buffer[source + 1]!;
+        tex.buffer[dest + 2] = floating.buffer[source + 2]!;
+        tex.buffer[dest + 3] = floating.buffer[source + 3]!;
+      }
+    }
+    this.floating = null;
+    this.moveDrag = null;
+    this.disposeFloatingPlane();
+    const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
+    if (diff === null) {
+      this.syncAllLayerRenders();
+      this.refreshLayerStacking();
+      this.render();
+      this.emitStats();
+      this.updatePreviews();
+      return false;
+    }
+    this.pushHistory({ type: "stroke", layerId: tex.id, diff });
+    this.markTextureViewsDirty(tex.id);
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  /**
+   * Cut a cell-texture rect out into a floating selection (transparent hole,
+   * locks ignored like Delete). Commits any active floating selection first.
+   * Returns false for empty or invalid rects.
+   */
+  private cutRectToFloating(x0: number, y0: number, x1: number, y1: number): boolean {
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return false;
+    }
+    const ensured = this.ensureCellContent(layer.id, this.currentFrame);
+    if (ensured === null) {
+      return false;
+    }
+    this.syncLayerRender(layer);
+    this.refreshLayerStacking();
+    const tex = ensured.texture;
+    const minX = Math.max(0, Math.min(x0, x1));
+    const minY = Math.max(0, Math.min(y0, y1));
+    const maxX = Math.min(tex.width, Math.max(x0, x1) + 1);
+    const maxY = Math.min(tex.height, Math.max(y0, y1) + 1);
+    if (minX >= maxX || minY >= maxY) {
+      return false;
+    }
+    this.commitFloating();
+    const base = tex.buffer.slice();
+    const width = maxX - minX;
+    const height = maxY - minY;
+    const cut = new Uint8ClampedArray(width * height * 4);
+    for (let row = 0; row < height; row += 1) {
+      const source = ((minY + row) * tex.width + minX) * 4;
+      cut.set(tex.buffer.subarray(source, source + width * 4), row * width * 4);
+      tex.buffer.fill(0, source, source + width * 4);
+    }
+    const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
+    if (diff !== null) {
+      this.pushHistory({ type: "stroke", layerId: tex.id, diff });
+    }
+    this.floating = {
+      buffer: cut,
+      width,
+      height,
+      x: minX,
+      y: minY,
+      layerId: layer.id,
+      frame: this.currentFrame,
+      textureId: tex.id,
+      cutDepth: this.history.undoDepth(),
+      active: true,
+    };
+    this.markTextureViewsDirty(tex.id);
+    this.syncAllLayerRenders();
+    this.syncFloatingPlane();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  /** Cut the whole current-cell texture into a floating selection. */
+  private cutAllToFloating(): boolean {
+    const layer = this.activeLayer();
+    if (layer === null || layer.width < 1 || layer.height < 1) {
+      return false;
+    }
+    return this.cutRectToFloating(0, 0, layer.width - 1, layer.height - 1);
+  }
+
+  /**
+   * Keep floating activation in sync with undo/redo: popping the cut entry
+   * deactivates (content kept aside); redoing it back reactivates.
+   */
+  private syncFloatingWithHistory(): void {
+    const floating = this.floating;
+    if (floating === null) {
+      return;
+    }
+    const depth = this.history.undoDepth();
+    if (floating.active && depth < floating.cutDepth) {
+      floating.active = false;
+    } else if (!floating.active && depth >= floating.cutDepth) {
+      floating.active = true;
+    }
+    this.syncFloatingPlane();
+    this.updatePreviews();
+  }
+
+  private disposeFloatingPlane(): void {
+    if (this.floatingPlane !== null) {
+      this.scene.remove(this.floatingPlane);
+      this.floatingPlane = null;
+    }
+    if (this.floatingMaterial !== null) {
+      this.floatingMaterial.dispose();
+      this.floatingMaterial = null;
+    }
+    if (this.floatingTexture !== null) {
+      this.floatingTexture.dispose();
+      this.floatingTexture = null;
+    }
+    this.floatingPlaneFor = null;
+  }
+
+  /** (Re)create, position and show/hide the floating content plane. */
+  private syncFloatingPlane(): void {
+    const floating = this.floating;
+    if (floating === null || !floating.active || !this.floatingHomeVisible()) {
+      if (this.floatingPlane !== null) {
+        this.floatingPlane.visible = false;
+      }
+      return;
+    }
+    if (this.floatingPlane === null || this.floatingPlaneFor !== floating) {
+      this.disposeFloatingPlane();
+      const texture = new THREE.DataTexture(floating.buffer, floating.width, floating.height);
+      texture.magFilter = THREE.NearestFilter;
+      texture.minFilter = THREE.NearestFilter;
+      texture.generateMipmaps = false;
+      texture.flipY = true;
+      texture.needsUpdate = true;
+      const material = new THREE.ShaderMaterial({
+        uniforms: {
+          uMap: { value: texture },
+          uOpacity: { value: 1 },
+        },
+        vertexShader: LAYER_VERTEX_SHADER,
+        fragmentShader: LAYER_FRAGMENT_SHADER,
+        side: THREE.DoubleSide,
+        transparent: true,
+        depthWrite: false,
+      });
+      const plane = new THREE.Mesh(this.sharedGeometry, material);
+      plane.matrixAutoUpdate = false;
+      this.scene.add(plane);
+      this.floatingPlane = plane;
+      this.floatingMaterial = material;
+      this.floatingTexture = texture;
+      this.floatingPlaneFor = floating;
+    }
+    const layer = this.activeLayer();
+    if (layer === null) {
+      this.floatingPlane.visible = false;
+      return;
+    }
+    const center = layerImageToProject(
+      floating.x + floating.width / 2,
+      floating.y + floating.height / 2,
+      layer.width,
+      layer.height,
+      layer.transform,
+    );
+    this.writePlaneMatrix(
+      this.floatingPlane,
+      floating.width,
+      floating.height,
+      {
+        x: center.x,
+        y: center.y,
+        rotation: layer.transform.rotation,
+        flipX: layer.transform.flipX,
+        flipY: layer.transform.flipY,
+      },
+      this.layers.length * 0.01 + 0.01,
+    );
+    this.floatingPlane.visible = true;
+  }
+
+  /**
    * Paint one stabilized pencil segment `from -> to` in layer-image space.
    * Uses the same brush/AA/blend/accumulate paths as unstabilized strokes.
    */
@@ -3224,7 +3623,7 @@ export class GnumarusCanvasEngine {
       this.emitStats();
       return false;
     }
-    this.history.push({ type: "stroke", layerId: tex.id, diff });
+    this.pushHistory({ type: "stroke", layerId: tex.id, diff });
     this.syncAllLayerRenders();
     this.markTextureViewsDirty(tex.id);
     this.refreshLayerStacking();
@@ -3316,7 +3715,7 @@ export class GnumarusCanvasEngine {
       this.emitStats();
       return false;
     }
-    this.history.push({ type: "stroke", layerId: tex.id, diff });
+    this.pushHistory({ type: "stroke", layerId: tex.id, diff });
     this.syncAllLayerRenders();
     this.markTextureViewsDirty(tex.id);
     this.refreshLayerStacking();
@@ -3362,6 +3761,72 @@ export class GnumarusCanvasEngine {
     this.previewStabilizerLine.setAttribute("y2", String(focusClient.y - rect.top));
   }
 
+  /** Cell-image rect currently shown as marching ants: rubber band or floating selection. */
+  private selectionOverlayRect(): { x0: number; y0: number; x1: number; y1: number } | null {
+    if (this.rectDrag !== null) {
+      const drag = this.rectDrag;
+      return {
+        x0: Math.min(drag.x0, drag.x1),
+        y0: Math.min(drag.y0, drag.y1),
+        x1: Math.max(drag.x0, drag.x1) + 1,
+        y1: Math.max(drag.y0, drag.y1) + 1,
+      };
+    }
+    const floating = this.floating;
+    if (floating === null || !floating.active || !this.floatingHomeVisible()) {
+      return null;
+    }
+    return { x0: floating.x, y0: floating.y, x1: floating.x + floating.width, y1: floating.y + floating.height };
+  }
+
+  /** Position the marching-ants selection polygon over the active layer. */
+  private updateSelectionOverlay(): void {
+    const overlay = this.selectionOverlayRect();
+    const layer = this.activeLayer();
+    if (overlay === null || layer === null || layer.width < 1 || layer.height < 1) {
+      this.previewSelectWhite.style.display = "none";
+      this.previewSelectBlack.style.display = "none";
+      return;
+    }
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      this.previewSelectWhite.style.display = "none";
+      this.previewSelectBlack.style.display = "none";
+      return;
+    }
+    const toClient = (imageX: number, imageY: number): string => {
+      const project = layerImageToProject(imageX, imageY, layer.width, layer.height, layer.transform);
+      const client = projectToScreen(
+        project.x,
+        project.y,
+        { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+        this.viewTransform(),
+      );
+      return `${client.x - rect.left},${client.y - rect.top}`;
+    };
+    const points = [
+      toClient(overlay.x0, overlay.y0),
+      toClient(overlay.x1, overlay.y0),
+      toClient(overlay.x1, overlay.y1),
+      toClient(overlay.x0, overlay.y1),
+    ].join(" ");
+    this.previewSvg.style.display = "block";
+    this.previewSelectWhite.setAttribute("points", points);
+    this.previewSelectWhite.style.display = "block";
+    this.previewSelectBlack.setAttribute("points", points);
+    this.previewSelectBlack.style.display = "block";
+  }
+
+  /** Hide the overlay svg unless another overlay (rope, selection) needs it. */
+  private hidePreviewSvgIfIdle(): void {
+    if (
+      this.previewStabilizerLine.style.display !== "block" &&
+      this.previewSelectWhite.style.display !== "block"
+    ) {
+      this.previewSvg.style.display = "none";
+    }
+  }
+
   /** Refresh the brush tip and line/curve overlays for the last mouse position. */
   private updatePreviews(): void {
     if (this.disposed) {
@@ -3396,16 +3861,17 @@ export class GnumarusCanvasEngine {
     this.previewHandleA.style.display = "none";
     this.previewHandleB.style.display = "none";
     this.previewStabilizerLine.style.display = "none";
+    this.previewSelectWhite.style.display = "none";
+    this.previewSelectBlack.style.display = "none";
     for (const marker of this.previewMarkers) {
       marker.style.display = "none";
     }
     this.updateStabilizerOverlay();
+    this.updateSelectionOverlay();
     if (mouse === null) {
       // Keep the stabilizer dot hidden when the mouse leaves; the overlay
       // helper already hid it, but the svg may still be needed for nothing.
-      if (this.previewStabilizerLine.style.display !== "block") {
-        this.previewSvg.style.display = "none";
-      }
+      this.hidePreviewSvgIfIdle();
       return;
     }
     const rect = this.renderer.domElement.getBoundingClientRect();
@@ -3436,10 +3902,8 @@ export class GnumarusCanvasEngine {
       return;
     }
     if (this.tool !== "curve") {
-      // Preserve the stabilizer rope overlay for the pencil tool.
-      if (this.previewStabilizerLine.style.display !== "block") {
-        this.previewSvg.style.display = "none";
-      }
+      // Preserve the stabilizer rope and selection overlays for other tools.
+      this.hidePreviewSvgIfIdle();
       return;
     }
     if (this.curvePhase === "dragging" && this.curveP0 !== null) {
@@ -3517,9 +3981,7 @@ export class GnumarusCanvasEngine {
       placeMarker(3, this.curveP3.clientX, this.curveP3.clientY);
       return;
     }
-    if (this.previewStabilizerLine.style.display !== "block") {
-      this.previewSvg.style.display = "none";
-    }
+    this.hidePreviewSvgIfIdle();
   }
 
   private hidePreviews(): void {
@@ -3531,6 +3993,8 @@ export class GnumarusCanvasEngine {
     this.previewHandleA.style.display = "none";
     this.previewHandleB.style.display = "none";
     this.previewStabilizerLine.style.display = "none";
+    this.previewSelectWhite.style.display = "none";
+    this.previewSelectBlack.style.display = "none";
     for (const marker of this.previewMarkers) {
       marker.style.display = "none";
     }
@@ -3550,7 +4014,7 @@ export class GnumarusCanvasEngine {
     clearPixelBuffer(tex.buffer, layer.lockedChannels);
     const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
     if (diff !== null) {
-      this.history.push({ type: "stroke", layerId: tex.id, diff });
+      this.pushHistory({ type: "stroke", layerId: tex.id, diff });
     }
     this.syncAllLayerRenders();
     this.markTextureViewsDirty(tex.id);
@@ -3589,7 +4053,7 @@ export class GnumarusCanvasEngine {
     if (diff === null) {
       return false;
     }
-    this.history.push({ type: "stroke", layerId: tex.id, diff });
+    this.pushHistory({ type: "stroke", layerId: tex.id, diff });
     this.syncAllLayerRenders();
     this.markTextureViewsDirty(tex.id);
     this.refreshLayerStacking();
@@ -3636,7 +4100,7 @@ export class GnumarusCanvasEngine {
     if (diff === null) {
       return 0;
     }
-    this.history.push({ type: "stroke", layerId: tex.id, diff });
+    this.pushHistory({ type: "stroke", layerId: tex.id, diff });
     this.syncAllLayerRenders();
     this.markTextureViewsDirty(tex.id);
     this.refreshLayerStacking();
@@ -3769,6 +4233,8 @@ export class GnumarusCanvasEngine {
       this.stopFollowLoop();
     }
     this.sizeDrag = null;
+    this.rectDrag = null;
+    this.moveDrag = null;
     this.resetPencilPixelPerfect();
     this.updatePreviews();
     this.onToolChanged?.(tool);
@@ -3839,6 +4305,7 @@ export class GnumarusCanvasEngine {
     if (!applied) {
       return false;
     }
+    this.syncFloatingWithHistory();
     this.markLayersDirty();
     this.refreshLayerStacking();
     this.render();
@@ -3864,6 +4331,7 @@ export class GnumarusCanvasEngine {
     if (!applied) {
       return false;
     }
+    this.syncFloatingWithHistory();
     this.markLayersDirty();
     this.refreshLayerStacking();
     this.render();
@@ -4037,6 +4505,7 @@ export class GnumarusCanvasEngine {
     }
     this.disposed = true;
     this.stopFollowLoop();
+    this.disposeFloatingPlane();
     this.resizeObserver.disconnect();
     this.lineAnchor = null;
     this.lastMouseClient = null;
@@ -4181,6 +4650,22 @@ export class GnumarusCanvasEngine {
         this.pickColorAt(event.clientX, event.clientY);
         return;
       }
+      if (this.tool === "rectselect") {
+        // Drag marks a rectangle; releasing cuts it out as a floating texture.
+        const layer = this.activeLayer();
+        if (layer === null) {
+          return;
+        }
+        const pixel = this.toImagePixel(event.clientX, event.clientY);
+        if (pixel === null) {
+          return;
+        }
+        this.rectDrag = { x0: pixel.x, y0: pixel.y, x1: pixel.x, y1: pixel.y };
+        this.lastMouseClient = { x: event.clientX, y: event.clientY };
+        canvas.setPointerCapture(event.pointerId);
+        this.updatePreviews();
+        return;
+      }
       if (this.tool === "line") {
         // Two clicks define a segment: first arms the start, second draws.
         const layer = this.activeLayer();
@@ -4258,6 +4743,50 @@ export class GnumarusCanvasEngine {
           this.updatePreviews();
           return;
         }
+        return;
+      }
+      if (this.tool === "destransform") {
+        const floating = this.floating;
+        if (floating !== null && floating.active) {
+          // Clicking inside the visible floating rect starts a move; clicks
+          // anywhere else are ignored so work is never baked accidentally.
+          if (this.floatingHomeVisible()) {
+            const pixel = this.toImagePixel(event.clientX, event.clientY);
+            if (
+              pixel !== null &&
+              pixel.x >= floating.x &&
+              pixel.x < floating.x + floating.width &&
+              pixel.y >= floating.y &&
+              pixel.y < floating.y + floating.height
+            ) {
+              this.moveDrag = { grabDX: pixel.x - floating.x, grabDY: pixel.y - floating.y };
+              this.lastMouseClient = { x: event.clientX, y: event.clientY };
+              canvas.setPointerCapture(event.pointerId);
+            }
+          }
+          return;
+        }
+        // Nothing selected: select the whole current-cell texture first,
+        // exactly like a full-canvas rectangular selection, then move it.
+        const layer = this.activeLayer();
+        if (layer === null) {
+          return;
+        }
+        const pixel = this.toImagePixel(event.clientX, event.clientY);
+        if (pixel === null) {
+          return;
+        }
+        if (!this.cutAllToFloating()) {
+          return;
+        }
+        const current = this.floating;
+        if (current === null) {
+          return;
+        }
+        this.moveDrag = { grabDX: pixel.x - current.x, grabDY: pixel.y - current.y };
+        this.lastMouseClient = { x: event.clientX, y: event.clientY };
+        canvas.setPointerCapture(event.pointerId);
+        this.updatePreviews();
         return;
       }
       const layer = this.activeLayer();
@@ -4398,6 +4927,33 @@ export class GnumarusCanvasEngine {
         this.emitStats();
         return;
       }
+      if (this.rectDrag !== null) {
+        const target = this.clientToLayerImageFloat(event.clientX, event.clientY);
+        if (target !== null) {
+          this.rectDrag.x1 = Math.floor(target.x);
+          this.rectDrag.y1 = Math.floor(target.y);
+          this.lastMouseClient = { x: event.clientX, y: event.clientY };
+          this.updatePreviews();
+        }
+        return;
+      }
+      if (this.moveDrag !== null) {
+        const floating = this.floating;
+        if (floating === null || !floating.active) {
+          this.moveDrag = null;
+        } else {
+          const target = this.clientToLayerImageFloat(event.clientX, event.clientY);
+          if (target !== null) {
+            floating.x = Math.floor(target.x) - this.moveDrag.grabDX;
+            floating.y = Math.floor(target.y) - this.moveDrag.grabDY;
+            this.lastMouseClient = { x: event.clientX, y: event.clientY };
+            this.syncFloatingPlane();
+            this.render();
+            this.updatePreviews();
+          }
+        }
+        return;
+      }
       if (this.sizeDrag !== null) {
         // Horizontal movement only: right grows, left shrinks, vertical is ignored.
         const size = clampBrushSizeFloat(
@@ -4474,7 +5030,7 @@ export class GnumarusCanvasEngine {
         if (tex !== undefined) {
           const diff = computeImageDiff(this.strokeBase, tex.buffer, tex.width, tex.height);
           if (diff !== null) {
-            this.history.push({ type: "stroke", layerId: tex.id, diff });
+            this.pushHistory({ type: "stroke", layerId: tex.id, diff });
           }
         }
         this.strokeBase = null;
@@ -4493,6 +5049,7 @@ export class GnumarusCanvasEngine {
       this.loupeAnchor = null;
       this.lastPixel = null;
       this.sizeDrag = null;
+      this.moveDrag = null;
       this.resetPencilPixelPerfect();
       // Keep the stabilizer focus for hover preview; let follow mode converge.
       if (this.stabilizerMode === "follow") {
@@ -4502,6 +5059,12 @@ export class GnumarusCanvasEngine {
     };
     canvas.addEventListener("pointerup", endStroke);
     canvas.addEventListener("pointerup", (event: PointerEvent) => {
+      if (this.rectDrag !== null && event.button === 0) {
+        const drag = this.rectDrag;
+        this.rectDrag = null;
+        this.cutRectToFloating(drag.x0, drag.y0, drag.x1, drag.y1);
+        return;
+      }
       if (this.tool !== "curve" || this.curvePhase !== "dragging" || event.button !== 0) {
         return;
       }
@@ -4520,6 +5083,10 @@ export class GnumarusCanvasEngine {
     });
     canvas.addEventListener("pointercancel", endStroke);
     canvas.addEventListener("pointercancel", () => {
+      if (this.rectDrag !== null) {
+        this.rectDrag = null;
+        this.updatePreviews();
+      }
       if (this.tool === "curve" && this.curvePhase === "dragging") {
         this.resetCurveState();
         this.updatePreviews();
@@ -4580,7 +5147,10 @@ export class GnumarusCanvasEngine {
         return;
       }
       if (!event.ctrlKey && !event.altKey && !event.metaKey && !inField) {
-        if (event.key === "b" || event.key === "B") {
+        if ((event.key === "Enter" || event.key === "Return" || event.key === "Escape") && this.hasFloatingSelection()) {
+          this.commitFloating();
+          return;
+        }        if (event.key === "b" || event.key === "B") {
           this.setTool("pencil");
           return;
         }
@@ -4635,6 +5205,11 @@ export class GnumarusCanvasEngine {
         }
         if (event.key === "Escape" && this.tool === "curve" && this.curvePhase !== "idle") {
           this.resetCurveState();
+          this.updatePreviews();
+          return;
+        }
+        if (event.key === "Escape" && this.tool === "rectselect" && this.rectDrag !== null) {
+          this.rectDrag = null;
           this.updatePreviews();
           return;
         }
@@ -4829,6 +5404,7 @@ export class GnumarusCanvasEngine {
       -0.02,
     );
     this.updateGrid();
+    this.syncFloatingPlane();
   }
 
   private render(): void {

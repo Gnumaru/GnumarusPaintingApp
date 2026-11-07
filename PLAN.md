@@ -162,6 +162,11 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Shift+Up/Down moves the active layer in the stack with wraparound (`moveLayerWrapping`); Shift+Left/Right moves the current frame with wraparound (`moveFrame` swap, selection follows).
 - Arrow shortcuts stay out of text fields and of the color picker (ring/triangle/bars keep their own Arrow/Shift+Arrow keys); pure cell/duration remap helpers in the animation model are unit-tested.
 
+## 29. Rectangular selection + destructive transform (implemented)
+- Rectangular selection tool (`rectselect`): left-drag marks a rect on the current cell; on release the rect is cut out (transparent hole, locks ignored like Delete, undoable stroke) and becomes a floating texture (private copy, no cell of its own) with a marching-ants overlay (dual white/black SMIL-animated SVG polygons following layer and view transforms).
+- Destructive transform tool (`destransform`, move-only for now): drag inside the visible floating rect moves it in integer cell pixels with a live GL plane; outside clicks are ignored so work is never baked accidentally. With no selection it auto-selects the whole current-cell texture first (same as a full rect cut). Enter, Return or Esc merges the floating texture back with an exact copy paste (lossless relocation, clipped, undoable); a Commit selection helper button in its options bar does the same for mouse-only users.
+- Coherence: floating state is home-attached (layer/frame/texture) and survives navigation hidden; new cuts auto-commit the previous floating; moves never touch history; undo/redo track the cut entry by stack depth (deactivate/reactivate, detached buffer discarded on new edits, eviction-adjusted); resize/merge/fit commit when home-involved, layer removal and project loads drop it, cell transforms commit when home matches.
+
 ## 11. Custom color picker (implemented)
 - Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).
 - Every model carries an alpha axis; RGBA axes span 0..255. ARD Diagonal spans 0..360 and Ratio 0..255.
