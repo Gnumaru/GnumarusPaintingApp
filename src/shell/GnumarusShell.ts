@@ -2488,6 +2488,9 @@ export class GnumarusShell extends LitElement {
           this.setPencilColor(hex);
           this.statusMessage = `Eyedropper: ${hex}`;
         },
+        onTransformChanged: (): void => {
+          void this.refreshPreview();
+        },
         onToolSizeChanged: (kind, size): void => {
           if (kind === "brush") {
             this.brushSize = size;

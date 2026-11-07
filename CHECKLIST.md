@@ -153,3 +153,6 @@
 - [x] Rename transform tool display label to non-destructive cell transform (toolbar, options bar, status bar, shortcuts modal, docs, E2E)
 - [x] Unit tests (vitest) — 159 passed (no logic change)
 - [x] E2E test (Playwright): previous 99 + renamed tool button/empty-state/status expectations — 99 passed
+- [x] Live final preview during non-destructive transforms (`onTransformChanged`), e2e test green, docs updated
+- [x] Unit tests (vitest): 160 passed
+- [x] E2E test (Playwright): 107 passed

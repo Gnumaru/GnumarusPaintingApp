@@ -345,6 +345,8 @@ export interface GnumarusEngineOptions {
   onLayersChanged?: () => void;
   onToolSizeChanged?: (kind: GnumarusToolSizeKind, size: number) => void;
   onEyedropperPick?: (hex: string) => void;
+  /** Fired when a cell content transform changes (move/rotate/flip/reset). */
+  onTransformChanged?: () => void;
   checker?: GnumarusCheckerSettings;
   gridMinZoom?: number;
   background?: GnumarusBackgroundSettings;
@@ -496,6 +498,7 @@ export class GnumarusCanvasEngine {
   private readonly onLayersChanged: (() => void) | undefined;
   private readonly onToolSizeChanged: ((kind: GnumarusToolSizeKind, size: number) => void) | undefined;
   private readonly onEyedropperPick: ((hex: string) => void) | undefined;
+  private readonly onTransformChanged: (() => void) | undefined;
 
   constructor(container: HTMLElement, options: GnumarusEngineOptions) {
     this.container = container;
@@ -505,6 +508,7 @@ export class GnumarusCanvasEngine {
     this.onLayersChanged = options.onLayersChanged;
     this.onToolSizeChanged = options.onToolSizeChanged;
     this.onEyedropperPick = options.onEyedropperPick;
+    this.onTransformChanged = options.onTransformChanged;
     const initialChecker = options.checker ?? DEFAULT_CHECKER_SETTINGS;
     this.checkerMode = initialChecker.mode;
     this.checkerSizeX = clampCheckerSize(initialChecker.sizeX);
@@ -2081,6 +2085,7 @@ export class GnumarusCanvasEngine {
     this.syncAllLayerRenders();
     this.layoutSceneTransforms();
     this.render();
+    this.onTransformChanged?.();
     return true;
   }
 
@@ -2102,6 +2107,7 @@ export class GnumarusCanvasEngine {
     this.layoutSceneTransforms();
     this.render();
     this.emitStats();
+    this.onTransformChanged?.();
     return true;
   }
 

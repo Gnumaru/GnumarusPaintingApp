@@ -171,6 +171,11 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Every toolbar tool tooltip starts with its selection shortcut, then the tool name, then the explanation (`B: Pencil (...)`, `G or F: Bucket fill (...)`, `Ctrl (hold): Eyedropper (...)`, `N`/`C`/`Z`/`T` likewise).
 - Rectangular selection and destructive transform gain `R` and `V` shortcuts (previously shortcut-less), listed in the Shortcuts modal.
 
+## 42. Live final preview during non-destructive transforms (implemented)
+- Root cause: `setLayerTransform`/`resetLayerTransform` fired no callbacks, so the open preview only refreshed when something else (e.g. layer switch via `refreshLayers`) recomposites it.
+- Fix: new optional engine callback `onTransformChanged`, fired on both success paths, wired in the shell to `refreshPreview()` only — same per-move cost class as pencil strokes, no dirty-flag change.
+- E2E: transform drag with the preview open asserts pixels move mid-drag, plus menu Reset transform re-assert.
+
 ## 11. Custom color picker (implemented)
 - Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).
 - Every model carries an alpha axis; RGBA axes span 0..255. ARD Diagonal spans 0..360 and Ratio 0..255.

@@ -4111,3 +4111,44 @@ test("R and V select the rectangular selection and destructive transform tools",
   await page.keyboard.press("R");
   await expect(page.locator("gnumarus-shell")).toContainText("rectangular selection");
 });
+
+test("final preview follows non-destructive transforms live", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.getByRole("button", { name: "Final preview" }).click();
+  const previewCanvas = page.locator("gnumarus-shell canvas#previewCanvas");
+  await expect(previewCanvas).toBeVisible();
+  const previewPixel = (x: number, y: number): Promise<number[] | null> =>
+    page.evaluate(([px, py]: number[]) => {
+      const root = document.querySelector("gnumarus-shell")?.shadowRoot ?? null;
+      const canvas = root?.getElementById("previewCanvas") as HTMLCanvasElement | null;
+      const ctx = canvas?.getContext("2d") ?? null;
+      if (ctx === null) {
+        return null;
+      }
+      const data = ctx.getImageData(px, py, 1, 1).data;
+      return [data[0], data[1], data[2], data[3]];
+    }, [x, y]);
+  expect(await previewPixel(32, 32)).toEqual([0, 0, 0, 255]);
+  await page.getByRole("button", { name: "Non-destructive cell transform" }).click();
+  const zoom = (await getViewState(page)).zoom;
+  const shift = 10;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + shift * zoom, box.y + box.height / 2, { steps: 4 });
+  // Still holding the button: the open preview already shows the moved layer.
+  await expect.poll(() => previewPixel(32, 32)).toEqual([148, 148, 148, 255]);
+  await expect.poll(() => previewPixel(32 + shift, 32)).toEqual([0, 0, 0, 255]);
+  await page.mouse.up();
+  expect(await previewPixel(32 + shift, 32)).toEqual([0, 0, 0, 255]);
+  // Reset transform refreshes the preview too.
+  await page.locator('gnumarus-shell [data-layer-id="layer0"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Reset transform" }).click();
+  await expect.poll(() => previewPixel(32, 32)).toEqual([0, 0, 0, 255]);
+});
