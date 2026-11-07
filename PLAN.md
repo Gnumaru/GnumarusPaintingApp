@@ -167,6 +167,10 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Destructive transform tool (`destransform`, move-only for now): drag inside the visible floating rect moves it in integer cell pixels with a live GL plane; outside clicks are ignored so work is never baked accidentally. With no selection it auto-selects the whole current-cell texture first (same as a full rect cut). Enter, Return or Esc merges the floating texture back with an exact copy paste (lossless relocation, clipped, undoable); a Commit selection helper button in its options bar does the same for mouse-only users.
 - Coherence: floating state is home-attached (layer/frame/texture) and survives navigation hidden; new cuts auto-commit the previous floating; moves never touch history; undo/redo track the cut entry by stack depth (deactivate/reactivate, detached buffer discarded on new edits, eviction-adjusted); resize/merge/fit commit when home-involved, layer removal and project loads drop it, cell transforms commit when home matches.
 
+## 30. Tool tooltip shortcut prefixes + R/V shortcuts (implemented)
+- Every toolbar tool tooltip starts with its selection shortcut, then the tool name, then the explanation (`B: Pencil (...)`, `G or F: Bucket fill (...)`, `Ctrl (hold): Eyedropper (...)`, `N`/`C`/`Z`/`T` likewise).
+- Rectangular selection and destructive transform gain `R` and `V` shortcuts (previously shortcut-less), listed in the Shortcuts modal.
+
 ## 11. Custom color picker (implemented)
 - Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).
 - Every model carries an alpha axis; RGBA axes span 0..255. ARD Diagonal spans 0..360 and Ratio 0..255.

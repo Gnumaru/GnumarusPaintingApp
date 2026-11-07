@@ -5174,6 +5174,14 @@ export class GnumarusCanvasEngine {
           this.setTool("loupe");
           return;
         }
+        if (event.key === "r" || event.key === "R") {
+          this.setTool("rectselect");
+          return;
+        }
+        if (event.key === "v" || event.key === "V") {
+          this.setTool("destransform");
+          return;
+        }
         if (event.key === "t" || event.key === "T") {
           this.setTool("transform");
           return;

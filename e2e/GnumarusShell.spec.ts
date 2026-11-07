@@ -4065,3 +4065,49 @@ test("floating selection survives frame switches hidden and merges explicitly", 
   expect(await floatingRect(page)).toBeNull();
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
 });
+
+test("tool tooltips start with the selection shortcut", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const titles = await page.evaluate(() => {
+    const root = document.querySelector("gnumarus-shell")?.shadowRoot;
+    const buttons = Array.from(root?.querySelectorAll(".toolbar button[aria-label]") ?? []);
+    const entries: Array<{ label: string | null; title: string | null }> = [];
+    for (const button of buttons) {
+      const element = button as HTMLElement;
+      if (element.getAttribute("aria-label") === "Final preview") {
+        continue;
+      }
+      entries.push({ label: element.getAttribute("aria-label"), title: element.getAttribute("title") });
+    }
+    return entries;
+  });
+  expect(titles).toEqual([
+    { label: "Pencil", title: expect.stringMatching(/^B: Pencil \(/) },
+    { label: "Loupe", title: expect.stringMatching(/^Z: Loupe \(/) },
+    { label: "Bucket fill", title: expect.stringMatching(/^G or F: Bucket fill \(/) },
+    { label: "Eyedropper", title: expect.stringMatching(/^Ctrl \(hold\): Eyedropper \(/) },
+    { label: "Line", title: expect.stringMatching(/^N: Line \(/) },
+    { label: "Curve", title: expect.stringMatching(/^C: Curve \(/) },
+    { label: "Rectangular selection", title: expect.stringMatching(/^R: Rectangular selection \(/) },
+    { label: "Destructive transform", title: expect.stringMatching(/^V: Destructive transform \(/) },
+    { label: "Non-destructive cell transform", title: expect.stringMatching(/^T: Non-destructive cell transform \(/) },
+  ]);
+});
+
+test("R and V select the rectangular selection and destructive transform tools", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await expect(page.locator("gnumarus-shell")).toContainText("pencil");
+  await page.keyboard.press("r");
+  await expect(page.locator("gnumarus-shell")).toContainText("rectangular selection");
+  await page.keyboard.press("b");
+  await expect(page.locator("gnumarus-shell")).toContainText("pencil");
+  await page.keyboard.press("v");
+  await expect(page.locator("gnumarus-shell")).toContainText("destructive transform");
+  await expect(page.getByRole("button", { name: "Commit selection" })).toBeVisible();
+  await page.keyboard.press("V");
+  await expect(page.locator("gnumarus-shell")).toContainText("destructive transform");
+  await page.keyboard.press("R");
+  await expect(page.locator("gnumarus-shell")).toContainText("rectangular selection");
+});

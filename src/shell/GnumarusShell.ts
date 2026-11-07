@@ -141,6 +141,8 @@ const GNUMARUS_SHORTCUTS: GnumarusShortcutSection[] = [
       { keys: "C", action: "Curve tool" },
       { keys: "Z", action: "Loupe tool" },
       { keys: "T", action: "Non-destructive cell transform tool" },
+      { keys: "R", action: "Rectangular selection tool" },
+      { keys: "V", action: "Destructive transform tool" },
       { keys: "E", action: "Toggle eraser blend mode" },
       { keys: "Hold Ctrl", action: "Temporary eyedropper (release to restore the previous tool)" },
       { keys: "Enter, Return or Esc", action: "Merge floating selection into the cell" },
@@ -1187,7 +1189,7 @@ export class GnumarusShell extends LitElement {
         <div class="toolbar" ?hidden=${this.uiHidden}>
           <button
             class=${this.tool === "pencil" ? "active" : ""}
-            title="Pencil (pixel-art solid brush, size and shape in the options bar)"
+            title="B: Pencil (pixel-art solid brush, size and shape in the options bar)"
             aria-label="Pencil"
             @click=${(): void => {
               this.tool = "pencil";
@@ -1198,7 +1200,7 @@ export class GnumarusShell extends LitElement {
           </button>
           <button
             class=${this.tool === "loupe" ? "active" : ""}
-            title="Loupe (left-drag zoom, right-drag rotate, middle-click flip)"
+            title="Z: Loupe (left-drag zoom, right-drag rotate, middle-click flip)"
             aria-label="Loupe"
             @click=${(): void => {
               this.tool = "loupe";
@@ -1209,7 +1211,7 @@ export class GnumarusShell extends LitElement {
           </button>
           <button
             class=${this.tool === "bucket" ? "active" : ""}
-            title="Bucket fill (click fills contiguous same-color region)"
+            title="G or F: Bucket fill (click fills contiguous same-color region)"
             aria-label="Bucket fill"
             @click=${(): void => {
               this.tool = "bucket";
@@ -1236,7 +1238,7 @@ export class GnumarusShell extends LitElement {
           </button>
           <button
             class=${this.tool === "eyedropper" ? "active" : ""}
-            title="Eyedropper (click a pixel to copy its color, hold Ctrl for temporary access)"
+            title="Ctrl (hold): Eyedropper (click a pixel to copy its color)"
             aria-label="Eyedropper"
             @click=${(): void => {
               this.tool = "eyedropper";
@@ -1261,7 +1263,7 @@ export class GnumarusShell extends LitElement {
           </button>
           <button
             class=${this.tool === "line" ? "active" : ""}
-            title="Line (click start point, click end point)"
+            title="N: Line (click start point, click end point)"
             aria-label="Line"
             @click=${(): void => {
               this.tool = "line";
@@ -1272,7 +1274,7 @@ export class GnumarusShell extends LitElement {
           </button>
           <button
             class=${this.tool === "curve" ? "active" : ""}
-            title="Curve (drag endpoints, then two control clicks)"
+            title="C: Curve (drag endpoints, then two control clicks)"
             aria-label="Curve"
             @click=${(): void => {
               this.tool = "curve";
@@ -1283,7 +1285,7 @@ export class GnumarusShell extends LitElement {
           </button>
           <button
             class=${this.tool === "rectselect" ? "active" : ""}
-            title="Rectangular selection (drag to mark, release cuts to floating)"
+            title="R: Rectangular selection (drag to mark, release cuts to floating)"
             aria-label="Rectangular selection"
             @click=${(): void => {
               this.tool = "rectselect";
@@ -1294,7 +1296,7 @@ export class GnumarusShell extends LitElement {
           </button>
           <button
             class=${this.tool === "destransform" ? "active" : ""}
-            title="Destructive transform (drag to move selection, Enter merges)"
+            title="V: Destructive transform (drag to move selection, Enter merges)"
             aria-label="Destructive transform"
             @click=${(): void => {
               this.tool = "destransform";
@@ -1305,7 +1307,7 @@ export class GnumarusShell extends LitElement {
           </button>
           <button
             class=${this.tool === "transform" ? "active" : ""}
-            title="Non-destructive cell transform (left-drag move, right-drag rotate, middle-click flip layer)"
+            title="T: Non-destructive cell transform (left-drag move, right-drag rotate, middle-click flip layer)"
             aria-label="Non-destructive cell transform"
             @click=${(): void => {
               this.tool = "transform";

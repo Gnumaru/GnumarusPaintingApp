@@ -116,6 +116,9 @@
 - [x] Rectangular selection (cut to floating texture + marching ants) + destructive transform (move, auto-select-all, Enter/Esc merge), unit + e2e tests green, docs updated
 - [x] Unit tests (vitest): 160 passed
 - [x] E2E test (Playwright): 104 passed
+- [x] Tool tooltip shortcut prefixes + R/V shortcuts for selection tools, e2e tests green, docs updated
+- [x] Unit tests (vitest): 160 passed
+- [x] E2E test (Playwright): 106 passed
 - [x] Toast display time setting 0.5..2.0s default 1.0s in Settings Interface section with reset arrow, click selection also shows toast, layer auto names start at 1, frames renamable like layers (inline + dialog + menu, persisted in project.json)
 - [x] Unit tests (vitest): pixel buffer, color models, stabilizer, pixel perfect, rotation settings, toast settings, animation model (frame names insert/swap/ensure), channel lock, layer resize, grid settings, pixel grid shader, background settings, final render, viewport math (rotated bounds), project format (frame names), mapping, checker, history — 148 passed
 - [x] E2E test (Playwright): previous 87 + click toast + toast duration setting + layer names start at 1 + frame rename — 91 passed
