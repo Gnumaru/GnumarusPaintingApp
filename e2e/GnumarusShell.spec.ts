@@ -5289,3 +5289,115 @@ test("content and texture pickers render only while open", async ({ page }) => {
   await page.keyboard.press("Escape");
   await expect(page.locator('gnumarus-shell [data-testid="content-picker-grid"]')).toHaveCount(0);
 });
+
+test("layer menu Crop to canvas removes outside excess and stays undoable", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  // Full-canvas red texture with the content shifted 32px left and up.
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          loadProject(
+            width: number,
+            height: number,
+            inputs: Array<{
+              id: string;
+              name: string;
+              visible: boolean;
+              opacity: number;
+              width: number;
+              height: number;
+              buffer: Uint8ClampedArray;
+              transform: unknown;
+              lockedChannels: { r: boolean; g: boolean; b: boolean; a: boolean };
+            }>,
+          ): void;
+        };
+      };
+    };
+    const red = new Uint8ClampedArray(64 * 64 * 4);
+    for (let i = 0; i < 64 * 64; i += 1) {
+      red[i * 4] = 255;
+      red[i * 4 + 3] = 255;
+    }
+    root.__gnumarus?.engine?.loadProject(64, 64, [
+      {
+        id: "layer0",
+        name: "Layer 1",
+        visible: true,
+        opacity: 1,
+        width: 64,
+        height: 64,
+        buffer: red,
+        transform: {
+          x: -32, y: -32, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1,
+          skewX: 0, skewY: 0, rotationX: 0, rotationY: 0,
+        },
+        lockedChannels: { r: false, g: false, b: false, a: false },
+      },
+    ]);
+  });
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.getByRole("button", { name: "Final preview" }).click();
+  const previewCanvas = page.locator("gnumarus-shell canvas#previewCanvas");
+  await expect(previewCanvas).toBeVisible();
+  const previewPixel = (x: number, y: number): Promise<number[] | null> =>
+    page.evaluate(([px, py]: number[]) => {
+      const root = document.querySelector("gnumarus-shell")?.shadowRoot ?? null;
+      const target = root?.getElementById("previewCanvas") as HTMLCanvasElement | null;
+      const ctx = target?.getContext("2d") ?? null;
+      if (ctx === null) {
+        return null;
+      }
+      const data = ctx.getImageData(px, py, 1, 1).data;
+      return [data[0], data[1], data[2], data[3]];
+    }, [x, y]);
+  expect(await previewPixel(0, 0)).toEqual([255, 0, 0, 255]);
+  await page.locator('gnumarus-shell [data-layer-id="layer0"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Crop to canvas" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Texture cropped to 32 x 32");
+  const cropped = (await getLayers(page)).layers[0];
+  expect(cropped?.width).toBe(32);
+  expect(cropped?.height).toBe(32);
+  expect(cropped?.transform.x).toBeCloseTo(-16, 9);
+  expect(cropped?.transform.y).toBeCloseTo(-16, 9);
+  // Kept pixels are the old bottom-right quadrant.
+  expect(await readPixel(page, 0, 0)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 31, 31)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  // Rendering position is preserved: canvas origin still shows red.
+  expect(await previewPixel(0, 0)).toEqual([255, 0, 0, 255]);
+  // Undo restores the full texture and transform; redo crops again.
+  await page.keyboard.press("Control+z");
+  const undone = (await getLayers(page)).layers[0];
+  expect(undone?.width).toBe(64);
+  expect(undone?.transform.x).toBeCloseTo(-32, 9);
+  await page.keyboard.press("Control+y");
+  const redone = (await getLayers(page)).layers[0];
+  expect(redone?.width).toBe(32);
+  expect(redone?.transform.x).toBeCloseTo(-16, 9);
+});
+
+test("cell menu Crop to canvas reports edge cases", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  const cell = matrix.locator('[data-testid="anim-cell"][data-matrix-layer="layer0"][data-matrix-frame="0"]');
+  await cell.click({ button: "right" });
+  await page.getByRole("button", { name: "Crop to canvas" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText(
+    "Nothing to crop: texture is already inside the canvas",
+  );
+  // Push the content fully off-canvas, then crop refuses.
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { setLayerTransform(id: string, t: unknown): boolean } };
+    };
+    root.__gnumarus?.engine?.setLayerTransform("layer0", { x: 100, y: 0 });
+  });
+  await cell.click({ button: "right" });
+  await page.getByRole("button", { name: "Crop to canvas" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText(
+    "Cannot crop: cell content is fully outside the canvas",
+  );
+});

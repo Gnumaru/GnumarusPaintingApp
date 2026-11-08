@@ -52,6 +52,7 @@ import {
   type GnumarusStabilizerMode,
 } from "./GnumarusStabilizer";
 import {
+  canvasVisibleTextureBox,
   clampZoom,
   GNUMARUS_MAX_LAYER_SKEW,
   IDENTITY_LAYER_TRANSFORM,
@@ -68,6 +69,7 @@ import {
   screenToProject,
 } from "./GnumarusViewportMath";
 import type {
+  GnumarusCropBox,
   GnumarusLayerTransform,
   GnumarusRect,
   GnumarusViewTransform,
@@ -2587,6 +2589,51 @@ export class GnumarusCanvasEngine {
     if (box.left === 0 && box.top === 0 && box.width === entry.width && box.height === entry.height) {
       return false;
     }
+    return this.applyTextureCropBox(textureId, entry, box);
+  }
+
+  /**
+   * Crop a cell texture to the region visible on the canvas through that
+   * cell content transform. Returns "cropped" on success, "unchanged" when
+   * the cell has no texture or the texture already lies fully inside the
+   * canvas, and "outside" when the content sits fully outside the canvas
+   * (cropping would destroy every pixel, so nothing happens).
+   */
+  cropCellTextureToCanvas(layerId: string, frame: number): "cropped" | "unchanged" | "outside" {
+    const contentId = this.cells.get(animationCellKey(layerId, frame));
+    const content = contentId === undefined ? undefined : this.contents.get(contentId);
+    const textureId = content?.textureId ?? null;
+    const entry = textureId === null ? undefined : this.textures.get(textureId);
+    if (entry === undefined || textureId === null || content === undefined) {
+      return "unchanged";
+    }
+    this.commitFloatingIfHomeTexture(textureId);
+    const box = canvasVisibleTextureBox(
+      this.imageWidth,
+      this.imageHeight,
+      entry.width,
+      entry.height,
+      content.transform,
+    );
+    if (box === null) {
+      return "outside";
+    }
+    if (box.left === 0 && box.top === 0 && box.width === entry.width && box.height === entry.height) {
+      return "unchanged";
+    }
+    return this.applyTextureCropBox(textureId, entry, box) ? "cropped" : "unchanged";
+  }
+
+  /**
+   * Shared texture-crop body: snapshots the texture, copies the box pixels,
+   * re-seats every sharing content transform so rendering is unchanged,
+   * records an undoable history entry and refreshes the views.
+   */
+  private applyTextureCropBox(
+    textureId: string,
+    entry: { width: number; height: number; buffer: Uint8ClampedArray },
+    box: GnumarusCropBox,
+  ): boolean {
     const beforeWidth = entry.width;
     const beforeHeight = entry.height;
     const beforeBuffer = entry.buffer.slice();
@@ -2651,6 +2698,9 @@ export class GnumarusCanvasEngine {
         content.transform = { ...item.transform };
       }
     }
+    // setTexturePixels re-syncs the layer renders above, but with the
+    // pre-restore transforms; sync again now that they are restored.
+    this.syncAllLayerRenders();
     return true;
   }
 

@@ -1650,6 +1650,17 @@ export class GnumarusShell extends LitElement {
                 >
                   Fit texture to size
                 </button>
+                <button
+                  ?disabled=${this.contextMenuLayerId === null ||
+                  this.engine?.getCellTextureId(this.contextMenuLayerId, this.engine.getCurrentFrame()) === null}
+                  @click=${(): void => {
+                    if (this.contextMenuLayerId !== null) {
+                      this.onCropCellToCanvasFromLayer(this.contextMenuLayerId);
+                    }
+                  }}
+                >
+                  Crop to canvas
+                </button>
               </div>
             `
           : html``}
@@ -2462,6 +2473,9 @@ export class GnumarusShell extends LitElement {
         <button @click=${(): void => void this.onOpenContentPicker()}>Select content</button>
         <button ?disabled=${cellTextureId === null} @click=${(): void => this.onOpenFitTextureFromCell()}>
           Fit texture to size
+        </button>
+        <button ?disabled=${cellTextureId === null} @click=${(): void => this.onCropCellToCanvasFromCell()}>
+          Crop to canvas
         </button>
       </div>
     `;
@@ -4721,6 +4735,52 @@ export class GnumarusShell extends LitElement {
       this.statusMessage = "Nothing to fit: texture is empty or already fits";
     }
     this.closeFitTextureDialog();
+  }
+
+  private onCropCellToCanvasFromLayer(layerId: string): void {
+    if (this.engine === null) {
+      this.closeLayerMenu();
+      return;
+    }
+    const frame = this.engine.getCurrentFrame();
+    const outcome = this.engine.cropCellTextureToCanvas(layerId, frame);
+    this.closeLayerMenu();
+    this.reportCropToCanvasOutcome(outcome, layerId, frame);
+  }
+
+  private onCropCellToCanvasFromCell(): void {
+    const target = this.matrixCellTarget();
+    this.closeMatrixMenu();
+    if (target === null || this.engine === null) {
+      return;
+    }
+    this.reportCropToCanvasOutcome(
+      this.engine.cropCellTextureToCanvas(target.layerId, target.frame),
+      target.layerId,
+      target.frame,
+    );
+  }
+
+  private reportCropToCanvasOutcome(
+    outcome: "cropped" | "unchanged" | "outside",
+    layerId: string,
+    frame: number,
+  ): void {
+    if (outcome === "cropped") {
+      this.refreshLayers();
+      this.dirty = true;
+      const textureId = this.engine?.getCellTextureId(layerId, frame) ?? null;
+      const fitted =
+        textureId === null
+          ? undefined
+          : this.engine?.exportTextures().find((entry) => entry.id === textureId);
+      this.statusMessage =
+        fitted === undefined ? "Texture cropped to canvas" : `Texture cropped to ${fitted.width} x ${fitted.height}`;
+    } else if (outcome === "outside") {
+      this.statusMessage = "Cannot crop: cell content is fully outside the canvas";
+    } else {
+      this.statusMessage = "Nothing to crop: texture is already inside the canvas";
+    }
   }
 
   private openShortcutsDialog(): void {

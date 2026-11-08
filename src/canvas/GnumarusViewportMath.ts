@@ -315,6 +315,59 @@ export function normalizeRotation(radians: number): number {
   return result;
 }
 
+/** Integer texture-pixel box: sub-rectangle produced by cropping. */
+export interface GnumarusCropBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Texture-pixel box visible on the canvas through a content transform.
+ * Inverse-maps the four canvas corners into texture space, expands outward
+ * to whole texels and clamps to the texture, so no visible texel is ever
+ * dropped (at most a fringe of partially covered texels is kept).
+ * Null when the transform is degenerate or the content lies fully outside
+ * the canvas.
+ */
+export function canvasVisibleTextureBox(
+  canvasWidth: number,
+  canvasHeight: number,
+  textureWidth: number,
+  textureHeight: number,
+  transform: GnumarusLayerTransform,
+): GnumarusCropBox | null {
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  const corners: Array<[number, number]> = [
+    [-canvasWidth / 2, -canvasHeight / 2],
+    [canvasWidth / 2, -canvasHeight / 2],
+    [canvasWidth / 2, canvasHeight / 2],
+    [-canvasWidth / 2, canvasHeight / 2],
+  ];
+  for (const [projectX, projectY] of corners) {
+    const mapped = projectToLayerImageFloat(projectX, projectY, textureWidth, textureHeight, transform);
+    if (mapped === null) {
+      return null;
+    }
+    minX = Math.min(minX, mapped.x);
+    minY = Math.min(minY, mapped.y);
+    maxX = Math.max(maxX, mapped.x);
+    maxY = Math.max(maxY, mapped.y);
+  }
+  const left = Math.max(0, Math.floor(minX));
+  const top = Math.max(0, Math.floor(minY));
+  const right = Math.min(textureWidth, Math.ceil(maxX));
+  const bottom = Math.min(textureHeight, Math.ceil(maxY));
+  if (left >= right || top >= bottom) {
+    return null;
+  }
+  return { left, top, width: right - left, height: bottom - top };
+}
+
 /** Axis-aligned bbox of a width x height image rotated by radians. Flips preserve the bbox. */
 export function rotatedBounds(width: number, height: number, rotation: number): { width: number; height: number } {
   const cos = Math.abs(Math.cos(rotation));

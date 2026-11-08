@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  canvasVisibleTextureBox,
   clampZoom,
   imageToScreenPixel,
   layerImageToProject,
   layerLinearMatrix,
   layerMatrixDeterminant,
+  layerPixelCenterToProject,
   layerPixelToScreen,
   layerRotate3,
   normalizeRotation,
@@ -241,5 +243,79 @@ describe("GnumarusViewportMath", () => {
     const topZ = tiltX[2][0] * 0 + tiltX[2][1] * -1 + tiltX[2][2] * 0;
     expect(topZ).toBeCloseTo(Math.sin(0.3), 12);
     expect(topZ).toBeGreaterThan(0);
+  });
+
+  it("canvasVisibleTextureBox keeps the full texture when it fills the canvas", () => {
+    const identity: GnumarusLayerTransform = {
+      x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1,
+      skewX: 0, skewY: 0, rotationX: 0, rotationY: 0,
+    };
+    expect(canvasVisibleTextureBox(64, 64, 64, 64, identity)).toEqual({ left: 0, top: 0, width: 64, height: 64 });
+  });
+
+  it("canvasVisibleTextureBox crops offset excess", () => {
+    // 64x64 texture shifted 32px left and up: first 32 rows/columns drop out.
+    const shifted: GnumarusLayerTransform = {
+      x: -32, y: -32, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1,
+      skewX: 0, skewY: 0, rotationX: 0, rotationY: 0,
+    };
+    expect(canvasVisibleTextureBox(64, 64, 64, 64, shifted)).toEqual({ left: 32, top: 32, width: 32, height: 32 });
+    const rightDown: GnumarusLayerTransform = { ...shifted, x: 16, y: 8 };
+    expect(canvasVisibleTextureBox(64, 64, 64, 64, rightDown)).toEqual({ left: 0, top: 0, width: 48, height: 56 });
+  });
+
+  it("canvasVisibleTextureBox mirrors the box for flipped content", () => {
+    // Same shift as above but mirrored: the visible 32 columns are the left ones.
+    const flipped: GnumarusLayerTransform = {
+      x: -32, y: -32, rotation: 0, flipX: true, flipY: false, scaleX: 1, scaleY: 1,
+      skewX: 0, skewY: 0, rotationX: 0, rotationY: 0,
+    };
+    expect(canvasVisibleTextureBox(64, 64, 64, 64, flipped)).toEqual({ left: 0, top: 32, width: 32, height: 32 });
+  });
+
+  it("canvasVisibleTextureBox covers centered rotations fully", () => {
+    const spun: GnumarusLayerTransform = {
+      x: 0, y: 0, rotation: Math.PI / 2, flipX: false, flipY: false, scaleX: 1, scaleY: 1,
+      skewX: 0, skewY: 0, rotationX: 0, rotationY: 0,
+    };
+    expect(canvasVisibleTextureBox(64, 64, 64, 64, spun)).toEqual({ left: 0, top: 0, width: 64, height: 64 });
+  });
+
+  it("canvasVisibleTextureBox returns null outside the canvas or when degenerate", () => {
+    const away: GnumarusLayerTransform = {
+      x: 100, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1,
+      skewX: 0, skewY: 0, rotationX: 0, rotationY: 0,
+    };
+    expect(canvasVisibleTextureBox(64, 64, 64, 64, away)).toBeNull();
+    const edgeOn: GnumarusLayerTransform = {
+      x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1,
+      skewX: 0, skewY: 0, rotationX: Math.PI / 2, rotationY: 0,
+    };
+    expect(canvasVisibleTextureBox(64, 64, 64, 64, edgeOn)).toBeNull();
+  });
+
+  it("canvasVisibleTextureBox contains every canvas-mapped texel", () => {
+    const placed: GnumarusLayerTransform = {
+      x: -7, y: 5, rotation: 0.7, flipX: true, flipY: false, scaleX: 1.5, scaleY: 0.8,
+      skewX: 0.2, skewY: -0.1, rotationX: 0.2, rotationY: -0.15,
+    };
+    const box = canvasVisibleTextureBox(64, 64, 48, 40, placed);
+    expect(box).not.toBeNull();
+    if (box === null) {
+      return;
+    }
+    for (let y = 0; y < 40; y += 1) {
+      for (let x = 0; x < 48; x += 1) {
+        const project = layerPixelCenterToProject(x, y, 48, 40, placed);
+        const onCanvas =
+          project.x >= -32 && project.x < 32 && project.y >= -32 && project.y < 32;
+        if (onCanvas) {
+          expect(x).toBeGreaterThanOrEqual(box.left);
+          expect(x).toBeLessThan(box.left + box.width);
+          expect(y).toBeGreaterThanOrEqual(box.top);
+          expect(y).toBeLessThan(box.top + box.height);
+        }
+      }
+    }
   });
 });

@@ -180,3 +180,6 @@
 - [x] Frame-switch perf: lazy picker dialogs (thumbnails only while open), structural e2e, docs updated
 - [x] Unit tests (vitest): 197 passed
 - [x] E2E test (Playwright): 131 passed
+- [x] Crop texture to canvas (layer/cell context menus, transform-aware, undoable), unit + e2e tests green, docs updated
+- [x] Unit tests (vitest): 203 passed
+- [x] E2E test (Playwright): 133 passed
