@@ -4644,8 +4644,9 @@ export class GnumarusCanvasEngine {
   private updateRot3DGesture(clientX: number, clientY: number): void {
     if (this.trackballDrag !== null) {
       const gesture = this.trackballDrag;
-      // Screen-space trackball: right drags spin right (RY), down drags
-      // tip the top toward the viewer (RX); angle = drag / sphere radius.
+      // Screen-space trackball: right drags turn the front face right, so
+      // the left edge comes toward the viewer (negative RY); down drags
+      // tip the top toward the viewer (positive RX); angle = drag / radius.
       const okX = this.applyRot3DAngle(
         gesture.target,
         gesture.layerId,
@@ -4656,7 +4657,7 @@ export class GnumarusCanvasEngine {
         gesture.target,
         gesture.layerId,
         "y",
-        gesture.startRotationY + (clientX - gesture.grabClientX) / gesture.radiusPx,
+        gesture.startRotationY - (clientX - gesture.grabClientX) / gesture.radiusPx,
       );
       if (!okX || !okY) {
         this.trackballDrag = null;

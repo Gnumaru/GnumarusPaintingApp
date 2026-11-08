@@ -7,6 +7,8 @@
  * engine owns the live selection state.
  */
 
+import { layerRotate3 } from "./GnumarusViewportMath";
+
 export interface GnumarusSelectionPlacement {
   /** Center in home-texture pixels. */
   cx: number;
@@ -72,28 +74,16 @@ export function selectionLinearMatrix(placement: GnumarusSelectionPlacement): Gn
 /**
  * Full 3x3 rotation `Rz(rotation) * Ry(rotationY) * Rx(rotationX)`,
  * row-major, for gizmo rings (y-down, clockwise-positive, z toward viewer).
+ * Shares the layer convention exactly (a placement carries the same fields).
  */
-export function selectionRotate3(placement: GnumarusSelectionPlacement): [
+export function selectionRotate3(
+  placement: Pick<GnumarusSelectionPlacement, "rotation" | "rotationX" | "rotationY">,
+): [
   [number, number, number],
   [number, number, number],
   [number, number, number],
 ] {
-  const cx = Math.cos(placement.rotationX);
-  const sx = Math.sin(placement.rotationX);
-  const cy = Math.cos(placement.rotationY);
-  const sy = Math.sin(placement.rotationY);
-  const cz = Math.cos(placement.rotation);
-  const sz = Math.sin(placement.rotation);
-  const ryRx: [[number, number, number], [number, number, number], [number, number, number]] = [
-    [cy, sy * sx, -sy * cx],
-    [0, cx, sx],
-    [sy, -cy * sx, cy * cx],
-  ];
-  return [
-    [cz * ryRx[0][0] - sz * ryRx[1][0], cz * ryRx[0][1] - sz * ryRx[1][1], cz * ryRx[0][2] - sz * ryRx[1][2]],
-    [sz * ryRx[0][0] + cz * ryRx[1][0], sz * ryRx[0][1] + cz * ryRx[1][1], sz * ryRx[0][2] + cz * ryRx[1][2]],
-    [ryRx[2][0], ryRx[2][1], ryRx[2][2]],
-  ];
+  return layerRotate3(placement);
 }
 
 /** Determinant of the linear part (tilt scales it by cosRX*cosRY). */

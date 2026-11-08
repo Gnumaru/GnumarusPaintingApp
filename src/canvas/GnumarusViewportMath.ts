@@ -57,7 +57,7 @@ export interface GnumarusRect {
  * layer/project space (x right, y down, z toward the viewer, angles
  * clockwise-positive on screen). Row-major `m[row][col]`.
  */
-export function layerRotate3(layer: GnumarusLayerTransform): [
+export function layerRotate3(layer: Pick<GnumarusLayerTransform, "rotation" | "rotationX" | "rotationY">): [
   [number, number, number],
   [number, number, number],
   [number, number, number],

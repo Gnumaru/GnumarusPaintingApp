@@ -4915,7 +4915,7 @@ test("3d rotation trackball tilts the layer in the dragged direction", async ({ 
   await page.mouse.down();
   await page.mouse.move(center.x + 40, center.y, { steps: 4 });
   await page.mouse.up();
-  expect((await getLayerTransform(page)).rotationY).toBeCloseTo(40 / 128, 4);
+  expect((await getLayerTransform(page)).rotationY).toBeCloseTo(-40 / 128, 4);
   expect((await getLayerTransform(page)).rotationX).toBeCloseTo(0, 6);
   await page.mouse.move(center.x, center.y);
   await page.mouse.down();
@@ -4984,7 +4984,7 @@ test("3d rotation center resets only the rotations", async ({ page }) => {
   await page.mouse.down();
   await page.mouse.move(center.x + 40, center.y, { steps: 4 });
   await page.mouse.up();
-  expect((await getLayerTransform(page)).rotationY).toBeCloseTo(40 / 128, 4);
+  expect((await getLayerTransform(page)).rotationY).toBeCloseTo(-40 / 128, 4);
   const displaced = await getLayerTransform(page);
   const centerAgain = await rot3DCenter(page);
   await page.mouse.click(centerAgain.x, centerAgain.y);
@@ -5019,7 +5019,7 @@ test("destructive 3d rotation auto-selects, tilts and merges", async ({ page }) 
   await page.mouse.move(center.x + 40, center.y, { steps: 4 });
   await page.mouse.up();
   // Sphere radius is half the 64px selection times zoom 8 = 256 screen px.
-  expect((await getFloatingTransform(page))?.rotationY).toBeCloseTo(40 / 256, 4);
+  expect((await getFloatingTransform(page))?.rotationY).toBeCloseTo(-40 / 256, 4);
   await page.keyboard.press("Enter");
   expect(await floatingRect(page)).toBeNull();
   // The symmetric block survives the small tilt with its center intact.
@@ -5040,7 +5040,7 @@ test("painting on a tilted layer lands in layer space", async ({ page }) => {
   await page.mouse.down();
   await page.mouse.move(center.x + 40, center.y, { steps: 4 });
   await page.mouse.up();
-  expect((await getLayerTransform(page)).rotationY).toBeCloseTo(40 / 128, 4);
+  expect((await getLayerTransform(page)).rotationY).toBeCloseTo(-40 / 128, 4);
   // Tilt is about the layer center, so the canvas center still addresses
   // the layer center pixel through the ray-plane solve.
   await setPencil(page, "#ff0000");

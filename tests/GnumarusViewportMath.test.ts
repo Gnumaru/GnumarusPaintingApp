@@ -6,6 +6,7 @@ import {
   layerLinearMatrix,
   layerMatrixDeterminant,
   layerPixelToScreen,
+  layerRotate3,
   normalizeRotation,
   projectToLayerImageFloat,
   projectToLayerPixel,
@@ -227,5 +228,18 @@ describe("GnumarusViewportMath", () => {
     expect(layerMatrixDeterminant(edgeOn)).toBeCloseTo(0, 12);
     expect(projectToLayerImageFloat(0, 0, 8, 8, edgeOn)).toBeNull();
     expect(projectToLayerPixel(4, 4, 8, 8, edgeOn)).toBeNull();
+  });
+
+  it("tips the dragged side toward the viewer (trackball convention)", () => {
+    // Negative RY (right drags): left point (-1,0,0) gets positive z.
+    const tiltY = layerRotate3({ rotation: 0, rotationX: 0, rotationY: -0.3 });
+    const leftZ = tiltY[2][0] * -1 + tiltY[2][1] * 0 + tiltY[2][2] * 0;
+    expect(leftZ).toBeCloseTo(-Math.sin(-0.3), 12);
+    expect(leftZ).toBeGreaterThan(0);
+    // Positive RX (down drags): top point (0,-1,0) gets positive z.
+    const tiltX = layerRotate3({ rotation: 0, rotationX: 0.3, rotationY: 0 });
+    const topZ = tiltX[2][0] * 0 + tiltX[2][1] * -1 + tiltX[2][2] * 0;
+    expect(topZ).toBeCloseTo(Math.sin(0.3), 12);
+    expect(topZ).toBeGreaterThan(0);
   });
 });
