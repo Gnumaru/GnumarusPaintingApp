@@ -11,6 +11,7 @@ interface GnumarusWritableStream {
 }
 
 interface GnumarusPickedFile {
+  readonly name: string;
   text(): Promise<string>;
   arrayBuffer(): Promise<ArrayBuffer>;
 }
@@ -26,8 +27,15 @@ interface GnumarusDirectoryHandle {
   getDirectoryHandle(name: string, options?: { create?: boolean }): Promise<GnumarusDirectoryHandle>;
 }
 
+interface GnumarusOpenFilePickerOptions {
+  multiple?: boolean;
+  excludeAcceptAllOption?: boolean;
+  types?: Array<{ description?: string; accept: Record<string, string[]> }>;
+}
+
 interface GnumarusPickerWindow {
   showDirectoryPicker?: (options?: { mode?: string }) => Promise<GnumarusDirectoryHandle>;
+  showOpenFilePicker?: (options?: GnumarusOpenFilePickerOptions) => Promise<GnumarusFileHandle[]>;
 }
 
 function pickerWindow(): GnumarusPickerWindow {
@@ -38,12 +46,33 @@ export function isFileSystemAccessSupported(): boolean {
   return typeof pickerWindow().showDirectoryPicker === "function";
 }
 
+export function isFilePickerSupported(): boolean {
+  return typeof pickerWindow().showOpenFilePicker === "function";
+}
+
 export async function pickProjectDirectory(): Promise<GnumarusDirectoryHandle> {
   const showPicker = pickerWindow().showDirectoryPicker;
   if (showPicker === undefined) {
     throw new Error("File System Access API is only available in Chromium derivatives.");
   }
   return showPicker.call(window, { mode: "readwrite" });
+}
+
+/**
+ * Open the operating system file dialog to pick a single Aseprite file.
+ * Returns null when the dialog supports it; throws AbortError when the
+ * user cancels (callers treat cancellation as silent).
+ */
+export async function pickAsepriteFile(): Promise<GnumarusFileHandle | null> {
+  const showPicker = pickerWindow().showOpenFilePicker;
+  if (showPicker === undefined) {
+    throw new Error("File System Access API is only available in Chromium derivatives.");
+  }
+  const handles = await showPicker.call(window, {
+    multiple: false,
+    types: [{ description: "Aseprite files", accept: { "application/octet-stream": [".ase", ".aseprite"] } }],
+  });
+  return handles[0] ?? null;
 }
 
 async function resolveFile(

@@ -176,3 +176,6 @@
 - [x] Separate 3D rotation tools (`transform3d`/`destransform3d`) with RGB trackball gizmo, unit + e2e tests green, docs updated
 - [x] Unit tests (vitest): 178 passed
 - [x] E2E test (Playwright): 127 passed
+- [x] Aseprite (.ase/.aseprite) import via File > Import, unit + e2e tests green, docs updated
+- [x] Unit tests (vitest): 197 passed
+- [x] E2E test (Playwright): 130 passed

@@ -6,7 +6,9 @@ import {
   type GnumarusLayerInfo,
 } from "../canvas/GnumarusCanvasEngine";
 import {
+  isFilePickerSupported,
   isFileSystemAccessSupported,
+  pickAsepriteFile,
   pickProjectDirectory,
   readProjectFiles,
   writeProjectFiles,
@@ -61,6 +63,7 @@ import {
 } from "../settings/GnumarusToastSettings";
 import { compositeFinalImage } from "../preview/GnumarusFinalRender";
 import { decodePngToBuffer, encodeBufferToPngBlob } from "../project/GnumarusPngCodec";
+import { parseAsepriteFile } from "../project/GnumarusAseprite";
 import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
 import {
   clampBrushSizeFloat,
@@ -1140,6 +1143,7 @@ export class GnumarusShell extends LitElement {
                   <button @click=${(): void => void this.openNewDialog()}>New</button>
                   <button @click=${(): void => void this.openProject()}>Open</button>
                   <button title="Save (Ctrl+S)" @click=${(): void => void this.saveProject()}>Save</button>
+                  <button @click=${(): void => void this.importAseprite()}>Import</button>
                 </div>
               `
             : html``}
@@ -4823,6 +4827,79 @@ export class GnumarusShell extends LitElement {
       this.statusMessage = `Opened ${dir.name}`;
     } catch (error) {
       this.statusMessage = error instanceof Error ? `Open failed: ${error.message}` : "Open failed";
+    }
+  }
+
+  private async importAseprite(): Promise<void> {
+    this.fileMenuOpen = false;
+    if (!isFilePickerSupported()) {
+      this.statusMessage = "Import requires the File System Access API (Chromium)";
+      return;
+    }
+    this.stopPlayback();
+    let handle;
+    try {
+      handle = await pickAsepriteFile();
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
+      const reason = error instanceof Error ? error.message : String(error);
+      console.error(`Aseprite import failed: ${reason}`);
+      this.statusMessage = `Import failed: ${reason}`;
+      this.showToast(`Import failed: ${reason}`);
+      return;
+    }
+    if (handle === null) {
+      return;
+    }
+    try {
+      this.statusMessage = "Importing...";
+      const picked = await handle.getFile();
+      const bytes = new Uint8Array(await picked.arrayBuffer());
+      const imported = await parseAsepriteFile(bytes);
+      const fileName = picked.name;
+      const dot = fileName.lastIndexOf(".");
+      this.engine?.loadAnimationProject(imported.width, imported.height, {
+        layers: imported.layers.map((layer) => ({
+          id: layer.id,
+          name: layer.name,
+          visible: layer.visible,
+          opacity: layer.opacity,
+          lockedChannels: { ...layer.lockedChannels },
+        })),
+        textures: imported.textures.map((texture) => ({
+          id: texture.id,
+          name: texture.name,
+          width: texture.width,
+          height: texture.height,
+          buffer: texture.buffer,
+        })),
+        contents: imported.contents.map((content) => ({
+          id: content.id,
+          name: content.name,
+          textureId: content.textureId,
+          transform: { ...content.transform },
+        })),
+        cells: imported.cells.map((cell) => ({ ...cell })),
+        frames: imported.frames,
+        currentFrame: 0,
+        defaultFrameDuration: imported.defaultFrameDuration,
+        frameDurations: imported.frameDurations.map((entry) => ({ ...entry })),
+        frameNames: [],
+      });
+      this.refreshLayers();
+      this.directoryHandle = null;
+      this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
+      this.dirty = true;
+      const summary = `Imported ${fileName} (${imported.layers.length} layers, ${imported.frames} frames)`;
+      this.statusMessage = summary;
+      this.showToast(summary);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.error(`Aseprite import failed: ${reason}`);
+      this.statusMessage = `Import failed: ${reason}`;
+      this.showToast(`Import failed: ${reason}`);
     }
   }
 

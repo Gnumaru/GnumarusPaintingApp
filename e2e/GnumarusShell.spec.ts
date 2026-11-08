@@ -5056,3 +5056,221 @@ test("painting on a tilted layer lands in layer space", async ({ page }) => {
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
+
+/** Build a minimal 2-layer, 2-frame .ase file inside the page (zlib via CompressionStream). */
+async function buildAsepriteBytes(page: import("@playwright/test").Page): Promise<Uint8Array> {
+  return page.evaluate(async () => {
+    async function deflate(data: Uint8Array): Promise<Uint8Array> {
+      const output = await new Response(
+        new Blob([data.slice()]).stream().pipeThrough(new CompressionStream("deflate")),
+      ).arrayBuffer();
+      return new Uint8Array(output);
+    }
+    class Writer {
+      readonly bytes: number[] = [];
+      u8(v: number): this {
+        this.bytes.push(v & 0xff);
+        return this;
+      }
+      u16(v: number): this {
+        this.bytes.push(v & 0xff, (v >>> 8) & 0xff);
+        return this;
+      }
+      i16(v: number): this {
+        return this.u16(v < 0 ? 0x10000 + v : v);
+      }
+      u32(v: number): this {
+        this.bytes.push(v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff);
+        return this;
+      }
+      raw(values: ArrayLike<number>): this {
+        for (let i = 0; i < values.length; i += 1) {
+          this.bytes.push(values[i] ?? 0);
+        }
+        return this;
+      }
+      str(text: string): this {
+        const encoded = new TextEncoder().encode(text);
+        this.u16(encoded.length);
+        return this.raw(encoded);
+      }
+      wrap(type: number, payload: Writer): this {
+        this.u32(6 + payload.bytes.length);
+        this.u16(type);
+        return this.raw(payload.bytes);
+      }
+    }
+    const layerChunk = (name: string, flags: number): Writer => {
+      const payload = new Writer();
+      payload.u16(flags).u16(0).u16(0).u16(0).u16(0).u16(0);
+      payload.u8(255).u8(0).u8(0).u8(0);
+      payload.str(name);
+      return new Writer().wrap(0x2004, payload);
+    };
+    const imageCel = async (
+      layer: number,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      pixels: Uint8Array,
+    ): Promise<Writer> => {
+      const payload = new Writer();
+      payload.u16(layer).i16(x).i16(y).u8(255).u16(2).i16(0);
+      payload.u8(0).u8(0).u8(0).u8(0).u8(0);
+      payload.u16(width).u16(height);
+      payload.raw(await deflate(pixels));
+      return new Writer().wrap(0x2005, payload);
+    };
+    const linkedCel = (layer: number, x: number, y: number, linkTo: number): Writer => {
+      const payload = new Writer();
+      payload.u16(layer).i16(x).i16(y).u8(255).u16(1).i16(0);
+      payload.u8(0).u8(0).u8(0).u8(0).u8(0);
+      payload.u16(linkTo);
+      return new Writer().wrap(0x2005, payload);
+    };
+    const frameChunk = (duration: number, chunks: Writer[]): Writer => {
+      const body = new Writer();
+      for (const chunk of chunks) {
+        body.raw(chunk.bytes);
+      }
+      const out = new Writer();
+      out.u32(16 + body.bytes.length);
+      out.u16(0xf1fa).u16(chunks.length).u16(duration).u8(0).u8(0).u32(chunks.length);
+      return out.raw(body.bytes);
+    };
+    const blue = new Uint8Array(16 * 4);
+    for (let i = 0; i < 16; i += 1) {
+      blue[i * 4] = 0;
+      blue[i * 4 + 1] = 0;
+      blue[i * 4 + 2] = 255;
+      blue[i * 4 + 3] = 255;
+    }
+    const red = new Uint8Array([255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255]);
+    // Frame 0 (100ms): blue background + red 2x2 square at (1,1).
+    // Frame 1 (250ms): blue background + linked copy of the red square.
+    const frames = [
+      frameChunk(100, [
+        layerChunk("bg", 1 | 8),
+        layerChunk("fg", 1),
+        await imageCel(0, 0, 0, 4, 4, blue),
+        await imageCel(1, 1, 1, 2, 2, red),
+      ]),
+      frameChunk(250, [await imageCel(0, 0, 0, 4, 4, blue), linkedCel(1, 1, 1, 0)]),
+    ];
+    const out = new Writer();
+    const body = new Writer();
+    for (const entry of frames) {
+      body.raw(entry.bytes);
+    }
+    out.u32(128 + body.bytes.length);
+    out.u16(0xa5e0).u16(frames.length).u16(4).u16(4).u16(32).u32(1).u16(100);
+    out.u32(0).u32(0).u8(0).u8(0).u8(0).u8(0).u16(0).u8(0).u8(0);
+    out.i16(0).i16(0).u16(0).u16(0);
+    out.raw(new Array<number>(84).fill(0));
+    out.raw(body.bytes);
+    return new Uint8Array(out.bytes);
+  });
+}
+
+/** Stub the OS file picker to serve in-memory bytes as the picked file. */
+async function stubAsepritePicker(
+  page: import("@playwright/test").Page,
+  fileName: string,
+  bytes: Uint8Array,
+): Promise<void> {
+  await page.evaluate(
+    ([name, data]: [string, number[]]) => {
+      const root = window as unknown as {
+        showOpenFilePicker?: () => Promise<Array<{ getFile(): Promise<File> }>>;
+      };
+      root.showOpenFilePicker = async () => [
+        {
+          getFile: async () => new File([new Uint8Array(data)], name, { type: "application/octet-stream" }),
+        },
+      ];
+    },
+    [fileName, Array.from(bytes)] as [string, number[]],
+  );
+}
+
+async function animationFrameCount(page: import("@playwright/test").Page): Promise<number> {
+  return page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { getFrameCount(): number } } };
+    return root.__gnumarus?.engine?.getFrameCount() ?? -1;
+  });
+}
+
+async function frameDuration(
+  page: import("@playwright/test").Page,
+  frame: number,
+): Promise<number | null> {
+  return page.evaluate((target: number) => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getEffectiveFrameDuration(frame: number): number } };
+    };
+    return root.__gnumarus?.engine?.getEffectiveFrameDuration(target) ?? null;
+  }, frame);
+}
+
+test("File > Import loads layers, frames and durations from .ase", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell");
+  await stubAsepritePicker(page, "hero.ase", await buildAsepriteBytes(page));
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import" }).click();
+  const toast = page.locator('gnumarus-shell [data-testid="toast"]');
+  await expect(toast).toBeVisible();
+  await expect(toast).toContainText("Imported hero.ase (2 layers, 2 frames)");
+  // Active layer is the top one (fg, 2x2 red texture): texture-space pixels.
+  expect(await readPixel(page, 0, 0)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 1, 1)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  // The 2x2 square at canvas (1,1) centers on the 4x4 canvas: offset (0,0).
+  const layers = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getLayers(): Array<{ id: string; transform: { x: number; y: number } }> } };
+    };
+    return root.__gnumarus?.engine?.getLayers() ?? [];
+  });
+  expect(layers.map((layer) => layer.id)).toEqual(["layer0", "layer1"]);
+  expect(layers[1]?.transform).toMatchObject({ x: 0, y: 0 });
+  // Switch to the background layer: solid blue 4x4.
+  await page.locator('gnumarus-shell [data-layer-id="layer0"] .layer-name').click();
+  expect(await readPixel(page, 0, 0)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+  expect(await readPixel(page, 3, 3)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+  expect(await animationFrameCount(page)).toBe(2);
+  expect(await frameDuration(page, 0)).toBe(100);
+  expect(await frameDuration(page, 1)).toBe(250);
+});
+
+test("File > Import rejects corrupt files with an error toast", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      errors.push(message.text());
+    }
+  });
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell");
+  await stubAsepritePicker(page, "broken.ase", new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7]));
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import" }).click();
+  const toast = page.locator('gnumarus-shell [data-testid="toast"]');
+  await expect(toast).toBeVisible();
+  await expect(toast).toContainText("Import failed");
+  expect(errors.some((text) => text.includes("Aseprite import failed"))).toBe(true);
+});
+
+test("File > Import cancellation stays silent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell");
+  await page.evaluate(() => {
+    const root = window as unknown as { showOpenFilePicker?: () => Promise<never> };
+    root.showOpenFilePicker = async () => {
+      throw new DOMException("User cancelled", "AbortError");
+    };
+  });
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import" }).click();
+  await expect(page.locator('gnumarus-shell [data-testid="toast"]')).toBeHidden();
+});
