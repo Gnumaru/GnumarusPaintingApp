@@ -4433,11 +4433,15 @@ test("skew anchors shear the floating selection on their axis", async ({ page })
   await page.mouse.down();
   await page.mouse.move(anchor.x + 5 * zoom, anchor.y, { steps: 4 });
   await page.mouse.up();
-  expect((await getFloatingTransform(page))?.skewX).toBeCloseTo(1, 6);
+  // The dragged top edge follows right (negative center-shear); the bottom
+  // edge stays anchored.
+  expect((await getFloatingTransform(page))?.skewX).toBeCloseTo(-1, 6);
   await page.keyboard.press("Enter");
-  expect(await readPixel(page, 30, 31)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
-  expect(await readPixel(page, 33, 31)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 34, 31)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 31, 31)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   expect(await readPixel(page, 34, 33)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await redPixelCount(page, 28, 28, 40, 36)).toBe(9);
 });
 
 test("center anchor resets the floating transform to the as-cut state", async ({ page }) => {
@@ -4454,7 +4458,7 @@ test("center anchor resets the floating transform to the as-cut state", async ({
   await page.mouse.down();
   await page.mouse.move(skew.x + 5 * zoom, skew.y, { steps: 4 });
   await page.mouse.up();
-  expect((await getFloatingTransform(page))?.skewX).toBeCloseTo(1, 6);
+  expect((await getFloatingTransform(page))?.skewX).toBeCloseTo(-1, 6);
   const center = await getSelectionHandle(page, "center");
   await page.mouse.click(center.x, center.y);
   expect(await getFloatingTransform(page)).toMatchObject({

@@ -167,24 +167,21 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Destructive transform tool (`destransform`, move-only for now): drag inside the visible floating rect moves it in integer cell pixels with a live GL plane; outside clicks are ignored so work is never baked accidentally. With no selection it auto-selects the whole current-cell texture first (same as a full rect cut). Enter, Return or Esc merges the floating texture back with an exact copy paste (lossless relocation, clipped, undoable); a Commit selection helper button in its options bar does the same for mouse-only users.
 - Coherence: floating state is home-attached (layer/frame/texture) and survives navigation hidden; new cuts auto-commit the previous floating; moves never touch history; undo/redo track the cut entry by stack depth (deactivate/reactivate, detached buffer discarded on new edits, eviction-adjusted); resize/merge/fit commit when home-involved, layer removal and project loads drop it, cell transforms commit when home matches.
 
-## 30. Tool tooltip shortcut prefixes + R/V shortcuts (implemented)
+## 46. Tool tooltip shortcut prefixes + R/V shortcuts (implemented)
 - Every toolbar tool tooltip starts with its selection shortcut, then the tool name, then the explanation (`B: Pencil (...)`, `G or F: Bucket fill (...)`, `Ctrl (hold): Eyedropper (...)`, `N`/`C`/`Z`/`T` likewise).
 - Rectangular selection and destructive transform gain `R` and `V` shortcuts (previously shortcut-less), listed in the Shortcuts modal.
 
-## 42. Live final preview during non-destructive transforms (implemented)
-- Root cause: `setLayerTransform`/`resetLayerTransform` fired no callbacks, so the open preview only refreshed when something else (e.g. layer switch via `refreshLayers`) recomposites it.
-- Fix: new optional engine callback `onTransformChanged`, fired on both success paths, wired in the shell to `refreshPreview()` only — same per-move cost class as pencil strokes, no dirty-flag change.
-- E2E: transform drag with the preview open asserts pixels move mid-drag, plus menu Reset transform re-assert.
-
-## 44. Magenta border on the free texture edges (implemented)
+## 47. Magenta border on the free texture edges (implemented)
 - Right and bottom edges of the current cell texture (where the axis lines are not) get a plain magenta (`#ff00ff`) border, following the same transform and visibility rules as the axes.
 
-## 44. Destructive selection transform anchors (implemented)
+## 48. Destructive selection transform anchors (implemented)
 - Rename tool to "destructive selection transform" (display strings only, id `destransform` stays).
 - Resize anchors (rectangles at corners + edge midpoints, 1px min, no mirror), rotate anchors (quarter-circle arrows, offset outward from corners), skew anchors (double arrows beyond edge midpoints, per-axis screen-proportional shear), center anchor (circular arrow, click resets to the as-cut snapshot).
 - Floating placement becomes center-based floats (pos/rotation/scale/skew); render via affine plane basis, commit via inverse-map nearest resample with tie epsilon; pure math in a unit-tested module.
 
-## 45. Floating plane orientation fix (implemented)
+## 49. Opposite-edge anchored skew (implemented)
+- Bug: opposite skew anchors dragged identically (center-based shear moves both edges oppositely), so e.g. dragging the top edge right moved the top edge left.
+- Fix: the dragged edge follows the cursor while the opposite edge stays exactly anchored (anchor fixed via center re-seat from the full affine matrix); shear direction comes from the on-screen box axes (uniform under rotation/scale); per-side signs (top/left negative, bottom/right positive). Pure local-unit math replaced by screen-proportional, scale-aware interaction.
 - Bug: on auto-select the floating content rendered vertically flipped and shifted up-left by half its size.
 - Root cause: the floating plane matrix copied `writePlaneMatrix` element layout but fed it corner-based coords; that layout requires center-based normalized coords with flipped V.
 - Fix: position the quad through the same normalized convention (center basis + V flip), mapping through the floating placement.

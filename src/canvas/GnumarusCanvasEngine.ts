@@ -538,13 +538,20 @@ export class GnumarusCanvasEngine {
   } | null = null;
   /** Active rotate gesture (screen-space angles). */
   private rotateDrag: { startRotation: number; grabAngle: number; centerX: number; centerY: number } | null = null;
-  /** Active skew gesture (screen-space pixels over the box screen size). */
+  /** Active skew gesture (dragged edge follows, opposite edge anchored). */
   private skewDrag: {
     axis: "x" | "y";
+    sign: 1 | -1;
     startSkew: number;
     grabClientX: number;
     grabClientY: number;
-    boxSize: number;
+    dirX: number;
+    dirY: number;
+    extent: number;
+    anchorBufferX: number;
+    anchorBufferY: number;
+    anchorHomeX: number;
+    anchorHomeY: number;
   } | null = null;
   /** Pending center-anchor tap (click without drag resets the transform). */
   private centerTap: { startClientX: number; startClientY: number; grabDX: number; grabDY: number } | null = null;
@@ -3589,9 +3596,12 @@ export class GnumarusCanvasEngine {
       return false;
     }
     if (hit.kind === "skew") {
+      // The dragged edge follows the cursor while the opposite edge stays
+      // anchored: skew-n/s shear horizontally (sign flips per side), skew-e/w
+      // vertically. Directions come from the on-screen box axes so the feel
+      // stays uniform under rotation and scale.
       const axis = hit.id === "skew-n" || hit.id === "skew-s" ? "x" : "y";
       const layout = this.selectionHandleLayout();
-      // Box extent from the edge midpoints (not the offset skew anchors).
       const first = axis === "x" ? "resize-n" : "resize-e";
       const second = axis === "x" ? "resize-s" : "resize-w";
       const firstPos = layout?.find((handle) => handle.id === first);
@@ -3599,19 +3609,62 @@ export class GnumarusCanvasEngine {
       if (firstPos === undefined || secondPos === undefined) {
         return false;
       }
-      const boxSize = Math.sqrt(
-        (secondPos.x - firstPos.x) * (secondPos.x - firstPos.x) +
-          (secondPos.y - firstPos.y) * (secondPos.y - firstPos.y),
+      // Perpendicular screen extent (the dimension the shear is measured in).
+      const perpDX = secondPos.x - firstPos.x;
+      const perpDY = secondPos.y - firstPos.y;
+      const perpLength = Math.sqrt(perpDX * perpDX + perpDY * perpDY);
+      if (!(perpLength > 1e-6)) {
+        return false;
+      }
+      const anchorBuffer =
+        hit.id === "skew-n"
+          ? { x: floating.width / 2, y: floating.height }
+          : hit.id === "skew-s"
+            ? { x: floating.width / 2, y: 0 }
+            : hit.id === "skew-e"
+              ? { x: 0, y: floating.height / 2 }
+              : { x: floating.width, y: floating.height / 2 };
+      const anchorHome = forwardSelectionPoint(
+        this.floatingPlacement(floating),
+        anchorBuffer.x,
+        anchorBuffer.y,
       );
-      if (!(boxSize > 1e-6)) {
+      // Local shear direction on screen: +X axis for horizontal shear.
+      const placement = this.floatingPlacement(floating);
+      const originHome = forwardSelectionPoint(placement, floating.width / 2, floating.height / 2);
+      const layer = this.activeLayer();
+      if (layer === null) {
+        return false;
+      }
+      const rect = this.renderer.domElement.getBoundingClientRect();
+      const local: GnumarusRect = { left: 0, top: 0, width: rect.width, height: rect.height };
+      const view = this.viewTransform();
+      const projectHome = (hx: number, hy: number): { x: number; y: number } => {
+        const project = layerImageToProject(hx, hy, layer.width, layer.height, layer.transform);
+        return projectToScreen(project.x, project.y, local, view);
+      };
+      const centerScreen = projectHome(originHome.x, originHome.y);
+      const plusXHome = forwardSelectionPoint(placement, floating.width / 2 + 1, floating.height / 2);
+      const plusXScreen = projectHome(plusXHome.x, plusXHome.y);
+      const dirX = plusXScreen.x - centerScreen.x;
+      const dirY = plusXScreen.y - centerScreen.y;
+      const dirLength = Math.sqrt(dirX * dirX + dirY * dirY);
+      if (!(dirLength > 1e-9)) {
         return false;
       }
       this.skewDrag = {
         axis,
+        sign: hit.id === "skew-n" || hit.id === "skew-w" ? -1 : 1,
         startSkew: axis === "x" ? floating.skewX : floating.skewY,
         grabClientX: event.clientX,
         grabClientY: event.clientY,
-        boxSize,
+        dirX: dirX / dirLength,
+        dirY: dirY / dirLength,
+        extent: perpLength,
+        anchorBufferX: anchorBuffer.x,
+        anchorBufferY: anchorBuffer.y,
+        anchorHomeX: anchorHome.x,
+        anchorHomeY: anchorHome.y,
       };
       return true;
     }
@@ -3664,13 +3717,23 @@ export class GnumarusCanvasEngine {
     }
     if (this.skewDrag !== null) {
       const gesture = this.skewDrag;
-      const clampSkew = (value: number): number =>
-        Math.min(GNUMARUS_MAX_SELECTION_SKEW, Math.max(-GNUMARUS_MAX_SELECTION_SKEW, value));
+      const s =
+        ((clientX - gesture.grabClientX) * gesture.dirX + (clientY - gesture.grabClientY) * gesture.dirY) /
+        gesture.extent;
+      const skew = Math.min(
+        GNUMARUS_MAX_SELECTION_SKEW,
+        Math.max(-GNUMARUS_MAX_SELECTION_SKEW, gesture.startSkew + gesture.sign * s),
+      );
       if (gesture.axis === "x") {
-        floating.skewX = clampSkew(gesture.startSkew + (clientX - gesture.grabClientX) / gesture.boxSize);
+        floating.skewX = skew;
       } else {
-        floating.skewY = clampSkew(gesture.startSkew + (clientY - gesture.grabClientY) / gesture.boxSize);
+        floating.skewY = skew;
       }
+      const matrix = selectionLinearMatrix(this.floatingPlacement(floating));
+      const halfW = floating.width / 2;
+      const halfH = floating.height / 2;
+      floating.cx = gesture.anchorHomeX - (matrix.a * (gesture.anchorBufferX - halfW) + matrix.b * (gesture.anchorBufferY - halfH));
+      floating.cy = gesture.anchorHomeY - (matrix.c * (gesture.anchorBufferX - halfW) + matrix.d * (gesture.anchorBufferY - halfH));
       this.lastMouseClient = { x: clientX, y: clientY };
       this.afterFloatingChange();
       return;

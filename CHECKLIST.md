@@ -166,5 +166,6 @@
 - [x] Unit tests (vitest): 167 passed
 - [x] E2E test (Playwright): 113 passed
 - [x] Floating plane orientation fix (same normalized convention as layer planes), e2e regression test green, docs updated
+- [x] Opposite-edge anchored skew (dragged edge follows, opposite fixed), e2e test green, docs updated
 - [x] Unit tests (vitest): 167 passed
 - [x] E2E test (Playwright): 114 passed
