@@ -2045,7 +2045,8 @@ export class GnumarusShell extends LitElement {
           <button @click=${(): void => this.confirmLayerRename()}>Rename</button>
         </div>
       </dialog>
-      ${this.renderContentPickerDialog()} ${this.renderTexturePickerDialog()}
+      ${this.contentPickerTarget !== null ? this.renderContentPickerDialog() : html``}
+      ${this.texturePickerContentId !== null ? this.renderTexturePickerDialog() : html``}
     `;
   }
 
@@ -2458,7 +2459,7 @@ export class GnumarusShell extends LitElement {
         this.closeMatrixMenu();
       }}></div>
       <div class="context-menu" style="left: ${menu.x}px; top: ${menu.y}px;">
-        <button @click=${(): void => this.onOpenContentPicker()}>Select content</button>
+        <button @click=${(): void => void this.onOpenContentPicker()}>Select content</button>
         <button ?disabled=${cellTextureId === null} @click=${(): void => this.onOpenFitTextureFromCell()}>
           Fit texture to size
         </button>
@@ -4118,14 +4119,14 @@ export class GnumarusShell extends LitElement {
     `;
   }
 
-  private onOpenContentPicker(): void {
+  private async onOpenContentPicker(): Promise<void> {
     const target = this.matrixCellTarget();
     this.closeMatrixMenu();
     if (target === null || this.engine === null) {
       return;
     }
     this.contentPickerTarget = { ...target };
-    this.requestUpdate();
+    await this.updateComplete;
     const dialog = this.shadowRoot?.getElementById("contentPickerDialog") as HTMLDialogElement | null;
     dialog?.showModal();
   }
@@ -4168,7 +4169,7 @@ export class GnumarusShell extends LitElement {
       this.dirty = true;
       this.statusMessage = "Cell content created";
       this.closeContentPicker();
-      this.openTexturePicker(created);
+      void this.openTexturePicker(created);
       return;
     }
     if (this.engine.associateCellContent(target.layerId, target.frame, contentId)) {
@@ -4181,12 +4182,12 @@ export class GnumarusShell extends LitElement {
     this.closeContentPicker();
   }
 
-  private openTexturePicker(contentId: string): void {
+  private async openTexturePicker(contentId: string): Promise<void> {
     if (this.engine === null) {
       return;
     }
     this.texturePickerContentId = contentId;
-    this.requestUpdate();
+    await this.updateComplete;
     const dialog = this.shadowRoot?.getElementById("texturePickerDialog") as HTMLDialogElement | null;
     dialog?.showModal();
   }

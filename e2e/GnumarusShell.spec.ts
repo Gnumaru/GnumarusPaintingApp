@@ -5274,3 +5274,18 @@ test("File > Import cancellation stays silent", async ({ page }) => {
   await page.getByRole("button", { name: "Import" }).click();
   await expect(page.locator('gnumarus-shell [data-testid="toast"]')).toBeHidden();
 });
+
+test("content and texture pickers render only while open", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  // Closed pickers render no thumbnails, keeping frame switches cheap.
+  await expect(page.locator('gnumarus-shell [data-testid="content-picker-grid"]')).toHaveCount(0);
+  await expect(page.locator('gnumarus-shell [data-testid="texture-picker-grid"]')).toHaveCount(0);
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  const cell = matrix.locator('[data-testid="anim-cell"][data-matrix-frame="0"]').first();
+  await cell.click({ button: "right" });
+  await page.getByRole("button", { name: "Select content" }).click();
+  await expect(page.locator('gnumarus-shell [data-testid="content-picker-grid"]')).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator('gnumarus-shell [data-testid="content-picker-grid"]')).toHaveCount(0);
+});

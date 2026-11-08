@@ -177,5 +177,6 @@
 - [x] Unit tests (vitest): 178 passed
 - [x] E2E test (Playwright): 127 passed
 - [x] Aseprite (.ase/.aseprite) import via File > Import, unit + e2e tests green, docs updated
+- [x] Frame-switch perf: lazy picker dialogs (thumbnails only while open), structural e2e, docs updated
 - [x] Unit tests (vitest): 197 passed
-- [x] E2E test (Playwright): 130 passed
+- [x] E2E test (Playwright): 131 passed
