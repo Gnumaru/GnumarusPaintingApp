@@ -61,6 +61,13 @@ import {
   parseToastSettings,
   serializeToastSettings,
 } from "../settings/GnumarusToastSettings";
+import {
+  DEFAULT_FIT_SETTINGS,
+  FIT_SETTINGS_STORAGE_KEY,
+  clampFitAlphaThreshold,
+  parseFitSettings,
+  serializeFitSettings,
+} from "../settings/GnumarusFitSettings";
 import { compositeFinalImage } from "../preview/GnumarusFinalRender";
 import { decodePngToBuffer, encodeBufferToPngBlob } from "../project/GnumarusPngCodec";
 import { parseAsepriteFile } from "../project/GnumarusAseprite";
@@ -943,6 +950,7 @@ export class GnumarusShell extends LitElement {
     uiHidden: { type: Boolean },
     toastMessage: { type: String },
     toastDurationSec: { type: Number },
+    fitDefaultThreshold: { type: Number },
     renamingFrame: { type: Number },
     brushSize: { type: Number },
     brushShape: { type: String },
@@ -1022,6 +1030,7 @@ export class GnumarusShell extends LitElement {
   declare uiHidden: boolean;
   declare toastMessage: string;
   declare toastDurationSec: number;
+  declare fitDefaultThreshold: number;
   declare renamingFrame: number | null;
   declare brushSize: number;
   declare brushShape: GnumarusBrushShape;
@@ -1104,6 +1113,7 @@ export class GnumarusShell extends LitElement {
     this.uiHidden = false;
     this.toastMessage = "";
     this.toastDurationSec = DEFAULT_TOAST_SETTINGS.durationSec;
+    this.fitDefaultThreshold = DEFAULT_FIT_SETTINGS.alphaThreshold;
     this.renamingFrame = null;
     this.brushSize = 1;
     this.brushShape = "square";
@@ -1710,7 +1720,7 @@ export class GnumarusShell extends LitElement {
         </label>
         <div class="dialog-actions">
           <button @click=${(): void => this.closeFitTextureDialog()}>Cancel</button>
-          <button @click=${(): void => this.confirmFitTexture()}>OK</button>
+          <button id="fitTextureOk" @click=${(): void => this.confirmFitTexture()}>OK</button>
         </div>
       </dialog>
       <dialog id="shortcutsDialog">
@@ -2003,6 +2013,30 @@ export class GnumarusShell extends LitElement {
                 aria-label="Reset toast display time to default"
                 title="Reset to default"
                 @click=${(): void => this.resetToastDurationToDefault()}
+              >
+                ↻
+              </button>`
+            : html``}
+        </div>
+        <div class="setting-row">
+          <label
+            >Fit texture default alpha threshold
+            <input
+              type="number"
+              id="fitDefaultThreshold"
+              min="0"
+              max="254"
+              step="1"
+              .value=${String(this.fitDefaultThreshold)}
+              @input=${(): void => this.applyFitFromDialog()}
+            />
+          </label>
+          ${this.fitDefaultThreshold !== DEFAULT_FIT_SETTINGS.alphaThreshold
+            ? html`<button
+                class="reset-btn"
+                aria-label="Reset fit alpha threshold to default"
+                title="Reset to default"
+                @click=${(): void => this.resetFitToDefault()}
               >
                 ↻
               </button>`
@@ -2539,6 +2573,8 @@ export class GnumarusShell extends LitElement {
     this.backgroundColor = storedBackground.color;
     const storedToast = this.loadToastSettings();
     this.toastDurationSec = storedToast.durationSec;
+    const storedFit = this.loadFitSettings();
+    this.fitDefaultThreshold = storedFit.alphaThreshold;
     const host = this.shadowRoot?.getElementById("canvasHost") ?? null;
     if (host === null) {
       this.webglError = "Canvas host is missing.";
@@ -3081,6 +3117,54 @@ export class GnumarusShell extends LitElement {
     this.toastDurationSec = clampToastDurationSec(value);
     this.persistToast();
     this.statusMessage = `Toast display time: ${this.toastDurationSec} s`;
+  }
+
+  private loadFitSettings(): { alphaThreshold: number } {
+    try {
+      const stored = window.localStorage.getItem(FIT_SETTINGS_STORAGE_KEY);
+      if (stored !== null) {
+        return parseFitSettings(stored);
+      }
+    } catch {
+      // Corrupt or unavailable storage falls back to defaults.
+    }
+    return { ...DEFAULT_FIT_SETTINGS };
+  }
+
+  private persistFit(): void {
+    try {
+      window.localStorage.setItem(
+        FIT_SETTINGS_STORAGE_KEY,
+        serializeFitSettings({ alphaThreshold: this.fitDefaultThreshold }),
+      );
+    } catch {
+      // Storage failures must not break the settings flow.
+    }
+  }
+
+  private currentDialogFitThreshold(): number {
+    const input = this.shadowRoot?.getElementById("fitDefaultThreshold") as HTMLInputElement | null;
+    const parsed = Number(input?.value ?? String(DEFAULT_FIT_SETTINGS.alphaThreshold));
+    return clampFitAlphaThreshold(Number.isFinite(parsed) ? parsed : DEFAULT_FIT_SETTINGS.alphaThreshold);
+  }
+
+  private applyFitFromDialog(): void {
+    this.fitDefaultThreshold = this.currentDialogFitThreshold();
+    this.persistFit();
+    this.statusMessage = `Fit texture default alpha threshold: ${this.fitDefaultThreshold}`;
+  }
+
+  private resetFitToDefault(): void {
+    this.fitDefaultThreshold = DEFAULT_FIT_SETTINGS.alphaThreshold;
+    this.persistFit();
+    this.statusMessage = "Fit texture default alpha threshold reset to default";
+  }
+
+  /** Test hook: set the fit texture default alpha threshold (0..254, clamped). */
+  setFitDefaultThreshold(value: number): void {
+    this.fitDefaultThreshold = clampFitAlphaThreshold(value);
+    this.persistFit();
+    this.statusMessage = `Fit texture default alpha threshold: ${this.fitDefaultThreshold}`;
   }
 
   /** Test hook: rename a frame (trimmed 1..64 chars). */
@@ -4681,7 +4765,7 @@ export class GnumarusShell extends LitElement {
       this.statusMessage = "Nothing to fit: the layer has no texture on this frame";
       return;
     }
-    this.openFitTextureDialog(textureId);
+    void this.openFitTextureDialog(textureId);
   }
 
   private onOpenFitTextureFromCell(): void {
@@ -4695,18 +4779,20 @@ export class GnumarusShell extends LitElement {
       this.statusMessage = "Nothing to fit: the cell has no texture";
       return;
     }
-    this.openFitTextureDialog(textureId);
+    void this.openFitTextureDialog(textureId);
   }
 
-  private openFitTextureDialog(textureId: string): void {
+  private async openFitTextureDialog(textureId: string): Promise<void> {
     if (this.engine === null) {
       return;
     }
     this.fitTextureTarget = { textureId, textureName: this.fitTextureDisplayName(textureId) };
-    this.fitThreshold = 0;
-    this.requestUpdate();
+    this.fitThreshold = this.fitDefaultThreshold;
+    await this.updateComplete;
     const dialog = this.shadowRoot?.getElementById("fitTextureDialog") as HTMLDialogElement | null;
     dialog?.showModal();
+    const ok = this.shadowRoot?.getElementById("fitTextureOk") as HTMLButtonElement | null;
+    ok?.focus();
   }
 
   private closeFitTextureDialog(): void {

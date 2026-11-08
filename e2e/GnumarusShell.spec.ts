@@ -5401,3 +5401,43 @@ test("cell menu Crop to canvas reports edge cases", async ({ page }) => {
     "Cannot crop: cell content is fully outside the canvas",
   );
 });
+
+test("fit texture dialog focuses OK so Enter confirms immediately", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
+  await page.locator('gnumarus-shell [data-layer-id="layer0"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Fit texture to size" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#fitTextureDialog");
+  await expect(dialog).toBeVisible();
+  const focusedId = await page.evaluate(() => {
+    const root = document.querySelector("gnumarus-shell")?.shadowRoot ?? null;
+    const active = root?.activeElement;
+    return active instanceof HTMLElement ? active.id : null;
+  });
+  expect(focusedId).toBe("fitTextureOk");
+  await page.keyboard.press("Enter");
+  await expect(dialog).toBeHidden();
+  await expect(page.locator('gnumarus-shell [data-layer-id="layer0"]')).toContainText("1×1");
+});
+
+test("fit alpha threshold default flows into the dialog and persists", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const setting = page.locator("gnumarus-shell input#fitDefaultThreshold");
+  await expect(setting).toHaveValue("0");
+  await setting.fill("10");
+  const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.fit.v1"));
+  expect(persisted).toContain("10");
+  await page.getByRole("button", { name: "Close" }).click();
+  await page.locator('gnumarus-shell [data-layer-id="layer0"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Fit texture to size" }).click();
+  await expect(page.locator("gnumarus-shell dialog#fitTextureDialog input#fitThreshold")).toHaveValue("10");
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("button", { name: "Reset fit alpha threshold to default" }).click();
+  await expect(page.locator("gnumarus-shell input#fitDefaultThreshold")).toHaveValue("0");
+});

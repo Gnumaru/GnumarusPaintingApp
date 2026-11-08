@@ -183,3 +183,6 @@
 - [x] Crop texture to canvas (layer/cell context menus, transform-aware, undoable), unit + e2e tests green, docs updated
 - [x] Unit tests (vitest): 203 passed
 - [x] E2E test (Playwright): 133 passed
+- [x] Fit dialog OK autofocus + default alpha threshold setting, unit + e2e tests green, docs updated
+- [x] Unit tests (vitest): 208 passed
+- [x] E2E test (Playwright): 135 passed
