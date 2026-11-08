@@ -142,13 +142,23 @@ function parseLayerTransform(value: unknown): GnumarusLayerTransform {
   if (!isRecord(value)) {
     return { ...IDENTITY_LAYER_TRANSFORM };
   }
-  const { x, y, rotation, flipX, flipY } = value;
+  const { x, y, rotation, flipX, flipY, scaleX, scaleY, skewX, skewY } = value;
+  const parsedScaleX =
+    typeof scaleX === "number" && Number.isFinite(scaleX) && scaleX > 0 ? (scaleX as number) : 1;
+  const parsedScaleY =
+    typeof scaleY === "number" && Number.isFinite(scaleY) && scaleY > 0 ? (scaleY as number) : 1;
+  const parsedSkewX = typeof skewX === "number" && Number.isFinite(skewX) ? (skewX as number) : 0;
+  const parsedSkewY = typeof skewY === "number" && Number.isFinite(skewY) ? (skewY as number) : 0;
   return {
     x: typeof x === "number" && Number.isFinite(x) ? x : 0,
     y: typeof y === "number" && Number.isFinite(y) ? y : 0,
     rotation: typeof rotation === "number" && Number.isFinite(rotation) ? rotation : 0,
     flipX: flipX === true,
     flipY: flipY === true,
+    scaleX: parsedScaleX,
+    scaleY: parsedScaleY,
+    skewX: parsedSkewX,
+    skewY: parsedSkewY,
   };
 }
 

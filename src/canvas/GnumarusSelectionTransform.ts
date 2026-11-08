@@ -19,6 +19,9 @@ export interface GnumarusSelectionPlacement {
   /** Shear factors (horizontal shear per vertical unit and vice versa). */
   skewX: number;
   skewY: number;
+  /** Mirror flags, applied to buffer-centered coords before the linear map. */
+  flipX: boolean;
+  flipY: boolean;
   /** Source buffer dimensions. */
   width: number;
   height: number;
@@ -69,8 +72,8 @@ export function forwardSelectionPoint(
   y: number,
 ): { x: number; y: number } {
   const matrix = selectionLinearMatrix(placement);
-  const qx = x - placement.width / 2;
-  const qy = y - placement.height / 2;
+  const qx = (x - placement.width / 2) * (placement.flipX ? -1 : 1);
+  const qy = (y - placement.height / 2) * (placement.flipY ? -1 : 1);
   return {
     x: matrix.a * qx + matrix.b * qy + placement.cx,
     y: matrix.c * qx + matrix.d * qy + placement.cy,
@@ -93,9 +96,11 @@ export function inverseSelectionPoint(
   }
   const dx = x - placement.cx;
   const dy = y - placement.cy;
+  const qx = (matrix.d * dx - matrix.b * dy) / determinant;
+  const qy = (-matrix.c * dx + matrix.a * dy) / determinant;
   return {
-    x: (matrix.d * dx - matrix.b * dy) / determinant + placement.width / 2,
-    y: (-matrix.c * dx + matrix.a * dy) / determinant + placement.height / 2,
+    x: qx / (placement.flipX ? -1 : 1) + placement.width / 2,
+    y: qy / (placement.flipY ? -1 : 1) + placement.height / 2,
   };
 }
 

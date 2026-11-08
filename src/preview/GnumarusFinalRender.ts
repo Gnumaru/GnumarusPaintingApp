@@ -1,5 +1,5 @@
 import { compositePixelOver, parseHexColor } from "../canvas/GnumarusPixelBuffer";
-import { layerPixelCenterToProject, IDENTITY_LAYER_TRANSFORM } from "../canvas/GnumarusViewportMath";
+import { layerPixelCenterToProject, IDENTITY_LAYER_TRANSFORM, layerLinearMatrix } from "../canvas/GnumarusViewportMath";
 import type { GnumarusLayerTransform } from "../canvas/GnumarusViewportMath";
 
 export interface GnumarusFlattenLayerInput {
@@ -82,6 +82,7 @@ function paintPreviewBackground(
 interface GnumarusPreparedLayer extends GnumarusFlattenLayerInput {
   cos: number;
   sin: number;
+  matrix: { a: number; b: number; c: number; d: number };
 }
 
 /**
@@ -123,6 +124,7 @@ export function compositeFinalImage(
       opacity,
       cos: Math.cos(layer.transform.rotation),
       sin: Math.sin(layer.transform.rotation),
+      matrix: layerLinearMatrix(layer.transform),
     });
   }
   for (let y = 0; y < height; y += 1) {
@@ -130,12 +132,16 @@ export function compositeFinalImage(
       const project = layerPixelCenterToProject(x, y, width, height, IDENTITY_LAYER_TRANSFORM);
       const dstIndex = (y * width + x) * 4;
       for (const layer of prepared) {
+        const determinant = layer.matrix.a * layer.matrix.d - layer.matrix.b * layer.matrix.c;
+        if (!(Math.abs(determinant) > 1e-9)) {
+          continue;
+        }
         const rx = project.x - layer.transform.x;
         const ry = project.y - layer.transform.y;
-        const qx = (layer.cos * rx + layer.sin * ry) / (layer.transform.flipX ? -1 : 1);
-        const qy = (-layer.sin * rx + layer.cos * ry) / (layer.transform.flipY ? -1 : 1);
-        const sx = Math.floor(qx + layer.width / 2);
-        const sy = Math.floor(qy + layer.height / 2);
+        const qx = (layer.matrix.d * rx - layer.matrix.b * ry) / determinant;
+        const qy = (-layer.matrix.c * rx + layer.matrix.a * ry) / determinant;
+        const sx = Math.floor(qx / (layer.transform.flipX ? -1 : 1) + layer.width / 2);
+        const sy = Math.floor(qy / (layer.transform.flipY ? -1 : 1) + layer.height / 2);
         if (sx < 0 || sy < 0 || sx >= layer.width || sy >= layer.height) {
           continue;
         }

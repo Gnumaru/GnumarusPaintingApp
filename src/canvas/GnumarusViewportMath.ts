@@ -16,6 +16,12 @@ export interface GnumarusLayerTransform {
   rotation: number;
   flipX: boolean;
   flipY: boolean;
+  /** Multipliers, always positive. */
+  scaleX: number;
+  scaleY: number;
+  /** Shear factors (horizontal shear per vertical unit and vice versa). */
+  skewX: number;
+  skewY: number;
 }
 
 export const IDENTITY_LAYER_TRANSFORM: GnumarusLayerTransform = {
@@ -24,13 +30,37 @@ export const IDENTITY_LAYER_TRANSFORM: GnumarusLayerTransform = {
   rotation: 0,
   flipX: false,
   flipY: false,
+  scaleX: 1,
+  scaleY: 1,
+  skewX: 0,
+  skewY: 0,
 };
+
+/** Clamp for layer shear factors (keeps mapping safely invertible). */
+export const GNUMARUS_MAX_LAYER_SKEW = 2;
 
 export interface GnumarusRect {
   left: number;
   top: number;
   width: number;
   height: number;
+}
+
+/** Linear part of the layer-image (flip-applied, layer-centered) to project map. */
+export function layerLinearMatrix(layer: GnumarusLayerTransform): { a: number; b: number; c: number; d: number } {
+  const cos = Math.cos(layer.rotation);
+  const sin = Math.sin(layer.rotation);
+  return {
+    a: cos * layer.scaleX - sin * layer.skewY * layer.scaleX,
+    b: cos * layer.skewX * layer.scaleY - sin * layer.scaleY,
+    c: sin * layer.scaleX + cos * layer.skewY * layer.scaleX,
+    d: sin * layer.skewX * layer.scaleY + cos * layer.scaleY,
+  };
+}
+
+/** Determinant of the layer linear part (scales times shear factor). */
+export function layerMatrixDeterminant(layer: GnumarusLayerTransform): number {
+  return layer.scaleX * layer.scaleY * (1 - layer.skewX * layer.skewY);
 }
 
 /** Continuous image coordinates to project pixels (origin at project center, y down). */
@@ -43,11 +73,10 @@ export function layerImageToProject(
 ): { x: number; y: number } {
   const qx = (imageX - layerWidth / 2) * (layer.flipX ? -1 : 1);
   const qy = (imageY - layerHeight / 2) * (layer.flipY ? -1 : 1);
-  const cos = Math.cos(layer.rotation);
-  const sin = Math.sin(layer.rotation);
+  const matrix = layerLinearMatrix(layer);
   return {
-    x: cos * qx - sin * qy + layer.x,
-    y: sin * qx + cos * qy + layer.y,
+    x: matrix.a * qx + matrix.b * qy + layer.x,
+    y: matrix.c * qx + matrix.d * qy + layer.y,
   };
 }
 
@@ -70,18 +99,42 @@ export function projectToLayerPixel(
   layerHeight: number,
   layer: GnumarusLayerTransform,
 ): { x: number; y: number } | null {
-  const rx = projectX - layer.x;
-  const ry = projectY - layer.y;
-  const cos = Math.cos(layer.rotation);
-  const sin = Math.sin(layer.rotation);
-  const qx = (cos * rx + sin * ry) / (layer.flipX ? -1 : 1);
-  const qy = (-sin * rx + cos * ry) / (layer.flipY ? -1 : 1);
-  const x = Math.floor(qx + layerWidth / 2);
-  const y = Math.floor(qy + layerHeight / 2);
+  const mapped = projectToLayerImageFloat(projectX, projectY, layerWidth, layerHeight, layer);
+  if (mapped === null) {
+    return null;
+  }
+  const x = Math.floor(mapped.x);
+  const y = Math.floor(mapped.y);
   if (x < 0 || y < 0 || x >= layerWidth || y >= layerHeight) {
     return null;
   }
   return { x, y };
+}
+
+/**
+ * Project pixels to continuous layer image coordinates (unbounded floats).
+ * Null when the transform is degenerate (not invertible).
+ */
+export function projectToLayerImageFloat(
+  projectX: number,
+  projectY: number,
+  layerWidth: number,
+  layerHeight: number,
+  layer: GnumarusLayerTransform,
+): { x: number; y: number } | null {
+  const matrix = layerLinearMatrix(layer);
+  const determinant = matrix.a * matrix.d - matrix.b * matrix.c;
+  if (!(Math.abs(determinant) > 1e-9)) {
+    return null;
+  }
+  const rx = projectX - layer.x;
+  const ry = projectY - layer.y;
+  const qx = (matrix.d * rx - matrix.b * ry) / determinant;
+  const qy = (-matrix.c * rx + matrix.a * ry) / determinant;
+  return {
+    x: qx / (layer.flipX ? -1 : 1) + layerWidth / 2,
+    y: qy / (layer.flipY ? -1 : 1) + layerHeight / 2,
+  };
 }
 
 /** Client (CSS pixel) point to project pixels (origin at project center, y down). */

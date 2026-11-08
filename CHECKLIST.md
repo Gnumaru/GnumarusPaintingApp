@@ -170,3 +170,6 @@
 - [x] Centered mirror skew revision (dragged edge follows along its axis, opposite mirrors, perpendicular no-op), e2e tests green, docs updated
 - [x] Unit tests (vitest): 167 passed
 - [x] E2E test (Playwright): 115 passed
+- [x] Flip anchors (destructive) + full anchor parity for non-destructive cell transform (layer scale/skew extension), unit + e2e tests green, docs updated
+- [x] Unit tests (vitest): 173 passed
+- [x] E2E test (Playwright): 121 passed

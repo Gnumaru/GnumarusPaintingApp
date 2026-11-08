@@ -24,7 +24,7 @@ describe("GnumarusProjectFormat", () => {
         id: "content1",
         name: "Content 1",
         textureId: "layer0",
-        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
       },
     ]);
     expect(project.animation.cells).toEqual([{ layer: "layer0", frame: 0, content: "content1" }]);
@@ -71,7 +71,7 @@ describe("GnumarusProjectFormat", () => {
             opacity: 0.5,
             width: 32,
             height: 16,
-            transform: { x: 1, y: 2, rotation: 0.5, flipX: true, flipY: false },
+            transform: { x: 1, y: 2, rotation: 0.5, flipX: true, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
             lockedChannels: { r: true, g: false, b: false, a: false },
             cells: [{ frame: 0, file: "cells/layer0_frame0.png" }],
           },
@@ -81,7 +81,7 @@ describe("GnumarusProjectFormat", () => {
     expect(parsed.animation.textures[0]).toMatchObject({ id: "layer0", width: 32, height: 16 });
     expect(parsed.animation.contents[0]).toMatchObject({
       textureId: "layer0",
-      transform: { x: 1, y: 2, rotation: 0.5, flipX: true, flipY: false },
+      transform: { x: 1, y: 2, rotation: 0.5, flipX: true, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
     });
     expect(parsed.layers[0]).toMatchObject({ opacity: 0.5, lockedChannels: { r: true, g: false, b: false, a: false } });
   });
@@ -94,7 +94,7 @@ describe("GnumarusProjectFormat", () => {
       id: "content2",
       name: "Content 2",
       textureId: null,
-      transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+      transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
     });
     project.animation.cells.push(
       { layer: "layer0", frame: 1, content: "content1" },

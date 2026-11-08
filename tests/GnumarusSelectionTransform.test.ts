@@ -16,6 +16,8 @@ const IDENTITY = {
   scaleY: 1,
   skewX: 0,
   skewY: 0,
+  flipX: false,
+  flipY: false,
   width: 5,
   height: 5,
 };
@@ -83,5 +85,31 @@ describe("GnumarusSelectionTransform", () => {
     expect(rotated.minX).toBeCloseTo(30, 9);
     expect(rotated.maxX).toBeCloseTo(35, 9);
     expect(selectionLinearMatrix(IDENTITY)).toEqual({ a: 1, b: 0, c: 0, d: 1 });
+  });
+
+  it("mirrors buffer coords about the center", () => {
+    // flipX swaps left and right; flipY swaps top and bottom.
+    expect(forwardSelectionPoint({ ...IDENTITY, flipX: true }, 0, 0)).toEqual({ x: 35, y: 30 });
+    expect(forwardSelectionPoint({ ...IDENTITY, flipX: true }, 5, 5)).toEqual({ x: 30, y: 35 });
+    expect(forwardSelectionPoint({ ...IDENTITY, flipY: true }, 0, 0)).toEqual({ x: 30, y: 35 });
+    expect(forwardSelectionPoint({ ...IDENTITY, flipY: true }, 5, 5)).toEqual({ x: 35, y: 30 });
+    // Double mirrors restore the identity map and bbox.
+    const both = { ...IDENTITY, flipX: true, flipY: true };
+    expect(forwardSelectionPoint(both, 0, 0)).toEqual({ x: 35, y: 35 });
+    expect(selectionCornerBox(both)).toEqual({ minX: 30, minY: 30, maxX: 35, maxY: 35 });
+    expect(isSelectionDegenerate(both)).toBe(false);
+  });
+
+  it("round-trips through mirrors combined with rotation and shear", () => {
+    const placed = {
+      ...IDENTITY, rotation: 0.7, scaleX: 1.5, scaleY: 0.8,
+      skewX: 0.3, skewY: -0.2, flipX: true, flipY: true,
+    };
+    for (const [x, y] of [[0, 0], [5, 0], [2.5, 2.5], [5, 5], [1.25, 3.75]]) {
+      const forward = forwardSelectionPoint(placed, x, y);
+      const back = inverseSelectionPoint(placed, forward.x, forward.y);
+      expect(back?.x).toBeCloseTo(x, 9);
+      expect(back?.y).toBeCloseTo(y, 9);
+    }
   });
 });

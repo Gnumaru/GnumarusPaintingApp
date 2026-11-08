@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   clampZoom,
   imageToScreenPixel,
+  layerImageToProject,
+  layerLinearMatrix,
+  layerMatrixDeterminant,
   layerPixelToScreen,
   normalizeRotation,
+  projectToLayerImageFloat,
   projectToLayerPixel,
   rotatedBounds,
   screenToImagePixel,
@@ -88,7 +92,7 @@ describe("GnumarusViewportMath", () => {
   });
 
   it("maps small offset layers", () => {
-    const layer: GnumarusLayerTransform = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false };
+    const layer: GnumarusLayerTransform = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 };
     const screen = layerPixelToScreen(0, 0, RECT, 8, 8, PLAIN, layer);
     expect(screen.x).toBeCloseTo(200 - 3.5 * 4, 6);
     expect(screen.y).toBeCloseTo(150 - 3.5 * 4, 6);
@@ -96,8 +100,8 @@ describe("GnumarusViewportMath", () => {
   });
 
   it("shifts layers by their offset", () => {
-    const centered: GnumarusLayerTransform = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false };
-    const shifted: GnumarusLayerTransform = { x: 10, y: -5, rotation: 0, flipX: false, flipY: false };
+    const centered: GnumarusLayerTransform = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 };
+    const shifted: GnumarusLayerTransform = { x: 10, y: -5, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 };
     const a = layerPixelToScreen(4, 4, RECT, 8, 8, PLAIN, centered);
     const b = layerPixelToScreen(4, 4, RECT, 8, 8, PLAIN, shifted);
     expect(b.x - a.x).toBeCloseTo(40, 6);
@@ -107,10 +111,10 @@ describe("GnumarusViewportMath", () => {
   it("round-trips pixels through layer rotation and flips", () => {
     const view: GnumarusViewTransform = { ...PLAIN, rotation: Math.PI / 6 };
     const layers: GnumarusLayerTransform[] = [
-      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
-      { x: 20, y: -13, rotation: Math.PI / 3, flipX: false, flipY: false },
-      { x: -40, y: 30, rotation: -Math.PI / 2, flipX: true, flipY: false },
-      { x: 5, y: 5, rotation: Math.PI, flipX: true, flipY: true },
+      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
+      { x: 20, y: -13, rotation: Math.PI / 3, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
+      { x: -40, y: 30, rotation: -Math.PI / 2, flipX: true, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
+      { x: 5, y: 5, rotation: Math.PI, flipX: true, flipY: true, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
     ];
     for (const layer of layers) {
       for (const [ix, iy] of [
@@ -137,5 +141,52 @@ describe("GnumarusViewportMath", () => {
     expect(diagonal.height).toBeCloseTo(64 * Math.SQRT2, 8);
     // Sign of rotation does not matter for the bbox.
     expect(rotatedBounds(64, 32, -Math.PI / 2)).toEqual(quarter);
+  });
+
+  it("scales layer images about the layer center", () => {
+    const scaled: GnumarusLayerTransform = {
+      x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 2, scaleY: 3, skewX: 0, skewY: 0,
+    };
+    // Layer is 4x4: image (0,0) sits 2 left / 2 up from center, doubled/tripled.
+    expect(layerImageToProject(0, 0, 4, 4, scaled)).toEqual({ x: -4, y: -6 });
+    expect(layerImageToProject(4, 4, 4, 4, scaled)).toEqual({ x: 4, y: 6 });
+    expect(layerImageToProject(2, 2, 4, 4, scaled)).toEqual({ x: 0, y: 0 });
+    expect(layerMatrixDeterminant(scaled)).toBeCloseTo(6, 12);
+  });
+
+  it("shears layer images proportional to the cross-axis offset", () => {
+    const skewed: GnumarusLayerTransform = {
+      x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 1, skewY: 0,
+    };
+    // Center column stays, top row shifts left, bottom row shifts right.
+    expect(layerImageToProject(2, 2, 4, 4, skewed)).toEqual({ x: 0, y: 0 });
+    expect(layerImageToProject(0, 0, 4, 4, skewed).x).toBeCloseTo(-4, 9);
+    expect(layerImageToProject(4, 4, 4, 4, skewed).x).toBeCloseTo(4, 9);
+    expect(layerMatrixDeterminant(skewed)).toBeCloseTo(1, 12);
+  });
+
+  it("round-trips floats through scale, skew and flips", () => {
+    const placed: GnumarusLayerTransform = {
+      x: 7, y: -3, rotation: 0.7, flipX: true, flipY: false,
+      scaleX: 1.5, scaleY: 0.8, skewX: 0.3, skewY: -0.2,
+    };
+    for (const [ix, iy] of [[0, 0], [8, 0], [4, 4], [8, 8], [2.5, 6.25]]) {
+      const project = layerImageToProject(ix, iy, 8, 8, placed);
+      const back = projectToLayerImageFloat(project.x, project.y, 8, 8, placed);
+      expect(back?.x).toBeCloseTo(ix, 9);
+      expect(back?.y).toBeCloseTo(iy, 9);
+    }
+    expect(layerLinearMatrix({
+      x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0,
+    })).toEqual({ a: 1, b: 0, c: 0, d: 1 });
+  });
+
+  it("reports degenerate layer shear as null", () => {
+    const degenerate: GnumarusLayerTransform = {
+      x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 1, skewY: 1,
+    };
+    expect(layerMatrixDeterminant(degenerate)).toBeCloseTo(0, 12);
+    expect(projectToLayerImageFloat(0, 0, 8, 8, degenerate)).toBeNull();
+    expect(projectToLayerPixel(0, 0, 8, 8, degenerate)).toBeNull();
   });
 });

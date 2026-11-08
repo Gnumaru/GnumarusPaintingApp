@@ -4,7 +4,7 @@ import { layerImageToProject } from "../src/canvas/GnumarusViewportMath";
 
 describe("shiftTransformForCrop", () => {
   it("leaves the transform alone for a full-size box", () => {
-    const transform = { x: 4, y: -2, rotation: 0.3, flipX: false, flipY: true };
+    const transform = { x: 4, y: -2, rotation: 0.3, flipX: false, flipY: true, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 };
     const shifted = shiftTransformForCrop(transform, 64, 64, { left: 0, top: 0, width: 64, height: 64 });
     expect(shifted).toEqual(transform);
   });
@@ -12,7 +12,7 @@ describe("shiftTransformForCrop", () => {
   it("shifts the center for identity crops", () => {
     // Crop 10px off the left and 4px off the top of a 64x48 texture.
     const shifted = shiftTransformForCrop(
-      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
       64,
       48,
       { left: 10, top: 4, width: 54, height: 44 },
@@ -24,7 +24,7 @@ describe("shiftTransformForCrop", () => {
 
   it("mirrors the shift for flipped textures", () => {
     const flipped = shiftTransformForCrop(
-      { x: 0, y: 0, rotation: 0, flipX: true, flipY: true },
+      { x: 0, y: 0, rotation: 0, flipX: true, flipY: true, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
       64,
       48,
       { left: 10, top: 4, width: 54, height: 44 },
@@ -35,11 +35,11 @@ describe("shiftTransformForCrop", () => {
 
   it("keeps every remaining pixel at the same project position", () => {
     const cases = [
-      { x: 5, y: -3, rotation: 0, flipX: false, flipY: false },
-      { x: -7, y: 9, rotation: 0, flipX: true, flipY: false },
-      { x: 2, y: 2, rotation: Math.PI / 2, flipX: false, flipY: true },
-      { x: 0, y: 0, rotation: 0.7, flipX: true, flipY: true },
-      { x: 11, y: -4, rotation: -1.1, flipX: false, flipY: false },
+      { x: 5, y: -3, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
+      { x: -7, y: 9, rotation: 0, flipX: true, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
+      { x: 2, y: 2, rotation: Math.PI / 2, flipX: false, flipY: true, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
+      { x: 0, y: 0, rotation: 0.7, flipX: true, flipY: true, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
+      { x: 11, y: -4, rotation: -1.1, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
     ];
     const oldWidth = 64;
     const oldHeight = 48;

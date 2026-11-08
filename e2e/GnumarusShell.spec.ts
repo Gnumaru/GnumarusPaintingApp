@@ -361,7 +361,7 @@ interface GnumarusLayerState {
   opacity: number;
   width: number;
   height: number;
-  transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
+  transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean; scaleX: number; scaleY: number; skewX: number; skewY: number };
 }
 
 async function getLayers(page: import("@playwright/test").Page): Promise<{
@@ -660,7 +660,7 @@ test("non-destructive cell transform tool moves, rotates and flips the active la
 
   await page.mouse.click(cx, cy, { button: "middle" });
   transform = (await getLayers(page)).layers[0]?.transform;
-  expect(transform).toMatchObject({ flipX: true, flipY: false });
+  expect(transform).toMatchObject({ flipX: true, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 });
   await page.keyboard.down("Shift");
   await page.mouse.click(cx, cy, { button: "middle" });
   await page.keyboard.up("Shift");
@@ -686,7 +686,7 @@ test("painting works on a layer smaller than the project", async ({ page }) => {
               width: number;
               height: number;
               buffer: Uint8ClampedArray;
-              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
+              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean; scaleX: number; scaleY: number; skewX: number; skewY: number };
             }>,
           ): void;
         };
@@ -706,7 +706,7 @@ test("painting works on a layer smaller than the project", async ({ page }) => {
         width: 8,
         height: 8,
         buffer: red,
-        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
       },
     ]);
   });
@@ -725,7 +725,7 @@ test("painting works on a layer smaller than the project", async ({ page }) => {
     8,
     8,
     { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false },
-    { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+    { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
   );
   await page.mouse.click(target.x, target.y);
   expect(await readPixel(page, 2, 2)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
@@ -815,7 +815,7 @@ test("alpha lock preserves alpha while painting", async ({ page }) => {
               width: number;
               height: number;
               buffer: Uint8ClampedArray;
-              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
+              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean; scaleX: number; scaleY: number; skewX: number; skewY: number };
               lockedChannels: { r: boolean; g: boolean; b: boolean; a: boolean };
             }>,
           ): void;
@@ -838,7 +838,7 @@ test("alpha lock preserves alpha while painting", async ({ page }) => {
         width: 64,
         height: 64,
         buffer,
-        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
         lockedChannels: { r: false, g: false, b: false, a: true },
       },
     ]);
@@ -1987,7 +1987,7 @@ test("bucket fill fills a contiguous region without crossing barriers", async ({
               width: number;
               height: number;
               buffer: Uint8ClampedArray;
-              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
+              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean; scaleX: number; scaleY: number; skewX: number; skewY: number };
             }>,
           ): void;
         };
@@ -2010,7 +2010,7 @@ test("bucket fill fills a contiguous region without crossing barriers", async ({
         width: 8,
         height: 8,
         buffer: barrier,
-        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
       },
     ]);
   });
@@ -2030,7 +2030,7 @@ test("bucket fill fills a contiguous region without crossing barriers", async ({
     8,
     8,
     { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false },
-    { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+    { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
   );
   await page.mouse.click(target.x, target.y);
   expect(await readPixel(page, 1, 4)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
@@ -2095,7 +2095,7 @@ test("pencil brush size and shape paint thick strokes", async ({ page }) => {
               width: number;
               height: number;
               buffer: Uint8ClampedArray;
-              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
+              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean; scaleX: number; scaleY: number; skewX: number; skewY: number };
             }>,
           ): void;
         };
@@ -2110,7 +2110,7 @@ test("pencil brush size and shape paint thick strokes", async ({ page }) => {
         width: 8,
         height: 8,
         buffer: new Uint8ClampedArray(8 * 8 * 4),
-        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
       },
     ]);
   });
@@ -2150,7 +2150,7 @@ test("pencil brush size and shape paint thick strokes", async ({ page }) => {
       8,
       8,
       { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false },
-      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
     );
     await page.mouse.click(target.x, target.y);
   };
@@ -2185,7 +2185,7 @@ test("line tool draws two-click segments with width, shape and aliasing", async 
               width: number;
               height: number;
               buffer: Uint8ClampedArray;
-              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
+              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean; scaleX: number; scaleY: number; skewX: number; skewY: number };
             }>,
           ): void;
         };
@@ -2200,7 +2200,7 @@ test("line tool draws two-click segments with width, shape and aliasing", async 
         width: 8,
         height: 8,
         buffer: new Uint8ClampedArray(8 * 8 * 4),
-        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
       },
     ]);
   });
@@ -2225,7 +2225,7 @@ test("line tool draws two-click segments with width, shape and aliasing", async 
       8,
       8,
       { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false },
-      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
     );
     await page.mouse.click(target.x, target.y);
   };
@@ -2290,7 +2290,7 @@ test("brush and line previews follow the mouse", async ({ page }) => {
     64,
     64,
     { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false },
-    { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+    { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
   );
   await page.mouse.click(target.x, target.y);
   await page.mouse.move(target.x + 40, target.y);
@@ -2317,7 +2317,7 @@ test("pencil anti-aliasing smooths diagonal edges", async ({ page }) => {
               width: number;
               height: number;
               buffer: Uint8ClampedArray;
-              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
+              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean; scaleX: number; scaleY: number; skewX: number; skewY: number };
             }>,
           ): void;
         };
@@ -2332,7 +2332,7 @@ test("pencil anti-aliasing smooths diagonal edges", async ({ page }) => {
         width: 8,
         height: 8,
         buffer: new Uint8ClampedArray(8 * 8 * 4),
-        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
       },
     ]);
   });
@@ -2354,7 +2354,7 @@ test("pencil anti-aliasing smooths diagonal edges", async ({ page }) => {
     const state = await getViewState(page);
     const rect = { left: box.x, top: box.y, width: box.width, height: box.height };
     const view = { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false };
-    const layer = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false };
+    const layer = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 };
     const start = layerPixelToScreen(1, 1, rect, 8, 8, view, layer);
     const end = layerPixelToScreen(6, 6, rect, 8, 8, view, layer);
     await page.mouse.move(start.x, start.y);
@@ -2424,7 +2424,7 @@ test("curve tool draws cubic beziers with two control clicks", async ({ page }) 
               width: number;
               height: number;
               buffer: Uint8ClampedArray;
-              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
+              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean; scaleX: number; scaleY: number; skewX: number; skewY: number };
             }>,
           ): void;
         };
@@ -2439,7 +2439,7 @@ test("curve tool draws cubic beziers with two control clicks", async ({ page }) 
         width: 8,
         height: 8,
         buffer: new Uint8ClampedArray(8 * 8 * 4),
-        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
       },
     ]);
   });
@@ -2476,7 +2476,7 @@ test("curve tool draws cubic beziers with two control clicks", async ({ page }) 
       8,
       8,
       { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false },
-      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
     );
   };
   expect(await phaseOf()).toBe("idle");
@@ -2536,7 +2536,7 @@ test("brush and line widths accept floats with AA-dependent rounding", async ({ 
               width: number;
               height: number;
               buffer: Uint8ClampedArray;
-              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
+              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean; scaleX: number; scaleY: number; skewX: number; skewY: number };
             }>,
           ): void;
         };
@@ -2551,7 +2551,7 @@ test("brush and line widths accept floats with AA-dependent rounding", async ({ 
         width: 8,
         height: 8,
         buffer: new Uint8ClampedArray(8 * 8 * 4),
-        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
       },
     ]);
   });
@@ -2582,7 +2582,7 @@ test("brush and line widths accept floats with AA-dependent rounding", async ({ 
       8,
       8,
       { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false },
-      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
     );
     await page.mouse.click(target.x, target.y);
   };
@@ -2695,7 +2695,7 @@ test("normal blend accumulates translucent paint and eraser subtracts alpha", as
               width: number;
               height: number;
               buffer: Uint8ClampedArray;
-              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
+              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean; scaleX: number; scaleY: number; skewX: number; skewY: number };
             }>,
           ): void;
         };
@@ -2710,7 +2710,7 @@ test("normal blend accumulates translucent paint and eraser subtracts alpha", as
         width: 8,
         height: 8,
         buffer: new Uint8ClampedArray(8 * 8 * 4),
-        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
       },
     ]);
   });
@@ -2733,7 +2733,7 @@ test("normal blend accumulates translucent paint and eraser subtracts alpha", as
       8,
       8,
       { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false },
-      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
     );
     await page.mouse.click(target.x, target.y);
   };
@@ -2801,7 +2801,7 @@ test("E toggles eraser and strokes can opt out of accumulation", async ({ page }
               width: number;
               height: number;
               buffer: Uint8ClampedArray;
-              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
+              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean; scaleX: number; scaleY: number; skewX: number; skewY: number };
             }>,
           ): void;
         };
@@ -2816,7 +2816,7 @@ test("E toggles eraser and strokes can opt out of accumulation", async ({ page }
         width: 8,
         height: 8,
         buffer: new Uint8ClampedArray(8 * 8 * 4),
-        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
       },
     ]);
   });
@@ -2834,7 +2834,7 @@ test("E toggles eraser and strokes can opt out of accumulation", async ({ page }
     const state = await getViewState(page);
     const rect = { left: box.x, top: box.y, width: box.width, height: box.height };
     const view = { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false };
-    const layer = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false };
+    const layer = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 };
     const start = layerPixelToScreen(1, 4, rect, 8, 8, view, layer);
     const end = layerPixelToScreen(6, 4, rect, 8, 8, view, layer);
     await page.mouse.move(start.x, start.y);
@@ -3029,7 +3029,7 @@ test("rope stabilizer holds the focus within the rope and pulls beyond it", asyn
       64,
       64,
       { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false },
-      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
     );
   const start = toScreen(20, 32);
   await page.mouse.move(start.x, start.y);
@@ -3085,7 +3085,7 @@ test("follow stabilizer paints while chasing the cursor", async ({ page }) => {
       64,
       64,
       { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false },
-      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
     );
   const start = toScreen(10, 10);
   const end = toScreen(20, 10);
@@ -3285,7 +3285,7 @@ async function loadTinyLayer(
               width: number;
               height: number;
               buffer: Uint8ClampedArray;
-              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean };
+              transform: { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean; scaleX: number; scaleY: number; skewX: number; skewY: number };
             }>,
           ): void;
         };
@@ -3300,7 +3300,7 @@ async function loadTinyLayer(
         width: side,
         height: side,
         buffer: new Uint8ClampedArray(side * side * 4),
-        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+        transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
       },
     ]);
   }, size);
@@ -3381,7 +3381,7 @@ test("pencil pixel perfect is gated to 1px without AA and thins tight turns", as
     }
     const state = await getViewState(page);
     const view = { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false };
-    const layer = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false };
+    const layer = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 };
     const rect = { left: box.x, top: box.y, width: box.width, height: box.height };
     const at = (lx: number, ly: number): { x: number; y: number } =>
       layerPixelToScreen(lx, ly, rect, 8, 8, view, layer);
@@ -3423,7 +3423,7 @@ test("pencil pixel perfect still paints crossings and revisits", async ({ page }
   }
   const state = await getViewState(page);
   const view = { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false };
-  const layer = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false };
+  const layer = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 };
   const rect = { left: box.x, top: box.y, width: box.width, height: box.height };
   const at = (lx: number, ly: number): { x: number; y: number } =>
     layerPixelToScreen(lx, ly, rect, 8, 8, view, layer);
@@ -3463,7 +3463,7 @@ test("curve pixel perfect is gated to 1px without AA and keeps curves thin", asy
   }
   const state = await getViewState(page);
   const view = { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false };
-  const layer = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false };
+  const layer = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 };
   const rect = { left: box.x, top: box.y, width: box.width, height: box.height };
   const at = (lx: number, ly: number): { x: number; y: number } =>
     layerPixelToScreen(lx, ly, rect, 16, 16, view, layer);
@@ -3523,7 +3523,7 @@ test("layer context menu resets the layer transform", async ({ page }) => {
     };
     return root.__gnumarus?.engine?.getLayers()[0]?.transform ?? null;
   });
-  expect(transform).toEqual({ x: 0, y: 0, rotation: 0, flipX: false, flipY: false });
+  expect(transform).toEqual({ x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 });
   await expect(page.locator("gnumarus-shell")).toContainText("Layer transform reset");
 });
 
@@ -3936,7 +3936,7 @@ async function layerScreenTarget(
     64,
     64,
     { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false },
-    { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+    { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
   );
 }
 
@@ -4274,6 +4274,8 @@ async function getFloatingTransform(page: import("@playwright/test").Page): Prom
   scaleY: number;
   skewX: number;
   skewY: number;
+  flipX: boolean;
+  flipY: boolean;
   width: number;
   height: number;
 } | null> {
@@ -4289,6 +4291,8 @@ async function getFloatingTransform(page: import("@playwright/test").Page): Prom
             scaleY: number;
             skewX: number;
             skewY: number;
+            flipX: boolean;
+            flipY: boolean;
             width: number;
             height: number;
           } | null;
@@ -4491,6 +4495,261 @@ test("opposite skew anchors mirror each other and ignore perpendicular drags", a
   await page.mouse.up();
   expect((await getFloatingTransform(page))?.skewY).toBeCloseTo(1, 6);
   await page.keyboard.press("Escape");
+});
+
+async function cutSingleRedPixel(
+  page: import("@playwright/test").Page,
+  lx: number,
+  ly: number,
+): Promise<void> {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { setBrushSize(size: number): void } } };
+    root.__gnumarus?.shell?.setBrushSize(1);
+  });
+  const target = await layerScreenTarget(page, lx, ly);
+  await page.mouse.click(target.x, target.y);
+  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  const start = await layerScreenTarget(page, 30, 30);
+  const end = await layerScreenTarget(page, 34, 34);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 4 });
+  await page.mouse.up();
+  await page.getByRole("button", { name: "Destructive selection transform" }).click();
+}
+
+test("flip anchors mirror the floating selection about its center", async ({ page }) => {
+  // flip-n (above center) toggles the horizontal mirror: pixel (31,32)
+  // relocates to (33,32), mirrored about the cut center 32.5.
+  await cutSingleRedPixel(page, 31, 32);
+  const flipN = await getSelectionHandle(page, "flip-n");
+  await page.mouse.click(flipN.x, flipN.y);
+  expect((await getFloatingTransform(page))?.flipX).toBe(true);
+  await page.keyboard.press("Enter");
+  expect(await readPixel(page, 33, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 31, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  // flip-e (right of center) toggles the vertical mirror: (31,31) -> (31,33).
+  await cutSingleRedPixel(page, 31, 31);
+  const flipE = await getSelectionHandle(page, "flip-e");
+  await page.mouse.click(flipE.x, flipE.y);
+  expect((await getFloatingTransform(page))?.flipY).toBe(true);
+  await page.keyboard.press("Enter");
+  expect(await readPixel(page, 31, 33)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 31, 31)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+});
+
+async function getLayerTransform(page: import("@playwright/test").Page): Promise<{
+  x: number;
+  y: number;
+  rotation: number;
+  flipX: boolean;
+  flipY: boolean;
+  scaleX: number;
+  scaleY: number;
+  skewX: number;
+  skewY: number;
+}> {
+  return page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          getLayers(): Array<{
+            id: string;
+            transform: {
+              x: number;
+              y: number;
+              rotation: number;
+              flipX: boolean;
+              flipY: boolean;
+              scaleX: number;
+              scaleY: number;
+              skewX: number;
+              skewY: number;
+            };
+          }>;
+        };
+      };
+    };
+    const found = root.__gnumarus?.engine?.getLayers().find((layer) => layer.id === "layer0");
+    if (found === undefined) {
+      throw new Error("layer0 is missing");
+    }
+    return found.transform;
+  });
+}
+
+async function layerDragHandle(
+  page: import("@playwright/test").Page,
+  id: string,
+  dx: number,
+  dy: number,
+): Promise<void> {
+  // Zoom out so the outer anchors sit inside the canvas.
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { setZoom(zoom: number): void } } };
+    root.__gnumarus?.engine?.setZoom(4);
+  });
+  await page.getByRole("button", { name: "Non-destructive cell transform" }).click();
+  const box = await page.locator("gnumarus-shell canvas").boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const position = await page.evaluate((handleId: string) => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getSelectionHandles(): Array<{ id: string; x: number; y: number }> } };
+    };
+    return root.__gnumarus?.engine?.getSelectionHandles().find((handle) => handle.id === handleId) ?? null;
+  }, id);
+  if (position === null) {
+    throw new Error(`layer handle ${id} is missing`);
+  }
+  await page.mouse.move(box.x + position.x, box.y + position.y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + position.x + dx, box.y + position.y + dy, { steps: 4 });
+  await page.mouse.up();
+}
+
+test("non-destructive resize anchors scale the layer about the opposite edge", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await layerDragHandle(page, "resize-se", 5 * 4, 0);
+  const transform = await getLayerTransform(page);
+  // Dragging the corner 5 layer-px right widens 64px to 69px; the west
+  // edge stays anchored, so the center shifts right by half the growth.
+  expect(transform.scaleX).toBeCloseTo(69 / 64, 6);
+  expect(transform.scaleY).toBeCloseTo(1, 6);
+  expect(transform.x).toBeCloseTo(2.5, 6);
+  expect(transform.y).toBeCloseTo(0, 6);
+});
+
+test("non-destructive rotate anchors turn the layer about its center", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { setZoom(zoom: number): void } } };
+    root.__gnumarus?.engine?.setZoom(4);
+  });
+  await page.getByRole("button", { name: "Non-destructive cell transform" }).click();
+  const box = await page.locator("gnumarus-shell canvas").boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const grab = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getSelectionHandles(): Array<{ id: string; x: number; y: number }> } };
+    };
+    const handles = root.__gnumarus?.engine?.getSelectionHandles() ?? [];
+    const anchor = handles.find((handle) => handle.id === "rotate-se") ?? null;
+    const center = handles.find((handle) => handle.id === "center") ?? null;
+    return { anchor, center };
+  });
+  if (grab.anchor === null || grab.center === null) {
+    throw new Error("rotate anchors are missing");
+  }
+  const grabAngle = Math.atan2(grab.anchor.y - grab.center.y, grab.anchor.x - grab.center.x);
+  const dropAngle = grabAngle + Math.PI / 2;
+  const radius = Math.sqrt(
+    (grab.anchor.x - grab.center.x) * (grab.anchor.x - grab.center.x) +
+      (grab.anchor.y - grab.center.y) * (grab.anchor.y - grab.center.y),
+  );
+  await page.mouse.move(box.x + grab.anchor.x, box.y + grab.anchor.y);
+  await page.mouse.down();
+  await page.mouse.move(
+    box.x + grab.center.x + Math.cos(dropAngle) * radius,
+    box.y + grab.center.y + Math.sin(dropAngle) * radius,
+    { steps: 8 },
+  );
+  await page.mouse.up();
+  expect((await getLayerTransform(page)).rotation).toBeCloseTo(Math.PI / 2, 2);
+});
+
+test("non-destructive skew anchors mirror each other and ignore perpendicular drags", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  // Top edge follows right with a negative shear; dragging vertically does nothing.
+  await layerDragHandle(page, "skew-n", 5 * 4, 0);
+  expect((await getLayerTransform(page)).skewX).toBeCloseTo(-5 / 64, 6);
+  await layerDragHandle(page, "skew-n", 0, 5 * 4);
+  expect((await getLayerTransform(page)).skewX).toBeCloseTo(-5 / 64, 6);
+  // Bottom edge follows right with the opposite sign.
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { resetLayerTransform(id: string): boolean } } };
+    root.__gnumarus?.engine?.resetLayerTransform("layer0");
+  });
+  await layerDragHandle(page, "skew-s", 5 * 4, 0);
+  expect((await getLayerTransform(page)).skewX).toBeCloseTo(5 / 64, 6);
+});
+
+test("non-destructive flip anchors toggle the layer mirrors", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { setZoom(zoom: number): void } } };
+    root.__gnumarus?.engine?.setZoom(4);
+  });
+  await page.getByRole("button", { name: "Non-destructive cell transform" }).click();
+  const box = await page.locator("gnumarus-shell canvas").boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const clickHandle = async (id: string): Promise<void> => {
+    const position = await page.evaluate((handleId: string) => {
+      const root = window as unknown as {
+        __gnumarus?: { engine?: { getSelectionHandles(): Array<{ id: string; x: number; y: number }> } };
+      };
+      return root.__gnumarus?.engine?.getSelectionHandles().find((handle) => handle.id === handleId) ?? null;
+    }, id);
+    if (position === null) {
+      throw new Error(`layer handle ${id} is missing`);
+    }
+    await page.mouse.click(box.x + position.x, box.y + position.y);
+  };
+  await clickHandle("flip-n");
+  expect((await getLayerTransform(page)).flipX).toBe(true);
+  await clickHandle("flip-e");
+  expect((await getLayerTransform(page)).flipY).toBe(true);
+  await clickHandle("flip-n");
+  expect((await getLayerTransform(page)).flipX).toBe(false);
+});
+
+test("non-destructive center anchor resets the layer transform", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await layerDragHandle(page, "resize-se", 5 * 4, 0);
+  expect((await getLayerTransform(page)).scaleX).toBeCloseTo(69 / 64, 6);
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { setZoom(zoom: number): void } } };
+    root.__gnumarus?.engine?.setZoom(4);
+  });
+  await page.getByRole("button", { name: "Non-destructive cell transform" }).click();
+  const box = await page.locator("gnumarus-shell canvas").boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const position = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getSelectionHandles(): Array<{ id: string; x: number; y: number }> } };
+    };
+    return root.__gnumarus?.engine?.getSelectionHandles().find((handle) => handle.id === "center") ?? null;
+  });
+  if (position === null) {
+    throw new Error("layer center handle is missing");
+  }
+  await page.mouse.click(box.x + position.x, box.y + position.y);
+  expect(await getLayerTransform(page)).toMatchObject({
+    x: 0,
+    y: 0,
+    rotation: 0,
+    flipX: false,
+    flipY: false,
+    scaleX: 1,
+    scaleY: 1,
+    skewX: 0,
+    skewY: 0,
+  });
 });
 
 test("center anchor resets the floating transform to the as-cut state", async ({ page }) => {

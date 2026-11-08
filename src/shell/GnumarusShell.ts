@@ -1308,7 +1308,7 @@ export class GnumarusShell extends LitElement {
           </button>
           <button
             class=${this.tool === "transform" ? "active" : ""}
-            title="T: Non-destructive cell transform (left-drag move, right-drag rotate, middle-click flip layer)"
+            title="T: Non-destructive cell transform (drag anchors to move, resize, rotate, skew or flip; center resets)"
             aria-label="Non-destructive cell transform"
             @click=${(): void => {
               this.tool = "transform";

@@ -137,8 +137,8 @@ describe("GnumarusHistory", () => {
     const history = new GnumarusHistory();
     let texture = { width: 4, height: 4, buffer: createPixelBuffer(4, 4) };
     setPixel(texture.buffer, 4, 4, 2, 1, BLACK);
-    const transforms = new Map<string, { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean }>();
-    transforms.set("content1", { x: 0, y: 0, rotation: 0, flipX: false, flipY: false });
+    const transforms = new Map<string, { x: number; y: number; rotation: number; flipX: boolean; flipY: boolean; scaleX: number; scaleY: number; skewX: number; skewY: number }>();
+    transforms.set("content1", { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 });
     const fitEntry = {
       type: "fit" as const,
       fit: {
@@ -152,8 +152,8 @@ describe("GnumarusHistory", () => {
         transforms: [
           {
             contentId: "content1",
-            before: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
-            after: { x: 0.5, y: -0.5, rotation: 0, flipX: false, flipY: false },
+            before: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
+            after: { x: 0.5, y: -0.5, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
           },
         ],
       },
@@ -217,7 +217,7 @@ describe("GnumarusHistory", () => {
           opacity: 1,
           width: 4,
           height: 4,
-          transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+          transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
           lockedChannels: { r: false, g: false, b: false, a: false },
           stackIndex: 1,
           buffer: upperBuffer,
@@ -272,7 +272,7 @@ describe("GnumarusHistory", () => {
           opacity: 1,
           width: 4,
           height: 4,
-          transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+          transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
           lockedChannels: { r: false, g: false, b: false, a: false },
           stackIndex: 1,
           buffer: createPixelBuffer(4, 4),
@@ -335,7 +335,7 @@ describe("GnumarusHistory", () => {
           opacity: 1,
           width: 4,
           height: 4,
-          transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false },
+          transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 },
           lockedChannels: { r: false, g: false, b: false, a: false },
           stackIndex: 1,
           buffer: createPixelBuffer(4, 4),
