@@ -1608,7 +1608,7 @@ test("toolbar icons fill buttons without growing them", async ({ page }) => {
     Line: { w: 30, h: 25 },
     Curve: { w: 35, h: 29 },
     "Rectangular selection": { w: 34, h: 25 },
-    "Destructive transform": { w: 33, h: 25 },
+    "Destructive selection transform": { w: 33, h: 25 },
     "Non-destructive cell transform": { w: 31, h: 29 },
     "Final preview": { w: 32, h: 29 },
   };
@@ -3951,7 +3951,7 @@ test("rectangular selection cuts to floating and destructive transform moves and
   const center = await layerScreenTarget(page, 32, 32);
   await page.mouse.click(center.x, center.y);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
-  await page.getByRole("button", { name: "Destructive transform" }).click();
+  await page.getByRole("button", { name: "Destructive selection transform" }).click();
   await expect(page.getByRole("button", { name: "Commit selection" })).toBeDisabled();
   await page.getByRole("button", { name: "Rectangular selection" }).click();
   const start = await layerScreenTarget(page, 30, 30);
@@ -3963,7 +3963,7 @@ test("rectangular selection cuts to floating and destructive transform moves and
   await page.mouse.up();
   expect(await floatingRect(page)).toEqual({ x: 30, y: 30, width: 5, height: 5 });
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
-  await page.getByRole("button", { name: "Destructive transform" }).click();
+  await page.getByRole("button", { name: "Destructive selection transform" }).click();
   await expect(page.getByRole("button", { name: "Commit selection" })).toBeEnabled();
   const grab = await layerScreenTarget(page, 31, 31);
   const drop = await layerScreenTarget(page, 39, 31);
@@ -3989,7 +3989,7 @@ test("destructive transform auto-selects the whole texture and Esc merges", asyn
   await page.waitForSelector("gnumarus-shell canvas");
   await page.mouse.click((await layerScreenTarget(page, 32, 32)).x, (await layerScreenTarget(page, 32, 32)).y);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
-  await page.getByRole("button", { name: "Destructive transform" }).click();
+  await page.getByRole("button", { name: "Destructive selection transform" }).click();
   const center = await layerScreenTarget(page, 32, 32);
   await page.mouse.move(center.x, center.y);
   await page.mouse.down();
@@ -4090,7 +4090,7 @@ test("tool tooltips start with the selection shortcut", async ({ page }) => {
     { label: "Line", title: expect.stringMatching(/^N: Line \(/) },
     { label: "Curve", title: expect.stringMatching(/^C: Curve \(/) },
     { label: "Rectangular selection", title: expect.stringMatching(/^R: Rectangular selection \(/) },
-    { label: "Destructive transform", title: expect.stringMatching(/^V: Destructive transform \(/) },
+    { label: "Destructive selection transform", title: expect.stringMatching(/^V: Destructive selection transform \(/) },
     { label: "Non-destructive cell transform", title: expect.stringMatching(/^T: Non-destructive cell transform \(/) },
   ]);
 });
@@ -4104,10 +4104,10 @@ test("R and V select the rectangular selection and destructive transform tools",
   await page.keyboard.press("b");
   await expect(page.locator("gnumarus-shell")).toContainText("pencil");
   await page.keyboard.press("v");
-  await expect(page.locator("gnumarus-shell")).toContainText("destructive transform");
+  await expect(page.locator("gnumarus-shell")).toContainText("destructive selection transform");
   await expect(page.getByRole("button", { name: "Commit selection" })).toBeVisible();
   await page.keyboard.press("V");
-  await expect(page.locator("gnumarus-shell")).toContainText("destructive transform");
+  await expect(page.locator("gnumarus-shell")).toContainText("destructive selection transform");
   await page.keyboard.press("R");
   await expect(page.locator("gnumarus-shell")).toContainText("rectangular selection");
 });
@@ -4264,4 +4264,209 @@ test("canvas shows red X and green Y axis lines following the cell transform", a
   await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
   await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click();
   expect((await getAxisOverlay(page)).visible).toBe(false);
+});
+
+async function getFloatingTransform(page: import("@playwright/test").Page): Promise<{
+  cx: number;
+  cy: number;
+  rotation: number;
+  scaleX: number;
+  scaleY: number;
+  skewX: number;
+  skewY: number;
+  width: number;
+  height: number;
+} | null> {
+  return page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          getFloatingTransform(): {
+            cx: number;
+            cy: number;
+            rotation: number;
+            scaleX: number;
+            scaleY: number;
+            skewX: number;
+            skewY: number;
+            width: number;
+            height: number;
+          } | null;
+        };
+      };
+    };
+    return root.__gnumarus?.engine?.getFloatingTransform() ?? null;
+  });
+}
+
+async function getSelectionHandle(
+  page: import("@playwright/test").Page,
+  id: string,
+): Promise<{ x: number; y: number }> {
+  const box = await page.locator("gnumarus-shell canvas").boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const position = await page.evaluate((handleId: string) => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getSelectionHandles(): Array<{ id: string; x: number; y: number }> } };
+    };
+    return root.__gnumarus?.engine?.getSelectionHandles().find((handle) => handle.id === handleId) ?? null;
+  }, id);
+  if (position === null) {
+    throw new Error(`selection handle ${id} is missing`);
+  }
+  return { x: box.x + position.x, y: box.y + position.y };
+}
+
+async function redPixelCount(
+  page: import("@playwright/test").Page,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+): Promise<number> {
+  return page.evaluate(
+    ([ax, ay, bx, by]: number[]) => {
+      const root = window as unknown as {
+        __gnumarus?: {
+          engine?: { readPixel(x: number, y: number): { r: number; g: number; b: number; a: number } | null };
+        };
+      };
+      const engine = root.__gnumarus?.engine;
+      if (engine === undefined) {
+        throw new Error("engine is unavailable");
+      }
+      let count = 0;
+      for (let y = ay; y <= by; y += 1) {
+        for (let x = ax; x <= bx; x += 1) {
+          const pixel = engine.readPixel(x, y);
+          if (pixel !== null && pixel.r === 255 && pixel.g === 0 && pixel.b === 0 && pixel.a === 255) {
+            count += 1;
+          }
+        }
+      }
+      return count;
+    },
+    [x0, y0, x1, y1],
+  );
+}
+
+async function cutRedBlock(page: import("@playwright/test").Page): Promise<void> {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { setBrushSize(size: number): void } } };
+    root.__gnumarus?.shell?.setBrushSize(3);
+  });
+  const center = await layerScreenTarget(page, 32, 32);
+  await page.mouse.click(center.x, center.y);
+  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  const start = await layerScreenTarget(page, 30, 30);
+  const end = await layerScreenTarget(page, 34, 34);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 4 });
+  await page.mouse.up();
+  await page.getByRole("button", { name: "Destructive selection transform" }).click();
+}
+
+test("corner anchors resize the floating selection", async ({ page }) => {
+  await cutRedBlock(page);
+  expect(await floatingRect(page)).toEqual({ x: 30, y: 30, width: 5, height: 5 });
+  const zoom = (await getViewState(page)).zoom;
+  const anchor = await getSelectionHandle(page, "resize-se");
+  await page.mouse.move(anchor.x, anchor.y);
+  await page.mouse.down();
+  await page.mouse.move(anchor.x + 5 * zoom, anchor.y, { steps: 4 });
+  await page.mouse.up();
+  const transform = await getFloatingTransform(page);
+  expect(transform?.scaleX).toBeCloseTo(2, 6);
+  expect(transform?.scaleY).toBeCloseTo(1, 6);
+  await page.getByRole("button", { name: "Commit selection" }).click();
+  expect(await readPixel(page, 34, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 35, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 30, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 39, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await redPixelCount(page, 28, 28, 42, 36)).toBeGreaterThanOrEqual(15);
+  expect(await redPixelCount(page, 28, 28, 42, 36)).toBeLessThanOrEqual(21);
+});
+
+test("rotate anchors turn the floating selection", async ({ page }) => {
+  await cutRedBlock(page);
+  const box = await page.locator("gnumarus-shell canvas").boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const grab = await getSelectionHandle(page, "rotate-se");
+  const grabLocal = { x: grab.x - box.x, y: grab.y - box.y };
+  const center = await getSelectionHandle(page, "center");
+  const centerLocal = { x: center.x - box.x, y: center.y - box.y };
+  const grabAngle = Math.atan2(grabLocal.y - centerLocal.y, grabLocal.x - centerLocal.x);
+  const dropAngle = grabAngle + Math.PI / 2;
+  const radius = Math.sqrt(
+    (grabLocal.x - centerLocal.x) * (grabLocal.x - centerLocal.x) +
+      (grabLocal.y - centerLocal.y) * (grabLocal.y - centerLocal.y),
+  );
+  const drop = {
+    x: box.x + centerLocal.x + Math.cos(dropAngle) * radius,
+    y: box.y + centerLocal.y + Math.sin(dropAngle) * radius,
+  };
+  await page.mouse.move(grab.x, grab.y);
+  await page.mouse.down();
+  await page.mouse.move(drop.x, drop.y, { steps: 8 });
+  await page.mouse.up();
+  expect((await getFloatingTransform(page))?.rotation).toBeCloseTo(Math.PI / 2, 2);
+  await page.keyboard.press("Enter");
+  expect(await floatingRect(page)).toBeNull();
+  // The symmetric block survives the quarter turn exactly.
+  expect(await redPixelCount(page, 28, 28, 38, 38)).toBe(9);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("skew anchors shear the floating selection on their axis", async ({ page }) => {
+  await cutRedBlock(page);
+  const zoom = (await getViewState(page)).zoom;
+  const anchor = await getSelectionHandle(page, "skew-n");
+  await page.mouse.move(anchor.x, anchor.y);
+  await page.mouse.down();
+  await page.mouse.move(anchor.x + 5 * zoom, anchor.y, { steps: 4 });
+  await page.mouse.up();
+  expect((await getFloatingTransform(page))?.skewX).toBeCloseTo(1, 6);
+  await page.keyboard.press("Enter");
+  expect(await readPixel(page, 30, 31)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 33, 31)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 34, 33)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("center anchor resets the floating transform to the as-cut state", async ({ page }) => {
+  await cutRedBlock(page);
+  const zoom = (await getViewState(page)).zoom;
+  const corner = await getSelectionHandle(page, "resize-se");
+  await page.mouse.move(corner.x, corner.y);
+  await page.mouse.down();
+  await page.mouse.move(corner.x + 5 * zoom, corner.y, { steps: 4 });
+  await page.mouse.up();
+  expect((await getFloatingTransform(page))?.scaleX).toBeCloseTo(2, 6);
+  const skew = await getSelectionHandle(page, "skew-n");
+  await page.mouse.move(skew.x, skew.y);
+  await page.mouse.down();
+  await page.mouse.move(skew.x + 5 * zoom, skew.y, { steps: 4 });
+  await page.mouse.up();
+  expect((await getFloatingTransform(page))?.skewX).toBeCloseTo(1, 6);
+  const center = await getSelectionHandle(page, "center");
+  await page.mouse.click(center.x, center.y);
+  expect(await getFloatingTransform(page)).toMatchObject({
+    rotation: 0,
+    scaleX: 1,
+    scaleY: 1,
+    skewX: 0,
+    skewY: 0,
+  });
+  expect(await floatingRect(page)).toEqual({ x: 30, y: 30, width: 5, height: 5 });
+  await page.getByRole("button", { name: "Commit selection" }).click();
+  expect(await redPixelCount(page, 28, 28, 38, 38)).toBe(9);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 30, 30)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
 });

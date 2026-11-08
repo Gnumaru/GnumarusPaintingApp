@@ -30,6 +30,15 @@ import {
   walkCubicBezierPixels,
 } from "./GnumarusPixelPerfect";
 import {
+  GNUMARUS_MAX_SELECTION_SKEW,
+  forwardSelectionPoint,
+  inverseSelectionPoint,
+  isSelectionDegenerate,
+  selectionCornerBox,
+  selectionLinearMatrix,
+  type GnumarusSelectionPlacement,
+} from "./GnumarusSelectionTransform";
+import {
   GNUMARUS_DEFAULT_FOLLOW_STRENGTH,
   GNUMARUS_DEFAULT_ROPE_LENGTH,
   GNUMARUS_DEFAULT_STABILIZER_MODE,
@@ -130,12 +139,31 @@ export type GnumarusCanvasTool =
 
 /** Floating selection cut out of a cell texture, without a cell of its own. */
 export interface GnumarusFloatingSelection {
+  /** Source pixels as cut (never resampled in place). */
   buffer: Uint8ClampedArray;
   width: number;
   height: number;
-  /** Integer top-left position in home texture pixels (unbounded). */
-  x: number;
-  y: number;
+  /** Center in home texture pixels (floats, unbounded). */
+  cx: number;
+  cy: number;
+  /** Clockwise-positive radians. */
+  rotation: number;
+  /** Multipliers, always positive. */
+  scaleX: number;
+  scaleY: number;
+  /** Shear factors. */
+  skewX: number;
+  skewY: number;
+  /** Placement snapshot taken at cut time; the center anchor restores it. */
+  initial: {
+    cx: number;
+    cy: number;
+    rotation: number;
+    scaleX: number;
+    scaleY: number;
+    skewX: number;
+    skewY: number;
+  };
   layerId: string;
   frame: number;
   textureId: string;
@@ -143,6 +171,26 @@ export interface GnumarusFloatingSelection {
   cutDepth: number;
   active: boolean;
 }
+
+/** Anchor ids for the destructive selection transform overlay. */
+export type GnumarusSelectionHandleId =
+  | "resize-nw"
+  | "resize-ne"
+  | "resize-sw"
+  | "resize-se"
+  | "resize-n"
+  | "resize-s"
+  | "resize-e"
+  | "resize-w"
+  | "rotate-nw"
+  | "rotate-ne"
+  | "rotate-sw"
+  | "rotate-se"
+  | "skew-n"
+  | "skew-s"
+  | "skew-e"
+  | "skew-w"
+  | "center";
 
 export interface GnumarusLayerInfo {
   id: string;
@@ -455,6 +503,7 @@ export class GnumarusCanvasEngine {
   private readonly previewStabilizerLine: SVGLineElement;
   private readonly previewSelectWhite: SVGPolygonElement;
   private readonly previewSelectBlack: SVGPolygonElement;
+  private readonly selectionHandles: Array<{ id: GnumarusSelectionHandleId; group: SVGGElement }> = [];
   private readonly previewMarkers: SVGCircleElement[];
   private drawing = false;
   private panning = false;
@@ -472,8 +521,33 @@ export class GnumarusCanvasEngine {
   private floating: GnumarusFloatingSelection | null = null;
   /** Active rectangular-selection drag in cell image pixels, or null. */
   private rectDrag: { x0: number; y0: number; x1: number; y1: number } | null = null;
-  /** Active destructive-transform move (grab offset in cell image pixels). */
+  /** Active destructive-transform move (grab offset from the selection center). */
   private moveDrag: { grabDX: number; grabDY: number } | null = null;
+  /** Active corner/edge resize gesture. */
+  private resizeDrag: {
+    anchorBufferX: number;
+    anchorBufferY: number;
+    anchorHomeX: number;
+    anchorHomeY: number;
+    grabLocalX: number;
+    grabLocalY: number;
+    startScaleX: number;
+    startScaleY: number;
+    axis: "both" | "x" | "y";
+    placement: GnumarusSelectionPlacement;
+  } | null = null;
+  /** Active rotate gesture (screen-space angles). */
+  private rotateDrag: { startRotation: number; grabAngle: number; centerX: number; centerY: number } | null = null;
+  /** Active skew gesture (screen-space pixels over the box screen size). */
+  private skewDrag: {
+    axis: "x" | "y";
+    startSkew: number;
+    grabClientX: number;
+    grabClientY: number;
+    boxSize: number;
+  } | null = null;
+  /** Pending center-anchor tap (click without drag resets the transform). */
+  private centerTap: { startClientX: number; startClientY: number; grabDX: number; grabDY: number } | null = null;
   private floatingPlane: THREE.Mesh | null = null;
   private floatingPlaneFor: GnumarusFloatingSelection | null = null;
   private floatingMaterial: THREE.ShaderMaterial | null = null;
@@ -639,6 +713,62 @@ export class GnumarusCanvasEngine {
     };
     this.previewSelectWhite = makeSelectionAnts("selection-rect", "#ffffff", "-20");
     this.previewSelectBlack = makeSelectionAnts(null, "#000000", "-10");
+    const svgNamespace = "http://www.w3.org/2000/svg";
+    const appendShape = (group: SVGGElement, tag: string, attributes: Record<string, string>): SVGElement => {
+      const shape = document.createElementNS(svgNamespace, tag) as SVGElement;
+      for (const [name, value] of Object.entries(attributes)) {
+        shape.setAttribute(name, value);
+      }
+      group.appendChild(shape);
+      return shape;
+    };
+    const underlay = { fill: "none", stroke: "#000000", "stroke-width": "4", opacity: "0.9" };
+    const overlay = { fill: "none", stroke: "#ffffff", "stroke-width": "2", opacity: "0.95" };
+    const solidWhite = { fill: "#ffffff", stroke: "#000000", "stroke-width": "1", opacity: "0.95" };
+    const makeHandleGroup = (id: GnumarusSelectionHandleId): SVGGElement => {
+      const group = document.createElementNS(svgNamespace, "g") as SVGGElement;
+      group.setAttribute("data-testid", "pp-handle");
+      group.setAttribute("data-handle", id);
+      group.style.display = "none";
+      group.style.pointerEvents = "none";
+      this.previewSvg.appendChild(group);
+      this.selectionHandles.push({ id, group });
+      return group;
+    };
+    const resizeIds: GnumarusSelectionHandleId[] = [
+      "resize-nw",
+      "resize-ne",
+      "resize-se",
+      "resize-sw",
+      "resize-n",
+      "resize-s",
+      "resize-e",
+      "resize-w",
+    ];
+    for (const id of resizeIds) {
+      const group = makeHandleGroup(id);
+      appendShape(group, "rect", { x: "-4", y: "-4", width: "8", height: "8", ...solidWhite });
+    }
+    const rotateIds: GnumarusSelectionHandleId[] = ["rotate-nw", "rotate-ne", "rotate-se", "rotate-sw"];
+    for (const id of rotateIds) {
+      const group = makeHandleGroup(id);
+      appendShape(group, "path", { d: "M -7 0 A 7 7 0 0 1 0 -7", ...underlay });
+      appendShape(group, "path", { d: "M -7 0 A 7 7 0 0 1 0 -7", ...overlay });
+      appendShape(group, "polygon", { points: "-7,-4 -11,1 -3,1", ...solidWhite });
+      appendShape(group, "polygon", { points: "1,-7 -4,-11 -4,-3", ...solidWhite });
+    }
+    const skewIds: GnumarusSelectionHandleId[] = ["skew-n", "skew-s", "skew-e", "skew-w"];
+    for (const id of skewIds) {
+      const group = makeHandleGroup(id);
+      appendShape(group, "line", { x1: "-7", y1: "0", x2: "7", y2: "0", ...underlay });
+      appendShape(group, "line", { x1: "-7", y1: "0", x2: "7", y2: "0", ...overlay });
+      appendShape(group, "polygon", { points: "-11,0 -5,-3 -5,3", ...solidWhite });
+      appendShape(group, "polygon", { points: "11,0 5,-3 5,3", ...solidWhite });
+    }
+    const centerGroup = makeHandleGroup("center");
+    appendShape(centerGroup, "circle", { cx: "0", cy: "0", r: "6.5", ...underlay });
+    appendShape(centerGroup, "circle", { cx: "0", cy: "0", r: "6.5", ...overlay });
+    appendShape(centerGroup, "polygon", { points: "0,-9.5 -3.5,-4 3.5,-4", ...solidWhite });
     this.previewMarkers = [];
     for (let i = 0; i < 4; i += 1) {
       const marker = document.createElementNS("http://www.w3.org/2000/svg", "circle");
@@ -3185,13 +3315,404 @@ export class GnumarusCanvasEngine {
     return this.floating !== null && this.floating.active;
   }
 
-  /** Floating selection rect in home texture pixels, or null when inactive. */
+  /** Floating placement as the pure affine module expects it. */
+  private floatingPlacement(floating: GnumarusFloatingSelection): GnumarusSelectionPlacement {
+    return {
+      cx: floating.cx,
+      cy: floating.cy,
+      rotation: floating.rotation,
+      scaleX: floating.scaleX,
+      scaleY: floating.scaleY,
+      skewX: floating.skewX,
+      skewY: floating.skewY,
+      width: floating.width,
+      height: floating.height,
+    };
+  }
+
+  /** Floating selection bbox in home texture pixels, or null when inactive. */
   getFloatingRect(): { x: number; y: number; width: number; height: number } | null {
     const floating = this.floating;
     if (floating === null || !floating.active) {
       return null;
     }
-    return { x: floating.x, y: floating.y, width: floating.width, height: floating.height };
+    const box = selectionCornerBox(this.floatingPlacement(floating));
+    const x = Math.floor(box.minX);
+    const y = Math.floor(box.minY);
+    return { x, y, width: Math.ceil(box.maxX) - x, height: Math.ceil(box.maxY) - y };
+  }
+
+  /** Floating transform params, or null when no selection is active. */
+  getFloatingTransform(): {
+    cx: number;
+    cy: number;
+    rotation: number;
+    scaleX: number;
+    scaleY: number;
+    skewX: number;
+    skewY: number;
+    width: number;
+    height: number;
+  } | null {
+    const floating = this.floating;
+    if (floating === null || !floating.active) {
+      return null;
+    }
+    return {
+      cx: floating.cx,
+      cy: floating.cy,
+      rotation: floating.rotation,
+      scaleX: floating.scaleX,
+      scaleY: floating.scaleY,
+      skewX: floating.skewX,
+      skewY: floating.skewY,
+      width: floating.width,
+      height: floating.height,
+    };
+  }
+
+  /**
+   * Reset the floating transform to the as-cut snapshot (position included).
+   * Ephemeral like moves: no history entry, commit captures the result.
+   */
+  resetFloatingTransform(): boolean {
+    const floating = this.floating;
+    if (floating === null || !floating.active) {
+      return false;
+    }
+    floating.cx = floating.initial.cx;
+    floating.cy = floating.initial.cy;
+    floating.rotation = floating.initial.rotation;
+    floating.scaleX = floating.initial.scaleX;
+    floating.scaleY = floating.initial.scaleY;
+    floating.skewX = floating.initial.skewX;
+    floating.skewY = floating.initial.skewY;
+    this.syncFloatingPlane();
+    this.render();
+    this.updatePreviews();
+    return true;
+  }
+
+  /** Refresh plane, canvas and overlay after a floating placement change. */
+  private afterFloatingChange(): void {
+    this.syncFloatingPlane();
+    this.render();
+    this.updatePreviews();
+  }
+
+  /**
+   * Map a client point to floating-local buffer coords (unbounded floats).
+   * Null when no selection is active, home is hidden, or degenerate.
+   */
+  private clientToSelectionLocal(clientX: number, clientY: number): { x: number; y: number } | null {
+    const floating = this.floating;
+    if (floating === null || !floating.active || !this.floatingHomeVisible()) {
+      return null;
+    }
+    const cursor = this.clientToLayerImageFloat(clientX, clientY);
+    if (cursor === null) {
+      return null;
+    }
+    return inverseSelectionPoint(this.floatingPlacement(floating), cursor.x, cursor.y);
+  }
+
+  /** Screen-space anchor layout in container-local pixels, or null. */
+  private selectionHandleLayout(): Array<{
+    id: GnumarusSelectionHandleId;
+    kind: "resize" | "rotate" | "skew" | "center";
+    x: number;
+    y: number;
+    angle: number;
+  }> | null {
+    const floating = this.floating;
+    if (floating === null || !floating.active || !this.floatingHomeVisible()) {
+      return null;
+    }
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return null;
+    }
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return null;
+    }
+    const placement = this.floatingPlacement(floating);
+    const local: GnumarusRect = { left: 0, top: 0, width: rect.width, height: rect.height };
+    const view = this.viewTransform();
+    const toLocal = (bufferX: number, bufferY: number): { x: number; y: number } => {
+      const home = forwardSelectionPoint(placement, bufferX, bufferY);
+      const project = layerImageToProject(home.x, home.y, layer.width, layer.height, layer.transform);
+      const client = projectToScreen(project.x, project.y, local, view);
+      return { x: client.x, y: client.y };
+    };
+    const halfW = floating.width / 2;
+    const halfH = floating.height / 2;
+    const center = toLocal(halfW, halfH);
+    const corners: Array<{ id: GnumarusSelectionHandleId; bx: number; by: number }> = [
+      { id: "resize-nw", bx: 0, by: 0 },
+      { id: "resize-ne", bx: floating.width, by: 0 },
+      { id: "resize-se", bx: floating.width, by: floating.height },
+      { id: "resize-sw", bx: 0, by: floating.height },
+    ];
+    const edges: Array<{ id: GnumarusSelectionHandleId; bx: number; by: number }> = [
+      { id: "resize-n", bx: halfW, by: 0 },
+      { id: "resize-s", bx: halfW, by: floating.height },
+      { id: "resize-e", bx: floating.width, by: halfH },
+      { id: "resize-w", bx: 0, by: halfH },
+    ];
+    const handles: Array<{
+      id: GnumarusSelectionHandleId;
+      kind: "resize" | "rotate" | "skew" | "center";
+      x: number;
+      y: number;
+      angle: number;
+    }> = [];
+    for (const corner of corners) {
+      const point = toLocal(corner.bx, corner.by);
+      handles.push({ id: corner.id, kind: "resize", x: point.x, y: point.y, angle: 0 });
+      const dx = point.x - center.x;
+      const dy = point.y - center.y;
+      const length = Math.sqrt(dx * dx + dy * dy);
+      const nx = length > 1e-6 ? dx / length : 0;
+      const ny = length > 1e-6 ? dy / length : -1;
+      handles.push({
+        id: corner.id.replace("resize-", "rotate-") as GnumarusSelectionHandleId,
+        kind: "rotate",
+        x: point.x + nx * 20,
+        y: point.y + ny * 20,
+        angle: (Math.atan2(ny, nx) * 180) / Math.PI - 225,
+      });
+    }
+    for (const edge of edges) {
+      const point = toLocal(edge.bx, edge.by);
+      handles.push({ id: edge.id, kind: "resize", x: point.x, y: point.y, angle: 0 });
+      const dx = point.x - center.x;
+      const dy = point.y - center.y;
+      const length = Math.sqrt(dx * dx + dy * dy);
+      const nx = length > 1e-6 ? dx / length : 0;
+      const ny = length > 1e-6 ? dy / length : -1;
+      const vertical = edge.id === "resize-e" || edge.id === "resize-w";
+      handles.push({
+        id: edge.id.replace("resize-", "skew-") as GnumarusSelectionHandleId,
+        kind: "skew",
+        x: point.x + nx * 34,
+        y: point.y + ny * 34,
+        angle: vertical ? 90 : 0,
+      });
+    }
+    handles.push({ id: "center", kind: "center", x: center.x, y: center.y, angle: 0 });
+    return handles;
+  }
+
+  /** Hit-test selection anchors by priority (rotate, skew, resize, center). */
+  private selectionHitTest(
+    clientX: number,
+    clientY: number,
+  ): { kind: "rotate" | "skew" | "resize" | "center"; id: GnumarusSelectionHandleId } | null {
+    const layout = this.selectionHandleLayout();
+    if (layout === null) {
+      return null;
+    }
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const mx = clientX - rect.left;
+    const my = clientY - rect.top;
+    const radiusSquared = 12 * 12;
+    for (const kind of ["rotate", "skew", "resize", "center"] as const) {
+      for (const handle of layout) {
+        if (handle.kind !== kind) {
+          continue;
+        }
+        const dx = handle.x - mx;
+        const dy = handle.y - my;
+        if (dx * dx + dy * dy <= radiusSquared) {
+          return { kind, id: handle.id };
+        }
+      }
+    }
+    return null;
+  }
+
+  /** Test hook: anchor layout in container-local pixels (destructure only). */
+  getSelectionHandles(): Array<{ id: string; x: number; y: number }> {
+    if (this.tool !== "destransform") {
+      return [];
+    }
+    return (this.selectionHandleLayout() ?? []).map((handle) => ({ id: handle.id, x: handle.x, y: handle.y }));
+  }
+
+  /** Start a resize/rotate/skew/center gesture from a hit anchor. */
+  private beginSelectionGesture(
+    hit: { kind: "rotate" | "skew" | "resize" | "center"; id: GnumarusSelectionHandleId },
+    event: PointerEvent,
+  ): boolean {
+    const floating = this.floating;
+    if (floating === null || !floating.active) {
+      return false;
+    }
+    const cursor = this.clientToLayerImageFloat(event.clientX, event.clientY);
+    if (cursor === null) {
+      return false;
+    }
+    if (hit.kind === "center") {
+      this.centerTap = {
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        grabDX: cursor.x - floating.cx,
+        grabDY: cursor.y - floating.cy,
+      };
+      return true;
+    }
+    if (hit.kind === "rotate") {
+      const layer = this.activeLayer();
+      if (layer === null) {
+        return false;
+      }
+      const rect = this.renderer.domElement.getBoundingClientRect();
+      const project = layerImageToProject(floating.cx, floating.cy, layer.width, layer.height, layer.transform);
+      const center = projectToScreen(
+        project.x,
+        project.y,
+        { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+        this.viewTransform(),
+      );
+      this.rotateDrag = {
+        startRotation: floating.rotation,
+        grabAngle: Math.atan2(event.clientY - center.y, event.clientX - center.x),
+        centerX: center.x,
+        centerY: center.y,
+      };
+      return true;
+    }
+    const placement = this.floatingPlacement(floating);
+    const local = inverseSelectionPoint(placement, cursor.x, cursor.y);
+    if (local === null) {
+      return false;
+    }
+    if (hit.kind === "skew") {
+      const axis = hit.id === "skew-n" || hit.id === "skew-s" ? "x" : "y";
+      const layout = this.selectionHandleLayout();
+      // Box extent from the edge midpoints (not the offset skew anchors).
+      const first = axis === "x" ? "resize-n" : "resize-e";
+      const second = axis === "x" ? "resize-s" : "resize-w";
+      const firstPos = layout?.find((handle) => handle.id === first);
+      const secondPos = layout?.find((handle) => handle.id === second);
+      if (firstPos === undefined || secondPos === undefined) {
+        return false;
+      }
+      const boxSize = Math.sqrt(
+        (secondPos.x - firstPos.x) * (secondPos.x - firstPos.x) +
+          (secondPos.y - firstPos.y) * (secondPos.y - firstPos.y),
+      );
+      if (!(boxSize > 1e-6)) {
+        return false;
+      }
+      this.skewDrag = {
+        axis,
+        startSkew: axis === "x" ? floating.skewX : floating.skewY,
+        grabClientX: event.clientX,
+        grabClientY: event.clientY,
+        boxSize,
+      };
+      return true;
+    }
+    const opposite: Record<string, { bx: number; by: number; axis: "both" | "x" | "y" }> = {
+      "resize-nw": { bx: floating.width, by: floating.height, axis: "both" },
+      "resize-ne": { bx: 0, by: floating.height, axis: "both" },
+      "resize-se": { bx: 0, by: 0, axis: "both" },
+      "resize-sw": { bx: floating.width, by: 0, axis: "both" },
+      "resize-n": { bx: floating.width / 2, by: floating.height, axis: "y" },
+      "resize-s": { bx: floating.width / 2, by: 0, axis: "y" },
+      "resize-e": { bx: 0, by: floating.height / 2, axis: "x" },
+      "resize-w": { bx: floating.width, by: floating.height / 2, axis: "x" },
+    };
+    const info = opposite[hit.id];
+    if (info === undefined) {
+      return false;
+    }
+    const anchorHome = forwardSelectionPoint(placement, info.bx, info.by);
+    this.resizeDrag = {
+      anchorBufferX: info.bx,
+      anchorBufferY: info.by,
+      anchorHomeX: anchorHome.x,
+      anchorHomeY: anchorHome.y,
+      grabLocalX: local.x - floating.width / 2,
+      grabLocalY: local.y - floating.height / 2,
+      startScaleX: floating.scaleX,
+      startScaleY: floating.scaleY,
+      axis: info.axis,
+      placement: { ...this.floatingPlacement(floating) },
+    };
+    return true;
+  }
+
+  /** Advance an in-progress resize/rotate/skew gesture from the cursor. */
+  private updateTransformGesture(clientX: number, clientY: number): void {
+    const floating = this.floating;
+    if (floating === null || !floating.active || !this.floatingHomeVisible()) {
+      this.resizeDrag = null;
+      this.rotateDrag = null;
+      this.skewDrag = null;
+      return;
+    }
+    if (this.rotateDrag !== null) {
+      const gesture = this.rotateDrag;
+      const angle = Math.atan2(clientY - gesture.centerY, clientX - gesture.centerX);
+      floating.rotation = normalizeRotation(gesture.startRotation + (angle - gesture.grabAngle));
+      this.lastMouseClient = { x: clientX, y: clientY };
+      this.afterFloatingChange();
+      return;
+    }
+    if (this.skewDrag !== null) {
+      const gesture = this.skewDrag;
+      const clampSkew = (value: number): number =>
+        Math.min(GNUMARUS_MAX_SELECTION_SKEW, Math.max(-GNUMARUS_MAX_SELECTION_SKEW, value));
+      if (gesture.axis === "x") {
+        floating.skewX = clampSkew(gesture.startSkew + (clientX - gesture.grabClientX) / gesture.boxSize);
+      } else {
+        floating.skewY = clampSkew(gesture.startSkew + (clientY - gesture.grabClientY) / gesture.boxSize);
+      }
+      this.lastMouseClient = { x: clientX, y: clientY };
+      this.afterFloatingChange();
+      return;
+    }
+    if (this.resizeDrag !== null) {
+      const gesture = this.resizeDrag;
+      const cursor = this.clientToLayerImageFloat(clientX, clientY);
+      if (cursor === null) {
+        return;
+      }
+      const local = inverseSelectionPoint(gesture.placement, cursor.x, cursor.y);
+      if (local === null) {
+        return;
+      }
+      const halfW = floating.width / 2;
+      const halfH = floating.height / 2;
+      const anchorCX = gesture.anchorBufferX - halfW;
+      const anchorCY = gesture.anchorBufferY - halfH;
+      let scaleX = gesture.startScaleX;
+      let scaleY = gesture.startScaleY;
+      if (gesture.axis !== "y") {
+        const denomX = gesture.grabLocalX - anchorCX;
+        if (Math.abs(denomX) > 1e-9) {
+          scaleX = gesture.startScaleX * (local.x - halfW - anchorCX) / denomX;
+        }
+      }
+      if (gesture.axis !== "x") {
+        const denomY = gesture.grabLocalY - anchorCY;
+        if (Math.abs(denomY) > 1e-9) {
+          scaleY = gesture.startScaleY * (local.y - halfH - anchorCY) / denomY;
+        }
+      }
+      scaleX = Math.min(1024 / floating.width, Math.max(1 / floating.width, scaleX));
+      scaleY = Math.min(1024 / floating.height, Math.max(1 / floating.height, scaleY));
+      floating.scaleX = scaleX;
+      floating.scaleY = scaleY;
+      const matrix = selectionLinearMatrix({ ...gesture.placement, scaleX, scaleY });
+      floating.cx = gesture.anchorHomeX - (matrix.a * anchorCX + matrix.b * anchorCY);
+      floating.cy = gesture.anchorHomeY - (matrix.c * anchorCX + matrix.d * anchorCY);
+      this.lastMouseClient = { x: clientX, y: clientY };
+      this.afterFloatingChange();
+    }
   }
 
   /** True when the floating selection belongs to the currently shown cell. */
@@ -3217,15 +3738,17 @@ export class GnumarusCanvasEngine {
       return;
     }
     this.floating = null;
-    this.moveDrag = null;
+    this.clearTransformGestures();
     this.disposeFloatingPlane();
     this.updatePreviews();
   }
 
   /**
    * Merge the floating texture back into its home cell texture with an exact
-   * copy paste (a destructive move relocates pixels losslessly), clipped to
-   * the texture. Undoable. Returns false when nothing was merged.
+   * copy paste (a destructive move relocates pixels losslessly), resampled
+   * through the inverse placement with nearest sampling and a tie epsilon,
+   * clipped to the texture. Undoable. Returns false when nothing was merged
+   * (inactive, missing home, degenerate transform or empty coverage).
    */
   commitFloating(): boolean {
     const floating = this.floating;
@@ -3235,20 +3758,37 @@ export class GnumarusCanvasEngine {
     const tex = this.textures.get(floating.textureId);
     if (tex === undefined) {
       this.floating = null;
-      this.moveDrag = null;
+      this.clearTransformGestures();
       this.disposeFloatingPlane();
       this.updatePreviews();
       return false;
     }
+    const placement = this.floatingPlacement(floating);
+    if (isSelectionDegenerate(placement)) {
+      return false;
+    }
+    const box = selectionCornerBox(placement);
+    const minX = Math.max(0, Math.floor(box.minX));
+    const minY = Math.max(0, Math.floor(box.minY));
+    const maxX = Math.min(tex.width, Math.ceil(box.maxX));
+    const maxY = Math.min(tex.height, Math.ceil(box.maxY));
+    if (minX >= maxX || minY >= maxY) {
+      return false;
+    }
     const base = tex.buffer.slice();
-    for (let y = 0; y < floating.height; y += 1) {
-      for (let x = 0; x < floating.width; x += 1) {
-        const dx = floating.x + x;
-        const dy = floating.y + y;
-        if (dx < 0 || dy < 0 || dx >= tex.width || dy >= tex.height) {
+    const epsilon = 1e-6;
+    for (let dy = minY; dy < maxY; dy += 1) {
+      for (let dx = minX; dx < maxX; dx += 1) {
+        const local = inverseSelectionPoint(placement, dx + 0.5, dy + 0.5);
+        if (local === null) {
           continue;
         }
-        const source = (y * floating.width + x) * 4;
+        const sx = Math.floor(local.x + epsilon);
+        const sy = Math.floor(local.y + epsilon);
+        if (sx < 0 || sy < 0 || sx >= floating.width || sy >= floating.height) {
+          continue;
+        }
+        const source = (sy * floating.width + sx) * 4;
         const dest = (dy * tex.width + dx) * 4;
         tex.buffer[dest] = floating.buffer[source]!;
         tex.buffer[dest + 1] = floating.buffer[source + 1]!;
@@ -3257,7 +3797,7 @@ export class GnumarusCanvasEngine {
       }
     }
     this.floating = null;
-    this.moveDrag = null;
+    this.clearTransformGestures();
     this.disposeFloatingPlane();
     const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
     if (diff === null) {
@@ -3322,8 +3862,22 @@ export class GnumarusCanvasEngine {
       buffer: cut,
       width,
       height,
-      x: minX,
-      y: minY,
+      cx: minX + width / 2,
+      cy: minY + height / 2,
+      rotation: 0,
+      scaleX: 1,
+      scaleY: 1,
+      skewX: 0,
+      skewY: 0,
+      initial: {
+        cx: minX + width / 2,
+        cy: minY + height / 2,
+        rotation: 0,
+        scaleX: 1,
+        scaleY: 1,
+        skewX: 0,
+        skewY: 0,
+      },
       layerId: layer.id,
       frame: this.currentFrame,
       textureId: tex.id,
@@ -3386,6 +3940,23 @@ export class GnumarusCanvasEngine {
     this.floatingPlaneFor = null;
   }
 
+  /** Clear every in-progress selection gesture (move/resize/rotate/skew/tap). */
+  private clearTransformGestures(): void {
+    this.moveDrag = null;
+    this.resizeDrag = null;
+    this.rotateDrag = null;
+    this.skewDrag = null;
+    this.centerTap = null;
+  }
+
+  /** Clear in-progress drags at stroke end, keeping a pending center tap. */
+  private clearTransformDrags(): void {
+    this.moveDrag = null;
+    this.resizeDrag = null;
+    this.rotateDrag = null;
+    this.skewDrag = null;
+  }
+
   /** (Re)create, position and show/hide the floating content plane. */
   private syncFloatingPlane(): void {
     const floating = this.floating;
@@ -3427,26 +3998,43 @@ export class GnumarusCanvasEngine {
       this.floatingPlane.visible = false;
       return;
     }
-    const center = layerImageToProject(
-      floating.x + floating.width / 2,
-      floating.y + floating.height / 2,
-      layer.width,
-      layer.height,
-      layer.transform,
-    );
-    this.writePlaneMatrix(
-      this.floatingPlane,
-      floating.width,
-      floating.height,
-      {
-        x: center.x,
-        y: center.y,
-        rotation: layer.transform.rotation,
-        flipX: layer.transform.flipX,
-        flipY: layer.transform.flipY,
-      },
-      this.layers.length * 0.01 + 0.01,
-    );
+    // Position the unit quad from the transformed buffer corners so the
+    // plane renders position, rotation, scale and skew exactly.
+    const placement = this.floatingPlacement(floating);
+    const corner = (x: number, y: number): { x: number; y: number } => {
+      const home = forwardSelectionPoint(placement, x, y);
+      return layerImageToProject(home.x, home.y, layer.width, layer.height, layer.transform);
+    };
+    const rect = this.container.getBoundingClientRect();
+    const w = Math.max(1, rect.width);
+    const h = Math.max(1, rect.height);
+    const local: GnumarusRect = { left: 0, top: 0, width: w, height: h };
+    const view = this.viewTransform();
+    const at = (x: number, y: number): { x: number; y: number } => {
+      const screen = projectToScreen(corner(x, y).x, corner(x, y).y, local, view);
+      return screen;
+    };
+    const o = at(0, 0);
+    const ex = at(floating.width, 0);
+    const ey = at(0, floating.height);
+    const elements = this.floatingPlane.matrix.elements;
+    elements[0] = ex.x - o.x;
+    elements[1] = -(ex.y - o.y);
+    elements[2] = 0;
+    elements[3] = 0;
+    elements[4] = ey.x - o.x;
+    elements[5] = -(ey.y - o.y);
+    elements[6] = 0;
+    elements[7] = 0;
+    elements[8] = 0;
+    elements[9] = 0;
+    elements[10] = 1;
+    elements[11] = 0;
+    elements[12] = o.x - w / 2;
+    elements[13] = h / 2 - o.y;
+    elements[14] = this.layers.length * 0.01 + 0.01;
+    elements[15] = 1;
+    this.floatingPlane.matrixWorldNeedsUpdate = true;
     this.floatingPlane.visible = true;
   }
 
@@ -3795,36 +4383,60 @@ export class GnumarusCanvasEngine {
   }
 
   /** Cell-image rect currently shown as marching ants: rubber band or floating selection. */
-  private selectionOverlayRect(): { x0: number; y0: number; x1: number; y1: number } | null {
+  /**
+   * Selection outline in home texture pixels: rubber band corners, or the
+   * transformed floating quad. Null when nothing is shown.
+   */
+  private selectionOverlayQuad(): Array<{ x: number; y: number }> | null {
     if (this.rectDrag !== null) {
       const drag = this.rectDrag;
-      return {
-        x0: Math.min(drag.x0, drag.x1),
-        y0: Math.min(drag.y0, drag.y1),
-        x1: Math.max(drag.x0, drag.x1) + 1,
-        y1: Math.max(drag.y0, drag.y1) + 1,
-      };
+      const x0 = Math.min(drag.x0, drag.x1);
+      const y0 = Math.min(drag.y0, drag.y1);
+      const x1 = Math.max(drag.x0, drag.x1) + 1;
+      const y1 = Math.max(drag.y0, drag.y1) + 1;
+      return [
+        { x: x0, y: y0 },
+        { x: x1, y: y0 },
+        { x: x1, y: y1 },
+        { x: x0, y: y1 },
+      ];
     }
     const floating = this.floating;
     if (floating === null || !floating.active || !this.floatingHomeVisible()) {
       return null;
     }
-    return { x0: floating.x, y0: floating.y, x1: floating.x + floating.width, y1: floating.y + floating.height };
+    const placement = this.floatingPlacement(floating);
+    const corners: Array<[number, number]> = [
+      [0, 0],
+      [floating.width, 0],
+      [floating.width, floating.height],
+      [0, floating.height],
+    ];
+    return corners.map(([x, y]) => forwardSelectionPoint(placement, x, y));
+  }
+
+  /** Hide every selection anchor group. */
+  private hideSelectionHandles(): void {
+    for (const handle of this.selectionHandles) {
+      handle.group.style.display = "none";
+    }
   }
 
   /** Position the marching-ants selection polygon over the active layer. */
   private updateSelectionOverlay(): void {
-    const overlay = this.selectionOverlayRect();
+    const overlay = this.selectionOverlayQuad();
     const layer = this.activeLayer();
     if (overlay === null || layer === null || layer.width < 1 || layer.height < 1) {
       this.previewSelectWhite.style.display = "none";
       this.previewSelectBlack.style.display = "none";
+      this.hideSelectionHandles();
       return;
     }
     const rect = this.renderer.domElement.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) {
       this.previewSelectWhite.style.display = "none";
       this.previewSelectBlack.style.display = "none";
+      this.hideSelectionHandles();
       return;
     }
     const toClient = (imageX: number, imageY: number): string => {
@@ -3837,17 +4449,34 @@ export class GnumarusCanvasEngine {
       );
       return `${client.x - rect.left},${client.y - rect.top}`;
     };
-    const points = [
-      toClient(overlay.x0, overlay.y0),
-      toClient(overlay.x1, overlay.y0),
-      toClient(overlay.x1, overlay.y1),
-      toClient(overlay.x0, overlay.y1),
-    ].join(" ");
+    const points = overlay.map((point) => toClient(point.x, point.y)).join(" ");
     this.previewSvg.style.display = "block";
     this.previewSelectWhite.setAttribute("points", points);
     this.previewSelectWhite.style.display = "block";
     this.previewSelectBlack.setAttribute("points", points);
     this.previewSelectBlack.style.display = "block";
+    if (this.tool === "destransform") {
+      const layout = this.selectionHandleLayout();
+      const placed = new Set<string>();
+      if (layout !== null) {
+        for (const handle of layout) {
+          const group = this.selectionHandles.find((entry) => entry.id === handle.id)?.group;
+          if (group === undefined) {
+            continue;
+          }
+          group.setAttribute("transform", `translate(${handle.x} ${handle.y}) rotate(${handle.angle})`);
+          group.style.display = "block";
+          placed.add(handle.id);
+        }
+      }
+      for (const handle of this.selectionHandles) {
+        if (!placed.has(handle.id)) {
+          handle.group.style.display = "none";
+        }
+      }
+    } else {
+      this.hideSelectionHandles();
+    }
   }
 
   /** Hide the overlay svg unless another overlay (rope, selection) needs it. */
@@ -3896,6 +4525,7 @@ export class GnumarusCanvasEngine {
     this.previewStabilizerLine.style.display = "none";
     this.previewSelectWhite.style.display = "none";
     this.previewSelectBlack.style.display = "none";
+    this.hideSelectionHandles();
     for (const marker of this.previewMarkers) {
       marker.style.display = "none";
     }
@@ -4028,6 +4658,7 @@ export class GnumarusCanvasEngine {
     this.previewStabilizerLine.style.display = "none";
     this.previewSelectWhite.style.display = "none";
     this.previewSelectBlack.style.display = "none";
+    this.hideSelectionHandles();
     for (const marker of this.previewMarkers) {
       marker.style.display = "none";
     }
@@ -4267,7 +4898,7 @@ export class GnumarusCanvasEngine {
     }
     this.sizeDrag = null;
     this.rectDrag = null;
-    this.moveDrag = null;
+    this.clearTransformGestures();
     this.resetPencilPixelPerfect();
     this.updatePreviews();
     this.onToolChanged?.(tool);
@@ -4941,20 +5572,32 @@ export class GnumarusCanvasEngine {
       if (this.tool === "destransform") {
         const floating = this.floating;
         if (floating !== null && floating.active) {
-          // Clicking inside the visible floating rect starts a move; clicks
+          // Anchors first, then the selection body for moves; clicks
           // anywhere else are ignored so work is never baked accidentally.
           if (this.floatingHomeVisible()) {
-            const pixel = this.toImagePixel(event.clientX, event.clientY);
-            if (
-              pixel !== null &&
-              pixel.x >= floating.x &&
-              pixel.x < floating.x + floating.width &&
-              pixel.y >= floating.y &&
-              pixel.y < floating.y + floating.height
-            ) {
-              this.moveDrag = { grabDX: pixel.x - floating.x, grabDY: pixel.y - floating.y };
+            const hit = this.selectionHitTest(event.clientX, event.clientY);
+            if (hit !== null && this.beginSelectionGesture(hit, event)) {
               this.lastMouseClient = { x: event.clientX, y: event.clientY };
               canvas.setPointerCapture(event.pointerId);
+              this.updatePreviews();
+              return;
+            }
+            if (hit === null) {
+              const local = this.clientToSelectionLocal(event.clientX, event.clientY);
+              const cursor = this.clientToLayerImageFloat(event.clientX, event.clientY);
+              if (
+                local !== null &&
+                cursor !== null &&
+                local.x >= 0 &&
+                local.x <= floating.width &&
+                local.y >= 0 &&
+                local.y <= floating.height
+              ) {
+                this.moveDrag = { grabDX: cursor.x - floating.cx, grabDY: cursor.y - floating.cy };
+                this.lastMouseClient = { x: event.clientX, y: event.clientY };
+                canvas.setPointerCapture(event.pointerId);
+                this.updatePreviews();
+              }
             }
           }
           return;
@@ -4963,6 +5606,10 @@ export class GnumarusCanvasEngine {
         // exactly like a full-canvas rectangular selection, then move it.
         const layer = this.activeLayer();
         if (layer === null) {
+          return;
+        }
+        const cursor = this.clientToLayerImageFloat(event.clientX, event.clientY);
+        if (cursor === null) {
           return;
         }
         const pixel = this.toImagePixel(event.clientX, event.clientY);
@@ -4976,7 +5623,7 @@ export class GnumarusCanvasEngine {
         if (current === null) {
           return;
         }
-        this.moveDrag = { grabDX: pixel.x - current.x, grabDY: pixel.y - current.y };
+        this.moveDrag = { grabDX: cursor.x - current.cx, grabDY: cursor.y - current.cy };
         this.lastMouseClient = { x: event.clientX, y: event.clientY };
         canvas.setPointerCapture(event.pointerId);
         this.updatePreviews();
@@ -5130,15 +5777,30 @@ export class GnumarusCanvasEngine {
         }
         return;
       }
+      if (this.resizeDrag !== null || this.rotateDrag !== null || this.skewDrag !== null) {
+        this.updateTransformGesture(event.clientX, event.clientY);
+        return;
+      }
+      if (this.centerTap !== null) {
+        const dx = event.clientX - this.centerTap.startClientX;
+        const dy = event.clientY - this.centerTap.startClientY;
+        if (dx * dx + dy * dy >= 16) {
+          // Dragged: the tap becomes a move starting from the down point.
+          this.moveDrag = { grabDX: this.centerTap.grabDX, grabDY: this.centerTap.grabDY };
+          this.centerTap = null;
+        } else {
+          return;
+        }
+      }
       if (this.moveDrag !== null) {
         const floating = this.floating;
-        if (floating === null || !floating.active) {
+        if (floating === null || !floating.active || !this.floatingHomeVisible()) {
           this.moveDrag = null;
         } else {
           const target = this.clientToLayerImageFloat(event.clientX, event.clientY);
           if (target !== null) {
-            floating.x = Math.floor(target.x) - this.moveDrag.grabDX;
-            floating.y = Math.floor(target.y) - this.moveDrag.grabDY;
+            floating.cx = target.x - this.moveDrag.grabDX;
+            floating.cy = target.y - this.moveDrag.grabDY;
             this.lastMouseClient = { x: event.clientX, y: event.clientY };
             this.syncFloatingPlane();
             this.render();
@@ -5242,7 +5904,7 @@ export class GnumarusCanvasEngine {
       this.loupeAnchor = null;
       this.lastPixel = null;
       this.sizeDrag = null;
-      this.moveDrag = null;
+      this.clearTransformDrags();
       this.resetPencilPixelPerfect();
       // Keep the stabilizer focus for hover preview; let follow mode converge.
       if (this.stabilizerMode === "follow") {
@@ -5252,6 +5914,13 @@ export class GnumarusCanvasEngine {
     };
     canvas.addEventListener("pointerup", endStroke);
     canvas.addEventListener("pointerup", (event: PointerEvent) => {
+      if (this.centerTap !== null) {
+        this.centerTap = null;
+        if (event.button === 0) {
+          this.resetFloatingTransform();
+        }
+        return;
+      }
       if (this.rectDrag !== null && event.button === 0) {
         const drag = this.rectDrag;
         this.rectDrag = null;
@@ -5276,6 +5945,7 @@ export class GnumarusCanvasEngine {
     });
     canvas.addEventListener("pointercancel", endStroke);
     canvas.addEventListener("pointercancel", () => {
+      this.centerTap = null;
       if (this.rectDrag !== null) {
         this.rectDrag = null;
         this.updatePreviews();

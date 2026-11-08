@@ -142,7 +142,7 @@ const GNUMARUS_SHORTCUTS: GnumarusShortcutSection[] = [
       { keys: "Z", action: "Loupe tool" },
       { keys: "T", action: "Non-destructive cell transform tool" },
       { keys: "R", action: "Rectangular selection tool" },
-      { keys: "V", action: "Destructive transform tool" },
+      { keys: "V", action: "Destructive selection transform tool" },
       { keys: "E", action: "Toggle eraser blend mode" },
       { keys: "Hold Ctrl", action: "Temporary eyedropper (release to restore the previous tool)" },
       { keys: "Enter, Return or Esc", action: "Merge floating selection into the cell" },
@@ -1297,8 +1297,8 @@ export class GnumarusShell extends LitElement {
           </button>
           <button
             class=${this.tool === "destransform" ? "active" : ""}
-            title="V: Destructive transform (drag to move selection, Enter merges)"
-            aria-label="Destructive transform"
+            title="V: Destructive selection transform (drag anchors to move, resize, rotate or skew; Enter merges)"
+            aria-label="Destructive selection transform"
             @click=${(): void => {
               this.tool = "destransform";
               this.engine?.setTool("destransform");
@@ -2027,7 +2027,7 @@ export class GnumarusShell extends LitElement {
       return "non-destructive cell transform";
     }
     if (tool === "destransform") {
-      return "destructive transform";
+      return "destructive selection transform";
     }
     if (tool === "rectselect") {
       return "rectangular selection";
@@ -2246,7 +2246,7 @@ export class GnumarusShell extends LitElement {
     }
     if (this.tool === "destransform") {
       return html`
-        <div class="tool-options" data-testid="tool-options" aria-label="Destructive transform options" ?hidden=${this.uiHidden}>
+        <div class="tool-options" data-testid="tool-options" aria-label="Destructive selection transform options" ?hidden=${this.uiHidden}>
           <button
             ?disabled=${!this.floatingActive}
             title="Merge the floating selection into the cell (Enter)"

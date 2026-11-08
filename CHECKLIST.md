@@ -162,3 +162,6 @@
 - [x] Magenta border on the right/bottom texture edges, e2e test green, docs updated
 - [x] Unit tests (vitest): 160 passed
 - [x] E2E test (Playwright): 109 passed
+- [x] Destructive selection transform anchors (resize/rotate/skew/center-reset) + rename, unit + e2e tests green, docs updated
+- [x] Unit tests (vitest): 167 passed
+- [x] E2E test (Playwright): 113 passed

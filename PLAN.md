@@ -179,6 +179,11 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 ## 44. Magenta border on the free texture edges (implemented)
 - Right and bottom edges of the current cell texture (where the axis lines are not) get a plain magenta (`#ff00ff`) border, following the same transform and visibility rules as the axes.
 
+## 44. Destructive selection transform anchors (implemented)
+- Rename tool to "destructive selection transform" (display strings only, id `destransform` stays).
+- Resize anchors (rectangles at corners + edge midpoints, 1px min, no mirror), rotate anchors (quarter-circle arrows, offset outward from corners), skew anchors (double arrows beyond edge midpoints, per-axis screen-proportional shear), center anchor (circular arrow, click resets to the as-cut snapshot).
+- Floating placement becomes center-based floats (pos/rotation/scale/skew); render via affine plane basis, commit via inverse-map nearest resample with tie epsilon; pure math in a unit-tested module.
+
 ## 11. Custom color picker (implemented)
 - Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).
 - Every model carries an alpha axis; RGBA axes span 0..255. ARD Diagonal spans 0..360 and Ratio 0..255.
