@@ -110,6 +110,10 @@ import {
   type GnumarusTexturePixels,
 } from "../animation/GnumarusAnimationModel";
 import {
+  mapNamedAnimationFrames,
+  type GnumarusNamedAnimation,
+} from "../animation/GnumarusNamedAnimations";
+import {
   DEFAULT_BACKGROUND_SETTINGS,
   type GnumarusBackgroundMode,
   type GnumarusBackgroundSettings,
@@ -311,6 +315,8 @@ export interface GnumarusAnimationProjectData {
   defaultFrameDuration: number;
   frameDurations: Array<{ frame: number; duration: number }>;
   frameNames: string[];
+  namedAnimations: GnumarusNamedAnimation[];
+  activeAnimation: string | null;
 }
 
 export interface GnumarusProjectLayerInput {
@@ -485,6 +491,8 @@ export class GnumarusCanvasEngine {
   private frameDurations = new Map<number, number>();
   private defaultFrameDuration = GNUMARUS_DEFAULT_FRAME_DURATION_MS;
   private frameNames: string[] = [defaultFrameName(0)];
+  private namedAnimations: GnumarusNamedAnimation[] = [];
+  private activeAnimationName: string | null = null;
   private frameNameCounter = 2;
   private contentCounter = 1;
   private textureCounter = 1;
@@ -1296,6 +1304,9 @@ export class GnumarusCanvasEngine {
     this.cells = insertFrameCells(this.cells, at);
     this.frameDurations = insertFrameDurations(this.frameDurations, at);
     this.frameNames = insertFrameNames(this.frameNames, at, name);
+    this.namedAnimations = mapNamedAnimationFrames(this.namedAnimations, (frame) =>
+      frame >= at ? frame + 1 : frame,
+    );
     this.frameCount += 1;
     if (this.floating !== null && this.floating.frame >= at) {
       this.floating.frame += 1;
@@ -1330,6 +1341,9 @@ export class GnumarusCanvasEngine {
     this.cells = swapFrameCells(this.cells, frame, target);
     this.frameDurations = swapFrameDurations(this.frameDurations, frame, target);
     this.frameNames = swapFrameNames(this.frameNames, frame, target);
+    this.namedAnimations = mapNamedAnimationFrames(this.namedAnimations, (entry) =>
+      entry === frame ? target : entry === target ? frame : entry,
+    );
     if (this.floating !== null) {
       if (this.floating.frame === frame) {
         this.floating.frame = target;
@@ -1379,6 +1393,9 @@ export class GnumarusCanvasEngine {
     }
     this.frameDurations = keptDurations;
     this.frameNames = [...this.frameNames.slice(0, frame), ...this.frameNames.slice(frame + 1)];
+    this.namedAnimations = mapNamedAnimationFrames(this.namedAnimations, (entry) =>
+      entry === frame ? null : entry > frame ? entry - 1 : entry,
+    );
     this.frameCount -= 1;
     if (this.floating !== null) {
       if (this.floating.frame === frame) {
@@ -1444,6 +1461,75 @@ export class GnumarusCanvasEngine {
 
   getDefaultFrameDuration(): number {
     return this.defaultFrameDuration;
+  }
+
+  /** Named animations (deep copies, in definition order). */
+  getNamedAnimations(): GnumarusNamedAnimation[] {
+    return this.namedAnimations.map((animation) => ({
+      name: animation.name,
+      loop: animation.loop,
+      frames: animation.frames.map((entry) => ({ frame: entry.frame, duration: entry.duration })),
+    }));
+  }
+
+  /**
+   * Add a parsed named animation. False when the shape is invalid or the
+   * name is already taken. Out-of-range frame entries are dropped.
+   */
+  addNamedAnimation(animation: GnumarusNamedAnimation): boolean {
+    const loop = animation.loop;
+    if (
+      typeof animation.name !== "string" ||
+      animation.name.trim().length === 0 ||
+      (loop !== "none" && loop !== "forward" && loop !== "ping-pong") ||
+      !Array.isArray(animation.frames) ||
+      this.namedAnimations.some((entry) => entry.name === animation.name)
+    ) {
+      return false;
+    }
+    const frames = animation.frames.filter(
+      (entry) =>
+        Number.isInteger(entry.frame) &&
+        entry.frame >= 0 &&
+        entry.frame < this.frameCount &&
+        (entry.duration === null || (typeof entry.duration === "number" && Number.isFinite(entry.duration))),
+    );
+    this.namedAnimations.push({
+      name: animation.name,
+      loop,
+      frames: frames.map((entry) => ({ frame: entry.frame, duration: entry.duration })),
+    });
+    return true;
+  }
+
+  /** Remove a named animation by name, clearing the selection if it pointed at it. */
+  removeNamedAnimation(name: string): boolean {
+    const index = this.namedAnimations.findIndex((entry) => entry.name === name);
+    if (index < 0) {
+      return false;
+    }
+    this.namedAnimations.splice(index, 1);
+    if (this.activeAnimationName === name) {
+      this.activeAnimationName = null;
+    }
+    return true;
+  }
+
+  /** Selected named animation, or null for the full timeline. */
+  getActiveAnimationName(): string | null {
+    return this.activeAnimationName;
+  }
+
+  /** Select a named animation (null = full timeline). False for unknown names. */
+  setActiveAnimation(name: string | null): boolean {
+    if (name !== null && !this.namedAnimations.some((entry) => entry.name === name)) {
+      return false;
+    }
+    if (this.activeAnimationName === name) {
+      return false;
+    }
+    this.activeAnimationName = name;
+    return true;
   }
 
   getEffectiveFrameDuration(frame: number): number {
@@ -1775,6 +1861,8 @@ export class GnumarusCanvasEngine {
       defaultFrameDuration: this.defaultFrameDuration,
       frameDurations: [...this.frameDurations.entries()].map(([frame, duration]) => ({ frame, duration })),
       frameNames: [...this.frameNames],
+      namedAnimations: this.getNamedAnimations(),
+      activeAnimation: this.activeAnimationName,
     };
   }
 
@@ -2899,6 +2987,8 @@ export class GnumarusCanvasEngine {
       defaultFrameDuration?: number;
       frameDurations?: Array<{ frame: number; duration: number }>;
       frameNames?: string[];
+      namedAnimations?: GnumarusNamedAnimation[];
+      activeAnimation?: string | null;
     },
   ): void {
     if (data.layers.length === 0) {
@@ -2993,6 +3083,18 @@ export class GnumarusCanvasEngine {
         this.frameDurations.set(entry.frame, clampFrameDurationMs(entry.duration));
       }
     }
+    this.namedAnimations = [];
+    this.activeAnimationName = null;
+    for (const animation of data.namedAnimations ?? []) {
+      if (!this.addNamedAnimation(animation)) {
+        throw new Error(`Invalid named animation: ${typeof animation.name === "string" ? animation.name : "?"}`);
+      }
+    }
+    if (data.activeAnimation !== undefined && data.activeAnimation !== null) {
+      if (!this.setActiveAnimation(data.activeAnimation)) {
+        throw new Error(`Unknown active animation: ${data.activeAnimation}`);
+      }
+    }
     let maxLayer = 0;
     let maxContent = 0;
     let maxTexture = 0;
@@ -3078,6 +3180,8 @@ export class GnumarusCanvasEngine {
     this.defaultFrameDuration = GNUMARUS_DEFAULT_FRAME_DURATION_MS;
     this.frameNames = [defaultFrameName(0)];
     this.frameNameCounter = 2;
+    this.namedAnimations = [];
+    this.activeAnimationName = null;
   }
 
   newProject(width: number, height: number): void {

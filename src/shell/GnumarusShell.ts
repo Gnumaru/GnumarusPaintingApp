@@ -98,6 +98,12 @@ import {
 import { parseHexToRgbaBytes, rgbaBytesToHex } from "../color/GnumarusColorModels";
 import { type GnumarusTexturePixels } from "../animation/GnumarusAnimationModel";
 import {
+  nextAnimationStep,
+  parseNamedAnimation,
+  GnumarusNamedAnimationError,
+  type GnumarusNamedAnimation,
+} from "../animation/GnumarusNamedAnimations";
+import {
   GNUMARUS_DEFAULT_FRAME_DURATION_MS as DEFAULT_ANIMATION_FRAME_DURATION,
 } from "../animation/GnumarusAnimationModel";
 import "../color/GnumarusColorPicker";
@@ -517,6 +523,7 @@ export class GnumarusShell extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
+      flex-wrap: wrap;
       gap: 4px;
       padding: 2px;
     }
@@ -532,6 +539,16 @@ export class GnumarusShell extends LitElement {
     }
     .anim-corner button:hover {
       background: #3a3a3a;
+    }
+    .anim-corner select {
+      background: #2b2b2b;
+      color: #e6e6e6;
+      border: 1px solid #3a3a3a;
+      border-radius: 4px;
+      padding: 2px 4px;
+      cursor: pointer;
+      font-size: 12px;
+      max-width: 100%;
     }
     .anim-frame-header {
       top: 0;
@@ -552,6 +569,15 @@ export class GnumarusShell extends LitElement {
     .anim-frame-header.current button {
       background: #0e639c;
       border-color: #0e639c;
+    }
+    .anim-frame-header.in-animation button {
+      background: #0e5a3c;
+      border-color: #0e5a3c;
+    }
+    .anim-frame-header.current.in-animation button {
+      background: #0e639c;
+      border-color: #0e639c;
+      box-shadow: inset 0 0 0 1px #2da886;
     }
     .anim-frame-header button:hover {
       background: #3a3a3a;
@@ -588,6 +614,12 @@ export class GnumarusShell extends LitElement {
     }
     .anim-cell.current-frame {
       box-shadow: inset 0 0 0 1px #0e639c;
+    }
+    .anim-cell.in-animation {
+      box-shadow: inset 0 0 0 1px #2da886;
+    }
+    .anim-cell.current-frame.in-animation {
+      box-shadow: inset 0 0 0 1px #0e639c, inset 0 0 0 3px #2da886;
     }
     .anim-cell.active-cell {
       box-shadow: inset 0 0 0 2px #ffd23f;
@@ -819,6 +851,25 @@ export class GnumarusShell extends LitElement {
       padding: 6px 12px;
       cursor: pointer;
     }
+    .dialog-error {
+      color: #f48771;
+      margin: 8px 0 0 0;
+    }
+    .animation-list {
+      list-style: none;
+      margin: 12px 0 0 0;
+      padding: 0;
+      max-height: min(30vh, 220px);
+      overflow-y: auto;
+    }
+    .animation-list li {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 4px 0;
+      border-top: 1px solid #3a3a3a;
+    }
     .shortcuts-list {
       max-height: min(60vh, 420px);
       min-width: min(480px, 80vw);
@@ -957,6 +1008,8 @@ export class GnumarusShell extends LitElement {
     defaultFrameDuration: { type: Number },
     durationTargetFrame: { type: Number },
     durationValue: { type: Number },
+    animationInput: { type: String },
+    animationError: { type: String },
     playing: { type: Boolean },
     uiHidden: { type: Boolean },
     toastMessage: { type: String },
@@ -1038,6 +1091,8 @@ export class GnumarusShell extends LitElement {
   declare defaultFrameDuration: number;
   declare durationTargetFrame: number | null;
   declare durationValue: number | null;
+  declare animationInput: string;
+  declare animationError: string | null;
   declare playing: boolean;
   declare uiHidden: boolean;
   declare toastMessage: string;
@@ -1065,6 +1120,9 @@ export class GnumarusShell extends LitElement {
   private engine: GnumarusCanvasEngine | null = null;
   private directoryHandle: GnumarusDirectoryHandle | null = null;
   private playTimer: number | null = null;
+  private playbackAnimation: GnumarusNamedAnimation | null = null;
+  private playbackIndex = 0;
+  private playbackDirection: 1 | -1 = 1;
   private toastTimer: number | null = null;
 
   constructor() {
@@ -1121,6 +1179,8 @@ export class GnumarusShell extends LitElement {
     this.defaultFrameDuration = DEFAULT_ANIMATION_FRAME_DURATION;
     this.durationTargetFrame = null;
     this.durationValue = null;
+    this.animationInput = "";
+    this.animationError = null;
     this.playing = false;
     this.playTimer = null;
     this.uiHidden = false;
@@ -2117,6 +2177,51 @@ export class GnumarusShell extends LitElement {
           <button @click=${(): void => this.confirmFrameDuration()}>Set</button>
         </div>
       </dialog>
+      <dialog id="animationDialog">
+        <h3>Named animations</h3>
+        <p>
+          Define one animation as <code>name,loop,frames</code>, e.g.
+          <code>walk,forward,1:400,2-4,7</code>. Loop is none, forward or ping-pong; frames
+          count from 1; <code>A-B</code> spans a range and <code>:ms</code> overrides the
+          duration of one frame (or every frame of a range).
+        </p>
+        <label
+          >Animation definition
+          <input
+            type="text"
+            id="animationInput"
+            maxlength="256"
+            placeholder="walk,forward,1,2,3"
+            .value=${this.animationInput}
+            @input=${(event: Event): void => {
+              this.animationInput = (event.target as HTMLInputElement).value;
+            }}
+          />
+        </label>
+        ${this.animationError !== null
+          ? html`<p class="dialog-error" role="alert">${this.animationError}</p>`
+          : html``}
+        <div class="dialog-actions">
+          <button @click=${(): void => this.closeAnimationDialog()}>Close</button>
+          <button @click=${(): void => this.confirmAddAnimation()}>Add</button>
+        </div>
+        <ul class="animation-list" data-testid="animation-list">
+          ${(this.engine?.getNamedAnimations() ?? []).map(
+            (animation) => html`
+              <li>
+                <span>${animation.name} (${animation.loop}, ${animation.frames.length} frame${animation.frames.length === 1 ? "" : "s"})</span>
+                <button
+                  aria-label=${`Delete animation ${animation.name}`}
+                  title=${`Delete animation ${animation.name}`}
+                  @click=${(): void => this.onDeleteAnimation(animation.name)}
+                >
+                  Delete
+                </button>
+              </li>
+            `,
+          )}
+        </ul>
+      </dialog>
       <dialog id="frameRenameDialog">
         <h3>Rename frame</h3>
         <label
@@ -2401,6 +2506,15 @@ export class GnumarusShell extends LitElement {
     }
     const matrix = this.engine.getAnimationMatrix();
     const columns = `120px repeat(${matrix.frameCount}, 76px)`;
+    const activeAnimation = this.engine.getActiveAnimationName();
+    const activeFrames =
+      activeAnimation === null
+        ? null
+        : new Set(
+            (this.engine.getNamedAnimations().find((entry) => entry.name === activeAnimation)?.frames ?? []).map(
+              (entry) => entry.frame,
+            ),
+          );
     return html`
       <div class="anim-matrix" data-testid="animation-matrix" aria-label="Animation matrix" ?hidden=${this.uiHidden}>
         <div class="anim-scroll">
@@ -2413,14 +2527,40 @@ export class GnumarusShell extends LitElement {
                 @click=${(): void => this.togglePlayback()}
                 >${this.playing ? "■" : "▶"}</button
               >
+              <select
+                data-testid="animation-select"
+                aria-label="Active animation"
+                title="Play only the frames of the selected animation"
+                @change=${(event: Event): void => this.onSelectAnimation(event)}
+              >
+                <option value="">All frames</option>
+                ${(this.engine?.getNamedAnimations() ?? []).map(
+                  (animation) => html`
+                    <option
+                      value=${animation.name}
+                      ?selected=${this.engine?.getActiveAnimationName() === animation.name}
+                    >
+                      ${animation.name}
+                    </option>
+                  `,
+                )}
+              </select>
+              <button
+                aria-label="Manage animations"
+                title="Define named frame animations"
+                @click=${(): void => this.openAnimationDialog()}
+              >
+                ⚙</button
+              >
             </div>
             ${Array.from({ length: matrix.frameCount }, (_unused, frame) => {
               const current = frame === matrix.currentFrame;
+              const inAnimation = activeFrames !== null && activeFrames.has(frame);
               const duration = this.engine?.getEffectiveFrameDuration(frame) ?? 0;
               const frameName = matrix.frameNames[frame] ?? `Frame ${frame + 1}`;
               const isRenaming = this.renamingFrame === frame;
               return html`
-                <div class="anim-frame-header ${current ? "current" : ""}">
+                <div class="anim-frame-header ${current ? "current" : ""} ${inAnimation ? "in-animation" : ""}">
                   ${isRenaming
                     ? html`<input
                         data-testid="anim-frame-rename"
@@ -2475,10 +2615,11 @@ export class GnumarusShell extends LitElement {
                 ${row.cells.map((cell) => {
                   const isActive = cell.layerId === matrix.activeLayerId && cell.frame === matrix.currentFrame;
                   const isCurrent = cell.frame === matrix.currentFrame;
+                  const inAnimation = activeFrames !== null && activeFrames.has(cell.frame);
                   const label = cell.contentName ?? "empty";
                   return html`
                     <div
-                      class="anim-cell ${cell.contentId !== null ? "filled" : ""} ${isCurrent ? "current-frame" : ""} ${isActive ? "active-cell" : ""}"
+                      class="anim-cell ${cell.contentId !== null ? "filled" : ""} ${isCurrent ? "current-frame" : ""} ${isActive ? "active-cell" : ""} ${inAnimation ? "in-animation" : ""}"
                       data-testid="anim-cell"
                       data-matrix-layer=${cell.layerId}
                       data-matrix-frame=${cell.frame}
@@ -4507,6 +4648,76 @@ export class GnumarusShell extends LitElement {
     this.durationTargetFrame = null;
   }
 
+  private openAnimationDialog(): void {
+    this.animationInput = "";
+    this.animationError = null;
+    const dialog = this.shadowRoot?.getElementById("animationDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+  }
+
+  private closeAnimationDialog(): void {
+    const dialog = this.shadowRoot?.getElementById("animationDialog") as HTMLDialogElement | null;
+    dialog?.close();
+    this.animationError = null;
+  }
+
+  private confirmAddAnimation(): void {
+    if (this.engine === null) {
+      this.closeAnimationDialog();
+      return;
+    }
+    const input = this.shadowRoot?.getElementById("animationInput") as HTMLInputElement | null;
+    const text = (input?.value ?? "").trim();
+    let parsed;
+    try {
+      parsed = parseNamedAnimation(text, this.engine.getFrameCount());
+    } catch (error) {
+      this.animationError =
+        error instanceof GnumarusNamedAnimationError ? error.message : "Invalid animation definition.";
+      return;
+    }
+    if (!this.engine.addNamedAnimation(parsed)) {
+      this.animationError = `An animation named "${parsed.name}" already exists.`;
+      return;
+    }
+    this.animationInput = "";
+    this.animationError = null;
+    this.refreshLayers();
+    this.dirty = true;
+    this.statusMessage = `Animation ${parsed.name} added (${parsed.frames.length} frame${parsed.frames.length === 1 ? "" : "s"})`;
+  }
+
+  private onDeleteAnimation(name: string): void {
+    if (this.engine === null) {
+      return;
+    }
+    if (this.engine.removeNamedAnimation(name)) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = `Animation ${name} deleted`;
+    }
+  }
+
+  private onSelectAnimation(event: Event): void {
+    if (this.engine === null) {
+      return;
+    }
+    const value = (event.target as HTMLSelectElement).value;
+    if (value === "") {
+      if (this.engine.setActiveAnimation(null)) {
+        this.refreshLayers();
+        this.dirty = true;
+        this.statusMessage = "Playing all frames";
+      }
+      return;
+    }
+    if (this.engine.setActiveAnimation(value)) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = `Animation ${value} selected`;
+    }
+  }
+
   private confirmFrameDuration(): void {
     const target = this.durationTargetFrame;
     if (target === null || this.engine === null) {
@@ -4690,8 +4901,32 @@ export class GnumarusShell extends LitElement {
       this.stopPlayback("Animation stopped");
       return;
     }
+    const activeName = this.engine.getActiveAnimationName();
+    const animation =
+      activeName === null
+        ? null
+        : (this.engine.getNamedAnimations().find((entry) => entry.name === activeName) ?? null);
+    if (animation !== null && animation.frames.length === 0) {
+      this.statusMessage = `Animation ${animation.name} has no frames to play`;
+      return;
+    }
     this.playing = true;
-    this.statusMessage = `Playing from frame ${this.engine.getCurrentFrame() + 1}`;
+    this.playbackAnimation = animation;
+    this.playbackDirection = 1;
+    if (animation === null) {
+      this.playbackIndex = 0;
+      this.statusMessage = `Playing from frame ${this.engine.getCurrentFrame() + 1}`;
+    } else {
+      const current = this.engine.getCurrentFrame();
+      const resume = animation.frames.findIndex((entry) => entry.frame === current);
+      this.playbackIndex = resume < 0 ? 0 : resume;
+      const start = animation.frames[this.playbackIndex];
+      if (start !== undefined) {
+        this.engine.setCurrentFrame(start.frame);
+        this.refreshLayers();
+      }
+      this.statusMessage = `Playing animation ${animation.name} from frame ${(start?.frame ?? 0) + 1}`;
+    }
     this.schedulePlaybackTick();
   }
 
@@ -4700,6 +4935,7 @@ export class GnumarusShell extends LitElement {
       window.clearTimeout(this.playTimer);
       this.playTimer = null;
     }
+    this.playbackAnimation = null;
     if (this.playing) {
       this.playing = false;
       if (message !== "") {
@@ -4712,7 +4948,31 @@ export class GnumarusShell extends LitElement {
     if (!this.playing || this.engine === null) {
       return;
     }
-    const delay = Math.max(1, this.engine.getEffectiveFrameDuration(this.engine.getCurrentFrame()));
+    const animation = this.playbackAnimation;
+    if (animation === null) {
+      const delay = Math.max(1, this.engine.getEffectiveFrameDuration(this.engine.getCurrentFrame()));
+      if (this.playTimer !== null) {
+        window.clearTimeout(this.playTimer);
+      }
+      this.playTimer = window.setTimeout(() => {
+        if (!this.playing || this.engine === null) {
+          return;
+        }
+        const next = (this.engine.getCurrentFrame() + 1) % Math.max(1, this.engine.getFrameCount());
+        this.engine.setCurrentFrame(next);
+        this.refreshLayers();
+        this.schedulePlaybackTick();
+      }, delay);
+      return;
+    }
+    const entry = animation.frames[this.playbackIndex];
+    if (entry === undefined) {
+      this.playbackAnimation = null;
+      this.stopPlayback(`Animation ${animation.name} has no frames to play`);
+      this.refreshLayers();
+      return;
+    }
+    const delay = Math.max(1, entry.duration ?? this.engine.getEffectiveFrameDuration(entry.frame));
     if (this.playTimer !== null) {
       window.clearTimeout(this.playTimer);
     }
@@ -4720,8 +4980,19 @@ export class GnumarusShell extends LitElement {
       if (!this.playing || this.engine === null) {
         return;
       }
-      const next = (this.engine.getCurrentFrame() + 1) % Math.max(1, this.engine.getFrameCount());
-      this.engine.setCurrentFrame(next);
+      const step = nextAnimationStep(animation, this.playbackIndex, this.playbackDirection);
+      if (step === null) {
+        this.playbackAnimation = null;
+        this.stopPlayback(`Animation ${animation.name} finished`);
+        this.refreshLayers();
+        return;
+      }
+      this.playbackIndex = step.index;
+      this.playbackDirection = step.direction;
+      const next = animation.frames[step.index];
+      if (next !== undefined) {
+        this.engine.setCurrentFrame(next.frame);
+      }
       this.refreshLayers();
       this.schedulePlaybackTick();
     }, delay);
@@ -5165,6 +5436,12 @@ export class GnumarusShell extends LitElement {
         defaultFrameDuration: project.animation.defaultFrameDuration,
         frameDurations: project.animation.frameDurations.map((entry) => ({ ...entry })),
         frameNames: [...project.animation.frameNames],
+        namedAnimations: project.animation.namedAnimations.map((entry) => ({
+          name: entry.name,
+          loop: entry.loop,
+          frames: entry.frames.map((item) => ({ ...item })),
+        })),
+        activeAnimation: project.animation.activeAnimation,
       });
       this.refreshLayers();
       this.directoryHandle = dir;
@@ -5233,6 +5510,8 @@ export class GnumarusShell extends LitElement {
         defaultFrameDuration: imported.defaultFrameDuration,
         frameDurations: imported.frameDurations.map((entry) => ({ ...entry })),
         frameNames: [],
+        namedAnimations: [],
+        activeAnimation: null,
       });
       this.refreshLayers();
       this.directoryHandle = null;
@@ -5300,6 +5579,12 @@ export class GnumarusShell extends LitElement {
           defaultFrameDuration: exported.defaultFrameDuration,
           frameDurations: exported.frameDurations.map((entry) => ({ ...entry })),
           frameNames: [...exported.frameNames],
+          namedAnimations: exported.namedAnimations.map((entry) => ({
+            name: entry.name,
+            loop: entry.loop,
+            frames: entry.frames.map((item) => ({ ...item })),
+          })),
+          activeAnimation: exported.activeAnimation,
           textures: texturesMeta,
           contents: contentsMeta,
           cells: exported.cells.map((cell) => ({ ...cell })),

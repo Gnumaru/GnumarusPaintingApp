@@ -289,3 +289,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Shortcuts Ctrl+Shift+Up/Down/Left/Right expand the current cell texture by a configurable integer step (new `GnumarusExpandSettings`, default 16px, 1..1024, Interface section + reset + hook + persistence); new pixels transparent black; position re-seated; undoable; listed in the Shortcuts modal.
 - "Fit texture to size" dialog focuses OK on open (after `updateComplete`, `id="fitTextureOk"`), so Enter/Return confirms immediately; `openFitTextureDialog` is now async (`void` at both menu call sites) and seeds the input from the new setting.
 - New `GnumarusFitSettings` (default alpha threshold 0, range 0..254 floored, localStorage `gnumarus.settings.fit.v1`, Interface section row with reset button, `setFitDefaultThreshold` test hook), mirroring the toast-settings conventions.
+
+## 56. Named animations from definition strings (implemented)
+- Pure module `src/animation/GnumarusNamedAnimations.ts`: `name,loop,frames` strings (`none`/`forward`/`ping-pong`, 1-based frames, `A-B` ranges, `:ms` per-frame or per-range overrides), strict parse errors, serialize with range collapsing, ping-pong-safe step function, frame-index remap helper.
+- Engine owns the list + active selection, remaps indices on frame insert/move/remove, persists via `project.json`.
+- Matrix corner gets an animation dropdown (All frames + names) and a manage dialog (add string, inline errors, delete); selected animation columns highlight; playback scopes to it (override durations, `none` stops at the end).

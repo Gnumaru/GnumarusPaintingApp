@@ -189,3 +189,6 @@
 - [x] Resize to canvas + Ctrl+Shift+Arrow texture expand step setting, unit + e2e tests green, docs updated
 - [x] Unit tests (vitest): 217 passed
 - [x] E2E test (Playwright): 138 passed
+- [x] Named animations (`name,loop,frames` strings, matrix dropdown + highlight, scoped playback), unit + e2e tests green, docs updated
+- [x] Unit tests (vitest): 232 passed
+- [x] E2E test (Playwright): 145 passed

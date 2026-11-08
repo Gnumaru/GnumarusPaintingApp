@@ -5597,3 +5597,144 @@ test("fit alpha threshold default flows into the dialog and persists", async ({ 
   await page.getByRole("button", { name: "Reset fit alpha threshold to default" }).click();
   await expect(page.locator("gnumarus-shell input#fitDefaultThreshold")).toHaveValue("0");
 });
+
+async function animationDialog(page: import("@playwright/test").Page): Promise<import("@playwright/test").Locator> {
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Manage animations", exact: true }).click();
+  const dialog = page.locator("gnumarus-shell dialog#animationDialog");
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
+async function addAnimation(page: import("@playwright/test").Page, text: string): Promise<void> {
+  const dialog = await animationDialog(page);
+  await dialog.locator("input#animationInput").fill(text);
+  await dialog.getByRole("button", { name: "Add", exact: true }).click();
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(dialog).toBeHidden();
+}
+
+async function addFrames(page: import("@playwright/test").Page, count: number): Promise<void> {
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  for (let i = 0; i < count; i += 1) {
+    await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  }
+}
+
+async function selectAnimation(page: import("@playwright/test").Page, name: string): Promise<void> {
+  await page.locator('gnumarus-shell [data-testid="animation-select"]').selectOption(name);
+}
+
+test("named animations reject bad definitions and list valid ones", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await addFrames(page, 2);
+  const dialog = await animationDialog(page);
+  await dialog.locator("input#animationInput").fill("walk,sideways,1");
+  await dialog.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(dialog.locator('[role="alert"]')).toContainText("none, forward or ping-pong");
+  await dialog.locator("input#animationInput").fill("walk,forward,1,2");
+  await dialog.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Animation walk added (2 frames)");
+  await expect(dialog.locator('[data-testid="animation-list"]')).toContainText("walk (forward, 2 frames)");
+  await expect(page.locator('gnumarus-shell [data-testid="animation-select"]')).toContainText("walk");
+  await dialog.locator("input#animationInput").fill("walk,none,3");
+  await dialog.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(dialog.locator('[role="alert"]')).toContainText("already exists");
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(dialog).toBeHidden();
+});
+
+test("selecting an animation highlights its frame columns", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await addFrames(page, 2);
+  await addAnimation(page, "walk,forward,1,3");
+  await page.locator('gnumarus-shell [data-testid="animation-select"]').selectOption("walk");
+  await expect(page.locator("gnumarus-shell")).toContainText("Animation walk selected");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await expect(matrix.locator('.anim-frame-header:has([data-frame="0"])')).toHaveClass(/in-animation/);
+  await expect(matrix.locator('.anim-frame-header:has([data-frame="2"])')).toHaveClass(/in-animation/);
+  await expect(matrix.locator('.anim-frame-header:has([data-frame="1"])')).not.toHaveClass(/in-animation/);
+  await expect(
+    matrix.locator('[data-testid="anim-cell"][data-matrix-frame="0"]').first(),
+  ).toHaveClass(/in-animation/);
+  await selectAnimation(page, "");
+  await expect(matrix.locator('.anim-frame-header:has([data-frame="0"])')).not.toHaveClass(/in-animation/);
+});
+
+test("forward playback follows the animation order and skips other frames", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await addFrames(page, 2);
+  await addAnimation(page, "walk,forward,3,1");
+  await selectAnimation(page, "walk");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Play animation", exact: true }).click();
+  // Custom order 3,1: from frame 1 the next shown frame is 3, then 1 again.
+  await expect.poll(async () => getMatrixFrame(page), { timeout: 5000 }).toBe(2);
+  await expect.poll(async () => getMatrixFrame(page), { timeout: 5000 }).toBe(0);
+  await matrix.getByRole("button", { name: "Stop animation", exact: true }).click();
+  await expect(matrix.getByRole("button", { name: "Play animation", exact: true })).toBeVisible();
+});
+
+test("a none animation stops after its last frame", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await addFrames(page, 2);
+  await addAnimation(page, "once,none,1,2");
+  await selectAnimation(page, "once");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Play animation", exact: true }).click();
+  await expect.poll(async () => getMatrixFrame(page), { timeout: 5000 }).toBe(1);
+  await expect(matrix.getByRole("button", { name: "Play animation", exact: true })).toBeVisible();
+  await page.waitForTimeout(400);
+  expect(await getMatrixFrame(page)).toBe(1);
+});
+
+test("a ping-pong animation bounces without repeating endpoints", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await addFrames(page, 2);
+  await addAnimation(page, "boing,ping-pong,1,2,3");
+  await selectAnimation(page, "boing");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Play animation", exact: true }).click();
+  await expect.poll(async () => getMatrixFrame(page), { timeout: 5000 }).toBe(1);
+  await expect.poll(async () => getMatrixFrame(page), { timeout: 5000 }).toBe(2);
+  // Forward would wrap to frame 1 here; ping-pong bounces back to frame 2.
+  await expect.poll(async () => getMatrixFrame(page), { timeout: 5000 }).toBe(1);
+  await matrix.getByRole("button", { name: "Stop animation", exact: true }).click();
+});
+
+test("deleting the selected animation restores the full timeline", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await addFrames(page, 1);
+  await addAnimation(page, "walk,forward,1,2");
+  await selectAnimation(page, "walk");
+  const dialog = await animationDialog(page);
+  await dialog.getByRole("button", { name: "Delete animation walk", exact: true }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Animation walk deleted");
+  await expect(page.locator('gnumarus-shell [data-testid="animation-select"]')).toHaveValue("");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await expect(matrix.locator('.anim-frame-header:has([data-frame="0"])')).not.toHaveClass(/in-animation/);
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+});
+
+test("animation duration overrides win over the project default", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await addFrames(page, 1);
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { setDefaultFrameDuration(d: number): boolean } } };
+    root.__gnumarus?.engine?.setDefaultFrameDuration(2000);
+  });
+  await addAnimation(page, "fast,forward,1:100,2:100");
+  await selectAnimation(page, "fast");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Play animation", exact: true }).click();
+  // With the 2000ms project default this would time out; overrides tick at 100ms.
+  await expect.poll(async () => getMatrixFrame(page), { timeout: 1500 }).toBe(1);
+  await matrix.getByRole("button", { name: "Stop animation", exact: true }).click();
+});

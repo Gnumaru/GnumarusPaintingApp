@@ -227,4 +227,60 @@ describe("GnumarusProjectFormat", () => {
     const parsed = parseProject(serializeProject(project));
     expect(parsed.animation.frameNames).toEqual(["Intro", "Outro"]);
   });
+
+  it("defaults to no named animations for legacy files", () => {
+    const raw = JSON.parse(serializeProject(createDefaultProject(8, 8))) as {
+      animation: Record<string, unknown>;
+    } & Record<string, unknown>;
+    const animation = raw.animation;
+    delete animation["namedAnimations"];
+    delete animation["activeAnimation"];
+    const parsed = parseProject(JSON.stringify(raw));
+    expect(parsed.animation.namedAnimations).toEqual([]);
+    expect(parsed.animation.activeAnimation).toBeNull();
+  });
+
+  it("round-trips named animations with overrides", () => {
+    const project = createDefaultProject(8, 8);
+    project.animation.frames = 4;
+    project.animation.frameNames = ["Frame 1", "Frame 2", "Frame 3", "Frame 4"];
+    project.animation.namedAnimations = [
+      {
+        name: "walk",
+        loop: "forward",
+        frames: [
+          { frame: 0, duration: 400 },
+          { frame: 1, duration: null },
+          { frame: 2, duration: null },
+          { frame: 3, duration: null },
+        ],
+      },
+      { name: "idle", loop: "ping-pong", frames: [{ frame: 1, duration: 200 }] },
+    ];
+    project.animation.activeAnimation = "walk";
+    const parsed = parseProject(serializeProject(project));
+    expect(parsed.animation.namedAnimations).toEqual(project.animation.namedAnimations);
+    expect(parsed.animation.activeAnimation).toBe("walk");
+  });
+
+  it("rejects malformed named animations but coerces unknown selections", () => {
+    const raw = JSON.parse(serializeProject(createDefaultProject(8, 8))) as {
+      animation: Record<string, unknown>;
+    } & Record<string, unknown>;
+    const animation = raw.animation;
+    animation["namedAnimations"] = [{ name: "walk", loop: "sideways", frames: [] }];
+    expect(() => parseProject(JSON.stringify(raw))).toThrow(GnumarusProjectError);
+    animation["namedAnimations"] = [
+      { name: "walk", loop: "forward", frames: [{ frame: 0, duration: null }] },
+      { name: "walk", loop: "none", frames: [] },
+    ];
+    expect(() => parseProject(JSON.stringify(raw))).toThrow(/duplicated animation name/);
+    animation["namedAnimations"] = [{ name: "walk", loop: "forward", frames: [{ frame: 9, duration: null }] }];
+    expect(() => parseProject(JSON.stringify(raw))).toThrow(GnumarusProjectError);
+    animation["namedAnimations"] = [];
+    animation["activeAnimation"] = "ghost";
+    expect(parseProject(JSON.stringify(raw)).animation.activeAnimation).toBeNull();
+    animation["activeAnimation"] = 42;
+    expect(() => parseProject(JSON.stringify(raw))).toThrow(GnumarusProjectError);
+  });
 });

@@ -1,5 +1,6 @@
 import type { GnumarusLayerTransform } from "../canvas/GnumarusViewportMath";
 import { IDENTITY_LAYER_TRANSFORM } from "../canvas/GnumarusViewportMath";
+import type { GnumarusAnimationLoop } from "../animation/GnumarusNamedAnimations";
 import { parseChannelLock, type GnumarusChannelLock } from "../canvas/GnumarusPixelBuffer";
 import {
   clampFrameDurationMs,
@@ -41,6 +42,19 @@ export interface GnumarusFrameDurationRef {
   duration: number;
 }
 
+export interface GnumarusNamedAnimationFrameMeta {
+  /** 0-based project frame index. */
+  frame: number;
+  /** Per-frame duration override in ms, or null for the project duration. */
+  duration: number | null;
+}
+
+export interface GnumarusNamedAnimationMeta {
+  name: string;
+  loop: GnumarusAnimationLoop;
+  frames: GnumarusNamedAnimationFrameMeta[];
+}
+
 export interface GnumarusAnimationMeta {
   frames: number;
   currentFrame: number;
@@ -50,6 +64,10 @@ export interface GnumarusAnimationMeta {
   frameDurations: GnumarusFrameDurationRef[];
   /** Display names per frame index (length matches frames). */
   frameNames: string[];
+  /** Named frame sequences (may be empty). */
+  namedAnimations: GnumarusNamedAnimationMeta[];
+  /** Selected named animation, or null for the full timeline. */
+  activeAnimation: string | null;
   textures: GnumarusTextureMeta[];
   contents: GnumarusContentMeta[];
   cells: GnumarusMatrixCellRef[];
@@ -116,6 +134,8 @@ export function createDefaultProject(width: number, height: number): GnumarusPro
       defaultFrameDuration: GNUMARUS_DEFAULT_FRAME_DURATION_MS,
       frameDurations: [],
       frameNames: [defaultFrameName(0)],
+      namedAnimations: [],
+      activeAnimation: null,
       textures: [{ id: "layer0", name: "Texture 1", width, height, file: textureFilePath("layer0") }],
       contents: [
         {
@@ -186,7 +206,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>): GnumarusAnim
   if (!isRecord(value)) {
     throw new GnumarusProjectError("project.json has an invalid animation section");
   }
-  const { frames, currentFrame, defaultFrameDuration, frameDurations, frameNames, textures, contents, cells } = value;
+  const { frames, currentFrame, defaultFrameDuration, frameDurations, frameNames, namedAnimations, activeAnimation, textures, contents, cells } = value;
   if (!Number.isInteger(frames) || (frames as number) < 1) {
     throw new GnumarusProjectError("project.json has an invalid frame count");
   }
@@ -330,16 +350,84 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>): GnumarusAnim
       checkedNames.push((entry as string).trim().slice(0, 64));
     }
   }
+  const checkedAnimations = parseNamedAnimationMetas(namedAnimations, frameCount);
   return {
     frames: frameCount,
     currentFrame: startFrame,
     defaultFrameDuration: checkedDefaultMs,
     frameDurations: checkedDurations,
     frameNames: checkedNames,
+    namedAnimations: checkedAnimations,
+    activeAnimation: parseActiveAnimationName(activeAnimation, checkedAnimations),
     textures: checkedTextures,
     contents: checkedContents,
     cells: checkedCells,
   };
+}
+
+/** Strict named-animation list (absent in legacy files means none). */
+function parseNamedAnimationMetas(value: unknown, frameCount: number): GnumarusNamedAnimationMeta[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new GnumarusProjectError("project.json has invalid named animations");
+  }
+  const checked: GnumarusNamedAnimationMeta[] = [];
+  const seenNames = new Set<string>();
+  for (const entry of value) {
+    if (!isRecord(entry)) {
+      throw new GnumarusProjectError("project.json has an invalid named animation");
+    }
+    const { name, loop, frames } = entry;
+    if (typeof name !== "string" || name.trim().length === 0) {
+      throw new GnumarusProjectError("project.json has a named animation with an invalid name");
+    }
+    const trimmed = name.trim().slice(0, 64);
+    if (seenNames.has(trimmed)) {
+      throw new GnumarusProjectError(`project.json has a duplicated animation name "${trimmed}"`);
+    }
+    seenNames.add(trimmed);
+    if (loop !== "none" && loop !== "forward" && loop !== "ping-pong") {
+      throw new GnumarusProjectError(`project.json has an animation with an invalid loop mode`);
+    }
+    if (!Array.isArray(frames)) {
+      throw new GnumarusProjectError("project.json has a named animation with invalid frames");
+    }
+    const checkedFrames: GnumarusNamedAnimationFrameMeta[] = [];
+    for (const item of frames) {
+      if (!isRecord(item)) {
+        throw new GnumarusProjectError("project.json has a named animation with an invalid frame");
+      }
+      const { frame, duration } = item;
+      if (!Number.isInteger(frame) || (frame as number) < 0 || (frame as number) >= frameCount) {
+        throw new GnumarusProjectError("project.json has a named animation with an invalid frame");
+      }
+      if (duration !== null && duration !== undefined && (typeof duration !== "number" || !Number.isFinite(duration))) {
+        throw new GnumarusProjectError("project.json has a named animation with an invalid duration");
+      }
+      checkedFrames.push({
+        frame: frame as number,
+        duration: duration === undefined || duration === null ? null : clampFrameDurationMs(duration as number),
+      });
+    }
+    checked.push({ name: trimmed, loop, frames: checkedFrames });
+  }
+  return checked;
+}
+
+/**
+ * Active animation selection: unknown names coerce to null (like current
+ * frame clamping), malformed values throw.
+ */
+function parseActiveAnimationName(value: unknown, animations: GnumarusNamedAnimationMeta[]): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new GnumarusProjectError("project.json has an invalid active animation");
+  }
+  return animations.some((entry) => entry.name === value) ? value : null;
 }
 
 function migrateLegacyLayersToAnimation(
@@ -376,6 +464,8 @@ function migrateLegacyLayersToAnimation(
     defaultFrameDuration: GNUMARUS_DEFAULT_FRAME_DURATION_MS,
     frameDurations: [],
     frameNames: [defaultFrameName(0)],
+    namedAnimations: [],
+    activeAnimation: null,
     textures,
     contents,
     cells,
