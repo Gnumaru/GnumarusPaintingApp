@@ -179,9 +179,10 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Resize anchors (rectangles at corners + edge midpoints, 1px min, no mirror), rotate anchors (quarter-circle arrows, offset outward from corners), skew anchors (double arrows beyond edge midpoints, per-axis screen-proportional shear), center anchor (circular arrow, click resets to the as-cut snapshot).
 - Floating placement becomes center-based floats (pos/rotation/scale/skew); render via affine plane basis, commit via inverse-map nearest resample with tie epsilon; pure math in a unit-tested module.
 
-## 49. Opposite-edge anchored skew (implemented)
+## 49. Opposite-edge anchored skew (implemented, revised to centered mirror)
 - Bug: opposite skew anchors dragged identically (center-based shear moves both edges oppositely), so e.g. dragging the top edge right moved the top edge left.
-- Fix: the dragged edge follows the cursor while the opposite edge stays exactly anchored (anchor fixed via center re-seat from the full affine matrix); shear direction comes from the on-screen box axes (uniform under rotation/scale); per-side signs (top/left negative, bottom/right positive). Pure local-unit math replaced by screen-proportional, scale-aware interaction.
+- First fix (superseded): dragged edge followed with the opposite edge anchored. Rejected: the opposite edge must mirror instead of staying fixed.
+- Final behavior: centered shear with the center fixed — the dragged edge follows the cursor along the edge axis while the opposite edge mirrors it; dragging perpendicular to the edge projects to zero and does nothing. Top/bottom shear horizontally (along the box X axis), left/right vertically (along the box Y axis); per-side signs (top/left negative, bottom/right positive); shear direction comes from the on-screen box axes (uniform under rotation/scale). Pure local-unit math replaced by screen-proportional, scale-aware interaction.
 - Bug: on auto-select the floating content rendered vertically flipped and shifted up-left by half its size.
 - Root cause: the floating plane matrix copied `writePlaneMatrix` element layout but fed it corner-based coords; that layout requires center-based normalized coords with flipped V.
 - Fix: position the quad through the same normalized convention (center basis + V flip), mapping through the floating placement.

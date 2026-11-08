@@ -4433,15 +4433,64 @@ test("skew anchors shear the floating selection on their axis", async ({ page })
   await page.mouse.down();
   await page.mouse.move(anchor.x + 5 * zoom, anchor.y, { steps: 4 });
   await page.mouse.up();
-  // The dragged top edge follows right (negative center-shear); the bottom
-  // edge stays anchored.
+  // The dragged top edge follows right (negative centered shear); the
+  // bottom edge mirrors left, the center stays fixed.
   expect((await getFloatingTransform(page))?.skewX).toBeCloseTo(-1, 6);
   await page.keyboard.press("Enter");
   expect(await readPixel(page, 34, 31)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 31, 31)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
-  expect(await readPixel(page, 34, 33)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
-  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 30, 33)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 34, 33)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   expect(await redPixelCount(page, 28, 28, 40, 36)).toBe(9);
+});
+
+test("opposite skew anchors mirror each other and ignore perpendicular drags", async ({ page }) => {
+  await cutRedBlock(page);
+  const zoom = (await getViewState(page)).zoom;
+  // Bottom edge follows right with the opposite sign of the top edge.
+  const bottom = await getSelectionHandle(page, "skew-s");
+  await page.mouse.move(bottom.x, bottom.y);
+  await page.mouse.down();
+  await page.mouse.move(bottom.x + 5 * zoom, bottom.y, { steps: 4 });
+  await page.mouse.up();
+  expect((await getFloatingTransform(page))?.skewX).toBeCloseTo(1, 6);
+  await page.keyboard.press("Escape");
+  // Perpendicular drags do nothing: vertical on top/bottom.
+  await cutRedBlock(page);
+  const top = await getSelectionHandle(page, "skew-n");
+  await page.mouse.move(top.x, top.y);
+  await page.mouse.down();
+  await page.mouse.move(top.x, top.y + 5 * zoom, { steps: 4 });
+  await page.mouse.up();
+  expect((await getFloatingTransform(page))?.skewX).toBeCloseTo(0, 6);
+  await page.keyboard.press("Escape");
+  // Left edge follows down; horizontal drag does nothing.
+  await cutRedBlock(page);
+  const left = await getSelectionHandle(page, "skew-w");
+  await page.mouse.move(left.x, left.y);
+  await page.mouse.down();
+  await page.mouse.move(left.x, left.y + 5 * zoom, { steps: 4 });
+  await page.mouse.up();
+  expect((await getFloatingTransform(page))?.skewY).toBeCloseTo(-1, 6);
+  await page.keyboard.press("Escape");
+  await cutRedBlock(page);
+  const leftFlat = await getSelectionHandle(page, "skew-w");
+  await page.mouse.move(leftFlat.x, leftFlat.y);
+  await page.mouse.down();
+  await page.mouse.move(leftFlat.x + 5 * zoom, leftFlat.y, { steps: 4 });
+  await page.mouse.up();
+  expect((await getFloatingTransform(page))?.skewY).toBeCloseTo(0, 6);
+  await page.keyboard.press("Escape");
+  // Right edge follows down with the opposite sign of the left edge.
+  await cutRedBlock(page);
+  const right = await getSelectionHandle(page, "skew-e");
+  await page.mouse.move(right.x, right.y);
+  await page.mouse.down();
+  await page.mouse.move(right.x, right.y + 5 * zoom, { steps: 4 });
+  await page.mouse.up();
+  expect((await getFloatingTransform(page))?.skewY).toBeCloseTo(1, 6);
+  await page.keyboard.press("Escape");
 });
 
 test("center anchor resets the floating transform to the as-cut state", async ({ page }) => {

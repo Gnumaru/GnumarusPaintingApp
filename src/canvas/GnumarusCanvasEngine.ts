@@ -538,7 +538,7 @@ export class GnumarusCanvasEngine {
   } | null = null;
   /** Active rotate gesture (screen-space angles). */
   private rotateDrag: { startRotation: number; grabAngle: number; centerX: number; centerY: number } | null = null;
-  /** Active skew gesture (dragged edge follows, opposite edge anchored). */
+  /** Active skew gesture (centered shear, opposite edge mirrors). */
   private skewDrag: {
     axis: "x" | "y";
     sign: 1 | -1;
@@ -548,10 +548,6 @@ export class GnumarusCanvasEngine {
     dirX: number;
     dirY: number;
     extent: number;
-    anchorBufferX: number;
-    anchorBufferY: number;
-    anchorHomeX: number;
-    anchorHomeY: number;
   } | null = null;
   /** Pending center-anchor tap (click without drag resets the transform). */
   private centerTap: { startClientX: number; startClientY: number; grabDX: number; grabDY: number } | null = null;
@@ -3596,9 +3592,12 @@ export class GnumarusCanvasEngine {
       return false;
     }
     if (hit.kind === "skew") {
-      // The dragged edge follows the cursor while the opposite edge stays
-      // anchored: skew-n/s shear horizontally (sign flips per side), skew-e/w
-      // vertically. Directions come from the on-screen box axes so the feel
+      // Centered shear: the dragged edge follows the cursor along the edge
+      // axis while the opposite edge mirrors it (center stays fixed).
+      // Top/bottom shear horizontally (drag along the box X axis);
+      // left/right shear vertically (drag along the box Y axis).
+      // Dragging perpendicular to the edge projects to zero, so it does
+      // nothing. Directions come from the on-screen box axes so the feel
       // stays uniform under rotation and scale.
       const axis = hit.id === "skew-n" || hit.id === "skew-s" ? "x" : "y";
       const layout = this.selectionHandleLayout();
@@ -3609,27 +3608,15 @@ export class GnumarusCanvasEngine {
       if (firstPos === undefined || secondPos === undefined) {
         return false;
       }
-      // Perpendicular screen extent (the dimension the shear is measured in).
+      // Screen extent the shear is measured in (height for x, width for y).
       const perpDX = secondPos.x - firstPos.x;
       const perpDY = secondPos.y - firstPos.y;
       const perpLength = Math.sqrt(perpDX * perpDX + perpDY * perpDY);
       if (!(perpLength > 1e-6)) {
         return false;
       }
-      const anchorBuffer =
-        hit.id === "skew-n"
-          ? { x: floating.width / 2, y: floating.height }
-          : hit.id === "skew-s"
-            ? { x: floating.width / 2, y: 0 }
-            : hit.id === "skew-e"
-              ? { x: 0, y: floating.height / 2 }
-              : { x: floating.width, y: floating.height / 2 };
-      const anchorHome = forwardSelectionPoint(
-        this.floatingPlacement(floating),
-        anchorBuffer.x,
-        anchorBuffer.y,
-      );
-      // Local shear direction on screen: +X axis for horizontal shear.
+      // Local shear direction on screen: +X for horizontal shear, +Y for
+      // vertical shear (buffer coords are y-down, matching home pixels).
       const placement = this.floatingPlacement(floating);
       const originHome = forwardSelectionPoint(placement, floating.width / 2, floating.height / 2);
       const layer = this.activeLayer();
@@ -3644,10 +3631,13 @@ export class GnumarusCanvasEngine {
         return projectToScreen(project.x, project.y, local, view);
       };
       const centerScreen = projectHome(originHome.x, originHome.y);
-      const plusXHome = forwardSelectionPoint(placement, floating.width / 2 + 1, floating.height / 2);
-      const plusXScreen = projectHome(plusXHome.x, plusXHome.y);
-      const dirX = plusXScreen.x - centerScreen.x;
-      const dirY = plusXScreen.y - centerScreen.y;
+      const plusHome =
+        axis === "x"
+          ? forwardSelectionPoint(placement, floating.width / 2 + 1, floating.height / 2)
+          : forwardSelectionPoint(placement, floating.width / 2, floating.height / 2 + 1);
+      const plusScreen = projectHome(plusHome.x, plusHome.y);
+      const dirX = plusScreen.x - centerScreen.x;
+      const dirY = plusScreen.y - centerScreen.y;
       const dirLength = Math.sqrt(dirX * dirX + dirY * dirY);
       if (!(dirLength > 1e-9)) {
         return false;
@@ -3661,10 +3651,6 @@ export class GnumarusCanvasEngine {
         dirX: dirX / dirLength,
         dirY: dirY / dirLength,
         extent: perpLength,
-        anchorBufferX: anchorBuffer.x,
-        anchorBufferY: anchorBuffer.y,
-        anchorHomeX: anchorHome.x,
-        anchorHomeY: anchorHome.y,
       };
       return true;
     }
@@ -3716,6 +3702,8 @@ export class GnumarusCanvasEngine {
       return;
     }
     if (this.skewDrag !== null) {
+      // Centered shear: only the along-edge component matters; the center
+      // stays fixed so the opposite edge mirrors the dragged one.
       const gesture = this.skewDrag;
       const s =
         ((clientX - gesture.grabClientX) * gesture.dirX + (clientY - gesture.grabClientY) * gesture.dirY) /
@@ -3729,11 +3717,6 @@ export class GnumarusCanvasEngine {
       } else {
         floating.skewY = skew;
       }
-      const matrix = selectionLinearMatrix(this.floatingPlacement(floating));
-      const halfW = floating.width / 2;
-      const halfH = floating.height / 2;
-      floating.cx = gesture.anchorHomeX - (matrix.a * (gesture.anchorBufferX - halfW) + matrix.b * (gesture.anchorBufferY - halfH));
-      floating.cy = gesture.anchorHomeY - (matrix.c * (gesture.anchorBufferX - halfW) + matrix.d * (gesture.anchorBufferY - halfH));
       this.lastMouseClient = { x: clientX, y: clientY };
       this.afterFloatingChange();
       return;
