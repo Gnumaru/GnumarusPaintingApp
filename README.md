@@ -27,6 +27,7 @@ Classic desktop-like painting app (top menu bar, central canvas, bottom status b
 - Channel lock: per-layer R/G/B/A toggles; paint, clear and Merge Down write only unlocked channels. Example: alpha locked + paint keeps old alpha; green locked + cyan paint yields blue.
 - Fit texture to size: layer and cell context menus open a modal with an alpha threshold (0..254, default from Settings, OK autofocused for Enter confirm); the texture is cropped to the smallest box with alpha above the threshold while keeping its apparent position; undoable.
 - Crop to canvas: layer and cell context menus crop the texture to what the canvas shows through the cell transform, keeping its apparent position; refuses fully-outside content; undoable.
+- Resize to canvas: layer and cell context menus grow/shrink the texture to cover the whole canvas; Ctrl+Shift+arrows expand the current cell texture by a configurable step (default 16px); both keep the apparent position and are undoable.
 - Textures named `Texture 1`, `Texture 2`, ... independent of layer names.
 - Directory projects via the File System Access API (Chromium derivatives): `project.json` metadata plus `textures/*.png` cell images (legacy `cells/*.png` projects open via automatic migration).
 - Aseprite import via File > Import: `.ase`/`.aseprite` files load layers (groups flattened, tilemaps skipped), frames, frame durations and linked cels (shared cell contents); corrupt files are rejected with an error toast.

@@ -324,20 +324,16 @@ export interface GnumarusCropBox {
 }
 
 /**
- * Texture-pixel box visible on the canvas through a content transform.
- * Inverse-maps the four canvas corners into texture space, expands outward
- * to whole texels and clamps to the texture, so no visible texel is ever
- * dropped (at most a fringe of partially covered texels is kept).
- * Null when the transform is degenerate or the content lies fully outside
- * the canvas.
+ * Float bounds of the canvas area in texture space, by inverse-mapping the
+ * four canvas corners. Null when the transform is degenerate.
  */
-export function canvasVisibleTextureBox(
+function textureSpaceCanvasBounds(
   canvasWidth: number,
   canvasHeight: number,
   textureWidth: number,
   textureHeight: number,
   transform: GnumarusLayerTransform,
-): GnumarusCropBox | null {
+): { minX: number; minY: number; maxX: number; maxY: number } | null {
   let minX = Number.POSITIVE_INFINITY;
   let minY = Number.POSITIVE_INFINITY;
   let maxX = Number.NEGATIVE_INFINITY;
@@ -358,13 +354,66 @@ export function canvasVisibleTextureBox(
     maxX = Math.max(maxX, mapped.x);
     maxY = Math.max(maxY, mapped.y);
   }
-  const left = Math.max(0, Math.floor(minX));
-  const top = Math.max(0, Math.floor(minY));
-  const right = Math.min(textureWidth, Math.ceil(maxX));
-  const bottom = Math.min(textureHeight, Math.ceil(maxY));
+  return { minX, minY, maxX, maxY };
+}
+
+/**
+ * Texture-pixel box visible on the canvas through a content transform.
+ * Inverse-maps the four canvas corners into texture space, expands outward
+ * to whole texels and clamps to the texture, so no visible texel is ever
+ * dropped (at most a fringe of partially covered texels is kept).
+ * Null when the transform is degenerate or the content lies fully outside
+ * the canvas.
+ */
+export function canvasVisibleTextureBox(
+  canvasWidth: number,
+  canvasHeight: number,
+  textureWidth: number,
+  textureHeight: number,
+  transform: GnumarusLayerTransform,
+): GnumarusCropBox | null {
+  const bounds = textureSpaceCanvasBounds(canvasWidth, canvasHeight, textureWidth, textureHeight, transform);
+  if (bounds === null) {
+    return null;
+  }
+  const left = Math.max(0, Math.floor(bounds.minX));
+  const top = Math.max(0, Math.floor(bounds.minY));
+  const right = Math.min(textureWidth, Math.ceil(bounds.maxX));
+  const bottom = Math.min(textureHeight, Math.ceil(bounds.maxY));
   if (left >= right || top >= bottom) {
     return null;
   }
+  return { left, top, width: right - left, height: bottom - top };
+}
+
+/**
+ * Texture-pixel box that both drops invisible excess and pads transparent
+ * pixels so the whole canvas maps inside the texture: the outward-snapped
+ * canvas footprint in texture space. Null when degenerate or fully outside
+ * (same cases as the visible box, which it always contains).
+ */
+export function canvasResizeTextureBox(
+  canvasWidth: number,
+  canvasHeight: number,
+  textureWidth: number,
+  textureHeight: number,
+  transform: GnumarusLayerTransform,
+): GnumarusCropBox | null {
+  const bounds = textureSpaceCanvasBounds(canvasWidth, canvasHeight, textureWidth, textureHeight, transform);
+  if (bounds === null) {
+    return null;
+  }
+  const visibleLeft = Math.max(0, Math.floor(bounds.minX));
+  const visibleTop = Math.max(0, Math.floor(bounds.minY));
+  const visibleRight = Math.min(textureWidth, Math.ceil(bounds.maxX));
+  const visibleBottom = Math.min(textureHeight, Math.ceil(bounds.maxY));
+  if (visibleLeft >= visibleRight || visibleTop >= visibleBottom) {
+    return null;
+  }
+  const left = Math.floor(bounds.minX);
+  const top = Math.floor(bounds.minY);
+  const right = Math.ceil(bounds.maxX);
+  const bottom = Math.ceil(bounds.maxY);
   return { left, top, width: right - left, height: bottom - top };
 }
 

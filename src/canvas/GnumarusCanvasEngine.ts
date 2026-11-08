@@ -10,6 +10,7 @@ import {
   drawCubicBezierCoverage,
   drawLineSegment,
   findAlphaBoundingBox,
+  GNUMARUS_MAX_TEXTURE_DIM,
   floodFill,
   getPixel,
   parseBrushShape,
@@ -52,6 +53,7 @@ import {
   type GnumarusStabilizerMode,
 } from "./GnumarusStabilizer";
 import {
+  canvasResizeTextureBox,
   canvasVisibleTextureBox,
   clampZoom,
   GNUMARUS_MAX_LAYER_SKEW,
@@ -2625,6 +2627,82 @@ export class GnumarusCanvasEngine {
   }
 
   /**
+   * Resize a cell texture so it covers the whole canvas area: crops excess
+   * outside the canvas and pads transparent pixels where the canvas maps
+   * outside the texture, through that cell content transform. Rendering is
+   * pixel-identical (the transform is re-seated, pixels are only moved or
+   * padded with zeros). Returns "resized" on success, "unchanged" when the
+   * texture already covers the canvas exactly, and "outside" when the
+   * content is fully outside, degenerate, or would exceed the texture cap.
+   */
+  resizeCellTextureToCanvas(layerId: string, frame: number): "resized" | "unchanged" | "outside" {
+    const contentId = this.cells.get(animationCellKey(layerId, frame));
+    const content = contentId === undefined ? undefined : this.contents.get(contentId);
+    const textureId = content?.textureId ?? null;
+    const entry = textureId === null ? undefined : this.textures.get(textureId);
+    if (entry === undefined || textureId === null || content === undefined) {
+      return "unchanged";
+    }
+    this.commitFloatingIfHomeTexture(textureId);
+    const box = canvasResizeTextureBox(
+      this.imageWidth,
+      this.imageHeight,
+      entry.width,
+      entry.height,
+      content.transform,
+    );
+    if (
+      box === null ||
+      box.width < 1 ||
+      box.height < 1 ||
+      box.width > GNUMARUS_MAX_TEXTURE_DIM ||
+      box.height > GNUMARUS_MAX_TEXTURE_DIM
+    ) {
+      return "outside";
+    }
+    if (box.left === 0 && box.top === 0 && box.width === entry.width && box.height === entry.height) {
+      return "unchanged";
+    }
+    return this.applyTextureCropBox(textureId, entry, box) ? "resized" : "unchanged";
+  }
+
+  /**
+   * Expand a cell texture by `amount` pixels toward `direction`, filling the
+   * new pixels with transparent black and re-seating the content transform
+   * so the apparent position is unchanged. Undoable. Returns "expanded" on
+   * success or "unchanged" when the cell has no texture (or is capped).
+   */
+  expandCellTexture(
+    layerId: string,
+    frame: number,
+    direction: "up" | "down" | "left" | "right",
+    amount: number,
+  ): "expanded" | "unchanged" {
+    const contentId = this.cells.get(animationCellKey(layerId, frame));
+    const content = contentId === undefined ? undefined : this.contents.get(contentId);
+    const textureId = content?.textureId ?? null;
+    const entry = textureId === null ? undefined : this.textures.get(textureId);
+    if (entry === undefined || textureId === null) {
+      return "unchanged";
+    }
+    const step = Number.isFinite(amount) ? Math.min(1024, Math.max(1, Math.floor(amount))) : 16;
+    const growth = Math.min(step, GNUMARUS_MAX_TEXTURE_DIM - (direction === "left" || direction === "right" ? entry.width : entry.height));
+    if (growth < 1) {
+      return "unchanged";
+    }
+    this.commitFloatingIfHomeTexture(textureId);
+    const box: GnumarusCropBox =
+      direction === "up"
+        ? { left: 0, top: -growth, width: entry.width, height: entry.height + growth }
+        : direction === "down"
+          ? { left: 0, top: 0, width: entry.width, height: entry.height + growth }
+          : direction === "left"
+            ? { left: -growth, top: 0, width: entry.width + growth, height: entry.height }
+            : { left: 0, top: 0, width: entry.width + growth, height: entry.height };
+    return this.applyTextureCropBox(textureId, entry, box) ? "expanded" : "unchanged";
+  }
+
+  /**
    * Shared texture-crop body: snapshots the texture, copies the box pixels,
    * re-seats every sharing content transform so rendering is unchanged,
    * records an undoable history entry and refreshes the views.
@@ -2637,10 +2715,24 @@ export class GnumarusCanvasEngine {
     const beforeWidth = entry.width;
     const beforeHeight = entry.height;
     const beforeBuffer = entry.buffer.slice();
+    // Starts transparent; source rows/columns outside the old texture (from
+    // padding origins) stay zeroed in all channels.
     const afterBuffer = new Uint8ClampedArray(box.width * box.height * 4);
     for (let y = 0; y < box.height; y += 1) {
-      const src = ((box.top + y) * beforeWidth + box.left) * 4;
-      afterBuffer.set(entry.buffer.subarray(src, src + box.width * 4), y * box.width * 4);
+      const srcY = box.top + y;
+      if (srcY < 0 || srcY >= beforeHeight) {
+        continue;
+      }
+      const srcLeft = Math.max(0, box.left);
+      const srcRight = Math.min(beforeWidth, box.left + box.width);
+      if (srcRight <= srcLeft) {
+        continue;
+      }
+      const src = (srcY * beforeWidth + srcLeft) * 4;
+      afterBuffer.set(
+        entry.buffer.subarray(src, src + (srcRight - srcLeft) * 4),
+        (y * box.width + (srcLeft - box.left)) * 4,
+      );
     }
     const transforms = [...this.contents.values()]
       .filter((content) => content.textureId === textureId)

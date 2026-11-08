@@ -68,6 +68,13 @@ import {
   parseFitSettings,
   serializeFitSettings,
 } from "../settings/GnumarusFitSettings";
+import {
+  DEFAULT_EXPAND_SETTINGS,
+  EXPAND_SETTINGS_STORAGE_KEY,
+  clampExpandStep,
+  parseExpandSettings,
+  serializeExpandSettings,
+} from "../settings/GnumarusExpandSettings";
 import { compositeFinalImage } from "../preview/GnumarusFinalRender";
 import { decodePngToBuffer, encodeBufferToPngBlob } from "../project/GnumarusPngCodec";
 import { parseAsepriteFile } from "../project/GnumarusAseprite";
@@ -131,6 +138,10 @@ const GNUMARUS_SHORTCUTS: GnumarusShortcutSection[] = [
       { keys: "Shift+ArrowDown", action: "Move active layer down (wraps around)" },
       { keys: "Insert", action: "Insert layer above the active layer" },
       { keys: "Delete", action: "Reset current cell texture to transparent" },
+      { keys: "Ctrl+Shift+ArrowUp", action: "Expand current cell texture up by the configured step" },
+      { keys: "Ctrl+Shift+ArrowDown", action: "Expand current cell texture down by the configured step" },
+      { keys: "Ctrl+Shift+ArrowLeft", action: "Expand current cell texture left by the configured step" },
+      { keys: "Ctrl+Shift+ArrowRight", action: "Expand current cell texture right by the configured step" },
     ],
   },
   {
@@ -951,6 +962,7 @@ export class GnumarusShell extends LitElement {
     toastMessage: { type: String },
     toastDurationSec: { type: Number },
     fitDefaultThreshold: { type: Number },
+    expandStep: { type: Number },
     renamingFrame: { type: Number },
     brushSize: { type: Number },
     brushShape: { type: String },
@@ -1031,6 +1043,7 @@ export class GnumarusShell extends LitElement {
   declare toastMessage: string;
   declare toastDurationSec: number;
   declare fitDefaultThreshold: number;
+  declare expandStep: number;
   declare renamingFrame: number | null;
   declare brushSize: number;
   declare brushShape: GnumarusBrushShape;
@@ -1114,6 +1127,7 @@ export class GnumarusShell extends LitElement {
     this.toastMessage = "";
     this.toastDurationSec = DEFAULT_TOAST_SETTINGS.durationSec;
     this.fitDefaultThreshold = DEFAULT_FIT_SETTINGS.alphaThreshold;
+    this.expandStep = DEFAULT_EXPAND_SETTINGS.step;
     this.renamingFrame = null;
     this.brushSize = 1;
     this.brushShape = "square";
@@ -1671,6 +1685,17 @@ export class GnumarusShell extends LitElement {
                 >
                   Crop to canvas
                 </button>
+                <button
+                  ?disabled=${this.contextMenuLayerId === null ||
+                  this.engine?.getCellTextureId(this.contextMenuLayerId, this.engine.getCurrentFrame()) === null}
+                  @click=${(): void => {
+                    if (this.contextMenuLayerId !== null) {
+                      this.onResizeCellToCanvasFromLayer(this.contextMenuLayerId);
+                    }
+                  }}
+                >
+                  Resize to canvas
+                </button>
               </div>
             `
           : html``}
@@ -2037,6 +2062,30 @@ export class GnumarusShell extends LitElement {
                 aria-label="Reset fit alpha threshold to default"
                 title="Reset to default"
                 @click=${(): void => this.resetFitToDefault()}
+              >
+                ↻
+              </button>`
+            : html``}
+        </div>
+        <div class="setting-row">
+          <label
+            >Cell texture expand step (pixels)
+            <input
+              type="number"
+              id="expandStep"
+              min="1"
+              max="1024"
+              step="1"
+              .value=${String(this.expandStep)}
+              @input=${(): void => this.applyExpandFromDialog()}
+            />
+          </label>
+          ${this.expandStep !== DEFAULT_EXPAND_SETTINGS.step
+            ? html`<button
+                class="reset-btn"
+                aria-label="Reset expand step to default"
+                title="Reset to default"
+                @click=${(): void => this.resetExpandToDefault()}
               >
                 ↻
               </button>`
@@ -2511,6 +2560,9 @@ export class GnumarusShell extends LitElement {
         <button ?disabled=${cellTextureId === null} @click=${(): void => this.onCropCellToCanvasFromCell()}>
           Crop to canvas
         </button>
+        <button ?disabled=${cellTextureId === null} @click=${(): void => this.onResizeCellToCanvasFromCell()}>
+          Resize to canvas
+        </button>
       </div>
     `;
   }
@@ -2575,6 +2627,8 @@ export class GnumarusShell extends LitElement {
     this.toastDurationSec = storedToast.durationSec;
     const storedFit = this.loadFitSettings();
     this.fitDefaultThreshold = storedFit.alphaThreshold;
+    const storedExpand = this.loadExpandSettings();
+    this.expandStep = storedExpand.step;
     const host = this.shadowRoot?.getElementById("canvasHost") ?? null;
     if (host === null) {
       this.webglError = "Canvas host is missing.";
@@ -2678,6 +2732,27 @@ export class GnumarusShell extends LitElement {
       event.preventDefault();
       this.mergeActiveLayerDown();
       return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey) {
+      if (
+        this.eventInField(event) ||
+        this.eventInColorPicker(event) ||
+        this.shadowRoot?.querySelector("dialog[open]") !== null
+      ) {
+        return;
+      }
+      if (
+        event.key === "ArrowUp" ||
+        event.key === "ArrowDown" ||
+        event.key === "ArrowLeft" ||
+        event.key === "ArrowRight"
+      ) {
+        event.preventDefault();
+        this.expandCurrentCellTexture(
+          event.key === "ArrowUp" ? "up" : event.key === "ArrowDown" ? "down" : event.key === "ArrowLeft" ? "left" : "right",
+        );
+        return;
+      }
     }
     if (event.key === "Tab") {
       if (this.shadowRoot?.querySelector("dialog[open]") !== null || this.eventInField(event)) {
@@ -3165,6 +3240,54 @@ export class GnumarusShell extends LitElement {
     this.fitDefaultThreshold = clampFitAlphaThreshold(value);
     this.persistFit();
     this.statusMessage = `Fit texture default alpha threshold: ${this.fitDefaultThreshold}`;
+  }
+
+  private loadExpandSettings(): { step: number } {
+    try {
+      const stored = window.localStorage.getItem(EXPAND_SETTINGS_STORAGE_KEY);
+      if (stored !== null) {
+        return parseExpandSettings(stored);
+      }
+    } catch {
+      // Corrupt or unavailable storage falls back to defaults.
+    }
+    return { ...DEFAULT_EXPAND_SETTINGS };
+  }
+
+  private persistExpand(): void {
+    try {
+      window.localStorage.setItem(
+        EXPAND_SETTINGS_STORAGE_KEY,
+        serializeExpandSettings({ step: this.expandStep }),
+      );
+    } catch {
+      // Storage failures must not break the settings flow.
+    }
+  }
+
+  private currentDialogExpandStep(): number {
+    const input = this.shadowRoot?.getElementById("expandStep") as HTMLInputElement | null;
+    const parsed = Number(input?.value ?? String(DEFAULT_EXPAND_SETTINGS.step));
+    return clampExpandStep(Number.isFinite(parsed) ? parsed : DEFAULT_EXPAND_SETTINGS.step);
+  }
+
+  private applyExpandFromDialog(): void {
+    this.expandStep = this.currentDialogExpandStep();
+    this.persistExpand();
+    this.statusMessage = `Cell texture expand step: ${this.expandStep} pixels`;
+  }
+
+  private resetExpandToDefault(): void {
+    this.expandStep = DEFAULT_EXPAND_SETTINGS.step;
+    this.persistExpand();
+    this.statusMessage = "Cell texture expand step reset to default";
+  }
+
+  /** Test hook: set the cell texture expand step in pixels (1..1024, clamped). */
+  setExpandStep(value: number): void {
+    this.expandStep = clampExpandStep(value);
+    this.persistExpand();
+    this.statusMessage = `Cell texture expand step: ${this.expandStep} pixels`;
   }
 
   /** Test hook: rename a frame (trimmed 1..64 chars). */
@@ -4866,6 +4989,82 @@ export class GnumarusShell extends LitElement {
       this.statusMessage = "Cannot crop: cell content is fully outside the canvas";
     } else {
       this.statusMessage = "Nothing to crop: texture is already inside the canvas";
+    }
+  }
+
+  private onResizeCellToCanvasFromLayer(layerId: string): void {
+    if (this.engine === null) {
+      this.closeLayerMenu();
+      return;
+    }
+    const frame = this.engine.getCurrentFrame();
+    const outcome = this.engine.resizeCellTextureToCanvas(layerId, frame);
+    this.closeLayerMenu();
+    this.reportResizeToCanvasOutcome(outcome, layerId, frame);
+  }
+
+  private onResizeCellToCanvasFromCell(): void {
+    const target = this.matrixCellTarget();
+    this.closeMatrixMenu();
+    if (target === null || this.engine === null) {
+      return;
+    }
+    this.reportResizeToCanvasOutcome(
+      this.engine.resizeCellTextureToCanvas(target.layerId, target.frame),
+      target.layerId,
+      target.frame,
+    );
+  }
+
+  private reportResizeToCanvasOutcome(
+    outcome: "resized" | "unchanged" | "outside",
+    layerId: string,
+    frame: number,
+  ): void {
+    if (outcome === "resized") {
+      this.refreshLayers();
+      this.dirty = true;
+      const textureId = this.engine?.getCellTextureId(layerId, frame) ?? null;
+      const fitted =
+        textureId === null
+          ? undefined
+          : this.engine?.exportTextures().find((entry) => entry.id === textureId);
+      this.statusMessage =
+        fitted === undefined ? "Texture resized to canvas" : `Texture resized to ${fitted.width} x ${fitted.height}`;
+    } else if (outcome === "outside") {
+      this.statusMessage = "Cannot resize to canvas: content is outside the canvas or too large";
+    } else {
+      this.statusMessage = "Nothing to resize: texture already fills the canvas";
+    }
+  }
+
+  private expandCurrentCellTexture(direction: "up" | "down" | "left" | "right"): void {
+    if (this.engine === null) {
+      return;
+    }
+    const outcome = this.engine.expandCellTexture(
+      this.engine.getActiveLayerId(),
+      this.engine.getCurrentFrame(),
+      direction,
+      this.expandStep,
+    );
+    if (outcome === "expanded") {
+      this.refreshLayers();
+      this.dirty = true;
+      const textureId = this.engine.getCellTextureId(
+        this.engine.getActiveLayerId(),
+        this.engine.getCurrentFrame(),
+      );
+      const fitted =
+        textureId === null
+          ? undefined
+          : this.engine.exportTextures().find((entry) => entry.id === textureId);
+      this.statusMessage =
+        fitted === undefined
+          ? "Texture expanded"
+          : `Texture expanded to ${fitted.width} x ${fitted.height}`;
+    } else {
+      this.statusMessage = "Nothing to expand: current cell has no texture";
     }
   }
 

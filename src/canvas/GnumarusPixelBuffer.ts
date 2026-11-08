@@ -109,6 +109,9 @@ export function createPixelBuffer(width: number, height: number): Uint8ClampedAr
 export const GNUMARUS_MIN_LAYER_DIM = 1;
 export const GNUMARUS_MAX_LAYER_DIM = 1024;
 
+/** Textures may exceed layer dims (offset/rotated content); cap their size. */
+export const GNUMARUS_MAX_TEXTURE_DIM = 4096;
+
 export function clampLayerDim(value: number): number {
   if (!Number.isFinite(value)) {
     return GNUMARUS_MIN_LAYER_DIM;

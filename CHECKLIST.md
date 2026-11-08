@@ -186,3 +186,6 @@
 - [x] Fit dialog OK autofocus + default alpha threshold setting, unit + e2e tests green, docs updated
 - [x] Unit tests (vitest): 208 passed
 - [x] E2E test (Playwright): 135 passed
+- [x] Resize to canvas + Ctrl+Shift+Arrow texture expand step setting, unit + e2e tests green, docs updated
+- [x] Unit tests (vitest): 217 passed
+- [x] E2E test (Playwright): 138 passed

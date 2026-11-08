@@ -283,5 +283,9 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Pre-existing bug fixed along the way: `applyFitToSize` (undo/redo path shared with fit-to-size) re-synced layer renders before restoring content transforms, leaving stale render transforms after undo; it now syncs again after the restore.
 
 ## 54. Fit dialog OK autofocus + default alpha threshold setting (implemented)
+
+## 55. Resize to canvas + Ctrl+Shift+Arrow texture expand (implemented)
+- Layer/cell context-menu item "Resize to canvas": crops excess AND pads transparent pixels so the texture covers the whole canvas area (union of the visible box and the canvas footprint in texture space), re-seating the transform via `shiftTransformForCrop` so rendering is pixel-identical. Refuses fully-outside/degenerate/oversize content; no-op when already exact. Undoable through the existing `fit` history record (crop body generalized to out-of-texture origins).
+- Shortcuts Ctrl+Shift+Up/Down/Left/Right expand the current cell texture by a configurable integer step (new `GnumarusExpandSettings`, default 16px, 1..1024, Interface section + reset + hook + persistence); new pixels transparent black; position re-seated; undoable; listed in the Shortcuts modal.
 - "Fit texture to size" dialog focuses OK on open (after `updateComplete`, `id="fitTextureOk"`), so Enter/Return confirms immediately; `openFitTextureDialog` is now async (`void` at both menu call sites) and seeds the input from the new setting.
 - New `GnumarusFitSettings` (default alpha threshold 0, range 0..254 floored, localStorage `gnumarus.settings.fit.v1`, Interface section row with reset button, `setFitDefaultThreshold` test hook), mirroring the toast-settings conventions.

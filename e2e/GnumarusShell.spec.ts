@@ -5402,6 +5402,162 @@ test("cell menu Crop to canvas reports edge cases", async ({ page }) => {
   );
 });
 
+async function loadRedProject(
+  page: import("@playwright/test").Page,
+  canvasSize: number,
+  textureSize: number,
+  offsetX: number,
+  offsetY: number,
+): Promise<void> {
+  await page.evaluate(
+    ([canvas, texture, dx, dy]: number[]) => {
+      const root = window as unknown as {
+        __gnumarus?: {
+          engine?: {
+            loadProject(
+              width: number,
+              height: number,
+              inputs: Array<{
+                id: string;
+                name: string;
+                visible: boolean;
+                opacity: number;
+                width: number;
+                height: number;
+                buffer: Uint8ClampedArray;
+                transform: unknown;
+                lockedChannels: { r: boolean; g: boolean; b: boolean; a: boolean };
+              }>,
+            ): void;
+          };
+        };
+      };
+      const red = new Uint8ClampedArray(texture * texture * 4);
+      for (let i = 0; i < texture * texture; i += 1) {
+        red[i * 4] = 255;
+        red[i * 4 + 3] = 255;
+      }
+      root.__gnumarus?.engine?.loadProject(canvas, canvas, [
+        {
+          id: "layer0",
+          name: "Layer 1",
+          visible: true,
+          opacity: 1,
+          width: texture,
+          height: texture,
+          buffer: red,
+          transform: {
+            x: dx, y: dy, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1,
+            skewX: 0, skewY: 0, rotationX: 0, rotationY: 0,
+          },
+          lockedChannels: { r: false, g: false, b: false, a: false },
+        },
+      ]);
+    },
+    [canvasSize, textureSize, offsetX, offsetY],
+  );
+}
+
+test("layer menu Resize to canvas crops excess and pads to cover", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadRedProject(page, 64, 64, -32, -32);
+  await page.getByRole("button", { name: "Final preview" }).click();
+  const previewCanvas = page.locator("gnumarus-shell canvas#previewCanvas");
+  await expect(previewCanvas).toBeVisible();
+  const previewPixel = (x: number, y: number): Promise<number[] | null> =>
+    page.evaluate(([px, py]: number[]) => {
+      const root = document.querySelector("gnumarus-shell")?.shadowRoot ?? null;
+      const target = root?.getElementById("previewCanvas") as HTMLCanvasElement | null;
+      const ctx = target?.getContext("2d") ?? null;
+      if (ctx === null) {
+        return null;
+      }
+      const data = ctx.getImageData(px, py, 1, 1).data;
+      return [data[0], data[1], data[2], data[3]];
+    }, [x, y]);
+  expect(await previewPixel(0, 0)).toEqual([255, 0, 0, 255]);
+  await page.locator('gnumarus-shell [data-layer-id="layer0"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Resize to canvas" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Texture resized to 64 x 64");
+  const resized = (await getLayers(page)).layers[0];
+  expect(resized?.width).toBe(64);
+  expect(resized?.height).toBe(64);
+  expect(resized?.transform.x).toBeCloseTo(0, 9);
+  expect(resized?.transform.y).toBeCloseTo(0, 9);
+  // Old bottom-right quadrant moved to the top-left; padding is transparent.
+  expect(await readPixel(page, 0, 0)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 31, 31)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 63, 63)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  // Rendering position is preserved.
+  expect(await previewPixel(0, 0)).toEqual([255, 0, 0, 255]);
+  // Undo restores the full offset texture; redo resizes again.
+  await page.keyboard.press("Control+z");
+  const undone = (await getLayers(page)).layers[0];
+  expect(undone?.width).toBe(64);
+  expect(undone?.transform.x).toBeCloseTo(-32, 9);
+  expect(await readPixel(page, 0, 0)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.keyboard.press("Control+y");
+  const redone = (await getLayers(page)).layers[0];
+  expect(redone?.width).toBe(64);
+  expect(redone?.transform.x).toBeCloseTo(0, 9);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+});
+
+test("cell menu Resize to canvas pads a small texture with transparency", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadRedProject(page, 64, 32, 0, 0);
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  const cell = matrix.locator('[data-testid="anim-cell"][data-matrix-layer="layer0"][data-matrix-frame="0"]');
+  await cell.click({ button: "right" });
+  await page.getByRole("button", { name: "Resize to canvas" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Texture resized to 64 x 64");
+  const resized = (await getLayers(page)).layers[0];
+  expect(resized?.width).toBe(64);
+  expect(resized?.height).toBe(64);
+  expect(resized?.transform.x).toBeCloseTo(0, 9);
+  expect(resized?.transform.y).toBeCloseTo(0, 9);
+  // Old pixels sit centered; the new border is zeroed in all channels.
+  expect(await readPixel(page, 16, 16)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 47, 47)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 63, 63)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  await page.keyboard.press("Control+z");
+  expect((await getLayers(page)).layers[0]?.width).toBe(32);
+});
+
+test("Ctrl+Shift+Arrow expands the current cell texture by the configured step", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  await page.keyboard.press("Control+Shift+ArrowRight");
+  await expect(page.locator("gnumarus-shell")).toContainText("Texture expanded to 80 x 64");
+  expect((await getLayers(page)).layers[0]?.width).toBe(80);
+  // Expanding right keeps existing coordinates: the painted pixel stays put.
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  await page.keyboard.press("Control+Shift+ArrowLeft");
+  await expect(page.locator("gnumarus-shell")).toContainText("Texture expanded to 96 x 64");
+  expect((await getLayers(page)).layers[0]?.width).toBe(96);
+  // Expanding left shifts existing pixels right by the step.
+  expect(await readPixel(page, 48, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  await page.keyboard.press("Control+z");
+  expect((await getLayers(page)).layers[0]?.width).toBe(80);
+  // The step setting changes the growth: 8px down from 64px height.
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.locator("gnumarus-shell input#expandStep").fill("8");
+  const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.expand.v1"));
+  expect(persisted).toContain("8");
+  await page.getByRole("button", { name: "Close" }).click();
+  await page.keyboard.press("Control+Shift+ArrowDown");
+  await expect(page.locator("gnumarus-shell")).toContainText("Texture expanded to 80 x 72");
+  expect((await getLayers(page)).layers[0]?.height).toBe(72);
+});
+
 test("fit texture dialog focuses OK so Enter confirms immediately", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

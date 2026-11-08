@@ -61,4 +61,26 @@ describe("shiftTransformForCrop", () => {
       }
     }
   });
+
+  it("keeps every pixel at the same project position for padded boxes", () => {
+    // Expanding a 32x32 texture by 16 transparent pixels on the left/top.
+    const box = { left: -16, top: -16, width: 64, height: 64 };
+    const cases = [
+      { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
+      { x: 4, y: -3, rotation: 0.5, flipX: true, flipY: false, scaleX: 2, scaleY: 2, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
+    ];
+    for (const transform of cases) {
+      const next = shiftTransformForCrop(transform, 32, 32, box);
+      for (const [x, y] of [
+        [16, 16],
+        [47, 47],
+        [30, 20],
+      ]) {
+        const after = layerImageToProject(x, y, box.width, box.height, next);
+        const before = layerImageToProject(x + box.left, y + box.top, 32, 32, transform);
+        expect(after.x).toBeCloseTo(before.x, 9);
+        expect(after.y).toBeCloseTo(before.y, 9);
+      }
+    }
+  });
 });

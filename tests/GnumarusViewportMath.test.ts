@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canvasResizeTextureBox,
   canvasVisibleTextureBox,
   clampZoom,
   imageToScreenPixel,
@@ -292,6 +293,67 @@ describe("GnumarusViewportMath", () => {
       skewX: 0, skewY: 0, rotationX: Math.PI / 2, rotationY: 0,
     };
     expect(canvasVisibleTextureBox(64, 64, 64, 64, edgeOn)).toBeNull();
+  });
+
+  it("canvasResizeTextureBox crops excess and pads to cover the canvas", () => {
+    // 64x64 texture shifted 32px left and up: drop [0,32), pad 32 right/bottom.
+    const shifted: GnumarusLayerTransform = {
+      x: -32, y: -32, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1,
+      skewX: 0, skewY: 0, rotationX: 0, rotationY: 0,
+    };
+    expect(canvasResizeTextureBox(64, 64, 64, 64, shifted)).toEqual({ left: 32, top: 32, width: 64, height: 64 });
+    // Small centered texture: pad transparent pixels on all sides.
+    const identity: GnumarusLayerTransform = {
+      x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1,
+      skewX: 0, skewY: 0, rotationX: 0, rotationY: 0,
+    };
+    expect(canvasResizeTextureBox(64, 64, 32, 32, identity)).toEqual({ left: -16, top: -16, width: 64, height: 64 });
+    // Exact cover is returned as-is.
+    expect(canvasResizeTextureBox(64, 64, 64, 64, identity)).toEqual({ left: 0, top: 0, width: 64, height: 64 });
+  });
+
+  it("canvasResizeTextureBox returns null outside the canvas or when degenerate", () => {
+    const away: GnumarusLayerTransform = {
+      x: 100, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1,
+      skewX: 0, skewY: 0, rotationX: 0, rotationY: 0,
+    };
+    expect(canvasResizeTextureBox(64, 64, 64, 64, away)).toBeNull();
+    const edgeOn: GnumarusLayerTransform = {
+      x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1,
+      skewX: 0, skewY: 0, rotationX: Math.PI / 2, rotationY: 0,
+    };
+    expect(canvasResizeTextureBox(64, 64, 64, 64, edgeOn)).toBeNull();
+  });
+
+  it("canvasResizeTextureBox contains the visible box and the canvas footprint", () => {
+    const placed: GnumarusLayerTransform = {
+      x: -7, y: 5, rotation: 0.7, flipX: true, flipY: false, scaleX: 1.5, scaleY: 0.8,
+      skewX: 0.2, skewY: -0.1, rotationX: 0.2, rotationY: -0.15,
+    };
+    const resized = canvasResizeTextureBox(64, 64, 48, 40, placed);
+    const visible = canvasVisibleTextureBox(64, 64, 48, 40, placed);
+    expect(resized).not.toBeNull();
+    expect(visible).not.toBeNull();
+    if (resized === null || visible === null) {
+      return;
+    }
+    // Resize box covers the visible box.
+    expect(resized.left).toBeLessThanOrEqual(visible.left);
+    expect(resized.top).toBeLessThanOrEqual(visible.top);
+    expect(resized.left + resized.width).toBeGreaterThanOrEqual(visible.left + visible.width);
+    expect(resized.top + resized.height).toBeGreaterThanOrEqual(visible.top + visible.height);
+    // And every canvas corner maps inside it.
+    for (const [px, py] of [[-32, -32], [32, -32], [32, 32], [-32, 32]] as Array<[number, number]>) {
+      const mapped = projectToLayerImageFloat(px, py, 48, 40, placed);
+      expect(mapped).not.toBeNull();
+      if (mapped === null) {
+        continue;
+      }
+      expect(mapped.x).toBeGreaterThanOrEqual(resized.left);
+      expect(mapped.x).toBeLessThanOrEqual(resized.left + resized.width);
+      expect(mapped.y).toBeGreaterThanOrEqual(resized.top);
+      expect(mapped.y).toBeLessThanOrEqual(resized.top + resized.height);
+    }
   });
 
   it("canvasVisibleTextureBox contains every canvas-mapped texel", () => {
