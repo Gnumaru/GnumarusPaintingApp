@@ -11,13 +11,14 @@
  * groups flattened away, tilemaps skipped), layer visibility and opacity,
  * frames with per-frame durations, raw and zlib-compressed cels in RGBA /
  * grayscale / indexed color (palette tracked progressively, transparent
- * index honored on non-background layers), and linked cels resolved into
- * shared cell contents. Cel opacity is baked into pixel alpha.
+ * index honored on non-background layers), linked cels resolved into
+ * shared cell contents, and frame tags resolved into named animations.
+ * Cel opacity is baked into pixel alpha.
  *
  * Ignored (no equivalent in this app): layer blend modes (everything
- * composites normal), per-cel z-index (last cel wins per cell), tags,
- * slices, tilesets/tilemaps, user data, color profiles, cel-extra scaling,
- * pixel aspect ratio.
+ * composites normal), per-cel z-index (last cel wins per cell), tag colors,
+ * tag repeat counts above one, slices, tilesets/tilemaps, user data, color
+ * profiles, cel-extra scaling, pixel aspect ratio.
  *
  * Decompression uses the native DecompressionStream ("deflate"), so no
  * new dependency is needed. Parsing is sequential and releases each
@@ -28,6 +29,10 @@ import {
   GNUMARUS_DEFAULT_FRAME_DURATION_MS,
   type GnumarusTexturePixels,
 } from "../animation/GnumarusAnimationModel";
+import type {
+  GnumarusAnimationLoop,
+  GnumarusNamedAnimation,
+} from "../animation/GnumarusNamedAnimations";
 import type { GnumarusChannelLock } from "../canvas/GnumarusPixelBuffer";
 import {
   IDENTITY_LAYER_TRANSFORM,
@@ -72,6 +77,7 @@ export interface GnumarusAsepriteDocument {
   frames: number;
   defaultFrameDuration: number;
   frameDurations: Array<{ frame: number; duration: number }>;
+  namedAnimations: GnumarusNamedAnimation[];
 }
 
 const ASE_MAGIC = 0xa5e0;
@@ -88,6 +94,12 @@ const ASE_CHUNK_OLD_PALETTE_11 = 0x0011;
 const ASE_CHUNK_LAYER = 0x2004;
 const ASE_CHUNK_CEL = 0x2005;
 const ASE_CHUNK_PALETTE = 0x2019;
+const ASE_CHUNK_TAGS = 0x2018;
+
+const ASE_TAG_LOOP_FORWARD = 0;
+const ASE_TAG_LOOP_REVERSE = 1;
+const ASE_TAG_LOOP_PING_PONG = 2;
+const ASE_TAG_LOOP_PING_PONG_REVERSE = 3;
 
 const ASE_LAYER_TYPE_IMAGE = 0;
 const ASE_LAYER_TYPE_GROUP = 1;
@@ -231,6 +243,16 @@ interface GnumarusAseLinkedCel {
   linkTo: number;
 }
 
+interface GnumarusAseTag {
+  name: string;
+  /** 0-based first frame. */
+  from: number;
+  /** 0-based last frame (always >= from). */
+  to: number;
+  loop: number;
+  repeat: number;
+}
+
 function asepriteCellKey(layer: number, frame: number): string {
   return `${layer}\n${frame}`;
 }
@@ -288,6 +310,7 @@ export async function parseAsepriteFile(data: Uint8Array): Promise<GnumarusAsepr
   const layerSlots: Array<GnumarusAseLayerSlot | null> = [];
   const rawCels = new Map<string, GnumarusAseRawCel>();
   const linkedCels = new Map<string, GnumarusAseLinkedCel>();
+  const tags: GnumarusAseTag[] = [];
   const durations = new Array<number>(frames).fill(
     speed > 0 ? clampFrameDurationMs(speed) : GNUMARUS_DEFAULT_FRAME_DURATION_MS,
   );
@@ -358,6 +381,10 @@ export async function parseAsepriteFile(data: Uint8Array): Promise<GnumarusAsepr
           sawNewPalette = true;
           break;
         }
+        case ASE_CHUNK_TAGS: {
+          parseTagsChunk(reader, chunkEnd, frame, frames, tags);
+          break;
+        }
         default: {
           reader.setPosition(chunkEnd, "skipped chunk");
           break;
@@ -386,6 +413,7 @@ export async function parseAsepriteFile(data: Uint8Array): Promise<GnumarusAsepr
     rawCels,
     linkedCels,
     palette,
+    tags,
   });
 }
 
@@ -446,6 +474,45 @@ function parsePaletteChunk(
   }
   if (reader.position !== chunkEnd) {
     reader.fail("palette chunk length mismatch");
+  }
+}
+
+function parseTagsChunk(
+  reader: GnumarusAseReader,
+  chunkEnd: number,
+  frame: number,
+  frameCount: number,
+  tags: GnumarusAseTag[],
+): void {
+  const count = reader.u16("tag count");
+  reader.skip(8, "tags reserved");
+  for (let index = 0; index < count; index += 1) {
+    const from = reader.u16("tag first frame");
+    const to = reader.u16("tag last frame");
+    const loop = reader.u8("tag loop direction");
+    const repeat = reader.u16("tag repeat count");
+    reader.skip(6, "tag reserved");
+    reader.skip(3, "tag color");
+    reader.skip(1, "tag extra byte");
+    const name = reader.string();
+    if (from > to) {
+      reader.fail(`frame ${frame} tag ${index} starts after its end`);
+    }
+    if (to >= frameCount) {
+      reader.fail(`frame ${frame} tag ${index} reaches out-of-range frame ${to}`);
+    }
+    if (
+      loop !== ASE_TAG_LOOP_FORWARD &&
+      loop !== ASE_TAG_LOOP_REVERSE &&
+      loop !== ASE_TAG_LOOP_PING_PONG &&
+      loop !== ASE_TAG_LOOP_PING_PONG_REVERSE
+    ) {
+      reader.fail(`frame ${frame} tag ${index} has an unknown loop direction`);
+    }
+    tags.push({ name, from, to, loop, repeat });
+  }
+  if (reader.position !== chunkEnd) {
+    reader.fail("tags chunk length mismatch");
   }
 }
 
@@ -632,6 +699,49 @@ interface GnumarusAseBuildInput {
   rawCels: Map<string, GnumarusAseRawCel>;
   linkedCels: Map<string, GnumarusAseLinkedCel>;
   palette: Map<number, { r: number; g: number; b: number; a: number }>;
+  tags: GnumarusAseTag[];
+}
+
+/**
+ * Map frame tags to named animations. Reverse directions play the range
+ * backwards under a forward/ping-pong loop; a repeat count of one plays
+ * once (`none`). Higher repeat counts and tag colors have no equivalent
+ * and are ignored. Empty names fall back to `Tag N`, taken names gain a
+ * ` (2)` suffix.
+ */
+export function tagsToNamedAnimations(tags: GnumarusAseTag[]): GnumarusNamedAnimation[] {
+  const taken = new Set<string>();
+  const animations: GnumarusNamedAnimation[] = [];
+  tags.forEach((tag, order) => {
+    const reversed = tag.loop === ASE_TAG_LOOP_REVERSE || tag.loop === ASE_TAG_LOOP_PING_PONG_REVERSE;
+    const pingPong =
+      tag.loop === ASE_TAG_LOOP_PING_PONG || tag.loop === ASE_TAG_LOOP_PING_PONG_REVERSE;
+    const loop: GnumarusAnimationLoop =
+      pingPong || tag.repeat !== 1 ? (pingPong ? "ping-pong" : "forward") : "none";
+    const frames: Array<{ frame: number; duration: null }> = [];
+    if (reversed) {
+      for (let frame = tag.to; frame >= tag.from; frame -= 1) {
+        frames.push({ frame, duration: null });
+      }
+    } else {
+      for (let frame = tag.from; frame <= tag.to; frame += 1) {
+        frames.push({ frame, duration: null });
+      }
+    }
+    let name = tag.name.trim().slice(0, 64);
+    if (name === "") {
+      name = `Tag ${order + 1}`;
+    }
+    let candidate = name;
+    let suffix = 2;
+    while (taken.has(candidate)) {
+      candidate = `${name} (${suffix})`;
+      suffix += 1;
+    }
+    taken.add(candidate);
+    animations.push({ name: candidate, loop, frames });
+  });
+  return animations;
 }
 
 function buildAsepriteDocument(input: GnumarusAseBuildInput): GnumarusAsepriteDocument {
@@ -796,5 +906,6 @@ function buildAsepriteDocument(input: GnumarusAseBuildInput): GnumarusAsepriteDo
     frames: input.frames,
     defaultFrameDuration: defaultDuration,
     frameDurations,
+    namedAnimations: tagsToNamedAnimations(input.tags),
   };
 }

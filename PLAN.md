@@ -291,6 +291,10 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - New `GnumarusFitSettings` (default alpha threshold 0, range 0..254 floored, localStorage `gnumarus.settings.fit.v1`, Interface section row with reset button, `setFitDefaultThreshold` test hook), mirroring the toast-settings conventions.
 
 ## 56. Named animations from definition strings (implemented)
+
+## 57. Aseprite tag import as named animations (implemented)
+- Parse the tags chunk (0x2018) in `GnumarusAseprite.ts`: direction forward/reverse/ping-pong/ping-pong-reverse, repeat count, RGB color skipped, strict bounds/length/range validation like other chunks.
+- Mapping: forward→`forward` (`repeat == 1`→`none`, play-once), reverse→reversed frames + same rule, ping-pong→`ping-pong` (forward order), ping-pong-reverse→`ping-pong` (reversed order); repeat counts >1 and tag colors have no equivalent and are ignored (documented). Empty names fall back to `Tag N`, duplicate names get ` (2)` suffixes.
 - Pure module `src/animation/GnumarusNamedAnimations.ts`: `name,loop,frames` strings (`none`/`forward`/`ping-pong`, 1-based frames, `A-B` ranges, `:ms` per-frame or per-range overrides), strict parse errors, serialize with range collapsing, ping-pong-safe step function, frame-index remap helper.
 - Engine owns the list + active selection, remaps indices on frame insert/move/remove, persists via `project.json`.
 - Matrix corner gets an animation dropdown (All frames + names) and a manage dialog (add string, inline errors, delete); selected animation columns highlight; playback scopes to it (override durations, `none` stops at the end).

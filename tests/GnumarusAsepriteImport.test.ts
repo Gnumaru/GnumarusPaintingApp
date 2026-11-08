@@ -482,18 +482,154 @@ describe("GnumarusAseprite", () => {
 
   it("skips unknown chunks without losing sync", async () => {
     const pixels = new Uint8Array(rgba(7, 8, 9, 255));
-    const tags = new AseWriter();
-    tags.u16(0);
-    tags.raw(new Array<number>(8).fill(0));
+    const mystery = new AseWriter();
+    mystery.u16(0);
+    mystery.raw(new Array<number>(8).fill(0));
     const data = sprite({
       frames: [
-        frame(100, [layerChunk("L"), new AseWriter().wrap(0x2018, tags), await imageCel(0, 0, 0, 1, 1, pixels)]),
+        frame(100, [layerChunk("L"), new AseWriter().wrap(0x9999, mystery), await imageCel(0, 0, 0, 1, 1, pixels)]),
       ],
       width: 1,
       height: 1,
     });
     const doc = await parseAsepriteFile(data);
     expect(doc.cells.length).toBe(1);
+  });
+
+  it("imports frame tags as named animations", async () => {
+    const pixels = new Uint8Array(rgba(7, 8, 9, 255));
+    const tags = new AseWriter();
+    tags.u16(4);
+    tags.raw(new Array<number>(8).fill(0));
+    const tag = (name: string, from: number, to: number, loop: number, repeat: number): void => {
+      tags.u16(from).u16(to).u8(loop).u16(repeat);
+      tags.raw(new Array<number>(6).fill(0));
+      tags.u8(255).u8(0).u8(0);
+      tags.u8(0);
+      tags.str(name);
+    };
+    tag("walk", 0, 2, 0, 0);
+    tag("back", 1, 3, 1, 0);
+    tag("boing", 0, 2, 2, 0);
+    tag("gnob", 0, 2, 3, 0);
+    const data = sprite({
+      frames: [
+        frame(
+          100,
+          [
+            layerChunk("L"),
+            new AseWriter().wrap(0x2018, tags),
+            await imageCel(0, 0, 0, 1, 1, pixels),
+          ],
+        ),
+        frame(100, []),
+        frame(100, []),
+        frame(100, []),
+      ],
+      width: 1,
+      height: 1,
+    });
+    const doc = await parseAsepriteFile(data);
+    expect(doc.namedAnimations).toEqual([
+      {
+        name: "walk",
+        loop: "forward",
+        frames: [
+          { frame: 0, duration: null },
+          { frame: 1, duration: null },
+          { frame: 2, duration: null },
+        ],
+      },
+      {
+        name: "back",
+        loop: "forward",
+        frames: [
+          { frame: 3, duration: null },
+          { frame: 2, duration: null },
+          { frame: 1, duration: null },
+        ],
+      },
+      {
+        name: "boing",
+        loop: "ping-pong",
+        frames: [
+          { frame: 0, duration: null },
+          { frame: 1, duration: null },
+          { frame: 2, duration: null },
+        ],
+      },
+      {
+        name: "gnob",
+        loop: "ping-pong",
+        frames: [
+          { frame: 2, duration: null },
+          { frame: 1, duration: null },
+          { frame: 0, duration: null },
+        ],
+      },
+    ]);
+  });
+
+  it("plays repeat-one tags once and renames empty or duplicated tags", async () => {
+    const pixels = new Uint8Array(rgba(7, 8, 9, 255));
+    const tags = new AseWriter();
+    tags.u16(3);
+    tags.raw(new Array<number>(8).fill(0));
+    const tag = (name: string, from: number, to: number, loop: number, repeat: number): void => {
+      tags.u16(from).u16(to).u8(loop).u16(repeat);
+      tags.raw(new Array<number>(6).fill(0));
+      tags.u8(0).u8(0).u8(0);
+      tags.u8(0);
+      tags.str(name);
+    };
+    tag("once", 0, 1, 0, 1);
+    tag("", 0, 0, 0, 0);
+    tag("once", 1, 1, 2, 0);
+    const data = sprite({
+      frames: [
+        frame(100, [layerChunk("L"), new AseWriter().wrap(0x2018, tags), await imageCel(0, 0, 0, 1, 1, pixels)]),
+        frame(100, []),
+      ],
+      width: 1,
+      height: 1,
+    });
+    const doc = await parseAsepriteFile(data);
+    expect(doc.namedAnimations).toEqual([
+      {
+        name: "once",
+        loop: "none",
+        frames: [
+          { frame: 0, duration: null },
+          { frame: 1, duration: null },
+        ],
+      },
+      { name: "Tag 2", loop: "forward", frames: [{ frame: 0, duration: null }] },
+      { name: "once (2)", loop: "ping-pong", frames: [{ frame: 1, duration: null }] },
+    ]);
+  });
+
+  it("rejects tags with bad ranges, loops or frames", async () => {
+    const pixels = new Uint8Array(rgba(7, 8, 9, 255));
+    const tagged = async (tag: AseWriter): Promise<Uint8Array> =>
+      sprite({
+        frames: [frame(100, [layerChunk("L"), new AseWriter().wrap(0x2018, tag), await imageCel(0, 0, 0, 1, 1, pixels)])],
+        width: 1,
+        height: 1,
+      });
+    const makeTag = (from: number, to: number, loop: number): AseWriter => {
+      const tags = new AseWriter();
+      tags.u16(1);
+      tags.raw(new Array<number>(8).fill(0));
+      tags.u16(from).u16(to).u8(loop).u16(0);
+      tags.raw(new Array<number>(6).fill(0));
+      tags.u8(0).u8(0).u8(0);
+      tags.u8(0);
+      tags.str("bad");
+      return tags;
+    };
+    await expect(parseAsepriteFile(await tagged(makeTag(1, 0, 0)))).rejects.toThrow(/starts after its end/);
+    await expect(parseAsepriteFile(await tagged(makeTag(0, 5, 0)))).rejects.toThrow(/out-of-range frame/);
+    await expect(parseAsepriteFile(await tagged(makeTag(0, 0, 9)))).rejects.toThrow(/unknown loop direction/);
   });
 
   it("rejects files that are not Aseprite files or are corrupt", async () => {

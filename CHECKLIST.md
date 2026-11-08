@@ -192,3 +192,6 @@
 - [x] Named animations (`name,loop,frames` strings, matrix dropdown + highlight, scoped playback), unit + e2e tests green, docs updated
 - [x] Unit tests (vitest): 232 passed
 - [x] E2E test (Playwright): 145 passed
+- [x] Aseprite tag import as named animations, unit + e2e tests green, docs updated
+- [x] Unit tests (vitest): 235 passed
+- [x] E2E test (Playwright): 146 passed

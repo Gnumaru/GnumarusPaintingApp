@@ -5510,14 +5510,24 @@ export class GnumarusShell extends LitElement {
         defaultFrameDuration: imported.defaultFrameDuration,
         frameDurations: imported.frameDurations.map((entry) => ({ ...entry })),
         frameNames: [],
-        namedAnimations: [],
+        namedAnimations: imported.namedAnimations.map((entry) => ({
+          name: entry.name,
+          loop: entry.loop,
+          frames: entry.frames.map((item) => ({ ...item })),
+        })),
         activeAnimation: null,
       });
       this.refreshLayers();
       this.directoryHandle = null;
       this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
       this.dirty = true;
-      const summary = `Imported ${fileName} (${imported.layers.length} layers, ${imported.frames} frames)`;
+      const animationSuffix =
+        imported.namedAnimations.length === 1
+          ? ", 1 animation"
+          : imported.namedAnimations.length > 1
+            ? `, ${imported.namedAnimations.length} animations`
+            : "";
+      const summary = `Imported ${fileName} (${imported.layers.length} layers, ${imported.frames} frames${animationSuffix})`;
       this.statusMessage = summary;
       this.showToast(summary);
     } catch (error) {
