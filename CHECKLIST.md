@@ -165,3 +165,6 @@
 - [x] Destructive selection transform anchors (resize/rotate/skew/center-reset) + rename, unit + e2e tests green, docs updated
 - [x] Unit tests (vitest): 167 passed
 - [x] E2E test (Playwright): 113 passed
+- [x] Floating plane orientation fix (same normalized convention as layer planes), e2e regression test green, docs updated
+- [x] Unit tests (vitest): 167 passed
+- [x] E2E test (Playwright): 114 passed

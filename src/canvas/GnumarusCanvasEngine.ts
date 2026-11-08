@@ -3998,25 +3998,24 @@ export class GnumarusCanvasEngine {
       this.floatingPlane.visible = false;
       return;
     }
-    // Position the unit quad from the transformed buffer corners so the
-    // plane renders position, rotation, scale and skew exactly.
+    // Position the unit quad with the same normalized convention as
+    // writePlaneMatrix (center-based basis with flipped V), mapping through
+    // the floating placement instead of the identity map. Anything else
+    // shifts the content by half its size and mirrors it vertically.
     const placement = this.floatingPlacement(floating);
-    const corner = (x: number, y: number): { x: number; y: number } => {
-      const home = forwardSelectionPoint(placement, x, y);
-      return layerImageToProject(home.x, home.y, layer.width, layer.height, layer.transform);
-    };
     const rect = this.container.getBoundingClientRect();
     const w = Math.max(1, rect.width);
     const h = Math.max(1, rect.height);
     const local: GnumarusRect = { left: 0, top: 0, width: w, height: h };
     const view = this.viewTransform();
-    const at = (x: number, y: number): { x: number; y: number } => {
-      const screen = projectToScreen(corner(x, y).x, corner(x, y).y, local, view);
-      return screen;
+    const at = (lx: number, ly: number): { x: number; y: number } => {
+      const home = forwardSelectionPoint(placement, (lx + 0.5) * floating.width, (0.5 - ly) * floating.height);
+      const projected = layerImageToProject(home.x, home.y, layer.width, layer.height, layer.transform);
+      return projectToScreen(projected.x, projected.y, local, view);
     };
     const o = at(0, 0);
-    const ex = at(floating.width, 0);
-    const ey = at(0, floating.height);
+    const ex = at(1, 0);
+    const ey = at(0, 1);
     const elements = this.floatingPlane.matrix.elements;
     elements[0] = ex.x - o.x;
     elements[1] = -(ex.y - o.y);
@@ -5109,6 +5108,14 @@ export class GnumarusCanvasEngine {
       return null;
     }
     return Array.from(layer.plane.matrix.elements);
+  }
+
+  /** Floating content plane matrix, or null when no plane exists. */
+  getFloatingPlaneMatrix(): number[] | null {
+    if (this.floatingPlane === null) {
+      return null;
+    }
+    return Array.from(this.floatingPlane.matrix.elements);
   }
 
   getGridState(): { visible: boolean; minZoom: number; layerId: string | null; width: number; height: number } {

@@ -184,6 +184,11 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Resize anchors (rectangles at corners + edge midpoints, 1px min, no mirror), rotate anchors (quarter-circle arrows, offset outward from corners), skew anchors (double arrows beyond edge midpoints, per-axis screen-proportional shear), center anchor (circular arrow, click resets to the as-cut snapshot).
 - Floating placement becomes center-based floats (pos/rotation/scale/skew); render via affine plane basis, commit via inverse-map nearest resample with tie epsilon; pure math in a unit-tested module.
 
+## 45. Floating plane orientation fix (implemented)
+- Bug: on auto-select the floating content rendered vertically flipped and shifted up-left by half its size.
+- Root cause: the floating plane matrix copied `writePlaneMatrix` element layout but fed it corner-based coords; that layout requires center-based normalized coords with flipped V.
+- Fix: position the quad through the same normalized convention (center basis + V flip), mapping through the floating placement.
+
 ## 11. Custom color picker (implemented)
 - Stopped using the browser color picker; implemented a custom picker with models RGB, CMYK, HSV, HSL (default), OKHSL, OKHSV and ARD (angle/ratio/diagonal cylindrical coordinates around the RGB cube diagonal, inspired by Krita Pigment.O).
 - Every model carries an alpha axis; RGBA axes span 0..255. ARD Diagonal spans 0..360 and Ratio 0..255.

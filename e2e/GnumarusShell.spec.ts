@@ -4470,3 +4470,60 @@ test("center anchor resets the floating transform to the as-cut state", async ({
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 30, 30)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
 });
+
+async function getPlaneMatrix(
+  page: import("@playwright/test").Page,
+  kind: "layer" | "floating",
+): Promise<number[] | null> {
+  return page.evaluate((which: string) => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          getLayerPlaneMatrix(id: string): number[] | null;
+          getFloatingPlaneMatrix(): number[] | null;
+        };
+      };
+    };
+    const engine = root.__gnumarus?.engine;
+    if (engine === undefined) {
+      throw new Error("engine is unavailable");
+    }
+    return which === "layer" ? engine.getLayerPlaneMatrix("layer0") : engine.getFloatingPlaneMatrix();
+  }, kind);
+}
+
+test("floating plane renders over the layer without shift or flip", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Destructive selection transform" }).click();
+  const box = await page.locator("gnumarus-shell canvas").boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  // Auto-select-all covers the whole texture at identity: the floating quad
+  // must coincide with the layer quad (same basis, only render depth differs).
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  const layerMatrix = await getPlaneMatrix(page, "layer");
+  const floatingMatrix = await getPlaneMatrix(page, "floating");
+  expect(layerMatrix).not.toBeNull();
+  expect(floatingMatrix).not.toBeNull();
+  for (let index = 0; index < 16; index += 1) {
+    if (index === 14) {
+      continue;
+    }
+    expect(floatingMatrix?.[index]).toBeCloseTo(layerMatrix?.[index] ?? 0, 6);
+  }
+  // Moves translate the quad in screen space without mirroring the basis.
+  const zoom = (await getViewState(page)).zoom;
+  const before = await getPlaneMatrix(page, "floating");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 10 * zoom, box.y + box.height / 2, { steps: 4 });
+  await page.mouse.up();
+  const after = await getPlaneMatrix(page, "floating");
+  expect((after?.[12] ?? 0) - (before?.[12] ?? 0)).toBeCloseTo(10 * zoom, 4);
+  expect((after?.[13] ?? 0) - (before?.[13] ?? 0)).toBeCloseTo(0, 4);
+  for (const index of [0, 1, 4, 5]) {
+    expect(after?.[index]).toBeCloseTo(before?.[index] ?? 0, 6);
+  }
+});
