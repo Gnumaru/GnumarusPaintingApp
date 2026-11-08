@@ -141,8 +141,10 @@ const GNUMARUS_SHORTCUTS: GnumarusShortcutSection[] = [
       { keys: "C", action: "Curve tool" },
       { keys: "Z", action: "Loupe tool" },
       { keys: "T", action: "Non-destructive cell transform tool" },
+      { keys: "Y", action: "3D rotation tool" },
       { keys: "R", action: "Rectangular selection tool" },
       { keys: "V", action: "Destructive selection transform tool" },
+      { keys: "U", action: "Destructive 3D rotation tool" },
       { keys: "E", action: "Toggle eraser blend mode" },
       { keys: "Hold Ctrl", action: "Temporary eyedropper (release to restore the previous tool)" },
       { keys: "Enter, Return or Esc", action: "Merge floating selection into the cell" },
@@ -1317,6 +1319,28 @@ export class GnumarusShell extends LitElement {
           >
             <span class="tool-icon">⤢</span>
           </button>
+          <button
+            class=${this.tool === "transform3d" ? "active" : ""}
+            title="Y: 3D rotation (drag to tilt the layer, rings rotate one axis, center resets rotations)"
+            aria-label="3D rotation"
+            @click=${(): void => {
+              this.tool = "transform3d";
+              this.engine?.setTool("transform3d");
+            }}
+          >
+            <span class="tool-icon">⟳</span>
+          </button>
+          <button
+            class=${this.tool === "destransform3d" ? "active" : ""}
+            title="U: Destructive 3D rotation (drag to tilt the selection, rings rotate one axis, Enter merges)"
+            aria-label="Destructive 3D rotation"
+            @click=${(): void => {
+              this.tool = "destransform3d";
+              this.engine?.setTool("destransform3d");
+            }}
+          >
+            <span class="tool-icon">⟲</span>
+          </button>
           <gnumarus-color-picker
             id="pencilColor"
             .value=${this.colorValue}
@@ -2026,8 +2050,14 @@ export class GnumarusShell extends LitElement {
     if (tool === "transform") {
       return "non-destructive cell transform";
     }
+    if (tool === "transform3d") {
+      return "3d rotation";
+    }
     if (tool === "destransform") {
       return "destructive selection transform";
+    }
+    if (tool === "destransform3d") {
+      return "destructive 3d rotation";
     }
     if (tool === "rectselect") {
       return "rectangular selection";
@@ -2244,7 +2274,7 @@ export class GnumarusShell extends LitElement {
         </div>
       `;
     }
-    if (this.tool === "destransform") {
+    if (this.tool === "destransform" || this.tool === "destransform3d") {
       return html`
         <div class="tool-options" data-testid="tool-options" aria-label="Destructive selection transform options" ?hidden=${this.uiHidden}>
           <button

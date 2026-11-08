@@ -41,7 +41,7 @@ describe("GnumarusAnimationModel", () => {
     const buffer = bufferOf(4, 4, 7);
     const textures = new Map([["layer0", { width: 4, height: 4, buffer }]]);
     const contents = new Map([
-      ["content1", { textureId: "layer0", transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 } }],
+      ["content1", { textureId: "layer0", transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 } }],
     ]);
     const cells = new Map([
       [animationCellKey("layer0", 0), "content1"],
@@ -62,8 +62,8 @@ describe("GnumarusAnimationModel", () => {
       ["tex1", { width: 2, height: 2, buffer: second }],
     ]);
     const contents = new Map([
-      ["c0", { textureId: "tex0", transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 } }],
-      ["c1", { textureId: "tex1", transform: { x: 5, y: 6, rotation: 0.5, flipX: true, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 } }],
+      ["c0", { textureId: "tex0", transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 } }],
+      ["c1", { textureId: "tex1", transform: { x: 5, y: 6, rotation: 0.5, flipX: true, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 } }],
     ]);
     const cells = new Map([
       [animationCellKey("layer0", 0), "c0"],
@@ -79,7 +79,7 @@ describe("GnumarusAnimationModel", () => {
 
   it("renders textureless contents as empty with their transform", () => {
     const contents = new Map([
-      ["c0", { textureId: null, transform: { x: 3, y: 4, rotation: 0, flipX: false, flipY: true, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 } }],
+      ["c0", { textureId: null, transform: { x: 3, y: 4, rotation: 0, flipX: false, flipY: true, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 } }],
     ]);
     const cells = new Map([[animationCellKey("layer0", 0), "c0"]]);
     const resolved = resolveAnimationFrame(["layer0"], new Map(), contents, cells, 0).get("layer0");

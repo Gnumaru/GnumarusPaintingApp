@@ -173,3 +173,6 @@
 - [x] Flip anchors (destructive) + full anchor parity for non-destructive cell transform (layer scale/skew extension), unit + e2e tests green, docs updated
 - [x] Unit tests (vitest): 173 passed
 - [x] E2E test (Playwright): 121 passed
+- [x] Separate 3D rotation tools (`transform3d`/`destransform3d`) with RGB trackball gizmo, unit + e2e tests green, docs updated
+- [x] Unit tests (vitest): 177 passed
+- [x] E2E test (Playwright): 127 passed

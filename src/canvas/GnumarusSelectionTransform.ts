@@ -22,6 +22,10 @@ export interface GnumarusSelectionPlacement {
   /** Mirror flags, applied to buffer-centered coords before the linear map. */
   flipX: boolean;
   flipY: boolean;
+  /** Tilt about the X axis in radians (top toward viewer when positive). */
+  rotationX: number;
+  /** Tilt about the Y axis in radians (right edge toward viewer when positive). */
+  rotationY: number;
   /** Source buffer dimensions. */
   width: number;
   height: number;
@@ -45,19 +49,62 @@ export const GNUMARUS_SELECTION_SAMPLE_EPSILON = 1e-6;
 
 /** Linear part of the floating-local (buffer-centered) to home map. */
 export function selectionLinearMatrix(placement: GnumarusSelectionPlacement): GnumarusAffineMatrix {
-  const cos = Math.cos(placement.rotation);
-  const sin = Math.sin(placement.rotation);
+  // Top-left 2x2 of Rz*Ry*Rx applied to the in-plane scale/shear part.
+  const cx = Math.cos(placement.rotationX);
+  const sx = Math.sin(placement.rotationX);
+  const cy = Math.cos(placement.rotationY);
+  const sy = Math.sin(placement.rotationY);
+  const cz = Math.cos(placement.rotation);
+  const sz = Math.sin(placement.rotation);
+  // R3 rows 0..1 times S*K columns.
+  const r00 = cz * cy;
+  const r01 = cz * sy * sx - sz * cx;
+  const r10 = sz * cy;
+  const r11 = sz * sy * sx + cz * cx;
   return {
-    a: cos * placement.scaleX - sin * placement.skewY * placement.scaleX,
-    b: cos * placement.skewX * placement.scaleY - sin * placement.scaleY,
-    c: sin * placement.scaleX + cos * placement.skewY * placement.scaleX,
-    d: sin * placement.skewX * placement.scaleY + cos * placement.scaleY,
+    a: r00 * placement.scaleX + r01 * placement.skewY * placement.scaleX,
+    b: r00 * placement.skewX * placement.scaleY + r01 * placement.scaleY,
+    c: r10 * placement.scaleX + r11 * placement.skewY * placement.scaleX,
+    d: r10 * placement.skewX * placement.scaleY + r11 * placement.scaleY,
   };
 }
 
-/** Determinant of the linear part (scales times shear factor). */
+/**
+ * Full 3x3 rotation `Rz(rotation) * Ry(rotationY) * Rx(rotationX)`,
+ * row-major, for gizmo rings (y-down, clockwise-positive, z toward viewer).
+ */
+export function selectionRotate3(placement: GnumarusSelectionPlacement): [
+  [number, number, number],
+  [number, number, number],
+  [number, number, number],
+] {
+  const cx = Math.cos(placement.rotationX);
+  const sx = Math.sin(placement.rotationX);
+  const cy = Math.cos(placement.rotationY);
+  const sy = Math.sin(placement.rotationY);
+  const cz = Math.cos(placement.rotation);
+  const sz = Math.sin(placement.rotation);
+  const ryRx: [[number, number, number], [number, number, number], [number, number, number]] = [
+    [cy, sy * sx, -sy * cx],
+    [0, cx, sx],
+    [sy, -cy * sx, cy * cx],
+  ];
+  return [
+    [cz * ryRx[0][0] - sz * ryRx[1][0], cz * ryRx[0][1] - sz * ryRx[1][1], cz * ryRx[0][2] - sz * ryRx[1][2]],
+    [sz * ryRx[0][0] + cz * ryRx[1][0], sz * ryRx[0][1] + cz * ryRx[1][1], sz * ryRx[0][2] + cz * ryRx[1][2]],
+    [ryRx[2][0], ryRx[2][1], ryRx[2][2]],
+  ];
+}
+
+/** Determinant of the linear part (tilt scales it by cosRX*cosRY). */
 export function selectionMatrixDeterminant(placement: GnumarusSelectionPlacement): number {
-  return placement.scaleX * placement.scaleY * (1 - placement.skewX * placement.skewY);
+  return (
+    Math.cos(placement.rotationX) *
+    Math.cos(placement.rotationY) *
+    placement.scaleX *
+    placement.scaleY *
+    (1 - placement.skewX * placement.skewY)
+  );
 }
 
 /** True when the transform cannot be inverted (degenerate shear/scales). */

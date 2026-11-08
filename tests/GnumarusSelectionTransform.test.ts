@@ -16,6 +16,8 @@ const IDENTITY = {
   scaleY: 1,
   skewX: 0,
   skewY: 0,
+  rotationX: 0,
+  rotationY: 0,
   flipX: false,
   flipY: false,
   width: 5,
@@ -57,7 +59,7 @@ describe("GnumarusSelectionTransform", () => {
   });
 
   it("round-trips through the inverse", () => {
-    const placed = { ...IDENTITY, rotation: 0.7, scaleX: 1.5, scaleY: 0.8, skewX: 0.3, skewY: -0.2 };
+    const placed = { ...IDENTITY, rotation: 0.7, scaleX: 1.5, scaleY: 0.8, skewX: 0.3, skewY: -0.2, rotationX: 0, rotationY: 0 };
     for (const [x, y] of [
       [0, 0],
       [5, 0],
@@ -73,9 +75,9 @@ describe("GnumarusSelectionTransform", () => {
   });
 
   it("detects degenerate shear", () => {
-    expect(isSelectionDegenerate({ ...IDENTITY, skewX: 1, skewY: 1 })).toBe(true);
-    expect(inverseSelectionPoint({ ...IDENTITY, skewX: 1, skewY: 1 }, 32, 32)).toBeNull();
-    expect(isSelectionDegenerate({ ...IDENTITY, skewX: 2, skewY: 0.4 })).toBe(false);
+    expect(isSelectionDegenerate({ ...IDENTITY, skewX: 1, skewY: 1, rotationX: 0, rotationY: 0 })).toBe(true);
+    expect(inverseSelectionPoint({ ...IDENTITY, skewX: 1, skewY: 1, rotationX: 0, rotationY: 0 }, 32, 32)).toBeNull();
+    expect(isSelectionDegenerate({ ...IDENTITY, skewX: 2, skewY: 0.4, rotationX: 0, rotationY: 0 })).toBe(false);
   });
 
   it("bounds the transformed corners", () => {
@@ -103,7 +105,7 @@ describe("GnumarusSelectionTransform", () => {
   it("round-trips through mirrors combined with rotation and shear", () => {
     const placed = {
       ...IDENTITY, rotation: 0.7, scaleX: 1.5, scaleY: 0.8,
-      skewX: 0.3, skewY: -0.2, flipX: true, flipY: true,
+      skewX: 0.3, skewY: -0.2, flipX: true, flipY: true, rotationX: 0.4, rotationY: -0.3,
     };
     for (const [x, y] of [[0, 0], [5, 0], [2.5, 2.5], [5, 5], [1.25, 3.75]]) {
       const forward = forwardSelectionPoint(placed, x, y);
@@ -111,5 +113,19 @@ describe("GnumarusSelectionTransform", () => {
       expect(back?.x).toBeCloseTo(x, 9);
       expect(back?.y).toBeCloseTo(y, 9);
     }
+  });
+
+  it("tilts the selection with foreshortening and reports the scaled determinant", () => {
+    const tiltX = { ...IDENTITY, rotationX: Math.PI / 6 };
+    const top = forwardSelectionPoint(tiltX, 2.5, 0);
+    expect(top.x).toBeCloseTo(32.5, 9);
+    expect(top.y).toBeCloseTo(32.5 - 2.5 * Math.cos(Math.PI / 6), 9);
+    expect(selectionMatrixDeterminant(tiltX)).toBeCloseTo(Math.cos(Math.PI / 6), 12);
+    const tiltY = { ...IDENTITY, rotationY: Math.PI / 6 };
+    const right = forwardSelectionPoint(tiltY, 5, 2.5);
+    expect(right.x).toBeCloseTo(32.5 + 2.5 * Math.cos(Math.PI / 6), 9);
+    expect(right.y).toBeCloseTo(32.5, 9);
+    // Edge-on tilt is degenerate.
+    expect(isSelectionDegenerate({ ...IDENTITY, rotationX: Math.PI / 2 })).toBe(true);
   });
 });

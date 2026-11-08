@@ -36,6 +36,7 @@ import {
   isSelectionDegenerate,
   selectionCornerBox,
   selectionLinearMatrix,
+  selectionRotate3,
   type GnumarusSelectionPlacement,
 } from "./GnumarusSelectionTransform";
 import {
@@ -57,6 +58,7 @@ import {
   layerImageToProject,
   layerLinearMatrix,
   layerPixelCenterToProject,
+  layerRotate3,
   normalizeRotation,
   projectToLayerImageFloat,
   projectToLayerPixel,
@@ -136,9 +138,11 @@ export type GnumarusCanvasTool =
   | "curve"
   | "loupe"
   | "transform"
+  | "transform3d"
   | "eyedropper"
   | "rectselect"
-  | "destransform";
+  | "destransform"
+  | "destransform3d";
 
 /** Floating selection cut out of a cell texture, without a cell of its own. */
 export interface GnumarusFloatingSelection {
@@ -157,6 +161,9 @@ export interface GnumarusFloatingSelection {
   /** Shear factors. */
   skewX: number;
   skewY: number;
+  /** Tilt about the X/Y axes in radians (managed by the 3D rotation tools). */
+  rotationX: number;
+  rotationY: number;
   /** Mirror flags (toggled by the flip anchors). */
   flipX: boolean;
   flipY: boolean;
@@ -169,6 +176,8 @@ export interface GnumarusFloatingSelection {
     scaleY: number;
     skewX: number;
     skewY: number;
+    rotationX: number;
+    rotationY: number;
     flipX: boolean;
     flipY: boolean;
   };
@@ -202,6 +211,9 @@ export type GnumarusSelectionHandleId =
   | "flip-s"
   | "flip-e"
   | "flip-w"
+  | "rot3d-x"
+  | "rot3d-y"
+  | "rot3d-z"
   | "center";
 
 export interface GnumarusLayerInfo {
@@ -307,6 +319,25 @@ export interface GnumarusProjectLayerInput {
   buffer: Uint8ClampedArray;
   transform: GnumarusLayerTransform;
   lockedChannels: GnumarusChannelLock;
+}
+
+/**
+ * Point on a 3D gizmo great circle (plane perpendicular to `axis`) at ring
+ * parameter `phi`, for a rigid sphere of radius `r` in layer/project units.
+ */
+function rot3DRingPoint(axis: "x" | "y" | "z", phi: number, r: number): [number, number, number] {
+  const c = Math.cos(phi) * r;
+  const s = Math.sin(phi) * r;
+  return axis === "x" ? [0, c, s] : axis === "y" ? [c, 0, s] : [c, s, 0];
+}
+
+/** Endpoints of a 3D gizmo axis line (negative, positive) for radius `r`. */
+function rot3DAxisEnds(axis: "x" | "y" | "z", r: number): [[number, number, number], [number, number, number]] {
+  return axis === "x"
+    ? [[-r, 0, 0], [r, 0, 0]]
+    : axis === "y"
+      ? [[0, -r, 0], [0, r, 0]]
+      : [[0, 0, -r], [0, 0, r]];
 }
 
 /**
@@ -515,6 +546,10 @@ export class GnumarusCanvasEngine {
   private readonly previewSelectWhite: SVGPolygonElement;
   private readonly previewSelectBlack: SVGPolygonElement;
   private readonly selectionHandles: Array<{ id: GnumarusSelectionHandleId; group: SVGGElement }> = [];
+  /** 3D gizmo ring halves (front solid, back dashed) per rotation axis. */
+  private readonly rot3dRings: Record<"x" | "y" | "z", { front: SVGPathElement; back: SVGPathElement }>;
+  /** 3D gizmo visible axis lines per rotation axis. */
+  private readonly rot3dAxes: Record<"x" | "y" | "z", SVGLineElement>;
   private readonly previewMarkers: SVGCircleElement[];
   private drawing = false;
   private panning = false;
@@ -603,6 +638,39 @@ export class GnumarusCanvasEngine {
   private layerCenterTap: { layerId: string; startClientX: number; startClientY: number } | null = null;
   /** Pending non-destructive flip tap (click toggles the mirror flag). */
   private layerFlipTap: { layerId: string; axis: "x" | "y"; startClientX: number; startClientY: number } | null = null;
+  /** Active 3D trackball drag (screen-space sphere around the gizmo center). */
+  private trackballDrag: {
+    /** "layer" (non-destructive) or "floating" (destructive) target. */
+    target: "layer" | "floating";
+    layerId: string;
+    startRotationX: number;
+    startRotationY: number;
+    grabClientX: number;
+    grabClientY: number;
+    /** Screen radius of the gizmo sphere in CSS pixels. */
+    radiusPx: number;
+  } | null = null;
+  /** Pending 3D center tap (click resets the tool rotations, drag trackballs). */
+  private rot3dCenterTap: {
+    target: "layer" | "floating";
+    layerId: string;
+    startClientX: number;
+    startClientY: number;
+    radiusPx: number;
+  } | null = null;
+  /** Active single-axis 3D rotation (tangent projection along the ring). */
+  private axisDrag: {
+    target: "layer" | "floating";
+    layerId: string;
+    axis: "x" | "y" | "z";
+    startAngle: number;
+    startPhi: number;
+    phi: number;
+    lastClientX: number;
+    lastClientY: number;
+    sphereR: number;
+    project: (ox: number, oy: number, oz: number) => { x: number; y: number; front: boolean };
+  } | null = null;
   private floatingPlane: THREE.Mesh | null = null;
   private floatingPlaneFor: GnumarusFloatingSelection | null = null;
   private floatingMaterial: THREE.ShaderMaterial | null = null;
@@ -834,6 +902,53 @@ export class GnumarusCanvasEngine {
     appendShape(centerGroup, "circle", { cx: "0", cy: "0", r: "6.5", ...underlay });
     appendShape(centerGroup, "circle", { cx: "0", cy: "0", r: "6.5", ...overlay });
     appendShape(centerGroup, "polygon", { points: "0,-9.5 -3.5,-4 3.5,-4", ...solidWhite });
+    // 3D rotation gizmo: RGB rings (solid front, dashed back), visible axis
+    // lines and colored single-axis handles. Shown only by the 3D tools.
+    const rot3dColor: Record<"x" | "y" | "z", string> = { x: "#ff0000", y: "#00ff00", z: "#0000ff" };
+    const makeRing = (axis: "x" | "y" | "z", front: boolean): SVGPathElement => {
+      const path = document.createElementNS(svgNamespace, "path") as SVGPathElement;
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", rot3dColor[axis]);
+      path.setAttribute("stroke-width", "2.5");
+      path.setAttribute("opacity", front ? "0.95" : "0.45");
+      if (!front) {
+        path.setAttribute("stroke-dasharray", "5 4");
+      }
+      path.style.display = "none";
+      path.style.pointerEvents = "none";
+      this.previewSvg.appendChild(path);
+      return path;
+    };
+    this.rot3dRings = {
+      x: { front: makeRing("x", true), back: makeRing("x", false) },
+      y: { front: makeRing("y", true), back: makeRing("y", false) },
+      z: { front: makeRing("z", true), back: makeRing("z", false) },
+    };
+    const makeGizmoAxis = (axis: "x" | "y" | "z"): SVGLineElement => {
+      const line = document.createElementNS(svgNamespace, "line") as SVGLineElement;
+      line.setAttribute("stroke", rot3dColor[axis]);
+      line.setAttribute("stroke-width", "2");
+      line.setAttribute("opacity", "0.9");
+      line.style.display = "none";
+      line.style.pointerEvents = "none";
+      this.previewSvg.appendChild(line);
+      return line;
+    };
+    this.rot3dAxes = { x: makeGizmoAxis("x"), y: makeGizmoAxis("y"), z: makeGizmoAxis("z") };
+    const rot3dIds: GnumarusSelectionHandleId[] = ["rot3d-x", "rot3d-y", "rot3d-z"];
+    for (const id of rot3dIds) {
+      const group = makeHandleGroup(id);
+      const axis = id.slice(-1) as "x" | "y" | "z";
+      appendShape(group, "circle", {
+        cx: "0",
+        cy: "0",
+        r: "6",
+        fill: rot3dColor[axis],
+        stroke: "#000000",
+        "stroke-width": "1.5",
+        opacity: "0.95",
+      });
+    }
     this.previewMarkers = [];
     for (let i = 0; i < 4; i += 1) {
       const marker = document.createElementNS("http://www.w3.org/2000/svg", "circle");
@@ -2298,6 +2413,14 @@ export class GnumarusCanvasEngine {
     if (transform.rotation !== undefined) {
       ensured.content.transform.rotation = normalizeRotation(transform.rotation);
     }
+    if (transform.rotationX !== undefined) {
+      const raw = Number.isFinite(transform.rotationX) ? (transform.rotationX as number) : 0;
+      ensured.content.transform.rotationX = normalizeRotation(raw);
+    }
+    if (transform.rotationY !== undefined) {
+      const raw = Number.isFinite(transform.rotationY) ? (transform.rotationY as number) : 0;
+      ensured.content.transform.rotationY = normalizeRotation(raw);
+    }
     if (transform.flipX !== undefined) {
       ensured.content.transform.flipX = transform.flipX;
     }
@@ -2336,6 +2459,7 @@ export class GnumarusCanvasEngine {
     this.syncAllLayerRenders();
     this.layoutSceneTransforms();
     this.render();
+    this.updatePreviews();
     this.onTransformChanged?.();
     return true;
   }
@@ -2357,6 +2481,7 @@ export class GnumarusCanvasEngine {
     this.syncAllLayerRenders();
     this.layoutSceneTransforms();
     this.render();
+    this.updatePreviews();
     this.emitStats();
     this.onTransformChanged?.();
     return true;
@@ -3415,6 +3540,8 @@ export class GnumarusCanvasEngine {
       scaleY: floating.scaleY,
       skewX: floating.skewX,
       skewY: floating.skewY,
+      rotationX: floating.rotationX,
+      rotationY: floating.rotationY,
       flipX: floating.flipX,
       flipY: floating.flipY,
       width: floating.width,
@@ -3443,6 +3570,8 @@ export class GnumarusCanvasEngine {
     scaleY: number;
     skewX: number;
     skewY: number;
+    rotationX: number;
+    rotationY: number;
     flipX: boolean;
     flipY: boolean;
     width: number;
@@ -3460,11 +3589,32 @@ export class GnumarusCanvasEngine {
       scaleY: floating.scaleY,
       skewX: floating.skewX,
       skewY: floating.skewY,
+      rotationX: floating.rotationX,
+      rotationY: floating.rotationY,
       flipX: floating.flipX,
       flipY: floating.flipY,
       width: floating.width,
       height: floating.height,
     };
+  }
+
+  /**
+   * Reset only the rotations (spin + tilts) of the floating selection,
+   * keeping position, scale, skew and mirrors. Used by the center handle
+   * of the destructive 3D rotation tool.
+   */
+  resetFloatingRotations(): boolean {
+    const floating = this.floating;
+    if (floating === null || !floating.active) {
+      return false;
+    }
+    floating.rotation = 0;
+    floating.rotationX = 0;
+    floating.rotationY = 0;
+    this.syncFloatingPlane();
+    this.render();
+    this.updatePreviews();
+    return true;
   }
 
   /**
@@ -3678,6 +3828,16 @@ export class GnumarusCanvasEngine {
 
   /** Test hook: anchor layout in container-local pixels (destructure only). */
   getSelectionHandles(): Array<{ id: string; x: number; y: number }> {
+    if (this.tool === "transform3d" || this.tool === "destransform3d") {
+      const frame = this.rot3DFrameFor(this.tool === "transform3d" ? "layer" : "floating");
+      if (frame === null) {
+        return [];
+      }
+      return [
+        ...this.rot3DHandlePositions(frame).map((handle) => ({ id: handle.id, x: handle.x, y: handle.y })),
+        { id: "center", x: frame.center.x, y: frame.center.y },
+      ];
+    }
     const layout =
       this.tool === "destransform"
         ? this.selectionHandleLayout()
@@ -4204,6 +4364,348 @@ export class GnumarusCanvasEngine {
     }
   }
 
+  /** Screen-space 3D gizmo frame (rings, axes, handles) for one tool target. */
+  private rot3DFrameFor(
+    target: "layer" | "floating",
+  ): {
+    target: "layer" | "floating";
+    layerId: string;
+    center: { x: number; y: number };
+    radiusPx: number;
+    sphereR: number;
+    toScreen: (ox: number, oy: number, oz: number) => { x: number; y: number; front: boolean };
+    rings: Record<"x" | "y" | "z", Array<{ x: number; y: number; front: boolean }>>;
+  } | null {
+    const layer = this.activeLayer();
+    if (layer === null || layer.width < 1 || layer.height < 1) {
+      return null;
+    }
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return null;
+    }
+    // Rotation + gizmo center/radius per target (rigid sphere: scale, skew
+    // and flips do not distort the rings).
+    let rot: [[number, number, number], [number, number, number], [number, number, number]];
+    let homeCX: number;
+    let homeCY: number;
+    let sphereR: number;
+    let layerId: string;
+    if (target === "floating") {
+      const floating = this.floating;
+      if (floating === null || !floating.active || !this.floatingHomeVisible()) {
+        return null;
+      }
+      rot = selectionRotate3(this.floatingPlacement(floating));
+      homeCX = floating.cx;
+      homeCY = floating.cy;
+      sphereR = Math.max(floating.width, floating.height) / 2;
+      layerId = floating.layerId;
+    } else {
+      rot = layerRotate3(layer.transform);
+      homeCX = layer.width / 2;
+      homeCY = layer.height / 2;
+      // Layer gizmo rotates about the project center offset.
+      sphereR = Math.max(layer.width, layer.height) / 2;
+      layerId = layer.id;
+    }
+    if (!(sphereR > 0)) {
+      return null;
+    }
+    const local: GnumarusRect = { left: 0, top: 0, width: rect.width, height: rect.height };
+    const view = this.viewTransform();
+    const toScreen = (ox: number, oy: number, oz: number): { x: number; y: number; front: boolean } => {
+      // Rotate the rigid offset, then map through the home layer placement.
+      const rx = rot[0][0] * ox + rot[0][1] * oy + rot[0][2] * oz;
+      const ry = rot[1][0] * ox + rot[1][1] * oy + rot[1][2] * oz;
+      const rz = rot[2][0] * ox + rot[2][1] * oy + rot[2][2] * oz;
+      let projectX: number;
+      let projectY: number;
+      if (target === "floating") {
+        const projected = layerImageToProject(homeCX + rx, homeCY + ry, layer.width, layer.height, layer.transform);
+        projectX = projected.x;
+        projectY = projected.y;
+      } else {
+        projectX = layer.transform.x + rx;
+        projectY = layer.transform.y + ry;
+      }
+      const client = projectToScreen(projectX, projectY, local, view);
+      // `local` is zero-based, so the client point is already container-local.
+      // On-plane (z = 0) counts as front so resting rings render solid.
+      return { x: client.x, y: client.y, front: rz >= 0 };
+    };
+    const origin = toScreen(0, 0, 0);
+    const radiusPx = Math.max(24, sphereR * this.zoom);
+    const samples = 120;
+    const rings = {
+      x: new Array<{ x: number; y: number; front: boolean }>(),
+      y: new Array<{ x: number; y: number; front: boolean }>(),
+      z: new Array<{ x: number; y: number; front: boolean }>(),
+    };
+    for (const axis of ["x", "y", "z"] as const) {
+      for (let i = 0; i < samples; i += 1) {
+        const [ox, oy, oz] = rot3DRingPoint(axis, (i / samples) * Math.PI * 2, sphereR);
+        rings[axis].push(toScreen(ox, oy, oz));
+      }
+    }
+    return { target, layerId, center: { x: origin.x, y: origin.y }, radiusPx, sphereR, toScreen, rings };
+  }
+
+  /** Axis-handle screen positions on the 3D rings (front, 45 degrees). */
+  private rot3DHandlePositions(frame: {
+    sphereR: number;
+    toScreen: (ox: number, oy: number, oz: number) => { x: number; y: number; front: boolean };
+  }): Array<{ id: GnumarusSelectionHandleId; x: number; y: number }> {
+    const handles: Array<{ id: GnumarusSelectionHandleId; x: number; y: number }> = [];
+    const ids: Array<{ id: GnumarusSelectionHandleId; axis: "x" | "y" | "z" }> = [
+      { id: "rot3d-x", axis: "x" },
+      { id: "rot3d-y", axis: "y" },
+      { id: "rot3d-z", axis: "z" },
+    ];
+    for (const entry of ids) {
+      const [ox, oy, oz] = rot3DRingPoint(entry.axis, Math.PI / 4, frame.sphereR);
+      const point = frame.toScreen(ox, oy, oz);
+      handles.push({ id: entry.id, x: point.x, y: point.y });
+    }
+    return handles;
+  }
+
+  /**
+   * Hit-test the 3D gizmo: axis handles, center reset, ring proximity,
+   * then the sphere body for trackball. Null when the tool has no frame.
+   */
+  private rot3DHitTest(
+    clientX: number,
+    clientY: number,
+  ): { kind: "axis" | "center" | "body"; id: GnumarusSelectionHandleId; axis: "x" | "y" | "z"; phi: number } | null {
+    const target = this.tool === "transform3d" ? "layer" : this.tool === "destransform3d" ? "floating" : null;
+    if (target === null) {
+      return null;
+    }
+    const frame = this.rot3DFrameFor(target);
+    if (frame === null) {
+      return null;
+    }
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const mx = clientX - rect.left;
+    const my = clientY - rect.top;
+    const radiusSquared = 12 * 12;
+    for (const handle of this.rot3DHandlePositions(frame)) {
+      const dx = handle.x - mx;
+      const dy = handle.y - my;
+      if (dx * dx + dy * dy <= radiusSquared) {
+        const axis = handle.id.slice(-1) as "x" | "y" | "z";
+        return { kind: "axis", id: handle.id, axis, phi: Math.PI / 4 };
+      }
+    }
+    const cdx = frame.center.x - mx;
+    const cdy = frame.center.y - my;
+    if (cdx * cdx + cdy * cdy <= radiusSquared) {
+      return { kind: "center", id: "center", axis: "z", phi: 0 };
+    }
+    // Ring proximity starts a single-axis drag about that ring's axis.
+    const ringThresholdSquared = 10 * 10;
+    for (const axis of ["x", "y", "z"] as const) {
+      const points = frame.rings[axis];
+      let best = Number.POSITIVE_INFINITY;
+      let bestPhi = 0;
+      for (let i = 0; i < points.length; i += 1) {
+        const point = points[i];
+        if (point === undefined) {
+          continue;
+        }
+        const dx = point.x - mx;
+        const dy = point.y - my;
+        const squared = dx * dx + dy * dy;
+        if (squared < best) {
+          best = squared;
+          bestPhi = (i / points.length) * Math.PI * 2;
+        }
+      }
+      if (best <= ringThresholdSquared) {
+        return { kind: "axis", id: `rot3d-${axis}` as GnumarusSelectionHandleId, axis, phi: bestPhi };
+      }
+    }
+    const bdx = frame.center.x - mx;
+    const bdy = frame.center.y - my;
+    if (bdx * bdx + bdy * bdy <= frame.radiusPx * frame.radiusPx) {
+      return { kind: "body", id: "center", axis: "z", phi: 0 };
+    }
+    return null;
+  }
+
+  /** Current tool-managed rotation angle for a 3D gesture target. */
+  private rot3DStartAngle(target: "layer" | "floating", layerId: string, axis: "x" | "y" | "z"): number | null {
+    if (target === "layer") {
+      const layer = this.activeLayer();
+      if (layer === null || layer.id !== layerId) {
+        return null;
+      }
+      return axis === "x" ? layer.transform.rotationX : axis === "y" ? layer.transform.rotationY : layer.transform.rotation;
+    }
+    const floating = this.floating;
+    if (floating === null || !floating.active || floating.layerId !== layerId) {
+      return null;
+    }
+    return axis === "x" ? floating.rotationX : axis === "y" ? floating.rotationY : floating.rotation;
+  }
+
+  /** Apply one tool-managed rotation angle (ephemeral; commit captures it). */
+  private applyRot3DAngle(target: "layer" | "floating", layerId: string, axis: "x" | "y" | "z", angle: number): boolean {
+    if (target === "layer") {
+      const layer = this.activeLayer();
+      if (layer === null || layer.id !== layerId) {
+        return false;
+      }
+      if (axis === "x") {
+        this.setLayerTransform(layerId, { rotationX: angle });
+      } else if (axis === "y") {
+        this.setLayerTransform(layerId, { rotationY: angle });
+      } else {
+        this.setLayerTransform(layerId, { rotation: angle });
+      }
+      return true;
+    }
+    const floating = this.floating;
+    if (floating === null || !floating.active || floating.layerId !== layerId || !this.floatingHomeVisible()) {
+      return false;
+    }
+    if (axis === "x") {
+      floating.rotationX = normalizeRotation(angle);
+    } else if (axis === "y") {
+      floating.rotationY = normalizeRotation(angle);
+    } else {
+      floating.rotation = normalizeRotation(angle);
+    }
+    this.afterFloatingChange();
+    return true;
+  }
+
+  /** Start a 3D gizmo gesture from a hit test. */
+  private beginRot3DGesture(
+    hit: { kind: "axis" | "center" | "body"; id: GnumarusSelectionHandleId; axis: "x" | "y" | "z"; phi: number },
+    event: PointerEvent,
+  ): boolean {
+    const target = this.tool === "transform3d" ? "layer" : this.tool === "destransform3d" ? "floating" : null;
+    if (target === null) {
+      return false;
+    }
+    const frame = this.rot3DFrameFor(target);
+    if (frame === null) {
+      return false;
+    }
+    if (hit.kind === "center") {
+      this.rot3dCenterTap = {
+        target,
+        layerId: frame.layerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        radiusPx: frame.radiusPx,
+      };
+      return true;
+    }
+    if (hit.kind === "axis") {
+      const startAngle = this.rot3DStartAngle(target, frame.layerId, hit.axis);
+      if (startAngle === null) {
+        return false;
+      }
+      this.axisDrag = {
+        target,
+        layerId: frame.layerId,
+        axis: hit.axis,
+        startAngle,
+        startPhi: hit.phi,
+        phi: hit.phi,
+        lastClientX: event.clientX,
+        lastClientY: event.clientY,
+        sphereR: frame.sphereR,
+        project: frame.toScreen,
+      };
+      return true;
+    }
+    const startX = this.rot3DStartAngle(target, frame.layerId, "x");
+    const startY = this.rot3DStartAngle(target, frame.layerId, "y");
+    if (startX === null || startY === null) {
+      return false;
+    }
+    this.trackballDrag = {
+      target,
+      layerId: frame.layerId,
+      startRotationX: startX,
+      startRotationY: startY,
+      grabClientX: event.clientX,
+      grabClientY: event.clientY,
+      radiusPx: frame.radiusPx,
+    };
+    return true;
+  }
+
+  /** Advance an in-progress 3D gizmo gesture from the cursor. */
+  private updateRot3DGesture(clientX: number, clientY: number): void {
+    if (this.trackballDrag !== null) {
+      const gesture = this.trackballDrag;
+      // Screen-space trackball: right drags spin right (RY), down drags
+      // tip the top toward the viewer (RX); angle = drag / sphere radius.
+      const okX = this.applyRot3DAngle(
+        gesture.target,
+        gesture.layerId,
+        "x",
+        gesture.startRotationX + (clientY - gesture.grabClientY) / gesture.radiusPx,
+      );
+      const okY = this.applyRot3DAngle(
+        gesture.target,
+        gesture.layerId,
+        "y",
+        gesture.startRotationY + (clientX - gesture.grabClientX) / gesture.radiusPx,
+      );
+      if (!okX || !okY) {
+        this.trackballDrag = null;
+        return;
+      }
+      this.lastMouseClient = { x: clientX, y: clientY };
+      return;
+    }
+    if (this.axisDrag !== null) {
+      const gesture = this.axisDrag;
+      // Tangent projection along the ring: the dragged ring point follows
+      // the cursor around its own axis; incremental in the live tangent.
+      const epsilon = 0.01;
+      const ahead = gesture.project(...rot3DRingPoint(gesture.axis, gesture.phi + epsilon, gesture.sphereR));
+      const behind = gesture.project(...rot3DRingPoint(gesture.axis, gesture.phi - epsilon, gesture.sphereR));
+      const tx = (ahead.x - behind.x) / (2 * epsilon);
+      const ty = (ahead.y - behind.y) / (2 * epsilon);
+      const denom = tx * tx + ty * ty;
+      if (!(denom > 1e-9)) {
+        return;
+      }
+      const dx = clientX - gesture.lastClientX;
+      const dy = clientY - gesture.lastClientY;
+      gesture.phi += (dx * tx + dy * ty) / denom;
+      gesture.lastClientX = clientX;
+      gesture.lastClientY = clientY;
+      if (
+        !this.applyRot3DAngle(gesture.target, gesture.layerId, gesture.axis, gesture.startAngle + (gesture.phi - gesture.startPhi))
+      ) {
+        this.axisDrag = null;
+      } else {
+        this.lastMouseClient = { x: clientX, y: clientY };
+      }
+    }
+  }
+
+  /** Reset only the tool-managed rotations (spin + tilts), keeping the rest. */
+  private resetRot3DAngles(target: "layer" | "floating", layerId: string): boolean {
+    if (target === "layer") {
+      const layer = this.activeLayer();
+      if (layer === null || layer.id !== layerId) {
+        return false;
+      }
+      this.setLayerTransform(layerId, { rotation: 0, rotationX: 0, rotationY: 0 });
+      return true;
+    }
+    return this.resetFloatingRotations();
+  }
+
   /** True when the floating selection belongs to the currently shown cell. */
   private floatingHomeVisible(): boolean {    const floating = this.floating;
     if (floating === null || !floating.active || floating.frame !== this.currentFrame) {
@@ -4357,6 +4859,8 @@ export class GnumarusCanvasEngine {
       scaleY: 1,
       skewX: 0,
       skewY: 0,
+      rotationX: 0,
+      rotationY: 0,
       flipX: false,
       flipY: false,
       initial: {
@@ -4367,6 +4871,8 @@ export class GnumarusCanvasEngine {
         scaleY: 1,
         skewX: 0,
         skewY: 0,
+        rotationX: 0,
+        rotationY: 0,
         flipX: false,
         flipY: false,
       },
@@ -4445,6 +4951,9 @@ export class GnumarusCanvasEngine {
     this.layerSkewDrag = null;
     this.layerCenterTap = null;
     this.layerFlipTap = null;
+    this.trackballDrag = null;
+    this.rot3dCenterTap = null;
+    this.axisDrag = null;
   }
 
   /** Clear in-progress drags at stroke end, keeping a pending center tap. */
@@ -4456,6 +4965,8 @@ export class GnumarusCanvasEngine {
     this.layerResizeDrag = null;
     this.layerRotateDrag = null;
     this.layerSkewDrag = null;
+    this.trackballDrag = null;
+    this.axisDrag = null;
   }
 
   /** (Re)create, position and show/hide the floating content plane. */
@@ -4912,7 +5423,7 @@ export class GnumarusCanvasEngine {
       ];
       return corners.map(([x, y]) => forwardSelectionPoint(placement, x, y));
     }
-    if (this.tool === "transform") {
+    if (this.tool === "transform" || this.tool === "transform3d") {
       // Non-destructive overlay: the active layer box in its own image
       // pixels (the layer transform applies at draw time in toClient).
       const layer = this.activeLayer();
@@ -4934,6 +5445,30 @@ export class GnumarusCanvasEngine {
     for (const handle of this.selectionHandles) {
       handle.group.style.display = "none";
     }
+  }
+
+  /** Hide the 3D gizmo rings and axis lines. */
+  private hideRot3dGizmo(): void {
+    for (const axis of ["x", "y", "z"] as const) {
+      this.rot3dRings[axis].front.style.display = "none";
+      this.rot3dRings[axis].back.style.display = "none";
+      this.rot3dAxes[axis].style.display = "none";
+    }
+  }
+
+  /** SVG path data for one ring side (front or back), breaking runs. */
+  private rot3DRingPath(points: Array<{ x: number; y: number; front: boolean }>, front: boolean): string {
+    let d = "";
+    let pen = false;
+    for (const point of points) {
+      if (point.front !== front) {
+        pen = false;
+        continue;
+      }
+      d += `${pen ? "L" : "M"}${point.x.toFixed(1)},${point.y.toFixed(1)}`;
+      pen = true;
+    }
+    return d;
   }
 
   /** Position the marching-ants selection polygon over the active layer. */
@@ -4989,8 +5524,49 @@ export class GnumarusCanvasEngine {
           handle.group.style.display = "none";
         }
       }
+      this.hideRot3dGizmo();
+    } else if (this.tool === "transform3d" || this.tool === "destransform3d") {
+      const frame = this.rot3DFrameFor(this.tool === "transform3d" ? "layer" : "floating");
+      const placed = new Set<string>();
+      if (frame !== null) {
+        this.previewSvg.style.display = "block";
+        for (const axis of ["x", "y", "z"] as const) {
+          const ring = this.rot3dRings[axis];
+          ring.front.setAttribute("d", this.rot3DRingPath(frame.rings[axis], true));
+          ring.front.style.display = "block";
+          ring.back.setAttribute("d", this.rot3DRingPath(frame.rings[axis], false));
+          ring.back.style.display = "block";
+          const line = this.rot3dAxes[axis];
+          const [from, to] = rot3DAxisEnds(axis, frame.sphereR);
+          const negative = frame.toScreen(...from);
+          const positive = frame.toScreen(...to);
+          line.setAttribute("x1", String(negative.x));
+          line.setAttribute("y1", String(negative.y));
+          line.setAttribute("x2", String(positive.x));
+          line.setAttribute("y2", String(positive.y));
+          line.style.display = "block";
+        }
+        const handles = [...this.rot3DHandlePositions(frame), { id: "center" as GnumarusSelectionHandleId, x: frame.center.x, y: frame.center.y }];
+        for (const handle of handles) {
+          const group = this.selectionHandles.find((entry) => entry.id === handle.id)?.group;
+          if (group === undefined) {
+            continue;
+          }
+          group.setAttribute("transform", `translate(${handle.x} ${handle.y})`);
+          group.style.display = "block";
+          placed.add(handle.id);
+        }
+      } else {
+        this.hideRot3dGizmo();
+      }
+      for (const handle of this.selectionHandles) {
+        if (!placed.has(handle.id)) {
+          handle.group.style.display = "none";
+        }
+      }
     } else {
       this.hideSelectionHandles();
+      this.hideRot3dGizmo();
     }
   }
 
@@ -5041,6 +5617,7 @@ export class GnumarusCanvasEngine {
     this.previewSelectWhite.style.display = "none";
     this.previewSelectBlack.style.display = "none";
     this.hideSelectionHandles();
+    this.hideRot3dGizmo();
     for (const marker of this.previewMarkers) {
       marker.style.display = "none";
     }
@@ -5174,6 +5751,7 @@ export class GnumarusCanvasEngine {
     this.previewSelectWhite.style.display = "none";
     this.previewSelectBlack.style.display = "none";
     this.hideSelectionHandles();
+    this.hideRot3dGizmo();
     for (const marker of this.previewMarkers) {
       marker.style.display = "none";
     }
@@ -5974,6 +6552,35 @@ export class GnumarusCanvasEngine {
         canvas.setPointerCapture(event.pointerId);
         return;
       }
+      if (this.tool === "transform3d" || this.tool === "destransform3d") {
+        // Rotation-only gizmo tools. The destructive variant auto-selects
+        // the whole current-cell texture when nothing is floating yet.
+        if (this.tool === "destransform3d") {
+          const floating = this.floating;
+          if (floating === null || !floating.active) {
+            const layer = this.activeLayer();
+            if (layer === null) {
+              return;
+            }
+            if (this.toImagePixel(event.clientX, event.clientY) === null) {
+              return;
+            }
+            if (!this.cutAllToFloating()) {
+              return;
+            }
+          }
+        } else if (this.activeLayer() === null) {
+          return;
+        }
+        const hit = this.rot3DHitTest(event.clientX, event.clientY);
+        if (hit !== null && this.beginRot3DGesture(hit, event)) {
+          this.lastMouseClient = { x: event.clientX, y: event.clientY };
+          canvas.setPointerCapture(event.pointerId);
+          this.updatePreviews();
+        }
+        // Clicks outside the gizmo are ignored so work is never baked.
+        return;
+      }
       if (this.tool === "loupe") {
         // Left-drag with the loupe tool zooms: up/right zooms in.
         this.loupeZooming = true;
@@ -6235,6 +6842,36 @@ export class GnumarusCanvasEngine {
         };
       }
       this.updatePreviews();
+      if (this.trackballDrag !== null || this.axisDrag !== null) {
+        this.updateRot3DGesture(event.clientX, event.clientY);
+        return;
+      }
+      if (this.rot3dCenterTap !== null) {
+        const dx = event.clientX - this.rot3dCenterTap.startClientX;
+        const dy = event.clientY - this.rot3dCenterTap.startClientY;
+        if (dx * dx + dy * dy >= 16) {
+          // Dragged: the tap becomes a trackball measured from the down
+          // point, so the full drag distance applies.
+          const tap = this.rot3dCenterTap;
+          this.rot3dCenterTap = null;
+          const startX = this.rot3DStartAngle(tap.target, tap.layerId, "x");
+          const startY = this.rot3DStartAngle(tap.target, tap.layerId, "y");
+          if (startX === null || startY === null) {
+            return;
+          }
+          this.trackballDrag = {
+            target: tap.target,
+            layerId: tap.layerId,
+            startRotationX: startX,
+            startRotationY: startY,
+            grabClientX: tap.startClientX,
+            grabClientY: tap.startClientY,
+            radiusPx: tap.radiusPx,
+          };
+          this.updateRot3DGesture(event.clientX, event.clientY);
+        }
+        return;
+      }
       if (this.layerResizeDrag !== null || this.layerRotateDrag !== null || this.layerSkewDrag !== null) {
         this.updateLayerGesture(event.clientX, event.clientY);
         return;
@@ -6539,6 +7176,14 @@ export class GnumarusCanvasEngine {
         }
         return;
       }
+      if (this.rot3dCenterTap !== null) {
+        const tap = this.rot3dCenterTap;
+        this.rot3dCenterTap = null;
+        if (event.button === 0) {
+          this.resetRot3DAngles(tap.target, tap.layerId);
+        }
+        return;
+      }
       if (this.rectDrag !== null && event.button === 0) {
         const drag = this.rectDrag;
         this.rectDrag = null;
@@ -6567,6 +7212,7 @@ export class GnumarusCanvasEngine {
       this.flipTap = null;
       this.layerCenterTap = null;
       this.layerFlipTap = null;
+      this.rot3dCenterTap = null;
       if (this.rectDrag !== null) {
         this.rectDrag = null;
         this.updatePreviews();
@@ -6668,6 +7314,14 @@ export class GnumarusCanvasEngine {
         }
         if (event.key === "t" || event.key === "T") {
           this.setTool("transform");
+          return;
+        }
+        if (event.key === "y" || event.key === "Y") {
+          this.setTool("transform3d");
+          return;
+        }
+        if (event.key === "u" || event.key === "U") {
+          this.setTool("destransform3d");
           return;
         }
         if (event.code === "Digit4" || event.code === "Numpad4") {

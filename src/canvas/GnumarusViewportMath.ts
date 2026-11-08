@@ -22,6 +22,10 @@ export interface GnumarusLayerTransform {
   /** Shear factors (horizontal shear per vertical unit and vice versa). */
   skewX: number;
   skewY: number;
+  /** Tilt about the layer X axis in radians (top toward viewer when positive). */
+  rotationX: number;
+  /** Tilt about the layer Y axis in radians (right edge toward viewer when positive). */
+  rotationY: number;
 }
 
 export const IDENTITY_LAYER_TRANSFORM: GnumarusLayerTransform = {
@@ -34,6 +38,8 @@ export const IDENTITY_LAYER_TRANSFORM: GnumarusLayerTransform = {
   scaleY: 1,
   skewX: 0,
   skewY: 0,
+  rotationX: 0,
+  rotationY: 0,
 };
 
 /** Clamp for layer shear factors (keeps mapping safely invertible). */
@@ -46,21 +52,68 @@ export interface GnumarusRect {
   height: number;
 }
 
-/** Linear part of the layer-image (flip-applied, layer-centered) to project map. */
-export function layerLinearMatrix(layer: GnumarusLayerTransform): { a: number; b: number; c: number; d: number } {
-  const cos = Math.cos(layer.rotation);
-  const sin = Math.sin(layer.rotation);
+/**
+ * Full 3x3 rotation `Rz(rotation) * Ry(rotationY) * Rx(rotationX)` in
+ * layer/project space (x right, y down, z toward the viewer, angles
+ * clockwise-positive on screen). Row-major `m[row][col]`.
+ */
+export function layerRotate3(layer: GnumarusLayerTransform): [
+  [number, number, number],
+  [number, number, number],
+  [number, number, number],
+] {
+  const cx = Math.cos(layer.rotationX);
+  const sx = Math.sin(layer.rotationX);
+  const cy = Math.cos(layer.rotationY);
+  const sy = Math.sin(layer.rotationY);
+  const cz = Math.cos(layer.rotation);
+  const sz = Math.sin(layer.rotation);
+  // Rx (y-down adapted) then Ry (y-down adapted), then Rz.
+  // Rx = [[1,0,0],[0,cx,sx],[0,-sx,cx]], Ry = [[cy,0,-sy],[0,1,0],[sy,0,cy]].
+  const ryRx: [[number, number, number], [number, number, number], [number, number, number]] = [
+    [cy, sy * sx, -sy * cx],
+    [0, cx, sx],
+    [sy, -cy * sx, cy * cx],
+  ];
+  return [
+    [cz * ryRx[0][0] - sz * ryRx[1][0], cz * ryRx[0][1] - sz * ryRx[1][1], cz * ryRx[0][2] - sz * ryRx[1][2]],
+    [sz * ryRx[0][0] + cz * ryRx[1][0], sz * ryRx[0][1] + cz * ryRx[1][1], sz * ryRx[0][2] + cz * ryRx[1][2]],
+    [ryRx[2][0], ryRx[2][1], ryRx[2][2]],
+  ];
+}
+
+/** In-plane scale/shear part (flips are applied to the coords beforehand). */
+function layerAffine2(layer: GnumarusLayerTransform): { a: number; b: number; c: number; d: number } {
   return {
-    a: cos * layer.scaleX - sin * layer.skewY * layer.scaleX,
-    b: cos * layer.skewX * layer.scaleY - sin * layer.scaleY,
-    c: sin * layer.scaleX + cos * layer.skewY * layer.scaleX,
-    d: sin * layer.skewX * layer.scaleY + cos * layer.scaleY,
+    a: layer.scaleX,
+    b: layer.skewX * layer.scaleY,
+    c: layer.skewY * layer.scaleX,
+    d: layer.scaleY,
   };
 }
 
-/** Determinant of the layer linear part (scales times shear factor). */
+/** Linear part of the layer-image (flip-applied, layer-centered) to project map. */
+export function layerLinearMatrix(layer: GnumarusLayerTransform): { a: number; b: number; c: number; d: number } {
+  const rotation = layerRotate3(layer);
+  const affine = layerAffine2(layer);
+  // Top-left 2x2 of R3 * S*K (content lives at z = 0).
+  return {
+    a: rotation[0][0] * affine.a + rotation[0][1] * affine.c,
+    b: rotation[0][0] * affine.b + rotation[0][1] * affine.d,
+    c: rotation[1][0] * affine.a + rotation[1][1] * affine.c,
+    d: rotation[1][0] * affine.b + rotation[1][1] * affine.d,
+  };
+}
+
+/** Determinant of the layer linear part (tilt scales it by cosRX*cosRY). */
 export function layerMatrixDeterminant(layer: GnumarusLayerTransform): number {
-  return layer.scaleX * layer.scaleY * (1 - layer.skewX * layer.skewY);
+  return (
+    Math.cos(layer.rotationX) *
+    Math.cos(layer.rotationY) *
+    layer.scaleX *
+    layer.scaleY *
+    (1 - layer.skewX * layer.skewY)
+  );
 }
 
 /** Continuous image coordinates to project pixels (origin at project center, y down). */
