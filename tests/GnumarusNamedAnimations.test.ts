@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   countAnimationFrames,
+  describeNamedAnimation,
+  formatNamedAnimationFrames,
   mapNamedAnimationFrames,
   nextAnimationStep,
   parseFrameList,
@@ -301,5 +303,28 @@ describe("GnumarusNamedAnimations", () => {
         [5, 1],
       ]),
     );
+  });
+
+  it("formats frame ranges and animation summaries", () => {
+    expect(formatNamedAnimationFrames([])).toBe("");
+    expect(formatNamedAnimationFrames([{ frame: 0, duration: null }])).toBe("1");
+    expect(formatNamedAnimationFrames([{ frame: 0, duration: null }, { frame: 1, duration: null }])).toBe("1,2");
+    expect(
+      formatNamedAnimationFrames(
+        [0, 1, 4, 5, 6, 7, 8].map((frame) => ({ frame, duration: null as number | null })),
+      ),
+    ).toBe("1,2,5-9");
+    expect(
+      formatNamedAnimationFrames(
+        [0, 2, 3, 4, 9].map((frame) => ({ frame, duration: null as number | null })),
+      ),
+    ).toBe("1,3-5,10");
+    expect(
+      describeNamedAnimation({ name: "walk", loop: "forward", frames: [{ frame: 0, duration: null }, { frame: 1, duration: null }] }),
+    ).toBe('"walk": forward, 2 frames: 1,2');
+    expect(describeNamedAnimation({ name: "idle", loop: "none", frames: [] })).toBe('"idle": none, 0 frames');
+    expect(
+      describeNamedAnimation({ name: "x", loop: "ping-pong", frames: [{ frame: 4, duration: 0.5 }] }),
+    ).toBe('"x": ping-pong, 1 frame: 5');
   });
 });

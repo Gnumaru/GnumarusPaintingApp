@@ -64,9 +64,9 @@ test("shell boots with menu, toolbar, canvas host and status bar", async ({ page
   await expect(page.locator("gnumarus-shell")).toBeAttached();
 
   await page.getByRole("button", { name: "File" }).click();
-  await expect(page.getByRole("button", { name: "New" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Open" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Save" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "New Project" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open Project" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save Project" })).toBeVisible();
 
   await expect(page.locator("gnumarus-shell")).toContainText("64 x 64");
   await expect(page.locator("gnumarus-shell")).toContainText("pencil");
@@ -78,7 +78,7 @@ test("File > New creates a canvas with the requested size", async ({ page }) => 
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell");
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "New" }).click();
+  await page.getByRole("button", { name: "New Project" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("New canvas");
   await page.getByRole("button", { name: "Create" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("64 x 64");
@@ -1906,7 +1906,7 @@ test("menubar closes on outside click and Escape", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const menubar = page.locator("gnumarus-shell .menubar");
-  const fileItem = menubar.getByRole("button", { name: "New", exact: true });
+  const fileItem = menubar.getByRole("button", { name: "New Project", exact: true });
   await page.getByRole("button", { name: "File" }).click();
   await expect(fileItem).toBeVisible();
   await page.locator("gnumarus-shell canvas").click();
@@ -1921,7 +1921,7 @@ test("menubar switches menus on hover while open", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const menubar = page.locator("gnumarus-shell .menubar");
-  const fileItem = menubar.getByRole("button", { name: "New", exact: true });
+  const fileItem = menubar.getByRole("button", { name: "New Project", exact: true });
   const editItem = menubar.getByRole("button", { name: "Settings", exact: true });
   const helpItem = menubar.getByRole("button", { name: "Shortcuts", exact: true });
   // Hovering with no menu open opens nothing.
@@ -3957,8 +3957,13 @@ test("quick action palette filters and runs actions", async ({ page }) => {
   await expect(input).toBeFocused();
   await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveText([
     "Crop All Cells to Canvas",
+    "Export",
     "Fit All Textures to Size",
+    "Import",
+    "New Project",
+    "Open Project",
     "Reset Canvas Transform",
+    "Save Project",
   ]);
   await input.fill("xyz-nothing");
   await expect(dialog.locator('[data-testid="action-palette-empty"]')).toBeVisible();
@@ -6323,13 +6328,36 @@ test("named animations reject bad definitions and list valid ones", async ({ pag
   await dialog.locator("input#animationInput").fill("walk,forward,1,2");
   await dialog.getByRole("button", { name: "Add", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Animation walk added (2 frames)");
-  await expect(dialog.locator('[data-testid="animation-list"]')).toContainText("walk (forward, 2 frames)");
+  await expect(dialog.locator('[data-testid="animation-list"]')).toContainText('"walk": forward, 2 frames: 1,2');
   await expect(page.locator('gnumarus-shell [data-testid="animation-select"]')).toContainText("walk");
   await dialog.locator("input#animationInput").fill("walk,none,3");
   await dialog.getByRole("button", { name: "Add", exact: true }).click();
   await expect(dialog.locator('[role="alert"]')).toContainText("already exists");
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(dialog).toBeHidden();
+});
+
+test("animation delete asks for confirmation", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await addFrames(page, 1);
+  await addAnimation(page, "walk,forward,1,2");
+  const dialog = await animationDialog(page);
+  const listItem = dialog.locator("li", { hasText: '"walk"' });
+  await expect(listItem).toBeVisible();
+  await listItem.getByRole("button", { name: 'Delete animation walk' }).click();
+  const confirm = page.locator("gnumarus-shell dialog#animationDeleteDialog");
+  await expect(confirm).toBeVisible();
+  await expect(confirm).toContainText("Are you sure");
+  await confirm.getByRole("button", { name: "No", exact: true }).click();
+  await expect(confirm).toBeHidden();
+  await expect(dialog.locator('[data-testid="animation-list"]')).toContainText('"walk"');
+  await listItem.getByRole("button", { name: 'Delete animation walk' }).click();
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole("button", { name: "Yes", exact: true }).click();
+  await expect(confirm).toBeHidden();
+  await expect(dialog.locator('[data-testid="animation-list"]')).not.toContainText('"walk"');
+  await expect(page.locator("gnumarus-shell")).toContainText("Animation walk deleted");
 });
 
 test("selecting an animation highlights its frame columns", async ({ page }) => {
@@ -6420,6 +6448,10 @@ test("deleting the selected animation restores the full timeline", async ({ page
   await selectAnimation(page, "walk");
   const dialog = await animationDialog(page);
   await dialog.getByRole("button", { name: "Delete animation walk", exact: true }).click();
+  const confirm = page.locator("gnumarus-shell dialog#animationDeleteDialog");
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole("button", { name: "Yes", exact: true }).click();
+  await expect(confirm).toBeHidden();
   await expect(page.locator("gnumarus-shell")).toContainText("Animation walk deleted");
   await expect(page.locator('gnumarus-shell [data-testid="animation-select"]')).toHaveValue("");
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
@@ -6580,9 +6612,11 @@ test("File > Export lists only formats the browser truly encodes", async ({ page
   );
   expect(values).toEqual(expect.arrayContaining(["image/png", "image/jpeg", "image/webp"]));
   // Chromium has no canvas encoder for these (it used to fall back to PNG bytes).
-  for (const mime of ["image/heic", "image/heif", "image/jxl"]) {
+  for (const mime of ["image/heic", "image/heif"]) {
     expect(values).not.toContain(mime);
   }
+  // JPEG XL is always offered through the bundled WASM codec.
+  expect(values).toContain("image/jxl");
   await dialog.getByRole("button", { name: "Cancel" }).click();
   // Every listed format must round-trip to a blob of the claimed type.
   let prev: string | null = null;
@@ -6659,6 +6693,102 @@ test("File > Export JPEG quality changes the file size", async ({ page }) => {
   expect(big).toBeGreaterThan(small);
 });
 
+test("File > Export saves the current frame as lossless JXL", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator("select#exportFormat").selectOption("image/jxl");
+  await expect(dialog.locator('input#exportJxlLossless')).toBeChecked();
+  await dialog.locator("#exportOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported");
+  const file = await exportedJxlBytes(page);
+  expect(file?.fileName).toContain("frame-1.jxl");
+  expect(file?.type).toBe("image/jxl");
+  expect(file?.bytes.slice(0, 2)).toEqual([0xff, 0x0a]);
+  const decoded = await decodeJxlInPage(page, file?.bytes ?? []);
+  expect(decoded?.width).toBe(64);
+  expect(decoded?.height).toBe(64);
+  expect(decoded?.frames).toBe(1);
+  expect(decoded?.center).toEqual([0, 0, 0, 255]);
+});
+
+test("File > Export saves lossy JXL when lossless is off", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator("select#exportFormat").selectOption("image/jxl");
+  await dialog.locator("#exportJxlLossless").uncheck();
+  await dialog.locator("input#exportQuality").fill("50");
+  await dialog.locator("#exportOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported");
+  const file = await exportedJxlBytes(page);
+  expect(file?.type).toBe("image/jxl");
+  expect(file?.bytes.slice(0, 2)).toEqual([0xff, 0x0a]);
+  const decoded = await decodeJxlInPage(page, file?.bytes ?? []);
+  expect(decoded?.width).toBe(64);
+  expect(decoded?.center?.[3]).toBe(255);
+});
+
+test("File > Export saves all frames as a single-file JXL animation", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await addFrames(page, 1);
+  await paintCenter(page);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator("select#exportAnimatedFormat").selectOption("jxl");
+  await dialog.locator("#exportAnimatedOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported");
+  const file = await exportedJxlBytes(page);
+  expect(file?.fileName).toContain("frames.jxl");
+  expect(file?.type).toBe("image/jxl");
+  expect(file?.bytes.slice(0, 2)).toEqual([0xff, 0x0a]);
+  const decoded = await decodeJxlInPage(page, file?.bytes ?? []);
+  expect(decoded?.frames).toBe(2);
+  expect(decoded?.width).toBe(64);
+});
+
+test("File > Export saves an animation as a JXL spritesheet", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await addFrames(page, 1);
+  await addAnimation(page, "go,none,1,2");
+  await page.locator('gnumarus-shell [data-testid="anim-frame"][data-frame="0"]').click();
+  await paintCenter(page);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("checkbox", { name: "go" }).check();
+  await expect(dialog.locator("select#exportSheetLayout")).toHaveValue("line");
+  await dialog.locator("select#exportSheetFormat").selectOption("image/jxl");
+  await dialog.locator("#exportSheetOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported");
+  const file = await exportedJxlBytes(page);
+  expect(file?.fileName).toContain("sheet.jxl");
+  expect(file?.type).toBe("image/jxl");
+  const decoded = await decodeJxlInPage(page, file?.bytes ?? []);
+  expect(decoded?.width).toBe(128);
+  expect(decoded?.height).toBe(64);
+  const at = (x: number, y: number): number => (y * 128 + x) * 4;
+  expect(decoded?.pixels.slice(at(32, 32), at(32, 32) + 4)).toEqual([0, 0, 0, 255]);
+  expect(decoded?.pixels.slice(at(96, 32), at(96, 32) + 4)).toEqual([0, 0, 0, 0]);
+});
+
 async function stubExportDirectory(page: import("@playwright/test").Page): Promise<void> {
   await page.evaluate(() => {
     const root = window as unknown as {
@@ -6687,8 +6817,7 @@ async function stubExportDirectory(page: import("@playwright/test").Page): Promi
   });
 }
 
-async function exportedGifBytes(page: import("@playwright/test").Page): Promise<{
-  fileName: string | null;
+async function exportedGifBytes(page: import("@playwright/test").Page): Promise<{  fileName: string | null;
   type: string;
   header: string;
   width: number;
@@ -6784,6 +6913,62 @@ async function exportedGifBytes(page: import("@playwright/test").Page): Promise<
       descriptors,
     };
   });
+}
+
+async function exportedJxlBytes(page: import("@playwright/test").Page): Promise<{
+  fileName: string | null;
+  type: string;
+  bytes: number[];
+} | null> {
+  return page.evaluate(async () => {
+    const root = window as unknown as {
+      __gnumarusExportTest?: { fileName: string | null; blob: Blob | null };
+    };
+    const state = root.__gnumarusExportTest;
+    if (state?.blob == null) {
+      return null;
+    }
+    const buffer = await state.blob.arrayBuffer();
+    return { fileName: state.fileName, type: state.blob.type, bytes: Array.from(new Uint8Array(buffer)) };
+  });
+}
+
+interface JxlDecodedFrame {
+  width: number;
+  height: number;
+  center: number[];
+  pixels: number[];
+  frames: number;
+}
+
+async function decodeJxlInPage(
+  page: import("@playwright/test").Page,
+  bytes: number[],
+): Promise<JxlDecodedFrame | null> {
+  return page.evaluate(async (data: number[]) => {
+    const shimUrl = "/src/codec/jxl/jxl_shim.js";
+    const ns: unknown = await import(/* @vite-ignore */ shimUrl);
+    const factory = (ns as { default: (overrides?: { wasmBinary?: Uint8Array }) => Promise<unknown> }).default;
+    const wasm = new Uint8Array(await (await fetch("/src/codec/jxl/jxl_shim.wasm")).arrayBuffer());
+    const codec = (await factory({ wasmBinary: wasm })) as {
+      jxl_decode_js(input: Uint8Array): { ok: boolean; width?: number; height?: number; buffer?: Uint8Array };
+      jxl_frame_count_js(input: Uint8Array): { ok: boolean; count?: number };
+    };
+    const input = new Uint8Array(data);
+    const decoded = codec.jxl_decode_js(input);
+    if (!decoded.ok || decoded.width === undefined || decoded.height === undefined || !(decoded.buffer instanceof Uint8Array)) {
+      return null;
+    }
+    const counted = codec.jxl_frame_count_js(input);
+    const at = (decoded.height >> 1) * decoded.width + (decoded.width >> 1);
+    return {
+      width: decoded.width,
+      height: decoded.height,
+      center: Array.from(decoded.buffer.subarray(at * 4, at * 4 + 4)),
+      pixels: Array.from(decoded.buffer),
+      frames: counted.ok === true && typeof counted.count === "number" ? counted.count : -1,
+    };
+  }, bytes);
 }
 
 async function exportedSequence(page: import("@playwright/test").Page): Promise<{

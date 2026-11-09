@@ -83,6 +83,48 @@ export class GnumarusJxlCodec {
     }
     return new Uint8Array(result.data);
   }
+
+  /**
+   * Encode uniform RGBA frames to a single animated JXL file. Durations
+   * are milliseconds; `numLoops` follows the container convention (0 loops
+   * forever). Decoding reads back the first frame.
+   */
+  encodeAnimation(
+    flat: Uint8Array,
+    width: number,
+    height: number,
+    durationsMs: number[],
+    lossless: boolean,
+    quality: number,
+    numLoops: number,
+  ): Uint8Array {
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
+      throw new GnumarusJxlError(`cannot encode JXL with invalid dimensions ${width}x${height}`);
+    }
+    if (durationsMs.length === 0 || flat.length !== durationsMs.length * width * height * 4) {
+      throw new GnumarusJxlError("JXL animation frames must share one size");
+    }
+    if (!lossless && (!Number.isFinite(quality) || quality < 0 || quality > 100)) {
+      throw new GnumarusJxlError(`invalid JXL quality ${quality}`);
+    }
+    const result = this.module.jxl_encode_animation_js(flat, width, height, durationsMs, lossless, quality, numLoops);
+    if (!result.ok || !(result.data instanceof Uint8Array) || result.data.length < 1) {
+      throw new GnumarusJxlError(`failed to encode JXL animation (stage ${result.stage ?? "?"})`);
+    }
+    return new Uint8Array(result.data);
+  }
+
+  /** Number of frames in a JXL file (still or animated). */
+  frameCount(data: Uint8Array): number {
+    if (data.length === 0) {
+      throw new GnumarusJxlError("cannot inspect an empty JXL file");
+    }
+    const result = this.module.jxl_frame_count_js(data);
+    if (!result.ok || typeof result.count !== "number") {
+      throw new GnumarusJxlError("failed to read JXL frame count");
+    }
+    return result.count;
+  }
 }
 
 let cachedCodec: Promise<GnumarusJxlCodec> | null = null;

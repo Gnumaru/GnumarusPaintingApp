@@ -94,6 +94,13 @@ import {
   normalizeStillQualityPercent,
   type GnumarusStillFormat,
 } from "../export/GnumarusImageExport";
+import {
+  encodeJxlAnimation,
+  encodeJxlStill,
+  JXL_EXT,
+  JXL_LABEL,
+  JXL_MIME,
+} from "../export/GnumarusJxlExport";
 import { createGifEncoder } from "../export/GnumarusGifExport";
 import {
   composeSheet,
@@ -127,6 +134,7 @@ import { parseHexToRgbaBytes, rgbaBytesToHex } from "../color/GnumarusColorModel
 import { type GnumarusTexturePixels } from "../animation/GnumarusAnimationModel";
 import {
   countAnimationFrames,
+  describeNamedAnimation,
   nextAnimationStep,
   parseNamedAnimation,
   GnumarusNamedAnimationError,
@@ -1111,18 +1119,22 @@ export class GnumarusShell extends LitElement {
     durationTargetFrame: { type: Number },
     durationValue: { type: Number },
     animationInput: { type: String },
+    animationDeleteTarget: { type: String },
     animationError: { type: String },
     exportFrame: { type: Number },
     exportFormat: { type: String },
     exportFormats: { type: Array },
     exportQuality: { type: Number },
+    exportJxlLossless: { type: Boolean },
     exportAnimation: { type: String },
     exportAnimatedFormat: { type: String },
     exportAnimatedQuality: { type: Number },
+    exportAnimatedJxlLossless: { type: Boolean },
     exportSheetLayout: { type: String },
     exportSheetFormat: { type: String },
     exportSheetCount: { type: Number },
     exportSheetQuality: { type: Number },
+    exportSheetJxlLossless: { type: Boolean },
     playing: { type: Boolean },
     uiHidden: { type: Boolean },
     toastMessage: { type: String },
@@ -1208,18 +1220,22 @@ export class GnumarusShell extends LitElement {
   declare durationTargetFrame: number | null;
   declare durationValue: number | null;
   declare animationInput: string;
+  declare animationDeleteTarget: string | null;
   declare animationError: string | null;
   declare exportFrame: number;
   declare exportFormat: string;
   declare exportFormats: GnumarusStillFormat[];
   declare exportQuality: number;
+  declare exportJxlLossless: boolean;
   declare exportAnimation: string;
   declare exportAnimatedFormat: string;
   declare exportAnimatedQuality: number;
+  declare exportAnimatedJxlLossless: boolean;
   declare exportSheetLayout: string;
   declare exportSheetFormat: string;
   declare exportSheetCount: number;
   declare exportSheetQuality: number;
+  declare exportSheetJxlLossless: boolean;
   declare playing: boolean;
   declare uiHidden: boolean;
   declare toastMessage: string;
@@ -1314,17 +1330,21 @@ export class GnumarusShell extends LitElement {
     this.durationValue = null;
     this.animationInput = "";
     this.animationError = null;
+    this.animationDeleteTarget = null;
     this.exportFrame = 1;
     this.exportFormat = "image/png";
     this.exportFormats = [];
     this.exportQuality = GNUMARUS_DEFAULT_STILL_QUALITY;
+    this.exportJxlLossless = true;
     this.exportAnimation = "";
     this.exportAnimatedFormat = "gif";
     this.exportAnimatedQuality = GNUMARUS_DEFAULT_STILL_QUALITY;
+    this.exportAnimatedJxlLossless = true;
     this.exportSheetLayout = "line";
     this.exportSheetFormat = "image/png";
     this.exportSheetCount = 2;
     this.exportSheetQuality = GNUMARUS_DEFAULT_STILL_QUALITY;
+    this.exportSheetJxlLossless = true;
     this.playing = false;
     this.playTimer = null;
     this.uiHidden = false;
@@ -1365,11 +1385,11 @@ export class GnumarusShell extends LitElement {
           ${this.fileMenuOpen
             ? html`
                 <div class="dropdown">
-                  <button @click=${(): void => void this.openNewDialog()}>New</button>
-                  <button @click=${(): void => void this.openProject()}>Open</button>
-                  <button title="Save (Ctrl+S)" @click=${(): void => void this.saveProject()}>Save</button>
-                  <button @click=${(): void => void this.importImageFile()}>Import</button>
-                  <button @click=${(): void => void this.openExportDialog()}>Export</button>
+                  <button @click=${(): void => void this.runAction("new-project")}>New Project</button>
+                  <button @click=${(): void => void this.runAction("open-project")}>Open Project</button>
+                  <button title="Save (Ctrl+S)" @click=${(): void => void this.runAction("save-project")}>Save Project</button>
+                  <button @click=${(): void => void this.runAction("import")}>Import</button>
+                  <button @click=${(): void => void this.runAction("export")}>Export</button>
                 </div>
               `
             : html``}
@@ -2418,7 +2438,7 @@ export class GnumarusShell extends LitElement {
           ${(this.engine?.getNamedAnimations() ?? []).map(
             (animation) => html`
               <li>
-                <span>${animation.name} (${animation.loop}, ${animation.frames.length} frame${animation.frames.length === 1 ? "" : "s"})</span>
+                <span>${describeNamedAnimation(animation)}</span>
                 <button
                   aria-label=${`Delete animation ${animation.name}`}
                   title=${`Delete animation ${animation.name}`}
@@ -2430,6 +2450,17 @@ export class GnumarusShell extends LitElement {
             `,
           )}
         </ul>
+      </dialog>
+      <dialog id="animationDeleteDialog" @close=${(): void => this.cancelDeleteAnimation()}>
+        <h3>Delete animation</h3>
+        <p>
+          Are you sure you want to delete
+          ${this.animationDeleteTarget === null ? "this animation" : `"${this.animationDeleteTarget}"`}?
+        </p>
+        <div class="dialog-actions">
+          <button id="animationDeleteNo" @click=${(): void => this.cancelDeleteAnimation()}>No</button>
+          <button id="animationDeleteYes" @click=${(): void => this.confirmDeleteAnimation()}>Yes</button>
+        </div>
       </dialog>
       <dialog id="exportDialog">
         <h3>Export frame</h3>
@@ -2458,7 +2489,20 @@ export class GnumarusShell extends LitElement {
             )}
           </select>
         </label>
-        ${this.exportFormat === "image/png"
+        ${this.exportFormat === JXL_MIME
+          ? html`<label
+              >Lossless
+              <input
+                type="checkbox"
+                id="exportJxlLossless"
+                ?checked=${this.exportJxlLossless}
+                @change=${(event: Event): void => {
+                  this.exportJxlLossless = (event.target as HTMLInputElement).checked;
+                }}
+              />
+            </label>`
+          : html``}
+        ${this.exportFormat === "image/png" || (this.exportFormat === JXL_MIME && this.exportJxlLossless)
           ? html``
           : html`<label
               >Quality
@@ -2506,12 +2550,28 @@ export class GnumarusShell extends LitElement {
             }}
           >
             <option value="gif">GIF animation</option>
+            <option value="jxl">JXL animation</option>
             ${this.exportFormats.map(
               (format) => html`<option value=${format.mime}>${format.label} sequence</option>`,
             )}
           </select>
         </label>
-        ${this.exportAnimatedFormat === "gif" || this.exportAnimatedFormat === "image/png"
+        ${this.exportAnimatedFormat === "jxl"
+          ? html`<label
+              >Lossless
+              <input
+                type="checkbox"
+                id="exportAnimatedJxlLossless"
+                ?checked=${this.exportAnimatedJxlLossless}
+                @change=${(event: Event): void => {
+                  this.exportAnimatedJxlLossless = (event.target as HTMLInputElement).checked;
+                }}
+              />
+            </label>`
+          : html``}
+        ${this.exportAnimatedFormat === "gif" ||
+        this.exportAnimatedFormat === "image/png" ||
+        (this.exportAnimatedFormat === "jxl" && this.exportAnimatedJxlLossless)
           ? html``
           : html`<label
               >Quality
@@ -2587,7 +2647,21 @@ export class GnumarusShell extends LitElement {
             )}
           </select>
         </label>
-        ${this.exportSheetFormat === "image/png"
+        ${this.exportSheetFormat === JXL_MIME
+          ? html`<label
+              >Lossless
+              <input
+                type="checkbox"
+                id="exportSheetJxlLossless"
+                ?checked=${this.exportSheetJxlLossless}
+                @change=${(event: Event): void => {
+                  this.exportSheetJxlLossless = (event.target as HTMLInputElement).checked;
+                }}
+              />
+            </label>`
+          : html``}
+        ${this.exportSheetFormat === "image/png" ||
+        (this.exportSheetFormat === JXL_MIME && this.exportSheetJxlLossless)
           ? html``
           : html`<label
               >Quality
@@ -3316,7 +3390,7 @@ export class GnumarusShell extends LitElement {
     const key = event.key.toLowerCase();
     if ((event.ctrlKey || event.metaKey) && !event.altKey && key === "s") {
       event.preventDefault();
-      void this.saveProject();
+      void this.runAction("save-project");
       return;
     }
     if ((event.ctrlKey || event.metaKey) && !event.altKey && key === "e") {
@@ -3647,6 +3721,46 @@ export class GnumarusShell extends LitElement {
       requirements: [],
       run: (): void => {
         this.resetCanvasTransform();
+      },
+    });
+    this.actionRegistry.register({
+      id: "new-project",
+      name: "New Project",
+      requirements: [],
+      run: (): void => {
+        void this.openNewDialog();
+      },
+    });
+    this.actionRegistry.register({
+      id: "open-project",
+      name: "Open Project",
+      requirements: [],
+      run: (): void => {
+        void this.openProject();
+      },
+    });
+    this.actionRegistry.register({
+      id: "save-project",
+      name: "Save Project",
+      requirements: [],
+      run: (): void => {
+        void this.saveProject();
+      },
+    });
+    this.actionRegistry.register({
+      id: "import",
+      name: "Import",
+      requirements: [],
+      run: (): void => {
+        void this.importImageFile();
+      },
+    });
+    this.actionRegistry.register({
+      id: "export",
+      name: "Export",
+      requirements: [],
+      run: (): void => {
+        void this.openExportDialog();
       },
     });
     this.actionRegistry.register({
@@ -5342,14 +5456,35 @@ export class GnumarusShell extends LitElement {
   }
 
   private onDeleteAnimation(name: string): void {
-    if (this.engine === null) {
+    this.animationDeleteTarget = name;
+    const dialog = this.shadowRoot?.getElementById("animationDeleteDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+    const no = this.shadowRoot?.getElementById("animationDeleteNo") as HTMLButtonElement | null;
+    no?.focus();
+  }
+
+  private confirmDeleteAnimation(): void {
+    const name = this.animationDeleteTarget;
+    const dialog = this.shadowRoot?.getElementById("animationDeleteDialog") as HTMLDialogElement | null;
+    dialog?.close();
+    this.animationDeleteTarget = null;
+    if (name === null || this.engine === null) {
       return;
     }
     if (this.engine.removeNamedAnimation(name)) {
       this.refreshLayers();
       this.dirty = true;
       this.statusMessage = `Animation ${name} deleted`;
+      this.showToast(`Animation ${name} deleted`);
     }
+  }
+
+  private cancelDeleteAnimation(): void {
+    const dialog = this.shadowRoot?.getElementById("animationDeleteDialog") as HTMLDialogElement | null;
+    if (dialog?.open === true) {
+      dialog.close();
+    }
+    this.animationDeleteTarget = null;
   }
 
   private onSelectAnimation(event: Event): void {
@@ -5379,6 +5514,10 @@ export class GnumarusShell extends LitElement {
     this.fileMenuOpen = false;
     this.exportFrame = this.engine.getCurrentFrame() + 1;
     this.exportFormats = detectStillFormats();
+    if (findStillFormat(this.exportFormats, JXL_MIME) === null) {
+      // Browsers never encode JXL through a canvas; our WASM codec does.
+      this.exportFormats = [...this.exportFormats, { mime: JXL_MIME, ext: JXL_EXT, label: JXL_LABEL, alpha: true }];
+    }
     if (findStillFormat(this.exportFormats, this.exportFormat) === null) {
       this.exportFormat = this.exportFormats[0]?.mime ?? "image/png";
     }
@@ -5389,7 +5528,11 @@ export class GnumarusShell extends LitElement {
     ) {
       this.exportAnimation = "";
     }
-    if (this.exportAnimatedFormat !== "gif" && findStillFormat(this.exportFormats, this.exportAnimatedFormat) === null) {
+    if (
+      this.exportAnimatedFormat !== "gif" &&
+      this.exportAnimatedFormat !== "jxl" &&
+      findStillFormat(this.exportFormats, this.exportAnimatedFormat) === null
+    ) {
       this.exportAnimatedFormat = "gif";
     }
     if (findStillFormat(this.exportFormats, this.exportSheetFormat) === null) {
@@ -5435,6 +5578,34 @@ export class GnumarusShell extends LitElement {
     return true;
   }
 
+  /**
+   * Encode through a canvas, except JXL which goes through the WASM libjxl
+   * codec (browsers cannot encode JXL). Quality percent is 1-100 or
+   * undefined for the browser default; JXL ignores it when lossless.
+   */
+  private async encodeExportStill(
+    buffer: Uint8ClampedArray,
+    width: number,
+    height: number,
+    format: GnumarusStillFormat,
+    qualityPercent: number | undefined,
+    jxlLossless: boolean,
+  ): Promise<Blob | null> {
+    if (format.mime === JXL_MIME) {
+      try {
+        const bytes = await encodeJxlStill(buffer, width, height, {
+          lossless: jxlLossless,
+          quality: qualityPercent ?? GNUMARUS_DEFAULT_STILL_QUALITY,
+        });
+        return new Blob([bytes as Uint8Array<ArrayBuffer>], { type: JXL_MIME });
+      } catch {
+        return null;
+      }
+    }
+    const fraction = qualityPercent === undefined ? undefined : qualityPercent / 100;
+    return encodeStillImage(buffer, width, height, format.mime, fraction);
+  }
+
   private async confirmExportFrame(): Promise<void> {
     if (this.engine === null) {
       this.closeExportDialog();
@@ -5468,12 +5639,13 @@ export class GnumarusShell extends LitElement {
       const quality = normalizeStillQualityPercent(Number(qualityInput?.value ?? this.exportQuality));
       this.exportQuality = quality;
       const flat = compositeFinalImage(size.width, size.height, inputs, background);
-      const blob = await encodeStillImage(
+      const blob = await this.encodeExportStill(
         flat,
         size.width,
         size.height,
-        format.mime,
-        format.mime === "image/png" ? undefined : quality / 100,
+        format,
+        format.mime === "image/png" ? undefined : quality,
+        this.exportJxlLossless,
       );
       if (blob === null) {
         this.closeExportDialog();
@@ -5570,6 +5742,45 @@ export class GnumarusShell extends LitElement {
         }
         return;
       }
+      if (formatValue === "jxl") {
+        const size = this.engine.size;
+        const animatedQualityInput = this.shadowRoot?.getElementById(
+          "exportAnimatedQuality",
+        ) as HTMLInputElement | null;
+        const animatedQuality = normalizeStillQualityPercent(
+          Number(animatedQualityInput?.value ?? this.exportAnimatedQuality),
+        );
+        this.exportAnimatedQuality = animatedQuality;
+        const frames: Array<{ buffer: Uint8ClampedArray; delayMs: number }> = [];
+        for (const entry of resolved.frames) {
+          const inputs = this.engine.getFrameFlattenInputs(entry.frame);
+          if (inputs === null) {
+            this.failAnimatedExport("Export failed: invalid frame");
+            return;
+          }
+          frames.push({
+            buffer: compositeFinalImage(size.width, size.height, inputs),
+            delayMs: entry.delayMs,
+          });
+        }
+        try {
+          const bytes = await encodeJxlAnimation(frames, size.width, size.height, resolved.loop, {
+            lossless: this.exportAnimatedJxlLossless,
+            quality: animatedQuality,
+          });
+          const blob = new Blob([bytes as Uint8Array<ArrayBuffer>], { type: JXL_MIME });
+          const fileName = `${base}-${resolved.label}.jxl`;
+          this.closeExportDialog();
+          if (await this.saveExportBlob(blob, fileName, "JXL animation")) {
+            this.statusMessage = `Exported ${fileName}`;
+            this.showToast(`Exported ${fileName}`);
+          }
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          this.failAnimatedExport(`Export failed: ${reason}`);
+        }
+        return;
+      }
       const format = findStillFormat(this.exportFormats, formatValue) ?? null;
       if (format === null) {
         this.failAnimatedExport("Export failed: no image format is available");
@@ -5586,7 +5797,7 @@ export class GnumarusShell extends LitElement {
         Number(animatedQualityInput?.value ?? this.exportAnimatedQuality),
       );
       this.exportAnimatedQuality = animatedQuality;
-      const animatedQualityValue = format.mime === "image/png" ? undefined : animatedQuality / 100;
+      const animatedQualityOrDefault = format.mime === "image/png" ? undefined : animatedQuality;
       const blobs: Blob[] = [];
       for (const entry of resolved.frames) {
         const inputs = this.engine.getFrameFlattenInputs(entry.frame);
@@ -5595,7 +5806,7 @@ export class GnumarusShell extends LitElement {
           return;
         }
         const flat = compositeFinalImage(size.width, size.height, inputs, background);
-        const blob = await encodeStillImage(flat, size.width, size.height, format.mime, animatedQualityValue);
+        const blob = await this.encodeExportStill(flat, size.width, size.height, format, animatedQualityOrDefault, this.exportAnimatedJxlLossless);
         if (blob === null) {
           this.failAnimatedExport(`Export failed: ${format.label} encoding is not supported here`);
           return;
@@ -5753,7 +5964,7 @@ export class GnumarusShell extends LitElement {
         Number(sheetQualityInput?.value ?? this.exportSheetQuality),
       );
       this.exportSheetQuality = sheetQuality;
-      const sheetQualityValue = format.mime === "image/png" ? undefined : sheetQuality / 100;
+      const sheetQualityValue = format.mime === "image/png" ? undefined : sheetQuality;
       if (layoutValue === "individual") {
         const flat = strips.flatMap((strip) => strip.frames);
         const blobs: Blob[] = [];
@@ -5763,12 +5974,13 @@ export class GnumarusShell extends LitElement {
             fail("Export failed: invalid frame");
             return;
           }
-          const blob = await encodeStillImage(
+          const blob = await this.encodeExportStill(
             flatPixels,
             size.width,
             size.height,
-            format.mime,
+            format,
             sheetQualityValue,
+            this.exportSheetJxlLossless,
           );
           if (blob === null) {
             fail(`Export failed: ${format.label} encoding is not supported here`);
@@ -5795,12 +6007,13 @@ export class GnumarusShell extends LitElement {
         pixels.set(frame, flatPixels);
       }
       const sheet = composeSheet(pixels, geometry, size.width, size.height);
-      const blob = await encodeStillImage(
+      const blob = await this.encodeExportStill(
         sheet.buffer,
         sheet.width,
         sheet.height,
-        format.mime,
+        format,
         sheetQualityValue,
+        this.exportSheetJxlLossless,
       );
       if (blob === null) {
         fail(`Export failed: ${format.label} encoding is not supported here`);

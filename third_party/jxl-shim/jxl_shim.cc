@@ -226,7 +226,168 @@ emscripten::val jxl_encode_js(emscripten::val pixels, int w, int h, bool lossles
   return result;
 }
 
+emscripten::val jxl_encode_animation_js(emscripten::val allPixels, int w, int h, emscripten::val durationsMs,
+                                        bool lossless, float quality, int numLoops) {
+  emscripten::val result = emscripten::val::object();
+  std::vector<uint8_t> input = emscripten::convertJSArrayToNumberVector<uint8_t>(allPixels);
+  std::vector<uint32_t> durations = emscripten::convertJSArrayToNumberVector<uint32_t>(durationsMs);
+  if (w <= 0 || h <= 0 || w > 65536 || h > 65536 || durations.empty() || durations.size() > 10000) {
+    result.set("ok", false);
+    result.set("stage", 1);
+    return result;
+  }
+  if (input.size() != durations.size() * static_cast<size_t>(w) * static_cast<size_t>(h) * 4) {
+    result.set("ok", false);
+    result.set("stage", 2);
+    return result;
+  }
+  if (!lossless && (quality < 0.0f || quality > 100.0f)) {
+    result.set("ok", false);
+    result.set("stage", 3);
+    return result;
+  }
+  JxlEncoderPtr enc = JxlEncoderMake(nullptr);
+  if (!enc) {
+    result.set("ok", false);
+    result.set("stage", 4);
+    return result;
+  }
+  JxlBasicInfo info;
+  JxlEncoderInitBasicInfo(&info);
+  info.xsize = static_cast<uint32_t>(w);
+  info.ysize = static_cast<uint32_t>(h);
+  info.bits_per_sample = 8;
+  info.exponent_bits_per_sample = 0;
+  info.num_color_channels = 3;
+  info.num_extra_channels = 1;
+  info.alpha_bits = 8;
+  info.alpha_exponent_bits = 0;
+  info.uses_original_profile = lossless ? JXL_TRUE : JXL_FALSE;
+  info.have_animation = JXL_TRUE;
+  info.animation.tps_numerator = 1000;
+  info.animation.tps_denominator = 1;
+  info.animation.num_loops = static_cast<uint32_t>(numLoops < 0 ? 0 : numLoops);
+  info.animation.have_timecodes = JXL_FALSE;
+  if (JxlEncoderSetBasicInfo(enc.get(), &info) != JXL_ENC_SUCCESS) {
+    result.set("ok", false);
+    result.set("stage", 5);
+    return result;
+  }
+  JxlColorEncoding color;
+  JxlColorEncodingSetToSRGB(&color, JXL_FALSE);
+  if (JxlEncoderSetColorEncoding(enc.get(), &color) != JXL_ENC_SUCCESS) {
+    result.set("ok", false);
+    result.set("stage", 6);
+    return result;
+  }
+  JxlEncoderFrameSettings* opts = JxlEncoderFrameSettingsCreate(enc.get(), nullptr);
+  if (!opts) {
+    result.set("ok", false);
+    result.set("stage", 7);
+    return result;
+  }
+  if (lossless) {
+    if (JxlEncoderSetFrameLossless(opts, JXL_TRUE) != JXL_ENC_SUCCESS) {
+      result.set("ok", false);
+      result.set("stage", 8);
+      return result;
+    }
+  } else {
+    float distance = (100.0f - quality) * 0.15f;
+    if (distance < 0.5f) distance = 0.5f;
+    if (JxlEncoderSetFrameDistance(opts, distance) != JXL_ENC_SUCCESS) {
+      result.set("ok", false);
+      result.set("stage", 9);
+      return result;
+    }
+  }
+  JxlPixelFormat format = {4, JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0};
+  const size_t stride = static_cast<size_t>(w) * 4;
+  const size_t frame_bytes = stride * static_cast<size_t>(h);
+  for (size_t f = 0; f < durations.size(); f += 1) {
+    JxlFrameHeader header;
+    JxlEncoderInitFrameHeader(&header);
+    header.duration = durations[f] < 1 ? 1 : durations[f];
+    header.is_last = (f + 1 == durations.size()) ? JXL_TRUE : JXL_FALSE;
+    if (JxlEncoderSetFrameHeader(opts, &header) != JXL_ENC_SUCCESS) {
+      result.set("ok", false);
+      result.set("stage", 10);
+      return result;
+    }
+    if (JxlEncoderAddImageFrame(opts, &format, input.data() + f * frame_bytes, frame_bytes) != JXL_ENC_SUCCESS) {
+      result.set("ok", false);
+      result.set("stage", 11);
+      return result;
+    }
+  }
+  JxlEncoderCloseInput(enc.get());
+
+  std::vector<uint8_t> compressed(kChunkSize);
+  size_t used = 0;
+  for (;;) {
+    uint8_t* next_out = compressed.data() + used;
+    size_t avail_out = compressed.size() - used;
+    JxlEncoderStatus status = JxlEncoderProcessOutput(enc.get(), &next_out, &avail_out);
+    used = static_cast<size_t>(next_out - compressed.data());
+    if (status == JXL_ENC_SUCCESS) break;
+    if (status != JXL_ENC_NEED_MORE_OUTPUT) {
+      result.set("ok", false);
+      result.set("stage", 12);
+      return result;
+    }
+    compressed.resize(compressed.size() * 2);
+  }
+  result.set("ok", true);
+  result.set("data", ToUint8Array(compressed.data(), used));
+  return result;
+}
+
+emscripten::val jxl_frame_count_js(emscripten::val data) {
+  emscripten::val result = emscripten::val::object();
+  std::vector<uint8_t> input = emscripten::convertJSArrayToNumberVector<uint8_t>(data);
+  if (input.empty()) {
+    result.set("ok", false);
+    return result;
+  }
+  JxlDecoderPtr dec = JxlDecoderMake(nullptr);
+  if (!dec) {
+    result.set("ok", false);
+    return result;
+  }
+  if (JxlDecoderSubscribeEvents(dec.get(), JXL_DEC_FRAME) != JXL_DEC_SUCCESS) {
+    result.set("ok", false);
+    return result;
+  }
+  if (JxlDecoderSetInput(dec.get(), input.data(), input.size()) != JXL_DEC_SUCCESS) {
+    result.set("ok", false);
+    return result;
+  }
+  JxlDecoderCloseInput(dec.get());
+  uint32_t frames = 0;
+  for (;;) {
+    JxlDecoderStatus status = JxlDecoderProcessInput(dec.get());
+    if (status == JXL_DEC_ERROR || status == JXL_DEC_NEED_MORE_INPUT) {
+      result.set("ok", false);
+      return result;
+    }
+    if (status == JXL_DEC_FRAME) {
+      frames += 1;
+      if (frames > 100000) {
+        result.set("ok", false);
+        return result;
+      }
+    } else if (status == JXL_DEC_SUCCESS) {
+      break;
+    }
+  }
+  result.set("ok", true);
+  result.set("count", frames);
+  return result;
+}
+
 EMSCRIPTEN_BINDINGS(jxl_bridge) {
   emscripten::function("jxl_decode_js", &jxl_decode_js);
   emscripten::function("jxl_encode_js", &jxl_encode_js);
+  emscripten::function("jxl_encode_animation_js", &jxl_encode_animation_js);
+  emscripten::function("jxl_frame_count_js", &jxl_frame_count_js);
 }

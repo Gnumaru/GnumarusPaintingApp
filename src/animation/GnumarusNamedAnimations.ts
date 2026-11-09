@@ -185,6 +185,39 @@ export function nextAnimationStep(
 }
 
 /**
+ * 1-based frame numbers as a compact list: runs of 3+ collapse to `A-B`,
+ * shorter runs stay expanded (`"some animation": forward, 7 frames: 1,2,5-8,9`).
+ */
+export function formatNamedAnimationFrames(frames: readonly GnumarusNamedAnimationFrame[]): string {
+  const ones = [...new Set(frames.map((entry) => entry.frame + 1))].sort((a, b) => a - b);
+  const parts: string[] = [];
+  let i = 0;
+  while (i < ones.length) {
+    let j = i;
+    while (j + 1 < ones.length && ones[j + 1] === ones[j] + 1) {
+      j += 1;
+    }
+    if (j - i + 1 >= 3) {
+      parts.push(`${ones[i]}-${ones[j]}`);
+    } else {
+      for (let k = i; k <= j; k += 1) {
+        parts.push(`${ones[k]}`);
+      }
+    }
+    i = j + 1;
+  }
+  return parts.join(",");
+}
+
+/** One-line summary for the animation list: `"name": loop, N frames: ranges`. */
+export function describeNamedAnimation(animation: GnumarusNamedAnimation): string {
+  const count = new Set(animation.frames.map((entry) => entry.frame)).size;
+  const ranges = formatNamedAnimationFrames(animation.frames);
+  const noun = count === 1 ? "frame" : "frames";
+  return `"${animation.name}": ${animation.loop}, ${count} ${noun}${ranges === "" ? "" : `: ${ranges}`}`;
+}
+
+/**
  * Remap every referenced frame index (insert/move/remove support).
  * Entries mapping to null are dropped.
  */
