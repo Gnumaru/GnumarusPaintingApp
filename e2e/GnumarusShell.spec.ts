@@ -5961,6 +5961,49 @@ test("File > Export lists only formats the browser truly encodes", async ({ page
   }
 });
 
+test("File > Export JPEG quality changes the file size", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  // The lossless default offers no quality control.
+  await expect(dialog.locator("input#exportQuality")).toHaveCount(0);
+  await dialog.locator("select#exportFormat").selectOption("image/jpeg");
+  await expect(dialog.locator("input#exportQuality")).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+
+  async function exportJpegSize(quality: string): Promise<number> {
+    await page.getByRole("button", { name: "File" }).click();
+    await page.getByRole("button", { name: "Export" }).click();
+    await expect(dialog).toBeVisible();
+    await dialog.locator("input#exportQuality").fill(quality);
+    await page.evaluate(() => {
+      const root = window as unknown as { __gnumarusExportTest?: { blob: Blob | null } };
+      if (root.__gnumarusExportTest !== undefined) {
+        root.__gnumarusExportTest.blob = null;
+      }
+    });
+    await dialog.locator("#exportOk").click();
+    await page.waitForFunction(() => {
+      const root = window as unknown as { __gnumarusExportTest?: { blob: Blob | null } };
+      return root.__gnumarusExportTest?.blob instanceof Blob;
+    });
+    return page.evaluate(() => {
+      const root = window as unknown as { __gnumarusExportTest?: { blob: Blob | null } };
+      return root.__gnumarusExportTest?.blob?.size ?? -1;
+    });
+  }
+
+  const small = await exportJpegSize("10");
+  const big = await exportJpegSize("100");
+  expect(small).toBeGreaterThan(0);
+  expect(big).toBeGreaterThan(small);
+});
+
 async function stubExportDirectory(page: import("@playwright/test").Page): Promise<void> {
   await page.evaluate(() => {
     const root = window as unknown as {

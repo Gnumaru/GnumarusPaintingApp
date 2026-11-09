@@ -4,7 +4,9 @@ import {
   findStillFormat,
   frameFileStem,
   isSupportedStillDataUrl,
+  normalizeStillQualityPercent,
   GNUMARUS_BASE_STILL_FORMATS,
+  GNUMARUS_DEFAULT_STILL_QUALITY,
   GNUMARUS_EXTRA_STILL_FORMATS,
 } from "../src/export/GnumarusImageExport";
 
@@ -32,6 +34,19 @@ describe("GnumarusImageExport", () => {
     // Firefox returns "data:," for unsupported mimes.
     expect(isSupportedStillDataUrl("data:,", "image/avif")).toBe(false);
     expect(isSupportedStillDataUrl("", "image/png")).toBe(false);
+  });
+
+  it("normalizes quality percents with a fallback default", () => {
+    expect(GNUMARUS_DEFAULT_STILL_QUALITY).toBe(92);
+    expect(normalizeStillQualityPercent(92)).toBe(92);
+    expect(normalizeStillQualityPercent(92.6)).toBe(93);
+    expect(normalizeStillQualityPercent(0)).toBe(1);
+    expect(normalizeStillQualityPercent(-20)).toBe(1);
+    expect(normalizeStillQualityPercent(150)).toBe(100);
+    expect(normalizeStillQualityPercent(Number.NaN)).toBe(GNUMARUS_DEFAULT_STILL_QUALITY);
+    expect(normalizeStillQualityPercent(Number.POSITIVE_INFINITY)).toBe(
+      GNUMARUS_DEFAULT_STILL_QUALITY,
+    );
   });
 
   it("builds zero-padded frame stems", () => {

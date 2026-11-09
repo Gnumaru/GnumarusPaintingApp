@@ -87,6 +87,8 @@ import {
   exportBaseName,
   findStillFormat,
   frameFileStem,
+  GNUMARUS_DEFAULT_STILL_QUALITY,
+  normalizeStillQualityPercent,
   type GnumarusStillFormat,
 } from "../export/GnumarusImageExport";
 import { createGifEncoder } from "../export/GnumarusGifExport";
@@ -1034,11 +1036,14 @@ export class GnumarusShell extends LitElement {
     exportFrame: { type: Number },
     exportFormat: { type: String },
     exportFormats: { type: Array },
+    exportQuality: { type: Number },
     exportAnimation: { type: String },
     exportAnimatedFormat: { type: String },
+    exportAnimatedQuality: { type: Number },
     exportSheetLayout: { type: String },
     exportSheetFormat: { type: String },
     exportSheetCount: { type: Number },
+    exportSheetQuality: { type: Number },
     playing: { type: Boolean },
     uiHidden: { type: Boolean },
     toastMessage: { type: String },
@@ -1125,11 +1130,14 @@ export class GnumarusShell extends LitElement {
   declare exportFrame: number;
   declare exportFormat: string;
   declare exportFormats: GnumarusStillFormat[];
+  declare exportQuality: number;
   declare exportAnimation: string;
   declare exportAnimatedFormat: string;
+  declare exportAnimatedQuality: number;
   declare exportSheetLayout: string;
   declare exportSheetFormat: string;
   declare exportSheetCount: number;
+  declare exportSheetQuality: number;
   declare playing: boolean;
   declare uiHidden: boolean;
   declare toastMessage: string;
@@ -1221,11 +1229,14 @@ export class GnumarusShell extends LitElement {
     this.exportFrame = 1;
     this.exportFormat = "image/png";
     this.exportFormats = [];
+    this.exportQuality = GNUMARUS_DEFAULT_STILL_QUALITY;
     this.exportAnimation = "";
     this.exportAnimatedFormat = "gif";
+    this.exportAnimatedQuality = GNUMARUS_DEFAULT_STILL_QUALITY;
     this.exportSheetLayout = "line";
     this.exportSheetFormat = "image/png";
     this.exportSheetCount = 2;
+    this.exportSheetQuality = GNUMARUS_DEFAULT_STILL_QUALITY;
     this.playing = false;
     this.playTimer = null;
     this.uiHidden = false;
@@ -2295,6 +2306,24 @@ export class GnumarusShell extends LitElement {
             )}
           </select>
         </label>
+        ${this.exportFormat === "image/png"
+          ? html``
+          : html`<label
+              >Quality
+              <input
+                type="number"
+                id="exportQuality"
+                min="1"
+                max="100"
+                step="1"
+                .value=${String(this.exportQuality)}
+                @change=${(event: Event): void => {
+                  this.exportQuality = normalizeStillQualityPercent(
+                    Number((event.target as HTMLInputElement).value),
+                  );
+                }}
+              />
+            </label>`}
         <div class="dialog-actions">
           <button @click=${(): void => this.closeExportDialog()}>Cancel</button>
           <button id="exportOk" @click=${(): void => void this.confirmExportFrame()}>Export</button>
@@ -2330,6 +2359,24 @@ export class GnumarusShell extends LitElement {
             )}
           </select>
         </label>
+        ${this.exportAnimatedFormat === "gif" || this.exportAnimatedFormat === "image/png"
+          ? html``
+          : html`<label
+              >Quality
+              <input
+                type="number"
+                id="exportAnimatedQuality"
+                min="1"
+                max="100"
+                step="1"
+                .value=${String(this.exportAnimatedQuality)}
+                @change=${(event: Event): void => {
+                  this.exportAnimatedQuality = normalizeStillQualityPercent(
+                    Number((event.target as HTMLInputElement).value),
+                  );
+                }}
+              />
+            </label>`}
         <div class="dialog-actions">
           <button id="exportAnimatedOk" @click=${(): void => void this.confirmExportAnimated()}>
             Export animation
@@ -2388,6 +2435,24 @@ export class GnumarusShell extends LitElement {
             )}
           </select>
         </label>
+        ${this.exportSheetFormat === "image/png"
+          ? html``
+          : html`<label
+              >Quality
+              <input
+                type="number"
+                id="exportSheetQuality"
+                min="1"
+                max="100"
+                step="1"
+                .value=${String(this.exportSheetQuality)}
+                @change=${(event: Event): void => {
+                  this.exportSheetQuality = normalizeStillQualityPercent(
+                    Number((event.target as HTMLInputElement).value),
+                  );
+                }}
+              />
+            </label>`}
         <div class="dialog-actions">
           <button id="exportSheetOk" @click=${(): void => void this.confirmExportSheet()}>
             Export spritesheet
@@ -4990,8 +5055,17 @@ export class GnumarusShell extends LitElement {
       const background = format.alpha
         ? undefined
         : this.canvasBackground(this.engine.getCheckerSettings(), this.engine.getBackgroundSettings());
+      const qualityInput = this.shadowRoot?.getElementById("exportQuality") as HTMLInputElement | null;
+      const quality = normalizeStillQualityPercent(Number(qualityInput?.value ?? this.exportQuality));
+      this.exportQuality = quality;
       const flat = compositeFinalImage(size.width, size.height, inputs, background);
-      const blob = await encodeStillImage(flat, size.width, size.height, format.mime);
+      const blob = await encodeStillImage(
+        flat,
+        size.width,
+        size.height,
+        format.mime,
+        format.mime === "image/png" ? undefined : quality / 100,
+      );
       if (blob === null) {
         this.closeExportDialog();
         this.statusMessage = `Export failed: ${format.label} encoding is not supported here`;
@@ -5096,6 +5170,14 @@ export class GnumarusShell extends LitElement {
       const background = format.alpha
         ? undefined
         : this.canvasBackground(this.engine.getCheckerSettings(), this.engine.getBackgroundSettings());
+      const animatedQualityInput = this.shadowRoot?.getElementById(
+        "exportAnimatedQuality",
+      ) as HTMLInputElement | null;
+      const animatedQuality = normalizeStillQualityPercent(
+        Number(animatedQualityInput?.value ?? this.exportAnimatedQuality),
+      );
+      this.exportAnimatedQuality = animatedQuality;
+      const animatedQualityValue = format.mime === "image/png" ? undefined : animatedQuality / 100;
       const blobs: Blob[] = [];
       for (const entry of resolved.frames) {
         const inputs = this.engine.getFrameFlattenInputs(entry.frame);
@@ -5104,7 +5186,7 @@ export class GnumarusShell extends LitElement {
           return;
         }
         const flat = compositeFinalImage(size.width, size.height, inputs, background);
-        const blob = await encodeStillImage(flat, size.width, size.height, format.mime);
+        const blob = await encodeStillImage(flat, size.width, size.height, format.mime, animatedQualityValue);
         if (blob === null) {
           this.failAnimatedExport(`Export failed: ${format.label} encoding is not supported here`);
           return;
@@ -5255,6 +5337,14 @@ export class GnumarusShell extends LitElement {
       const background = format.alpha
         ? undefined
         : this.canvasBackground(this.engine.getCheckerSettings(), this.engine.getBackgroundSettings());
+      const sheetQualityInput = this.shadowRoot?.getElementById(
+        "exportSheetQuality",
+      ) as HTMLInputElement | null;
+      const sheetQuality = normalizeStillQualityPercent(
+        Number(sheetQualityInput?.value ?? this.exportSheetQuality),
+      );
+      this.exportSheetQuality = sheetQuality;
+      const sheetQualityValue = format.mime === "image/png" ? undefined : sheetQuality / 100;
       if (layoutValue === "individual") {
         const flat = strips.flatMap((strip) => strip.frames);
         const blobs: Blob[] = [];
@@ -5264,7 +5354,13 @@ export class GnumarusShell extends LitElement {
             fail("Export failed: invalid frame");
             return;
           }
-          const blob = await encodeStillImage(flatPixels, size.width, size.height, format.mime);
+          const blob = await encodeStillImage(
+            flatPixels,
+            size.width,
+            size.height,
+            format.mime,
+            sheetQualityValue,
+          );
           if (blob === null) {
             fail(`Export failed: ${format.label} encoding is not supported here`);
             return;
@@ -5290,7 +5386,13 @@ export class GnumarusShell extends LitElement {
         pixels.set(frame, flatPixels);
       }
       const sheet = composeSheet(pixels, geometry, size.width, size.height);
-      const blob = await encodeStillImage(sheet.buffer, sheet.width, sheet.height, format.mime);
+      const blob = await encodeStillImage(
+        sheet.buffer,
+        sheet.width,
+        sheet.height,
+        format.mime,
+        sheetQualityValue,
+      );
       if (blob === null) {
         fail(`Export failed: ${format.label} encoding is not supported here`);
         return;

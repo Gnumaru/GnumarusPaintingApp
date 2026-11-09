@@ -196,3 +196,4 @@
 - [x] Unit tests (vitest): 235 passed
 - [x] E2E test (Playwright): 146 passed
 - [x] Short default names (L/F/C/T) + project export (static/animated/spritesheet), unit + e2e tests green, docs updated
+- [x] Export quality setting for lossy still formats (1-100 per section, default 92), unit + e2e tests green, docs updated
