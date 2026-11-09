@@ -5427,6 +5427,148 @@ function solidPsdPlane(width: number, height: number, value: number): number[] {
   return new Array<number>(width * height).fill(value);
 }
 
+function xcfU32(value: number): number[] {
+  return [(value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff];
+}
+
+function xcfI32(value: number): number[] {
+  return xcfU32(value < 0 ? 0x100000000 + value : value);
+}
+
+function xcfU64(value: number): number[] {
+  return [...xcfU32(Math.floor(value / 4294967296)), ...xcfU32(value >>> 0)];
+}
+
+function xcfRlePlane(samples: number[]): number[] {
+  const out: number[] = [];
+  let i = 0;
+  while (i < samples.length) {
+    let run = 1;
+    while (i + run < samples.length && samples[i + run] === samples[i]) {
+      run += 1;
+    }
+    if (run >= 3) {
+      out.push(run - 1, samples[i] as number);
+      i += run;
+      continue;
+    }
+    const start = i;
+    while (i < samples.length) {
+      let ahead = 1;
+      while (i + ahead < samples.length && samples[i + ahead] === samples[i] && ahead < 120) {
+        ahead += 1;
+      }
+      if (ahead >= 3 || i - start >= 120) {
+        break;
+      }
+      i += 1;
+    }
+    out.push(256 - (i - start), ...samples.slice(start, i));
+  }
+  return out;
+}
+
+interface XcfTestLayer {
+  name: string;
+  width: number;
+  height: number;
+  offsetX: number;
+  offsetY: number;
+  opacity?: number;
+  rgba: [number, number, number, number];
+}
+
+function buildXcfBytes(width: number, height: number, layers: XcfTestLayer[]): Uint8Array {
+  const out: number[] = [
+    ...[... "gimp xcf v011"].map((char) => char.charCodeAt(0)),
+    0,
+    ...xcfI32(width),
+    ...xcfI32(height),
+    ...xcfI32(0),
+    ...xcfI32(150),
+    ...xcfU32(17),
+    ...xcfU32(1),
+    1,
+    ...xcfU32(0),
+    ...xcfU32(0),
+  ];
+  const patch = (at: number, value: number[]): void => {
+    for (let i = 0; i < value.length; i += 1) {
+      out[at + i] = value[i] as number;
+    }
+  };
+  const reserve = (size: number): number => {
+    const at = out.length;
+    for (let i = 0; i < size; i += 1) {
+      out.push(0);
+    }
+    return at;
+  };
+  const slots = layers.map(() => reserve(8));
+  reserve(8);
+  layers.forEach((layer, index) => {
+    patch(slots[index] as number, xcfU64(out.length));
+    out.push(...xcfI32(layer.width), ...xcfI32(layer.height), ...xcfI32(1));
+    const name = [...layer.name].map((char) => char.charCodeAt(0) & 0xff);
+    out.push(...xcfU32(name.length + 1), ...name, 0);
+    out.push(...xcfU32(6), ...xcfU32(4), ...xcfU32(layer.opacity ?? 255));
+    out.push(...xcfU32(15), ...xcfU32(8), ...xcfI32(layer.offsetX), ...xcfI32(layer.offsetY));
+    out.push(...xcfU32(8), ...xcfU32(4), ...xcfU32(1));
+    out.push(...xcfU32(7), ...xcfU32(4), 0, 0, 0, 28);
+    out.push(...xcfU32(0), ...xcfU32(0));
+    const hier = reserve(8);
+    reserve(8);
+    patch(hier, xcfU64(out.length));
+    out.push(...xcfI32(layer.width), ...xcfI32(layer.height), ...xcfI32(4));
+    const level = reserve(8);
+    patch(level, xcfU64(out.length));
+    out.push(...xcfI32(layer.width), ...xcfI32(layer.height));
+    const tile = reserve(8);
+    reserve(8);
+    patch(tile, xcfU64(out.length));
+    const count = layer.width * layer.height;
+    const planes = [
+      new Array<number>(count).fill(layer.rgba[0]),
+      new Array<number>(count).fill(layer.rgba[1]),
+      new Array<number>(count).fill(layer.rgba[2]),
+      new Array<number>(count).fill(layer.rgba[3]),
+    ];
+    for (const plane of planes) {
+      out.push(...xcfRlePlane(plane));
+    }
+  });
+  return new Uint8Array(out);
+}
+
+test("File > Import loads layers and pixels from .xcf", async ({ page }) => {
+  const bytes = buildXcfBytes(4, 4, [
+    { name: "Top", width: 2, height: 2, offsetX: 2, offsetY: 2, opacity: 128, rgba: [255, 0, 0, 255] },
+    { name: "Bottom", width: 4, height: 4, offsetX: 0, offsetY: 0, rgba: [0, 0, 255, 255] },
+  ]);
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell");
+  await stubAsepritePicker(page, "art.xcf", bytes);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import" }).click();
+  const toast = page.locator('gnumarus-shell [data-testid="toast"]');
+  await expect(toast).toBeVisible();
+  await expect(toast).toContainText("Imported art.xcf (2 layers)");
+  // File order is top-first; the engine stacks bottom-first.
+  const state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.name)).toEqual(["Bottom", "Top"]);
+  expect(state.layers.map((layer) => layer.id)).toEqual(["layer0", "layer1"]);
+  expect(state.layers[1]?.opacity).toBeCloseTo(128 / 255, 5);
+  // The 2x2 square at canvas (2,2) centers on the 4x4 canvas: offset (1,1).
+  expect(state.layers[1]?.transform).toMatchObject({ x: 1, y: 1 });
+  expect(state.active).toBe("layer1");
+  // Active layer is the top one: texture-space pixels.
+  expect(await readPixel(page, 0, 0)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  // Switch to the background layer: solid blue 4x4.
+  await page.locator('gnumarus-shell [data-layer-id="layer0"] .layer-name').click();
+  expect(await readPixel(page, 3, 3)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+  expect(await animationFrameCount(page)).toBe(1);
+});
+
 test("File > Import loads layers and pixels from .psd", async ({ page }) => {
   const bytes = buildPsdBytes(4, 4, [
     {

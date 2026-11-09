@@ -102,6 +102,7 @@ import { parseFrameList, resolveExportSequence } from "../animation/GnumarusName
 import { decodePngToBuffer, encodeBufferToPngBlob } from "../project/GnumarusPngCodec";
 import { parseAsepriteFile } from "../project/GnumarusAseprite";
 import { parsePsdFile } from "../project/GnumarusPsd";
+import { parseXcfFile } from "../project/GnumarusXcf";
 import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
 import {
   clampBrushSizeFloat,
@@ -152,6 +153,22 @@ function isPhotoshopFile(bytes: Uint8Array): boolean {
     bytes[1] === 0x42 &&
     bytes[2] === 0x50 &&
     bytes[3] === 0x53
+  );
+}
+
+/** True when the bytes start with the GIMP `gimp xcf ` signature. */
+function isGimpFile(bytes: Uint8Array): boolean {
+  return (
+    bytes.length >= 9 &&
+    bytes[0] === 0x67 &&
+    bytes[1] === 0x69 &&
+    bytes[2] === 0x6d &&
+    bytes[3] === 0x70 &&
+    bytes[4] === 0x20 &&
+    bytes[5] === 0x78 &&
+    bytes[6] === 0x63 &&
+    bytes[7] === 0x66 &&
+    bytes[8] === 0x20
   );
 }
 
@@ -6259,6 +6276,10 @@ export class GnumarusShell extends LitElement {
         await this.loadPsdDocument(fileName, dot, bytes);
         return;
       }
+      if (isGimpFile(bytes)) {
+        await this.loadXcfDocument(fileName, dot, bytes);
+        return;
+      }
       const imported = await parseAsepriteFile(bytes);
       this.engine?.loadAnimationProject(imported.width, imported.height, {
         layers: imported.layers.map((layer) => ({
@@ -6352,6 +6373,47 @@ export class GnumarusShell extends LitElement {
     this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
     this.dirty = true;
     const summary = `Imported ${fileName} (${psd.layers.length} layer${psd.layers.length === 1 ? "" : "s"})`;
+    this.statusMessage = summary;
+    this.showToast(summary);
+  }
+
+  private async loadXcfDocument(fileName: string, dot: number, bytes: Uint8Array): Promise<void> {
+    const xcf = await parseXcfFile(bytes);
+    this.engine?.loadAnimationProject(xcf.width, xcf.height, {
+      layers: xcf.layers.map((layer) => ({
+        id: layer.id,
+        name: layer.name,
+        visible: layer.visible,
+        opacity: layer.opacity,
+        lockedChannels: { ...layer.lockedChannels },
+      })),
+      textures: xcf.textures.map((texture) => ({
+        id: texture.id,
+        name: texture.name,
+        width: texture.width,
+        height: texture.height,
+        buffer: texture.buffer,
+      })),
+      contents: xcf.contents.map((content) => ({
+        id: content.id,
+        name: content.name,
+        textureId: content.textureId,
+        transform: { ...content.transform },
+      })),
+      cells: xcf.cells.map((cell) => ({ ...cell })),
+      frames: 1,
+      currentFrame: 0,
+      defaultFrameDuration: DEFAULT_ANIMATION_FRAME_DURATION,
+      frameDurations: [],
+      frameNames: [],
+      namedAnimations: [],
+      activeAnimation: null,
+    });
+    this.refreshLayers();
+    this.directoryHandle = null;
+    this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
+    this.dirty = true;
+    const summary = `Imported ${fileName} (${xcf.layers.length} layer${xcf.layers.length === 1 ? "" : "s"})`;
     this.statusMessage = summary;
     this.showToast(summary);
   }

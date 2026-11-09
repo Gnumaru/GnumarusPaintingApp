@@ -69,8 +69,8 @@ export async function pickProjectDirectory(): Promise<GnumarusDirectoryHandle> {
 }
 
 /**
- * Open the operating system file dialog to pick a single Aseprite or
- * Photoshop file. Returns null when the dialog supports it; throws
+ * Open the operating system file dialog to pick an Aseprite, Photoshop or
+ * GIMP file. Returns null when the dialog supports it; throws
  * AbortError when the user cancels (callers treat cancellation as silent).
  */
 export async function pickImportFile(): Promise<GnumarusFileHandle | null> {
@@ -82,10 +82,11 @@ export async function pickImportFile(): Promise<GnumarusFileHandle | null> {
     multiple: false,
     types: [
       {
-        description: "Aseprite or Photoshop files",
+        description: "Aseprite, Photoshop or GIMP files",
         accept: {
           "application/octet-stream": [".ase", ".aseprite"],
           "image/vnd.adobe.photoshop": [".psd"],
+          "image/x-xcf": [".xcf"],
         },
       },
     ],

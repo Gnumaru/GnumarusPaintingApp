@@ -199,3 +199,6 @@
 - [x] Export quality setting for lossy still formats (1-100 per section, default 92), unit + e2e tests green, docs updated
 - [x] Frame durations in fractional seconds (default 0.25 s) + menubar outside-click/Esc/hover-switch, unit + e2e tests green, docs updated
 - [x] Photoshop PSD import (layers/pixels, rest ignored), unit + e2e tests green, docs updated
+- [x] GIMP XCF import (.xcf via magic dispatch, strict hand-written parser, groups flattened, single-frame project load)
+- [x] Unit tests (vitest) — 276 passed (previous 269 + 7 XCF import)
+- [x] E2E test (Playwright): previous 162 + XCF File > Import — 163 passed

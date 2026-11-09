@@ -33,6 +33,7 @@ Classic desktop-like painting app (top menu bar, central canvas, bottom status b
 - Directory projects via the File System Access API (Chromium derivatives): `project.json` metadata plus `textures/*.png` cell images (legacy `cells/*.png` projects open via automatic migration).
 - Aseprite import via File > Import: `.ase`/`.aseprite` files load layers (groups flattened, tilemaps skipped), frames, frame durations and linked cels (shared cell contents); corrupt files are rejected with an error toast.
 - Photoshop import via File > Import: `.psd` files load layers with opacity, visibility, offsets and names (flattened files load their composite image); blend modes, masks, groups and other unsupported data are ignored; corrupt files are rejected with an error toast.
+- GIMP import via File > Import: `.xcf` files load layers with opacity, visibility, offsets, alpha-lock and names (groups flattened); blend modes, masks and other unsupported data are ignored; corrupt files are rejected with an error toast.
 - WebGL2-only rendering with an explicit error message when unavailable. No WebGL1 fallback.
 
 ## Requirements
@@ -54,4 +55,4 @@ The build uses relative asset URLs (`base: './'`), so the app works at the domai
 
 ## Tech stack
 
-TypeScript (`strict`), Vite, Three.js (WebGL2 renderer), Lit (UI shell), Vitest, Playwright. All dependencies use permissive licenses (MIT / BSD / Apache-2.0). No GPL code.
+TypeScript (`strict`), Vite, Three.js (WebGL2 renderer), Lit (UI shell), Vitest, Playwright. All dependencies use permissive licenses (MIT / BSD / Apache-2.0). No GPL or proprietary licenses used.
