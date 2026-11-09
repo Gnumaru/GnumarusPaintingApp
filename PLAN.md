@@ -367,3 +367,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - File menu items become actions: new-project, open-project, save-project, import, export (menu labels renamed to New/Open/Save Project; Ctrl+S routes through the action). Palette list grows accordingly.
 - Animation modal rows show `"name": loop, N frames: 1,2,5-8` (new pure `describeNamedAnimation`, runs collapse at 3+); deleting asks in a confirm modal ("Are you sure?", Yes/No).
 - Unit tests for the summary formatter, animated shim round-trip (first-frame decode) and invalid inputs; E2E for JXL still/animated/sheet exports (signature + shim decode), menu renames, palette list, new modal display and delete confirm/cancel.
+
+## 68. Split E2E runs: recent only by default, full on demand (implemented)
+- Playwright tests for recent work carry the `@recent` tag in their titles (12 tests: action palette/search/shortcut, fit-all, crop-all x2, JXL still/lossy/animated/sheet + browser codec round-trip, animation delete confirm).
+- `npm run test:e2e` runs only `--grep @recent` (~25 s); `npm run test:e2e:full` runs the whole suite (~6 min, regressions, on explicit request).
+- Convention: tag new E2E tests with `@recent` when they land; move the tag to the next batch when a newer one arrives (untag tests whose feature is no longer "recent").

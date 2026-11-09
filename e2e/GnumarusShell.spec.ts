@@ -3943,7 +3943,7 @@ test("Help menu lists every keyboard shortcut in a modal", async ({ page }) => {
   await expect(dialog).toBeHidden();
 });
 
-test("quick action palette filters and runs actions", async ({ page }) => {
+test("quick action palette filters and runs actions @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.evaluate(() => {
@@ -3978,7 +3978,7 @@ test("quick action palette filters and runs actions", async ({ page }) => {
   await expect(page.locator("gnumarus-shell")).toContainText("Canvas transform reset");
 });
 
-test("quick action palette runs the clicked action and closes on Escape", async ({ page }) => {
+test("quick action palette runs the clicked action and closes on Escape @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.evaluate(() => {
@@ -3997,7 +3997,7 @@ test("quick action palette runs the clicked action and closes on Escape", async 
   await expect(dialog).toBeHidden();
 });
 
-test("Digit0 resets the canvas transform", async ({ page }) => {
+test("Digit0 resets the canvas transform @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.evaluate(() => {
@@ -4008,7 +4008,7 @@ test("Digit0 resets the canvas transform", async ({ page }) => {
   await expect(page.locator("gnumarus-shell")).toContainText("Canvas transform reset");
 });
 
-test("Fit All Textures to Size fits every texture at once", async ({ page }) => {
+test("Fit All Textures to Size fits every texture at once @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -4035,7 +4035,7 @@ test("Fit All Textures to Size fits every texture at once", async ({ page }) => 
   expect(await readPixel(page, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
 });
 
-test("Crop All Cells to Canvas crops shared textures sequentially", async ({ page }) => {
+test("Crop All Cells to Canvas crops shared textures sequentially @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -4075,7 +4075,7 @@ test("Crop All Cells to Canvas crops shared textures sequentially", async ({ pag
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
-test("Crop All Cells to Canvas crops every cell at once", async ({ page }) => {
+test("Crop All Cells to Canvas crops every cell at once @recent", async ({ page }) => {
   const bytes = buildXcfBytes(4, 4, [
     { name: "Top", width: 4, height: 4, offsetX: 2, offsetY: 2, rgba: [0, 255, 0, 255] },
     { name: "Bottom", width: 4, height: 4, offsetX: 0, offsetY: 0, rgba: [0, 0, 255, 255] },
@@ -6337,7 +6337,7 @@ test("named animations reject bad definitions and list valid ones", async ({ pag
   await expect(dialog).toBeHidden();
 });
 
-test("animation delete asks for confirmation", async ({ page }) => {
+test("animation delete asks for confirmation @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await addFrames(page, 1);
@@ -6693,7 +6693,7 @@ test("File > Export JPEG quality changes the file size", async ({ page }) => {
   expect(big).toBeGreaterThan(small);
 });
 
-test("File > Export saves the current frame as lossless JXL", async ({ page }) => {
+test("File > Export saves the current frame as lossless JXL @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await paintCenter(page);
@@ -6717,7 +6717,7 @@ test("File > Export saves the current frame as lossless JXL", async ({ page }) =
   expect(decoded?.center).toEqual([0, 0, 0, 255]);
 });
 
-test("File > Export saves lossy JXL when lossless is off", async ({ page }) => {
+test("File > Export saves lossy JXL when lossless is off @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await paintCenter(page);
@@ -6739,7 +6739,7 @@ test("File > Export saves lossy JXL when lossless is off", async ({ page }) => {
   expect(decoded?.center?.[3]).toBe(255);
 });
 
-test("File > Export saves all frames as a single-file JXL animation", async ({ page }) => {
+test("File > Export saves all frames as a single-file JXL animation @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await addFrames(page, 1);
@@ -6761,7 +6761,7 @@ test("File > Export saves all frames as a single-file JXL animation", async ({ p
   expect(decoded?.width).toBe(64);
 });
 
-test("File > Export saves an animation as a JXL spritesheet", async ({ page }) => {
+test("File > Export saves an animation as a JXL spritesheet @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await addFrames(page, 1);

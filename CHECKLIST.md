@@ -223,3 +223,4 @@
 - [x] Animation list shows quoted name + frame ranges; delete requires Yes/No confirm
 - [x] Unit tests (vitest) — 301 passed (previous 298 + format summary + JXL animated round-trip/frame-count)
 - [x] E2E test (Playwright): previous 174 + JXL still/lossy/animated/sheet + delete confirm/cancel + menu renames — 179 passed
+- [x] E2E split: `@recent` tag + `test:e2e` (recent only) vs `test:e2e:full` (full suite)

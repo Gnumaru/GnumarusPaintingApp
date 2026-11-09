@@ -47,7 +47,8 @@ Classic desktop-like painting app (top menu bar, central canvas, bottom status b
 - `npm run dev` — start the dev server.
 - `npm run build` — type-check and build to `dist/`.
 - `npm run test` — unit tests (Vitest).
-- `npm run test:e2e` — end-to-end tests (Playwright + headless Chromium).
+- `npm run test:e2e` — end-to-end tests for recent changes only (Playwright tag `@recent`, headless Chromium).
+- `npm run test:e2e:full` — the whole end-to-end suite (regression check, runs on explicit request).
 - `npm run deploy` — rebuild and copy `dist/` to `/var/www/html/GnumarusPaintingAndAnimationApp` (needs write access to `/var/www/html`; run with sudo if required).
 
 ## Hosting
