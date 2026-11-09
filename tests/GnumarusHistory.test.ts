@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { createPixelBuffer, setPixel } from "../src/canvas/GnumarusPixelBuffer";
+import { IDENTITY_LAYER_TRANSFORM } from "../src/canvas/GnumarusViewportMath";
 import {
   applyImageDiff,
   computeImageDiff,
   GnumarusHistory,
+  type GnumarusFitRecord,
   type GnumarusHistoryLayer,
 } from "../src/history/GnumarusHistory";
 
@@ -395,5 +397,50 @@ describe("GnumarusHistory", () => {
     expect(history.undoDepth()).toBe(2);
     expect(history.push(entry)).toBe(1);
     expect(history.undoDepth()).toBe(2);
+  });
+
+  it("undoes a fit batch in reverse and redoes it in order", () => {
+    const fitRecord = (textureId: string): GnumarusFitRecord => ({
+      textureId,
+      beforeWidth: 4,
+      beforeHeight: 4,
+      beforeBuffer: createPixelBuffer(4, 4),
+      afterWidth: 1,
+      afterHeight: 1,
+      afterBuffer: createPixelBuffer(1, 1),
+      transforms: [{ contentId: `content${textureId}`, before: { ...IDENTITY_LAYER_TRANSFORM }, after: { ...IDENTITY_LAYER_TRANSFORM } }],
+    });
+    const history = new GnumarusHistory();
+    const calls: string[] = [];
+    const applyFit = (textureId: string, width: number, height: number): boolean => {
+      calls.push(`${textureId}:${width}x${height}`);
+      return true;
+    };
+    const findLayer = (): null => null;
+    const noop = (): void => {};
+    history.push({ type: "fitBatch", fits: [fitRecord("texA"), fitRecord("texB")] });
+    expect(history.undo(findLayer, noop, undefined, applyFit)).toBe(true);
+    expect(calls).toEqual(["texB:4x4", "texA:4x4"]);
+    expect(history.redo(findLayer, noop, undefined, applyFit)).toBe(true);
+    expect(calls).toEqual(["texB:4x4", "texA:4x4", "texA:1x1", "texB:1x1"]);
+    expect(history.canUndo()).toBe(true);
+    expect(history.canRedo()).toBe(false);
+  });
+
+  it("skips a fit batch when no texture applies", () => {
+    const history = new GnumarusHistory();
+    const fit = {
+      textureId: "gone",
+      beforeWidth: 4,
+      beforeHeight: 4,
+      beforeBuffer: createPixelBuffer(4, 4),
+      afterWidth: 1,
+      afterHeight: 1,
+      afterBuffer: createPixelBuffer(1, 1),
+      transforms: [],
+    };
+    history.push({ type: "fitBatch", fits: [fit] });
+    expect(history.undo(() => null, () => {}, undefined, () => false)).toBe(false);
+    expect(history.canUndo()).toBe(false);
   });
 });

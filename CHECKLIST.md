@@ -215,3 +215,6 @@
 - [x] GnumarusJxl read/write wrapper + round-trip tests
 - [x] Unit tests (vitest) — 296 passed (previous 293 + 3 JXL)
 - [x] E2E test (Playwright): previous 170 + JXL browser round-trip — 171 passed
+- [x] Batch texture actions (fit-all with threshold dialog, crop-all-cells-to-canvas with shared-texture sequencing, single-undo fitBatch history)
+- [x] Unit tests (vitest) — 298 passed (previous 296 + 2 fitBatch history)
+- [x] E2E test (Playwright): previous 171 + fit-all (palette+dialog+undo) + crop-all (xcf offsets+undo, shared-texture sequencing) — 174 passed

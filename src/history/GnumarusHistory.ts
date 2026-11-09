@@ -140,7 +140,8 @@ export type GnumarusHistoryEntry =
   | { type: "stroke"; layerId: string; diff: GnumarusImageDiff }
   | { type: "merge"; merge: GnumarusMergeRecord }
   | { type: "resize"; resize: GnumarusResizeRecord }
-  | { type: "fit"; fit: GnumarusFitRecord };
+  | { type: "fit"; fit: GnumarusFitRecord }
+  | { type: "fitBatch"; fits: GnumarusFitRecord[] };
 
 export interface GnumarusHistoryLayer {
   buffer: Uint8ClampedArray;
@@ -247,6 +248,33 @@ export class GnumarusHistory {
         this.redoStack.push(entry);
         return true;
       }
+      if (entry.type === "fitBatch") {
+        if (applyFit === undefined) {
+          continue;
+        }
+        let applied = false;
+        for (let i = entry.fits.length - 1; i >= 0; i -= 1) {
+          const fit = entry.fits[i];
+          if (fit === undefined) {
+            continue;
+          }
+          const ok = applyFit(
+            fit.textureId,
+            fit.beforeWidth,
+            fit.beforeHeight,
+            fit.beforeBuffer,
+            fit.transforms.map((record) => ({ contentId: record.contentId, transform: { ...record.before } })),
+          );
+          if (ok) {
+            applied = true;
+          }
+        }
+        if (!applied) {
+          continue;
+        }
+        this.redoStack.push(entry);
+        return true;
+      }
       const needsAssociate = !entry.merge.removedLayer;
       if (needsAssociate && associateCell === undefined) {
         continue;
@@ -348,6 +376,29 @@ export class GnumarusHistory {
           entry.fit.transforms.map((record) => ({ contentId: record.contentId, transform: { ...record.after } })),
         );
         if (!ok) {
+          continue;
+        }
+        this.undoStack.push(entry);
+        return true;
+      }
+      if (entry.type === "fitBatch") {
+        if (applyFit === undefined) {
+          continue;
+        }
+        let applied = false;
+        for (const fit of entry.fits) {
+          const ok = applyFit(
+            fit.textureId,
+            fit.afterWidth,
+            fit.afterHeight,
+            fit.afterBuffer,
+            fit.transforms.map((record) => ({ contentId: record.contentId, transform: { ...record.after } })),
+          );
+          if (ok) {
+            applied = true;
+          }
+        }
+        if (!applied) {
           continue;
         }
         this.undoStack.push(entry);

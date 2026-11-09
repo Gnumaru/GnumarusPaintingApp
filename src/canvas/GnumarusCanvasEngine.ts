@@ -124,6 +124,7 @@ import { rgbaBytesToHex } from "../color/GnumarusColorModels";
 import {
   computeImageDiff,
   GnumarusHistory,
+  type GnumarusFitRecord,
   type GnumarusHistoryEntry,
   type GnumarusMergedLayerSnapshot,
 } from "../history/GnumarusHistory";
@@ -2852,6 +2853,34 @@ export class GnumarusCanvasEngine {
     entry: { width: number; height: number; buffer: Uint8ClampedArray },
     box: GnumarusCropBox,
   ): boolean {
+    const record = this.cropTextureToBox(textureId, entry, box);
+    if (record === null) {
+      return false;
+    }
+    this.pushHistory({
+      type: "fit",
+      fit: record,
+    });
+    this.markTextureViewsDirty(textureId);
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return true;
+  }
+
+  /**
+   * Crop a texture to a box and re-seat every sharing content transform,
+   * without recording history or refreshing the views. Returns the fit
+   * record for the caller to batch, or null when the pixels cannot be set.
+   */
+  private cropTextureToBox(
+    textureId: string,
+    entry: { width: number; height: number; buffer: Uint8ClampedArray },
+    box: GnumarusCropBox,
+  ): GnumarusFitRecord | null {
     const beforeWidth = entry.width;
     const beforeHeight = entry.height;
     const beforeBuffer = entry.buffer.slice();
@@ -2882,7 +2911,7 @@ export class GnumarusCanvasEngine {
         after: shiftTransformForCrop(content.transform, beforeWidth, beforeHeight, box),
       }));
     if (!this.setTexturePixels(textureId, box.width, box.height, afterBuffer)) {
-      return false;
+      return null;
     }
     for (const record of transforms) {
       const content = this.contents.get(record.contentId);
@@ -2890,27 +2919,131 @@ export class GnumarusCanvasEngine {
         content.transform = { ...record.after };
       }
     }
-    this.pushHistory({
-      type: "fit",
-      fit: {
-        textureId,
-        beforeWidth,
-        beforeHeight,
-        beforeBuffer,
-        afterWidth: box.width,
-        afterHeight: box.height,
-        afterBuffer: afterBuffer.slice(),
-        transforms,
-      },
-    });
-    this.markTextureViewsDirty(textureId);
+    return {
+      textureId,
+      beforeWidth,
+      beforeHeight,
+      beforeBuffer,
+      afterWidth: box.width,
+      afterHeight: box.height,
+      afterBuffer: afterBuffer.slice(),
+      transforms,
+    };
+  }
+
+  private refreshAfterBatchCrop(textureIds: Iterable<string>): void {
+    for (const textureId of textureIds) {
+      this.markTextureViewsDirty(textureId);
+    }
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
     this.render();
     this.onPixelsChanged();
     this.onLayersChanged?.();
     this.emitStats();
-    return true;
+  }
+
+  /**
+   * Crop every project texture to its alpha bounding box (same rule as
+   * `fitTextureToSize`), recording a single undoable history entry for the
+   * whole batch. Returns fitted/unchanged counts.
+   */
+  fitAllTexturesToSize(threshold: number): { fitted: number; unchanged: number } {
+    const limit = Number.isFinite(threshold) ? Math.min(254, Math.max(0, Math.floor(threshold))) : 0;
+    const records: GnumarusFitRecord[] = [];
+    const touched = new Set<string>();
+    let unchanged = 0;
+    for (const [textureId, entry] of this.textures) {
+      this.commitFloatingIfHomeTexture(textureId);
+      const box = findAlphaBoundingBox(entry.buffer, entry.width, entry.height, limit);
+      if (box === null) {
+        unchanged += 1;
+        continue;
+      }
+      if (box.left === 0 && box.top === 0 && box.width === entry.width && box.height === entry.height) {
+        unchanged += 1;
+        continue;
+      }
+      const record = this.cropTextureToBox(textureId, entry, box);
+      if (record === null) {
+        unchanged += 1;
+        continue;
+      }
+      records.push(record);
+      touched.add(textureId);
+    }
+    if (records.length === 0) {
+      return { fitted: 0, unchanged };
+    }
+    this.pushHistory({ type: "fitBatch", fits: records });
+    this.refreshAfterBatchCrop(touched);
+    return { fitted: records.length, unchanged };
+  }
+
+  /**
+   * Crop every cell content texture to its canvas-visible region (same rule
+   * as `cropCellTextureToCanvas`). Contents are grouped by texture so a
+   * shared texture is cropped once per distinct referencing geometry; each
+   * box is recomputed from current state and every referencing transform
+   * is re-seated, so rendering stays pixel-identical. Records a single
+   * undoable history entry. Returns cropped/unchanged/outside counts.
+   */
+  cropAllCellsToCanvas(): { cropped: number; unchanged: number; outside: number } {
+    const byTexture = new Map<string, string[]>();
+    for (const content of this.contents.values()) {
+      if (content.textureId === null) {
+        continue;
+      }
+      const group = byTexture.get(content.textureId);
+      if (group === undefined) {
+        byTexture.set(content.textureId, [content.id]);
+      } else {
+        group.push(content.id);
+      }
+    }
+    const records: GnumarusFitRecord[] = [];
+    const touched = new Set<string>();
+    let unchanged = 0;
+    let outside = 0;
+    for (const [textureId, contentIds] of byTexture) {
+      this.commitFloatingIfHomeTexture(textureId);
+      for (const contentId of contentIds) {
+        const content = this.contents.get(contentId);
+        const entry = this.textures.get(textureId);
+        if (content === undefined || entry === undefined) {
+          unchanged += 1;
+          continue;
+        }
+        const box = canvasVisibleTextureBox(
+          this.imageWidth,
+          this.imageHeight,
+          entry.width,
+          entry.height,
+          content.transform,
+        );
+        if (box === null) {
+          outside += 1;
+          continue;
+        }
+        if (box.left === 0 && box.top === 0 && box.width === entry.width && box.height === entry.height) {
+          unchanged += 1;
+          continue;
+        }
+        const record = this.cropTextureToBox(textureId, entry, box);
+        if (record === null) {
+          unchanged += 1;
+          continue;
+        }
+        records.push(record);
+        touched.add(textureId);
+      }
+    }
+    if (records.length === 0) {
+      return { cropped: 0, unchanged, outside };
+    }
+    this.pushHistory({ type: "fitBatch", fits: records });
+    this.refreshAfterBatchCrop(touched);
+    return { cropped: records.length, unchanged, outside };
   }
 
   private applyFitToSize(

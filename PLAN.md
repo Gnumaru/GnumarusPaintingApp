@@ -354,3 +354,10 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - License note: libjxl is BSD-3-Clause (non-viral); nothing is copied into our source tree, it builds from the submodule.
 
 - Fixed along the way: encoder rejected every input because `num_extra_channels` must be >= 1 when `alpha_bits` is set, and lossless requires `uses_original_profile` (modular mode); the Emscripten MODULARIZE build of this toolchain does not expose `HEAPU8` on the module, so the bridge was rewritten on embind `val` (copies across the boundary, no raw heap access from JS).
+
+## 65. Batch texture actions: fit all + crop all to canvas (implemented)
+- Two new actions runnable from the Run action palette: "Fit All Textures to Size" (same alpha-threshold dialog as the single-texture flow, applied to every project texture) and "Crop All Cells to Canvas" (no dialog, applies the cell crop logic to every cell content).
+- Engine: `fitAllTexturesToSize(threshold)` over all textures in creation order; `cropAllCellsToCanvas()` groups contents by texture (insertion order) and crops sequentially, recomputing each box from current state so shared textures crop once per distinct geometry and every referencing transform is re-seated. Both share a refactored `cropTextureToBox` core with the single-texture paths (behavior unchanged) and record ONE compound `fitBatch` history entry, so a single undo reverts the whole batch.
+- History: new `{ type: "fitBatch"; fits: GnumarusFitRecord[] }` entry; undo applies records in reverse with `before` state, redo in order with `after` state, reusing the existing `applyFit` callback.
+- Shell: palette entries (alphabetical), `fitTextureTarget` becomes `{ kind: "single" } | { kind: "all" }`, confirm handler branches to the batch call with count toasts; crop-all reports cropped/unchanged/outside counts.
+- Unit tests for the history batch entry (undo/redo order, skip-on-missing) plus E2E for both actions (palette search, dialog reuse, pixel-identical rendering after re-seat, single-undo revert, shared-texture multi-crop).

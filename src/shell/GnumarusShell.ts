@@ -1200,7 +1200,7 @@ export class GnumarusShell extends LitElement {
     | null;
   declare contentPickerTarget: { layerId: string; frame: number } | null;
   declare texturePickerContentId: string | null;
-  declare fitTextureTarget: { textureId: string; textureName: string } | null;
+  declare fitTextureTarget: { kind: "single"; textureId: string } | { kind: "all" } | null;
   declare fitThreshold: number;
   declare checkerColorA: string;
   declare checkerColorB: string;
@@ -3647,6 +3647,22 @@ export class GnumarusShell extends LitElement {
       requirements: [],
       run: (): void => {
         this.resetCanvasTransform();
+      },
+    });
+    this.actionRegistry.register({
+      id: "fit-all-textures-to-size",
+      name: "Fit All Textures to Size",
+      requirements: [],
+      run: (): void => {
+        void this.openFitTextureDialogForAll();
+      },
+    });
+    this.actionRegistry.register({
+      id: "crop-all-cells-to-canvas",
+      name: "Crop All Cells to Canvas",
+      requirements: [],
+      run: (): void => {
+        this.cropAllCellsToCanvas();
       },
     });
   }
@@ -6227,11 +6243,6 @@ export class GnumarusShell extends LitElement {
     }
   }
 
-  private fitTextureDisplayName(textureId: string): string {
-    const found = this.engine?.getAnimationMatrix().textures.find((entry) => entry.id === textureId);
-    return found?.name ?? textureId;
-  }
-
   private onOpenFitTextureFromLayer(layerId: string): void {
     if (this.engine === null) {
       this.closeLayerMenu();
@@ -6264,7 +6275,20 @@ export class GnumarusShell extends LitElement {
     if (this.engine === null) {
       return;
     }
-    this.fitTextureTarget = { textureId, textureName: this.fitTextureDisplayName(textureId) };
+    this.fitTextureTarget = { kind: "single", textureId };
+    this.fitThreshold = this.fitDefaultThreshold;
+    await this.updateComplete;
+    const dialog = this.shadowRoot?.getElementById("fitTextureDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+    const ok = this.shadowRoot?.getElementById("fitTextureOk") as HTMLButtonElement | null;
+    ok?.focus();
+  }
+
+  private async openFitTextureDialogForAll(): Promise<void> {
+    if (this.engine === null) {
+      return;
+    }
+    this.fitTextureTarget = { kind: "all" };
     this.fitThreshold = this.fitDefaultThreshold;
     await this.updateComplete;
     const dialog = this.shadowRoot?.getElementById("fitTextureDialog") as HTMLDialogElement | null;
@@ -6289,6 +6313,17 @@ export class GnumarusShell extends LitElement {
     const raw = Number(input?.value ?? "0");
     const threshold = Number.isFinite(raw) ? Math.min(254, Math.max(0, Math.floor(raw))) : 0;
     this.fitThreshold = threshold;
+    if (target.kind === "all") {
+      const result = this.engine.fitAllTexturesToSize(threshold);
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage =
+        result.fitted === 0
+          ? "Nothing to fit: every texture is empty or already fits"
+          : `Fitted ${result.fitted} texture${result.fitted === 1 ? "" : "s"} to size`;
+      this.closeFitTextureDialog();
+      return;
+    }
     if (this.engine.fitTextureToSize(target.textureId, threshold)) {
       this.refreshLayers();
       this.dirty = true;
@@ -6299,6 +6334,27 @@ export class GnumarusShell extends LitElement {
       this.statusMessage = "Nothing to fit: texture is empty or already fits";
     }
     this.closeFitTextureDialog();
+  }
+
+  private cropAllCellsToCanvas(): void {
+    if (this.engine === null) {
+      return;
+    }
+    const result = this.engine.cropAllCellsToCanvas();
+    if (result.cropped === 0) {
+      this.statusMessage =
+        result.outside > 0 && result.unchanged === 0
+          ? "Cannot crop: every cell content is fully outside the canvas"
+          : "Nothing to crop: every cell already fits the canvas";
+      return;
+    }
+    this.refreshLayers();
+    this.dirty = true;
+    const rest =
+      result.unchanged > 0 || result.outside > 0
+        ? ` (${result.unchanged} unchanged${result.outside > 0 ? `, ${result.outside} outside` : ""})`
+        : "";
+    this.statusMessage = `Cropped ${result.cropped} texture${result.cropped === 1 ? "" : "s"} to canvas${rest}`;
   }
 
   private onCropCellToCanvasFromLayer(layerId: string): void {
