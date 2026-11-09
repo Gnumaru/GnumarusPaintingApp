@@ -345,3 +345,12 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Unit tests for registry/requirements/messages/search ranking; E2E for palette open/filter/navigate/execute/close plus the `0` shortcut. Requirement-failure toast E2E waits for the second gated action.
 
 - Fixed along the way: palette query/index were declared but missing from the static `properties` block, so typing never re-rendered the list; found via the first E2E run.
+
+## 65. libjxl via WASM for JXL read/write (implemented)
+- Goal: compile libjxl (https://github.com/libjxl/libjxl, BSD-3-Clause, permissive) to WebAssembly with Emscripten and use it for JXL decoding/encoding; later: animated export beyond GIF, single-frame and spritesheet export in JXL.
+- Repo: added as a git submodule at `third_party/libjxl`, pinned to the v0.12.0 tag (latest stable at the time), including its `third_party` dependency submodules (brotli, highway, etc.).
+- Toolchain: Emscripten SDK installed at `~/emsdk` (outside the repo; no root needed). WASM build is single-threaded (no pthreads/SharedArrayBuffer/COOP-COEP requirement, so the app keeps working on any static host) with WASM SIMD where supported; all codec features on (lossless/lossy, alpha, animation-capable API).
+- Integration: new `src/codec/GnumarusJxl.ts` wrapper (decode JXL bytes to RGBA, encode RGBA to JXL bytes) loading the Emscripten module lazily; unit round-trip tests plus E2E still-image smoke coverage. Export-dialog formats come in a follow-up batch.
+- License note: libjxl is BSD-3-Clause (non-viral); nothing is copied into our source tree, it builds from the submodule.
+
+- Fixed along the way: encoder rejected every input because `num_extra_channels` must be >= 1 when `alpha_bits` is set, and lossless requires `uses_original_profile` (modular mode); the Emscripten MODULARIZE build of this toolchain does not expose `HEAPU8` on the module, so the bridge was rewritten on embind `val` (copies across the boundary, no raw heap access from JS).

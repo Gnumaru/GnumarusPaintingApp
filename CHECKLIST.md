@@ -211,3 +211,7 @@
 - [x] Action system (registry, context requirements, similarity search) + quick action palette (Ctrl+Shift+P) + reset-canvas-transform action
 - [x] Unit tests (vitest) — 293 passed (previous 287 + 6 actions)
 - [x] E2E test (Playwright): previous 167 + action palette (filter/run/close) + Digit0 shortcut — 170 passed
+- [x] libjxl submodule (third_party/libjxl @ v0.12.0) + Emscripten WASM build (single-threaded, full codec features)
+- [x] GnumarusJxl read/write wrapper + round-trip tests
+- [x] Unit tests (vitest) — 296 passed (previous 293 + 3 JXL)
+- [x] E2E test (Playwright): previous 170 + JXL browser round-trip — 171 passed
