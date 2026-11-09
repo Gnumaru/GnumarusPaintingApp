@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { zipSync } from "fflate";
 import { imageToScreenPixel, layerPixelToScreen } from "../src/canvas/GnumarusViewportMath";
 
 interface GnumarusPixel {
@@ -5567,6 +5568,75 @@ test("File > Import loads layers and pixels from .xcf", async ({ page }) => {
   await page.locator('gnumarus-shell [data-layer-id="layer0"] .layer-name').click();
   expect(await readPixel(page, 3, 3)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
   expect(await animationFrameCount(page)).toBe(1);
+});
+
+function kraRawTile(bgra: [number, number, number, number]): number[] {
+  const pixels: number[] = [0];
+  for (let i = 0; i < 64 * 64; i += 1) {
+    pixels.push(bgra[0], bgra[1], bgra[2], bgra[3]);
+  }
+  return pixels;
+}
+
+function kraTileStore(tiles: Array<{ x: number; y: number; bgra: [number, number, number, number] }>): Uint8Array {
+  const out: number[] = [];
+  const ascii = (text: string): void => {
+    for (let i = 0; i < text.length; i += 1) {
+      out.push(text.charCodeAt(i) & 0xff);
+    }
+  };
+  ascii("VERSION 2\nTILEWIDTH 64\nTILEHEIGHT 64\nPIXELSIZE 4\n");
+  ascii(`DATA ${tiles.length}\n`);
+  for (const tile of tiles) {
+    const payload = kraRawTile(tile.bgra);
+    ascii(`${tile.x},${tile.y},LZF,${payload.length}\n`);
+    out.push(...payload);
+  }
+  return new Uint8Array(out);
+}
+
+function buildKraBytes(
+  width: number,
+  height: number,
+  layers: Array<{ name: string; filename: string; x?: number; y?: number; tiles: Array<{ x: number; y: number; bgra: [number, number, number, number] }> }>,
+): Uint8Array {
+  const maindoc =
+    `<?xml version="1.0" encoding="UTF-8"?>\n<DOC><IMAGE width="${width}" height="${height}" ` +
+    `colorspacename="RGBA" name="art" profile="sRGB" mime="application/x-kra">` +
+    `<layers>${layers.map((layer) => `<layer opacity="255" x="${layer.x ?? 0}" y="${layer.y ?? 0}" colorspacename="RGBA" visible="1" nodetype="paintlayer" name="${layer.name}" filename="${layer.filename}" channelflags=""/>`).join("")}</layers>` +
+    `<animation><framerate type="value" value="10"/><range from="0" type="timerange" to="1"/><currentTime type="value" value="0"/></animation>` +
+    `</IMAGE></DOC>`;
+  const files: Record<string, Uint8Array> = {
+    mimetype: new TextEncoder().encode("application/x-krita"),
+    "maindoc.xml": new TextEncoder().encode(maindoc),
+  };
+  for (const layer of layers) {
+    files[`art/layers/${layer.filename}`] = kraTileStore(layer.tiles);
+  }
+  return zipSync(files);
+}
+
+test("File > Import loads layers, pixels and frames from .kra", async ({ page }) => {
+  const bytes = buildKraBytes(64, 64, [
+    { name: "Top", filename: "top", x: 2, y: 2, tiles: [{ x: 0, y: 0, bgra: [0, 0, 255, 255] }] },
+    { name: "Bottom", filename: "bottom", tiles: [{ x: 0, y: 0, bgra: [255, 0, 0, 255] }] },
+  ]);
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell");
+  await stubAsepritePicker(page, "art.kra", bytes);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import" }).click();
+  const toast = page.locator('gnumarus-shell [data-testid="toast"]');
+  await expect(toast).toBeVisible();
+  await expect(toast).toContainText("Imported art.kra (2 layers, 2 frames)");
+  // File order is top-first; the engine stacks bottom-first.
+  const state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.name)).toEqual(["Bottom", "Top"]);
+  expect(state.layers.map((layer) => layer.id)).toEqual(["layer0", "layer1"]);
+  // The 64x64 tile at layer offset (2,2) centers on the 64x64 canvas: offset (2,2).
+  expect(state.layers[1]?.transform).toMatchObject({ x: 2, y: 2 });
+  expect(await animationFrameCount(page)).toBe(2);
+  expect(await frameDuration(page, 0)).toBeCloseTo(0.1, 3);
 });
 
 test("File > Import loads layers and pixels from .psd", async ({ page }) => {

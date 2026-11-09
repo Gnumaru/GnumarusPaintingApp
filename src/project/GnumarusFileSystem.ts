@@ -82,11 +82,13 @@ export async function pickImportFile(): Promise<GnumarusFileHandle | null> {
     multiple: false,
     types: [
       {
-        description: "Aseprite, Photoshop or GIMP files",
+        description: "Aseprite, Photoshop, GIMP or Krita files",
         accept: {
           "application/octet-stream": [".ase", ".aseprite"],
           "image/vnd.adobe.photoshop": [".psd"],
           "image/x-xcf": [".xcf"],
+          "application/x-kra": [".kra"],
+          "application/x-krita-archive": [".krz"],
         },
       },
     ],

@@ -6280,6 +6280,11 @@ export class GnumarusShell extends LitElement {
         await this.loadXcfDocument(fileName, dot, bytes);
         return;
       }
+      const { isKritaFile } = await import("../project/GnumarusKra");
+      if (isKritaFile(bytes)) {
+        await this.loadKraDocument(fileName, dot, bytes);
+        return;
+      }
       const imported = await parseAsepriteFile(bytes);
       this.engine?.loadAnimationProject(imported.width, imported.height, {
         layers: imported.layers.map((layer) => ({
@@ -6414,6 +6419,48 @@ export class GnumarusShell extends LitElement {
     this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
     this.dirty = true;
     const summary = `Imported ${fileName} (${xcf.layers.length} layer${xcf.layers.length === 1 ? "" : "s"})`;
+    this.statusMessage = summary;
+    this.showToast(summary);
+  }
+
+  private async loadKraDocument(fileName: string, dot: number, bytes: Uint8Array): Promise<void> {
+    const { parseKraFile } = await import("../project/GnumarusKra");
+    const kra = await parseKraFile(bytes);
+    this.engine?.loadAnimationProject(kra.width, kra.height, {
+      layers: kra.layers.map((layer) => ({
+        id: layer.id,
+        name: layer.name,
+        visible: layer.visible,
+        opacity: layer.opacity,
+        lockedChannels: { ...layer.lockedChannels },
+      })),
+      textures: kra.textures.map((texture) => ({
+        id: texture.id,
+        name: texture.name,
+        width: texture.width,
+        height: texture.height,
+        buffer: texture.buffer,
+      })),
+      contents: kra.contents.map((content) => ({
+        id: content.id,
+        name: content.name,
+        textureId: content.textureId,
+        transform: { ...content.transform },
+      })),
+      cells: kra.cells.map((cell) => ({ ...cell })),
+      frames: kra.frames,
+      currentFrame: 0,
+      defaultFrameDuration: kra.defaultFrameDuration,
+      frameDurations: kra.frameDurations.map((entry) => ({ ...entry })),
+      frameNames: [],
+      namedAnimations: [],
+      activeAnimation: null,
+    });
+    this.refreshLayers();
+    this.directoryHandle = null;
+    this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
+    this.dirty = true;
+    const summary = `Imported ${fileName} (${kra.layers.length} layer${kra.layers.length === 1 ? "" : "s"}, ${kra.frames} frame${kra.frames === 1 ? "" : "s"})`;
     this.statusMessage = summary;
     this.showToast(summary);
   }

@@ -34,6 +34,7 @@ Classic desktop-like painting app (top menu bar, central canvas, bottom status b
 - Aseprite import via File > Import: `.ase`/`.aseprite` files load layers (groups flattened, tilemaps skipped), frames, frame durations and linked cels (shared cell contents); corrupt files are rejected with an error toast.
 - Photoshop import via File > Import: `.psd` files load layers with opacity, visibility, offsets and names (flattened files load their composite image); blend modes, masks, groups and other unsupported data are ignored; corrupt files are rejected with an error toast.
 - GIMP import via File > Import: `.xcf` files load layers with opacity, visibility, offsets, alpha-lock and names (groups flattened); blend modes, masks and other unsupported data are ignored; corrupt files are rejected with an error toast.
+- Krita import via File > Import: `.kra`/`.krz` files load layers with opacity, visibility, offsets, channel-locks and names (groups flattened) plus keyframed animation (playback range becomes frames with hold, framerate sets the default frame duration); blend modes, masks, non-paint layers and other unsupported data are ignored; corrupt files are rejected with an error toast.
 - WebGL2-only rendering with an explicit error message when unavailable. No WebGL1 fallback.
 
 ## Requirements
