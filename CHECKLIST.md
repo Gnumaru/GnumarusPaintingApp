@@ -198,3 +198,4 @@
 - [x] Short default names (L/F/C/T) + project export (static/animated/spritesheet), unit + e2e tests green, docs updated
 - [x] Export quality setting for lossy still formats (1-100 per section, default 92), unit + e2e tests green, docs updated
 - [x] Frame durations in fractional seconds (default 0.25 s) + menubar outside-click/Esc/hover-switch, unit + e2e tests green, docs updated
+- [x] Photoshop PSD import (layers/pixels, rest ignored), unit + e2e tests green, docs updated

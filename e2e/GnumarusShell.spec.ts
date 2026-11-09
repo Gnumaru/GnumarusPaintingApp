@@ -5327,6 +5327,176 @@ test("File > Import loads frame tags as named animations", async ({ page }) => {
   await expect(matrix.getByRole("button", { name: "Play animation", exact: true })).toBeVisible();
 });
 
+function psdU16(value: number): number[] {
+  return [(value >> 8) & 0xff, value & 0xff];
+}
+
+function psdU32(value: number): number[] {
+  return [(value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff];
+}
+
+function psdI32(value: number): number[] {
+  return psdU32(value < 0 ? 0x100000000 + value : value);
+}
+
+function psdI16(value: number): number[] {
+  return psdU16(value < 0 ? 0x10000 + value : value);
+}
+
+function psdAscii(text: string): number[] {
+  return [...text].map((char) => char.charCodeAt(0) & 0xff);
+}
+
+function psdPascal4(text: string): number[] {
+  const chars = psdAscii(text);
+  const pad = (4 - ((1 + chars.length) % 4)) % 4;
+  return [chars.length, ...chars, ...new Array<number>(pad).fill(0)];
+}
+
+interface PsdTestPlane {
+  id: number;
+  payload: number[];
+}
+
+interface PsdTestLayer {
+  top: number;
+  left: number;
+  bottom: number;
+  right: number;
+  opacity?: number;
+  flags?: number;
+  name?: string;
+  planes: PsdTestPlane[];
+}
+
+function buildPsdBytes(
+  width: number,
+  height: number,
+  layers: PsdTestLayer[],
+  composite?: number[][],
+): Uint8Array {
+  const out: number[] = [
+    ...psdAscii("8BPS"),
+    ...psdU16(1),
+    0, 0, 0, 0, 0, 0,
+    ...psdU16(3),
+    ...psdU32(height),
+    ...psdU32(width),
+    ...psdU16(8),
+    ...psdU16(3),
+    ...psdU32(0),
+    ...psdU32(0),
+  ];
+  const records: number[] = [...psdI16(layers.length)];
+  const blobs: number[] = [];
+  for (const layer of layers) {
+    records.push(
+      ...psdI32(layer.top),
+      ...psdI32(layer.left),
+      ...psdI32(layer.bottom),
+      ...psdI32(layer.right),
+      ...psdU16(layer.planes.length),
+    );
+    for (const plane of layer.planes) {
+      records.push(...psdI16(plane.id), ...psdU32(2 + plane.payload.length));
+    }
+    records.push(...psdAscii("8BIM"), ...psdAscii("norm"), layer.opacity ?? 255, 0, layer.flags ?? 8, 0);
+    const extra = [...psdU32(0), ...psdU32(0), ...psdPascal4(layer.name ?? "")];
+    records.push(...psdU32(extra.length), ...extra);
+    for (const plane of layer.planes) {
+      blobs.push(...psdU16(0), ...plane.payload);
+    }
+  }
+  const infoPad = (records.length + blobs.length) % 2;
+  const info = [...psdU32(records.length + blobs.length + infoPad), ...records, ...blobs];
+  if (infoPad === 1) {
+    info.push(0);
+  }
+  const section = [...info, ...psdU32(0)];
+  out.push(...psdU32(section.length), ...section);
+  if (composite !== undefined) {
+    out.push(...psdU16(0));
+    for (const plane of composite) {
+      out.push(...plane);
+    }
+  }
+  return new Uint8Array(out);
+}
+
+function solidPsdPlane(width: number, height: number, value: number): number[] {
+  return new Array<number>(width * height).fill(value);
+}
+
+test("File > Import loads layers and pixels from .psd", async ({ page }) => {
+  const bytes = buildPsdBytes(4, 4, [
+    {
+      top: 2,
+      left: 2,
+      bottom: 4,
+      right: 4,
+      opacity: 128,
+      name: "Top",
+      planes: [
+        { id: 0, payload: solidPsdPlane(2, 2, 255) },
+        { id: -1, payload: solidPsdPlane(2, 2, 255) },
+      ],
+    },
+    {
+      top: 0,
+      left: 0,
+      bottom: 4,
+      right: 4,
+      name: "Bottom",
+      planes: [
+        { id: 0, payload: solidPsdPlane(4, 4, 0) },
+        { id: 1, payload: solidPsdPlane(4, 4, 0) },
+        { id: 2, payload: solidPsdPlane(4, 4, 255) },
+      ],
+    },
+  ]);
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell");
+  await stubAsepritePicker(page, "art.psd", bytes);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import" }).click();
+  const toast = page.locator('gnumarus-shell [data-testid="toast"]');
+  await expect(toast).toBeVisible();
+  await expect(toast).toContainText("Imported art.psd (2 layers)");
+  // File order is top-first; the engine stacks bottom-first.
+  const state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.name)).toEqual(["Bottom", "Top"]);
+  expect(state.layers.map((layer) => layer.id)).toEqual(["layer0", "layer1"]);
+  expect(state.layers[1]?.opacity).toBeCloseTo(128 / 255, 5);
+  // The 2x2 square at canvas (2,2) centers on the 4x4 canvas: offset (1,1).
+  expect(state.layers[1]?.transform).toMatchObject({ x: 1, y: 1 });
+  expect(state.active).toBe("layer1");
+  // Active layer is the top one: texture-space pixels.
+  expect(await readPixel(page, 0, 0)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  // Switch to the background layer: solid blue 4x4.
+  await page.locator('gnumarus-shell [data-layer-id="layer0"] .layer-name').click();
+  expect(await readPixel(page, 3, 3)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+  expect(await animationFrameCount(page)).toBe(1);
+});
+
+test("File > Import falls back to the composite image for flattened .psd", async ({ page }) => {
+  const bytes = buildPsdBytes(2, 2, [], [
+    solidPsdPlane(2, 2, 0),
+    solidPsdPlane(2, 2, 200),
+    solidPsdPlane(2, 2, 0),
+  ]);
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell");
+  await stubAsepritePicker(page, "flat.psd", bytes);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import" }).click();
+  const toast = page.locator('gnumarus-shell [data-testid="toast"]');
+  await expect(toast).toBeVisible();
+  await expect(toast).toContainText("Imported flat.psd (1 layer)");
+  const state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.name)).toEqual(["Background"]);
+  expect(await readPixel(page, 1, 1)).toEqual({ r: 0, g: 200, b: 0, a: 255 });
+});
+
 test("File > Import rejects corrupt files with an error toast", async ({ page }) => {
   const errors: string[] = [];
   page.on("console", (message) => {
@@ -5342,7 +5512,7 @@ test("File > Import rejects corrupt files with an error toast", async ({ page })
   const toast = page.locator('gnumarus-shell [data-testid="toast"]');
   await expect(toast).toBeVisible();
   await expect(toast).toContainText("Import failed");
-  expect(errors.some((text) => text.includes("Aseprite import failed"))).toBe(true);
+  expect(errors.some((text) => text.includes("Import failed"))).toBe(true);
 });
 
 test("File > Import cancellation stays silent", async ({ page }) => {

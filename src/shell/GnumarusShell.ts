@@ -10,7 +10,7 @@ import {
   isFilePickerSupported,
   isFileSaveSupported,
   isFileSystemAccessSupported,
-  pickAsepriteFile,
+  pickImportFile,
   pickProjectDirectory,
   pickSaveFile,
   readProjectFiles,
@@ -101,6 +101,7 @@ import {
 import { parseFrameList, resolveExportSequence } from "../animation/GnumarusNamedAnimations";
 import { decodePngToBuffer, encodeBufferToPngBlob } from "../project/GnumarusPngCodec";
 import { parseAsepriteFile } from "../project/GnumarusAseprite";
+import { parsePsdFile } from "../project/GnumarusPsd";
 import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
 import {
   clampBrushSizeFloat,
@@ -141,6 +142,17 @@ interface GnumarusShortcutEntry {
 interface GnumarusShortcutSection {
   title: string;
   entries: GnumarusShortcutEntry[];
+}
+
+/** True when the bytes start with the Photoshop `8BPS` signature. */
+function isPhotoshopFile(bytes: Uint8Array): boolean {
+  return (
+    bytes.length >= 4 &&
+    bytes[0] === 0x38 &&
+    bytes[1] === 0x42 &&
+    bytes[2] === 0x50 &&
+    bytes[3] === 0x53
+  );
 }
 
 const GNUMARUS_SHORTCUTS: GnumarusShortcutSection[] = [
@@ -1282,7 +1294,7 @@ export class GnumarusShell extends LitElement {
                   <button @click=${(): void => void this.openNewDialog()}>New</button>
                   <button @click=${(): void => void this.openProject()}>Open</button>
                   <button title="Save (Ctrl+S)" @click=${(): void => void this.saveProject()}>Save</button>
-                  <button @click=${(): void => void this.importAseprite()}>Import</button>
+                  <button @click=${(): void => void this.importImageFile()}>Import</button>
                   <button @click=${(): void => void this.openExportDialog()}>Export</button>
                 </div>
               `
@@ -6214,7 +6226,7 @@ export class GnumarusShell extends LitElement {
     }
   }
 
-  private async importAseprite(): Promise<void> {
+  private async importImageFile(): Promise<void> {
     this.fileMenuOpen = false;
     if (!isFilePickerSupported()) {
       this.statusMessage = "Import requires the File System Access API (Chromium)";
@@ -6223,13 +6235,13 @@ export class GnumarusShell extends LitElement {
     this.stopPlayback();
     let handle;
     try {
-      handle = await pickAsepriteFile();
+      handle = await pickImportFile();
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         return;
       }
       const reason = error instanceof Error ? error.message : String(error);
-      console.error(`Aseprite import failed: ${reason}`);
+      console.error(`Import failed: ${reason}`);
       this.statusMessage = `Import failed: ${reason}`;
       this.showToast(`Import failed: ${reason}`);
       return;
@@ -6241,9 +6253,13 @@ export class GnumarusShell extends LitElement {
       this.statusMessage = "Importing...";
       const picked = await handle.getFile();
       const bytes = new Uint8Array(await picked.arrayBuffer());
-      const imported = await parseAsepriteFile(bytes);
       const fileName = picked.name;
       const dot = fileName.lastIndexOf(".");
+      if (isPhotoshopFile(bytes)) {
+        await this.loadPsdDocument(fileName, dot, bytes);
+        return;
+      }
+      const imported = await parseAsepriteFile(bytes);
       this.engine?.loadAnimationProject(imported.width, imported.height, {
         layers: imported.layers.map((layer) => ({
           id: layer.id,
@@ -6293,10 +6309,51 @@ export class GnumarusShell extends LitElement {
       this.showToast(summary);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      console.error(`Aseprite import failed: ${reason}`);
+      console.error(`Import failed: ${reason}`);
       this.statusMessage = `Import failed: ${reason}`;
       this.showToast(`Import failed: ${reason}`);
     }
+  }
+
+  private async loadPsdDocument(fileName: string, dot: number, bytes: Uint8Array): Promise<void> {
+    const psd = await parsePsdFile(bytes);
+    this.engine?.loadAnimationProject(psd.width, psd.height, {
+      layers: psd.layers.map((layer) => ({
+        id: layer.id,
+        name: layer.name,
+        visible: layer.visible,
+        opacity: layer.opacity,
+        lockedChannels: { r: false, g: false, b: false, a: false },
+      })),
+      textures: psd.textures.map((texture) => ({
+        id: texture.id,
+        name: texture.name,
+        width: texture.width,
+        height: texture.height,
+        buffer: texture.buffer,
+      })),
+      contents: psd.contents.map((content) => ({
+        id: content.id,
+        name: content.name,
+        textureId: content.textureId,
+        transform: { ...content.transform },
+      })),
+      cells: psd.cells.map((cell) => ({ ...cell })),
+      frames: 1,
+      currentFrame: 0,
+      defaultFrameDuration: DEFAULT_ANIMATION_FRAME_DURATION,
+      frameDurations: [],
+      frameNames: [],
+      namedAnimations: [],
+      activeAnimation: null,
+    });
+    this.refreshLayers();
+    this.directoryHandle = null;
+    this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
+    this.dirty = true;
+    const summary = `Imported ${fileName} (${psd.layers.length} layer${psd.layers.length === 1 ? "" : "s"})`;
+    this.statusMessage = summary;
+    this.showToast(summary);
   }
 
   private async saveProject(): Promise<void> {
