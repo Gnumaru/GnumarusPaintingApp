@@ -195,4 +195,4 @@
 - [x] Aseprite tag import as named animations, unit + e2e tests green, docs updated
 - [x] Unit tests (vitest): 235 passed
 - [x] E2E test (Playwright): 146 passed
-- [ ] Short default names (L/F/C/T) + project export (static/animated/spritesheet), unit + e2e tests green, docs updated
+- [x] Short default names (L/F/C/T) + project export (static/animated/spritesheet), unit + e2e tests green, docs updated

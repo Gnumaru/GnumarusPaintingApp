@@ -6149,3 +6149,127 @@ test("File > Export saves a named animation as a PNG sequence", async ({ page })
   expect(sequence?.firstCenter).toEqual([0, 0, 0, 255]);
   expect(sequence?.secondCenter).toEqual([0, 0, 0, 0]);
 });
+
+test("File > Export saves an animation as a single-line spritesheet", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await addFrames(page, 1);
+  await addAnimation(page, "go,none,1,2");
+  // Frame 1 keeps a black center dot; frame 2 stays blank.
+  await page.locator('gnumarus-shell [data-testid="anim-frame"][data-frame="0"]').click();
+  await paintCenter(page);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("checkbox", { name: "go" }).check();
+  await expect(dialog.locator("select#exportSheetLayout")).toHaveValue("line");
+  await dialog.locator("#exportSheetOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported");
+  const file = await exportedFile(page);
+  expect(file?.fileName).toContain("sheet.png");
+  expect(file?.type).toBe("image/png");
+  expect(file?.width).toBe(128);
+  expect(file?.height).toBe(64);
+  expect(file?.center).toEqual([0, 0, 0, 255]);
+  expect(file?.corner).toEqual([0, 0, 0, 0]);
+});
+
+async function exportedSheetPixels(page: import("@playwright/test").Page): Promise<{
+  width: number;
+  height: number;
+  cells: number[][];
+} | null> {
+  return page.evaluate(async () => {
+    const root = window as unknown as {
+      __gnumarusExportTest?: { fileName: string | null; blob: Blob | null };
+    };
+    const state = root.__gnumarusExportTest;
+    if (state?.blob == null) {
+      return null;
+    }
+    const bitmap = await createImageBitmap(state.blob);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    if (context === null) {
+      bitmap.close();
+      return null;
+    }
+    context.drawImage(bitmap, 0, 0);
+    const cells: number[][] = [];
+    for (const [x, y] of [
+      [32, 32],
+      [96, 32],
+      [32, 96],
+      [96, 96],
+    ]) {
+      cells.push(Array.from(context.getImageData(x, y, 1, 1).data));
+    }
+    const result = { width: bitmap.width, height: bitmap.height, cells };
+    bitmap.close();
+    return result;
+  });
+}
+
+test("File > Export saves one animation per line with ragged rows", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await addFrames(page, 2);
+  await addAnimation(page, "a,none,1,2");
+  await addAnimation(page, "b,none,3");
+  // Only frame 1 is painted; every other cell stays transparent.
+  await page.locator('gnumarus-shell [data-testid="anim-frame"][data-frame="0"]').click();
+  await paintCenter(page);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("checkbox", { name: "a", exact: true }).check();
+  await dialog.getByRole("checkbox", { name: "b", exact: true }).check();
+  await dialog.locator("select#exportSheetLayout").selectOption("per-line");
+  await dialog.locator("#exportSheetOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported");
+  const sheet = await exportedSheetPixels(page);
+  expect(sheet?.width).toBe(128);
+  expect(sheet?.height).toBe(128);
+  expect(sheet?.cells[0]).toEqual([0, 0, 0, 255]);
+  expect(sheet?.cells[1]).toEqual([0, 0, 0, 0]);
+  expect(sheet?.cells[2]).toEqual([0, 0, 0, 0]);
+  expect(sheet?.cells[3]).toEqual([0, 0, 0, 0]);
+});
+
+test("File > Export saves a manual frame list as individual files", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await addFrames(page, 1);
+  await page.locator('gnumarus-shell [data-testid="anim-frame"][data-frame="0"]').click();
+  await paintCenter(page);
+  await stubExportDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator("input#exportSheetFrames").fill("1,2");
+  await dialog.locator("select#exportSheetLayout").selectOption("individual");
+  await dialog.locator("#exportSheetOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported 2 files");
+  const sequence = await exportedSequence(page);
+  expect(sequence?.names).toEqual(["Untitled-sheet-001.png", "Untitled-sheet-002.png"]);
+  expect(sequence?.firstCenter).toEqual([0, 0, 0, 255]);
+  expect(sequence?.secondCenter).toEqual([0, 0, 0, 0]);
+});
+
+test("File > Export spritesheet without sources fails loudly", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator("#exportSheetOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("select an animation");
+});

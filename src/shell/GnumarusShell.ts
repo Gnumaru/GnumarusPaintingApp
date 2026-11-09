@@ -90,7 +90,13 @@ import {
   type GnumarusStillFormat,
 } from "../export/GnumarusImageExport";
 import { createGifEncoder } from "../export/GnumarusGifExport";
-import { resolveExportSequence } from "../animation/GnumarusNamedAnimations";
+import {
+  composeSheet,
+  computeSheetGeometry,
+  GNUMARUS_SHEET_LAYOUTS,
+  type GnumarusSheetLayout,
+} from "../export/GnumarusSpritesheet";
+import { parseFrameList, resolveExportSequence } from "../animation/GnumarusNamedAnimations";
 import { decodePngToBuffer, encodeBufferToPngBlob } from "../project/GnumarusPngCodec";
 import { parseAsepriteFile } from "../project/GnumarusAseprite";
 import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
@@ -1030,6 +1036,9 @@ export class GnumarusShell extends LitElement {
     exportFormats: { type: Array },
     exportAnimation: { type: String },
     exportAnimatedFormat: { type: String },
+    exportSheetLayout: { type: String },
+    exportSheetFormat: { type: String },
+    exportSheetCount: { type: Number },
     playing: { type: Boolean },
     uiHidden: { type: Boolean },
     toastMessage: { type: String },
@@ -1118,6 +1127,9 @@ export class GnumarusShell extends LitElement {
   declare exportFormats: GnumarusStillFormat[];
   declare exportAnimation: string;
   declare exportAnimatedFormat: string;
+  declare exportSheetLayout: string;
+  declare exportSheetFormat: string;
+  declare exportSheetCount: number;
   declare playing: boolean;
   declare uiHidden: boolean;
   declare toastMessage: string;
@@ -1211,6 +1223,9 @@ export class GnumarusShell extends LitElement {
     this.exportFormats = [];
     this.exportAnimation = "";
     this.exportAnimatedFormat = "gif";
+    this.exportSheetLayout = "line";
+    this.exportSheetFormat = "image/png";
+    this.exportSheetCount = 2;
     this.playing = false;
     this.playTimer = null;
     this.uiHidden = false;
@@ -2318,6 +2333,64 @@ export class GnumarusShell extends LitElement {
         <div class="dialog-actions">
           <button id="exportAnimatedOk" @click=${(): void => void this.confirmExportAnimated()}>
             Export animation
+          </button>
+        </div>
+        <h3>Export spritesheet</h3>
+        <div class="export-sheet-animations">
+          <label><input type="checkbox" id="exportSheetAll" />All frames</label>
+          ${this.engine?.getNamedAnimations().map(
+            (animation) =>
+              html`<label
+                ><input type="checkbox" data-export-sheet-anim="${animation.name}" />${animation.name}</label
+              >`,
+          ) ?? html``}
+        </div>
+        <label
+          >Extra frames (1,3-5)
+          <input type="text" id="exportSheetFrames" placeholder="1,3-5" />
+        </label>
+        <label
+          >Layout
+          <select
+            id="exportSheetLayout"
+            .value=${this.exportSheetLayout}
+            @change=${(event: Event): void => {
+              this.exportSheetLayout = (event.target as HTMLSelectElement).value;
+            }}
+          >
+            ${GNUMARUS_SHEET_LAYOUTS.map(
+              (entry) => html`<option value=${entry.value}>${entry.label}</option>`,
+            )}
+            <option value="individual">Individual frames</option>
+          </select>
+        </label>
+        <label
+          >Lines/columns count
+          <input
+            type="number"
+            id="exportSheetCount"
+            min="1"
+            step="1"
+            .value=${String(this.exportSheetCount)}
+          />
+        </label>
+        <label
+          >Format
+          <select
+            id="exportSheetFormat"
+            .value=${this.exportSheetFormat}
+            @change=${(event: Event): void => {
+              this.exportSheetFormat = (event.target as HTMLSelectElement).value;
+            }}
+          >
+            ${this.exportFormats.map(
+              (format) => html`<option value=${format.mime}>${format.label}</option>`,
+            )}
+          </select>
+        </label>
+        <div class="dialog-actions">
+          <button id="exportSheetOk" @click=${(): void => void this.confirmExportSheet()}>
+            Export spritesheet
           </button>
         </div>
       </dialog>
@@ -4845,6 +4918,9 @@ export class GnumarusShell extends LitElement {
     if (this.exportAnimatedFormat !== "gif" && findStillFormat(this.exportFormats, this.exportAnimatedFormat) === null) {
       this.exportAnimatedFormat = "gif";
     }
+    if (findStillFormat(this.exportFormats, this.exportSheetFormat) === null) {
+      this.exportSheetFormat = this.exportFormats[0]?.mime ?? "image/png";
+    }
     await this.updateComplete;
     const dialog = this.shadowRoot?.getElementById("exportDialog") as HTMLDialogElement | null;
     dialog?.showModal();
@@ -5037,37 +5113,196 @@ export class GnumarusShell extends LitElement {
       }
       const stem = `${base}-${resolved.label}`;
       this.closeExportDialog();
-      if (isFileSystemAccessSupported()) {
-        try {
-          const dir = await pickProjectDirectory();
-          for (let index = 0; index < blobs.length; index += 1) {
-            const blob = blobs[index];
-            if (blob === undefined) {
-              continue;
-            }
-            await writeBlobToDirectory(dir, `${frameFileStem(stem, index)}.${format.ext}`, blob);
-          }
-          this.statusMessage = `Exported ${blobs.length} files to ${dir.name}`;
-          this.showToast(`Exported ${blobs.length} files to ${dir.name}`);
-        } catch (error) {
-          if (!(error instanceof DOMException && error.name === "AbortError")) {
-            throw error;
-          }
-        }
-        return;
-      }
-      for (let index = 0; index < blobs.length; index += 1) {
-        const blob = blobs[index];
-        if (blob === undefined) {
-          continue;
-        }
-        downloadBlob(blob, `${frameFileStem(stem, index)}.${format.ext}`);
-      }
-      this.statusMessage = `Exported ${blobs.length} files`;
-      this.showToast(`Exported ${blobs.length} files`);
+      await this.saveStillSequence(blobs, stem, format);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       this.failAnimatedExport(`Export failed: ${reason}`);
+    }
+  }
+
+  /**
+   * Save encoded stills as numbered files (`stem-001.ext`) through the
+   * directory picker, or as one download per file when it is missing.
+   * Directory-picker cancellation stays silent.
+   */
+  private async saveStillSequence(
+    blobs: Blob[],
+    stem: string,
+    format: GnumarusStillFormat,
+  ): Promise<void> {
+    if (isFileSystemAccessSupported()) {
+      try {
+        const dir = await pickProjectDirectory();
+        for (let index = 0; index < blobs.length; index += 1) {
+          const blob = blobs[index];
+          if (blob === undefined) {
+            continue;
+          }
+          await writeBlobToDirectory(dir, `${frameFileStem(stem, index)}.${format.ext}`, blob);
+        }
+        this.statusMessage = `Exported ${blobs.length} files to ${dir.name}`;
+        this.showToast(`Exported ${blobs.length} files to ${dir.name}`);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          throw error;
+        }
+      }
+      return;
+    }
+    for (let index = 0; index < blobs.length; index += 1) {
+      const blob = blobs[index];
+      if (blob === undefined) {
+        continue;
+      }
+      downloadBlob(blob, `${frameFileStem(stem, index)}.${format.ext}`);
+    }
+    this.statusMessage = `Exported ${blobs.length} files`;
+    this.showToast(`Exported ${blobs.length} files`);
+  }
+
+  /**
+   * Resolve the spritesheet sources into strips of project frame indices:
+   * checked animations in definition order, then the all-frames strip,
+   * then the manual frame list. Throws with a user-facing message when
+   * nothing usable is selected.
+   */
+  private resolveSheetStrips(): Array<{ frames: number[] }> {
+    if (this.engine === null) {
+      throw new Error("Export failed: no project is open");
+    }
+    const strips: Array<{ frames: number[] }> = [];
+    const boxes = this.shadowRoot?.querySelectorAll("[data-export-sheet-anim]") ?? [];
+    const names = new Set<string>();
+    boxes.forEach((box) => {
+      if (box instanceof HTMLInputElement && box.checked) {
+        const name = box.getAttribute("data-export-sheet-anim") ?? "";
+        if (name !== "") {
+          names.add(name);
+        }
+      }
+    });
+    for (const animation of this.engine.getNamedAnimations()) {
+      if (names.has(animation.name)) {
+        strips.push({ frames: resolveExportSequence(animation).map((entry) => entry.frame) });
+      }
+    }
+    const allBox = this.shadowRoot?.getElementById("exportSheetAll") as HTMLInputElement | null;
+    if (allBox?.checked === true) {
+      const frames: number[] = [];
+      for (let frame = 0; frame < this.engine.getFrameCount(); frame += 1) {
+        frames.push(frame);
+      }
+      strips.push({ frames });
+    }
+    const listInput = this.shadowRoot?.getElementById("exportSheetFrames") as HTMLInputElement | null;
+    const listText = listInput?.value.trim() ?? "";
+    if (listText !== "") {
+      strips.push({ frames: parseFrameList(listText, this.engine.getFrameCount()) });
+    }
+    if (strips.every((strip) => strip.frames.length === 0)) {
+      throw new Error("Export failed: select an animation or list frames like 1,3-5");
+    }
+    return strips;
+  }
+
+  /** Composite one project frame (or null for bad frames). */
+  private compositeSheetFrame(frame: number, background: GnumarusPreviewBackground | undefined): Uint8ClampedArray | null {
+    if (this.engine === null) {
+      return null;
+    }
+    const inputs = this.engine.getFrameFlattenInputs(frame);
+    if (inputs === null) {
+      return null;
+    }
+    const size = this.engine.size;
+    return compositeFinalImage(size.width, size.height, inputs, background);
+  }
+
+  private async confirmExportSheet(): Promise<void> {
+    if (this.engine === null) {
+      this.closeExportDialog();
+      return;
+    }
+    const layoutSelect = this.shadowRoot?.getElementById("exportSheetLayout") as HTMLSelectElement | null;
+    const layoutValue = layoutSelect?.value ?? this.exportSheetLayout;
+    this.exportSheetLayout = layoutValue;
+    const formatSelect = this.shadowRoot?.getElementById("exportSheetFormat") as HTMLSelectElement | null;
+    const formatValue = formatSelect?.value ?? this.exportSheetFormat;
+    this.exportSheetFormat = formatValue;
+    const countInput = this.shadowRoot?.getElementById("exportSheetCount") as HTMLInputElement | null;
+    const countRaw = Math.floor(Number(countInput?.value ?? String(this.exportSheetCount)));
+    this.exportSheetCount = Number.isFinite(countRaw) ? countRaw : 0;
+    const fail = (message: string): void => {
+      this.closeExportDialog();
+      this.statusMessage = message;
+      this.showToast(message);
+    };
+    const format = findStillFormat(this.exportFormats, formatValue) ?? null;
+    if (format === null) {
+      fail("Export failed: no image format is available");
+      return;
+    }
+    let strips: Array<{ frames: number[] }>;
+    try {
+      strips = this.resolveSheetStrips();
+    } catch (error) {
+      fail(error instanceof Error ? error.message : "Export failed: invalid spritesheet sources");
+      return;
+    }
+    const base = exportBaseName(this.projectName);
+    try {
+      const size = this.engine.size;
+      const background = format.alpha
+        ? undefined
+        : this.canvasBackground(this.engine.getCheckerSettings(), this.engine.getBackgroundSettings());
+      if (layoutValue === "individual") {
+        const flat = strips.flatMap((strip) => strip.frames);
+        const blobs: Blob[] = [];
+        for (const frame of flat) {
+          const flatPixels = this.compositeSheetFrame(frame, background);
+          if (flatPixels === null) {
+            fail("Export failed: invalid frame");
+            return;
+          }
+          const blob = await encodeStillImage(flatPixels, size.width, size.height, format.mime);
+          if (blob === null) {
+            fail(`Export failed: ${format.label} encoding is not supported here`);
+            return;
+          }
+          blobs.push(blob);
+        }
+        this.closeExportDialog();
+        await this.saveStillSequence(blobs, `${base}-sheet`, format);
+        return;
+      }
+      const geometry = computeSheetGeometry(strips, layoutValue as GnumarusSheetLayout, this.exportSheetCount);
+      const needed = new Set<number>();
+      for (const cell of geometry.cells) {
+        needed.add(cell.frame);
+      }
+      const pixels = new Map<number, Uint8ClampedArray>();
+      for (const frame of needed) {
+        const flatPixels = this.compositeSheetFrame(frame, background);
+        if (flatPixels === null) {
+          fail("Export failed: invalid frame");
+          return;
+        }
+        pixels.set(frame, flatPixels);
+      }
+      const sheet = composeSheet(pixels, geometry, size.width, size.height);
+      const blob = await encodeStillImage(sheet.buffer, sheet.width, sheet.height, format.mime);
+      if (blob === null) {
+        fail(`Export failed: ${format.label} encoding is not supported here`);
+        return;
+      }
+      const fileName = `${base}-sheet.${format.ext}`;
+      this.closeExportDialog();
+      if (await this.saveExportBlob(blob, fileName, `${format.label} image`)) {
+        this.statusMessage = `Exported ${fileName}`;
+        this.showToast(`Exported ${fileName}`);
+      }
+    } catch (error) {
+      fail(error instanceof Error ? error.message : "Export failed: invalid spritesheet");
     }
   }
 
