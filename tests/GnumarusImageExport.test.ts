@@ -3,6 +3,7 @@ import {
   exportBaseName,
   findStillFormat,
   frameFileStem,
+  isSupportedStillDataUrl,
   GNUMARUS_BASE_STILL_FORMATS,
   GNUMARUS_EXTRA_STILL_FORMATS,
 } from "../src/export/GnumarusImageExport";
@@ -22,6 +23,15 @@ describe("GnumarusImageExport", () => {
   it("finds formats by mime", () => {
     expect(findStillFormat(GNUMARUS_BASE_STILL_FORMATS, "image/png")?.ext).toBe("png");
     expect(findStillFormat(GNUMARUS_BASE_STILL_FORMATS, "image/gif")).toBeNull();
+  });
+
+  it("accepts data URLs only with an exact mime prefix", () => {
+    expect(isSupportedStillDataUrl("data:image/avif;base64,AAAA", "image/avif")).toBe(true);
+    // Chromium falls back to a PNG data URL for unsupported mimes.
+    expect(isSupportedStillDataUrl("data:image/png;base64,AAAA", "image/avif")).toBe(false);
+    // Firefox returns "data:," for unsupported mimes.
+    expect(isSupportedStillDataUrl("data:,", "image/avif")).toBe(false);
+    expect(isSupportedStillDataUrl("", "image/png")).toBe(false);
   });
 
   it("builds zero-padded frame stems", () => {

@@ -5748,10 +5748,12 @@ test("a ping-pong animation bounces without repeating endpoints", async ({ page 
   await selectAnimation(page, "boing");
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
   await matrix.getByRole("button", { name: "Play animation", exact: true }).click();
-  await expect.poll(async () => getMatrixFrame(page), { timeout: 5000 }).toBe(1);
-  await expect.poll(async () => getMatrixFrame(page), { timeout: 5000 }).toBe(2);
+  // Dense polls: frames flip every ~100ms, so the default poll backoff
+  // (100/250/500/1000ms) aliases and can miss a frame window deterministically.
+  await expect.poll(async () => getMatrixFrame(page), { timeout: 10000, intervals: [50] }).toBe(1);
+  await expect.poll(async () => getMatrixFrame(page), { timeout: 10000, intervals: [50] }).toBe(2);
   // Forward would wrap to frame 1 here; ping-pong bounces back to frame 2.
-  await expect.poll(async () => getMatrixFrame(page), { timeout: 5000 }).toBe(1);
+  await expect.poll(async () => getMatrixFrame(page), { timeout: 10000, intervals: [50] }).toBe(1);
   await matrix.getByRole("button", { name: "Stop animation", exact: true }).click();
 });
 
@@ -5907,6 +5909,56 @@ test("File > Export cancellation stays silent", async ({ page }) => {
   await expect(dialog).toBeVisible();
   await dialog.locator("#exportOk").click();
   await expect(page.locator('gnumarus-shell [data-testid="toast"]')).toBeHidden();
+});
+
+test("File > Export lists only formats the browser truly encodes", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  const values = await dialog.locator("select#exportFormat option").evaluateAll((options) =>
+    options.map((option) => (option as HTMLOptionElement).value),
+  );
+  expect(values).toEqual(expect.arrayContaining(["image/png", "image/jpeg", "image/webp"]));
+  // Chromium has no canvas encoder for these (it used to fall back to PNG bytes).
+  for (const mime of ["image/heic", "image/heif", "image/jxl"]) {
+    expect(values).not.toContain(mime);
+  }
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  // Every listed format must round-trip to a blob of the claimed type.
+  let prev: string | null = null;
+  for (const mime of values) {
+    await page.getByRole("button", { name: "File" }).click();
+    await page.getByRole("button", { name: "Export" }).click();
+    await expect(dialog).toBeVisible();
+    await dialog.locator("select#exportFormat").selectOption(mime);
+    await dialog.locator("#exportOk").click();
+    await page.waitForFunction(
+      (previous: string | null) => {
+        const root = window as unknown as {
+          __gnumarusExportTest?: { fileName: string | null; blob: Blob | null };
+        };
+        const state = root.__gnumarusExportTest;
+        return state?.fileName !== null && state?.fileName !== undefined && state.fileName !== previous;
+      },
+      prev,
+    );
+    const saved = await page.evaluate(() => {
+      const root = window as unknown as {
+        __gnumarusExportTest?: { fileName: string | null; blob: Blob | null };
+      };
+      return {
+        fileName: root.__gnumarusExportTest?.fileName ?? null,
+        type: root.__gnumarusExportTest?.blob?.type ?? null,
+      };
+    });
+    expect(saved.type).toBe(mime);
+    prev = saved.fileName;
+  }
 });
 
 async function stubExportDirectory(page: import("@playwright/test").Page): Promise<void> {

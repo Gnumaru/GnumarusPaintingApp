@@ -32,6 +32,16 @@ export const GNUMARUS_EXTRA_STILL_FORMATS: GnumarusStillFormat[] = [
 let detectedFormats: GnumarusStillFormat[] | null = null;
 
 /**
+ * True when a `toDataURL(mime)` result proves the browser really encodes
+ * `mime`. Chromium silently falls back to a PNG data URL for unknown mimes
+ * (only Firefox returns `"data:,"`), so anything but an exact
+ * `data:<mime>` prefix means "unsupported".
+ */
+export function isSupportedStillDataUrl(dataUrl: string, mime: string): boolean {
+  return dataUrl.toLowerCase().startsWith(`data:${mime}`);
+}
+
+/**
  * Base formats plus any extra format this browser actually encodes
  * (probed once via a 1x1 canvas; result cached).
  */
@@ -46,7 +56,7 @@ export function detectStillFormats(): GnumarusStillFormat[] {
     canvas.height = 1;
     for (const format of GNUMARUS_EXTRA_STILL_FORMATS) {
       try {
-        if (canvas.toDataURL(format.mime) !== "data:,") {
+        if (isSupportedStillDataUrl(canvas.toDataURL(format.mime), format.mime)) {
           formats.push(format);
         }
       } catch {
@@ -90,7 +100,15 @@ export function encodeStillImage(
   context.putImageData(new ImageData(new Uint8ClampedArray(buffer), w, h), 0, 0);
   return new Promise((resolve) => {
     try {
-      canvas.toBlob((blob) => resolve(blob), mime);
+      canvas.toBlob((blob) => {
+        // Browsers silently fall back to PNG for unsupported mimes, so a
+        // mislabeled blob must be refused instead of saved as a fake .avif.
+        if (blob !== null && blob.type !== "" && blob.type !== mime) {
+          resolve(null);
+          return;
+        }
+        resolve(blob);
+      }, mime);
     } catch {
       resolve(null);
     }
