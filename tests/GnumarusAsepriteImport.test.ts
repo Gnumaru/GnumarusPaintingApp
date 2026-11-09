@@ -226,7 +226,7 @@ describe("GnumarusAseprite", () => {
       transform: expect.objectContaining({ x: 0, y: 0 }),
     });
     expect(doc.cells).toEqual([{ layer: "layer0", frame: 0, content: "content0" }]);
-    expect(doc.defaultFrameDuration).toBe(100);
+    expect(doc.defaultFrameDuration).toBe(0.1);
     expect(doc.frameDurations).toEqual([]);
   });
 
@@ -386,8 +386,8 @@ describe("GnumarusAseprite", () => {
     });
     const doc = await parseAsepriteFile(data);
     expect(doc.frames).toBe(2);
-    expect(doc.defaultFrameDuration).toBe(100);
-    expect(doc.frameDurations).toEqual([{ frame: 1, duration: 200 }]);
+    expect(doc.defaultFrameDuration).toBe(0.1);
+    expect(doc.frameDurations).toEqual([{ frame: 1, duration: 0.2 }]);
     expect(doc.textures.length).toBe(1);
     expect(doc.contents.length).toBe(1);
     expect(doc.cells).toEqual([

@@ -93,11 +93,11 @@ import {
 } from "../settings/GnumarusRotationSettings";
 import {
   animationCellKey,
-  clampFrameDurationMs,
+  clampFrameDurationSec,
   defaultFrameName,
-  effectiveFrameDurationMs,
+  effectiveFrameDurationSec,
   ensureFrameNames,
-  GNUMARUS_DEFAULT_FRAME_DURATION_MS,
+  GNUMARUS_DEFAULT_FRAME_DURATION_SEC,
   insertFrameCells,
   insertFrameDurations,
   insertFrameNames,
@@ -489,7 +489,7 @@ export class GnumarusCanvasEngine {
   private frameCount = 1;
   private currentFrame = 0;
   private frameDurations = new Map<number, number>();
-  private defaultFrameDuration = GNUMARUS_DEFAULT_FRAME_DURATION_MS;
+  private defaultFrameDuration = GNUMARUS_DEFAULT_FRAME_DURATION_SEC;
   private frameNames: string[] = [defaultFrameName(0)];
   private namedAnimations: GnumarusNamedAnimation[] = [];
   private activeAnimationName: string | null = null;
@@ -1494,7 +1494,7 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
-  /** Explicit per-frame duration in milliseconds, or null for the project default. */
+  /** Explicit per-frame duration in seconds, or null for the project default. */
   getFrameDuration(frame: number): number | null {
     if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
       return null;
@@ -1576,14 +1576,14 @@ export class GnumarusCanvasEngine {
   }
 
   getEffectiveFrameDuration(frame: number): number {
-    return effectiveFrameDurationMs(this.getFrameDuration(frame), this.defaultFrameDuration);
+    return effectiveFrameDurationSec(this.getFrameDuration(frame), this.defaultFrameDuration);
   }
 
-  setFrameDuration(frame: number, durationMs: number | null): boolean {
+  setFrameDuration(frame: number, durationSec: number | null): boolean {
     if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
       return false;
     }
-    if (durationMs === null) {
+    if (durationSec === null) {
       if (!this.frameDurations.has(frame)) {
         return false;
       }
@@ -1592,10 +1592,10 @@ export class GnumarusCanvasEngine {
       this.emitStats();
       return true;
     }
-    if (!Number.isFinite(durationMs)) {
+    if (!Number.isFinite(durationSec)) {
       return false;
     }
-    const clamped = clampFrameDurationMs(durationMs);
+    const clamped = clampFrameDurationSec(durationSec);
     if (this.frameDurations.get(frame) === clamped) {
       return false;
     }
@@ -1605,11 +1605,11 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
-  setDefaultFrameDuration(durationMs: number): boolean {
-    if (!Number.isFinite(durationMs)) {
+  setDefaultFrameDuration(durationSec: number): boolean {
+    if (!Number.isFinite(durationSec)) {
       return false;
     }
-    const clamped = clampFrameDurationMs(durationMs);
+    const clamped = clampFrameDurationSec(durationSec);
     if (clamped === this.defaultFrameDuration) {
       return false;
     }
@@ -3106,7 +3106,7 @@ export class GnumarusCanvasEngine {
     }
     this.frameCount = data.frames;
     this.currentFrame = Math.min(Math.max(0, Math.floor(data.currentFrame)), data.frames - 1);
-    this.defaultFrameDuration = clampFrameDurationMs(data.defaultFrameDuration ?? GNUMARUS_DEFAULT_FRAME_DURATION_MS);
+    this.defaultFrameDuration = clampFrameDurationSec(data.defaultFrameDuration ?? GNUMARUS_DEFAULT_FRAME_DURATION_SEC);
     this.frameNames = ensureFrameNames(data.frames, data.frameNames ?? []);
     this.frameNameCounter = data.frames + 1;
     for (const name of this.frameNames) {
@@ -3123,7 +3123,7 @@ export class GnumarusCanvasEngine {
         entry.frame < data.frames &&
         Number.isFinite(entry.duration)
       ) {
-        this.frameDurations.set(entry.frame, clampFrameDurationMs(entry.duration));
+        this.frameDurations.set(entry.frame, clampFrameDurationSec(entry.duration));
       }
     }
     this.namedAnimations = [];
@@ -3220,7 +3220,7 @@ export class GnumarusCanvasEngine {
     this.resetPencilPixelPerfect();
     this.hidePreviews();
     this.frameDurations.clear();
-    this.defaultFrameDuration = GNUMARUS_DEFAULT_FRAME_DURATION_MS;
+    this.defaultFrameDuration = GNUMARUS_DEFAULT_FRAME_DURATION_SEC;
     this.frameNames = [defaultFrameName(0)];
     this.frameNameCounter = 2;
     this.namedAnimations = [];

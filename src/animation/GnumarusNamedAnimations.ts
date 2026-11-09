@@ -1,12 +1,12 @@
 /**
  * Named animations defined from strings like
- * `walk,forward,1:400,2-4,7,1`: an animation name, a loop mode, then a
- * comma-separated frame list where `A-B` spans a range and `:ms` overrides
- * the duration of one frame (or every frame of a range). Frames are
- * numbered from 1. Pure data + parsing/stepping rules (no DOM or WebGL)
+ * `walk,forward,1:0.4,2-4,7,1`: an animation name, a loop mode, then a
+ * comma-separated frame list where `A-B` spans a range and `:s` overrides
+ * the duration in seconds of one frame (or every frame of a range). Frames
+ * are numbered from 1. Pure data + parsing/stepping rules (no DOM or WebGL)
  * so everything stays unit-testable; the engine owns the live list.
  */
-import { clampFrameDurationMs } from "./GnumarusAnimationModel";
+import { clampFrameDurationSec } from "./GnumarusAnimationModel";
 
 export type GnumarusAnimationLoop = "none" | "forward" | "ping-pong";
 
@@ -15,7 +15,7 @@ export const GNUMARUS_ANIMATION_LOOPS: GnumarusAnimationLoop[] = ["none", "forwa
 export interface GnumarusNamedAnimationFrame {
   /** 0-based project frame index. */
   frame: number;
-  /** Per-frame duration override in ms, or null for the project duration. */
+  /** Per-frame duration override in seconds, or null for the project duration. */
   duration: number | null;
 }
 
@@ -39,6 +39,22 @@ function parsePositiveInt(text: string, what: string): number {
   const value = Number.parseInt(text, 10);
   if (!Number.isSafeInteger(value) || value < 1) {
     throw new GnumarusNamedAnimationError(`Invalid ${what} "${text}": expected a positive frame number.`);
+  }
+  return value;
+}
+
+/** Parse a `:s` duration override as fractional seconds (no decimal limit). */
+function parsePositiveSeconds(text: string, what: string): number {
+  if (!/^\d+(?:\.\d+)?$/.test(text)) {
+    throw new GnumarusNamedAnimationError(
+      `Invalid ${what} "${text}": expected a positive number of seconds like 0.25.`,
+    );
+  }
+  const value = Number(text);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new GnumarusNamedAnimationError(
+      `Invalid ${what} "${text}": expected a positive number of seconds like 0.25.`,
+    );
   }
   return value;
 }
@@ -69,10 +85,10 @@ export function parseNamedAnimation(text: string, frameCount: number): GnumarusN
   const frames: GnumarusNamedAnimationFrame[] = [];
   for (const rawItem of parts.slice(2)) {
     const item = rawItem.trim();
-    const match = /^(\d+)(?:-(\d+))?(?::(\d+))?$/.exec(item);
+    const match = /^(\d+)(?:-(\d+))?(?::(\d+(?:\.\d+)?))?$/.exec(item);
     if (match === null || match[1] === undefined) {
       throw new GnumarusNamedAnimationError(
-        `Invalid frame entry "${item}": use 7, 3-5 or 2:200 (ranges expand, :ms overrides each frame).`,
+        `Invalid frame entry "${item}": use 7, 3-5 or 2:0.2 (ranges expand, :s overrides each frame).`,
       );
     }
     const first = parsePositiveInt(match[1], "frame number");
@@ -84,8 +100,8 @@ export function parseNamedAnimation(text: string, frameCount: number): GnumarusN
     }
     let duration: number | null = null;
     if (match[3] !== undefined) {
-      const overrideMs = parsePositiveInt(match[3], "duration");
-      duration = clampFrameDurationMs(overrideMs);
+      const overrideSec = parsePositiveSeconds(match[3], "duration");
+      duration = clampFrameDurationSec(overrideSec);
     }
     for (let frame = first; frame <= last; frame += 1) {
       if (frame < 1 || frame > frameCount) {
@@ -189,7 +205,7 @@ export function mapNamedAnimationFrames(
 export interface GnumarusExportFrame {
   /** 0-based project frame index. */
   frame: number;
-  /** Per-frame duration override in ms, or null for the project duration. */
+  /** Per-frame duration override in seconds, or null for the project duration. */
   duration: number | null;
 }
 

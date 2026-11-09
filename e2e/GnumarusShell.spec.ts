@@ -1839,14 +1839,14 @@ test("frame menu sets and clears an explicit frame duration", async ({ page }) =
   await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
   await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click({ button: "right" });
   await page.getByRole("button", { name: "Set frame duration…" }).click();
-  await page.locator("gnumarus-shell input#frameDuration").fill("250");
+  await page.locator("gnumarus-shell input#frameDuration").fill("0.25");
   await page.getByRole("button", { name: "Set", exact: true }).click();
-  expect(await getFrameDuration(page, 1)).toBe(250);
+  expect(await getFrameDuration(page, 1)).toBe(0.25);
   expect(await getFrameDuration(page, 0)).toBeNull();
-  await expect(page.locator("gnumarus-shell")).toContainText("Frame 2 duration: 250 ms");
+  await expect(page.locator("gnumarus-shell")).toContainText("Frame 2 duration: 0.25 s");
   await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click({ button: "right" });
   await page.getByRole("button", { name: "Set frame duration…" }).click();
-  await expect(page.locator("gnumarus-shell input#frameDuration")).toHaveValue("250");
+  await expect(page.locator("gnumarus-shell input#frameDuration")).toHaveValue("0.25");
   await page.getByRole("button", { name: "Clear" }).click();
   await expect(page.locator("gnumarus-shell dialog#frameDurationDialog")).toBeHidden();
   expect(await getFrameDuration(page, 1)).toBeNull();
@@ -1856,20 +1856,56 @@ test("frame menu sets and clears an explicit frame duration", async ({ page }) =
 test("project default frame duration is configurable with a reset", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  expect(await getDefaultFrameDuration(page)).toBe(100);
+  expect(await getDefaultFrameDuration(page)).toBe(0.25);
   await page.getByRole("button", { name: "Edit" }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Default frame duration");
   const input = page.locator("gnumarus-shell input#defaultFrameDuration");
-  await expect(input).toHaveValue("100");
+  await expect(input).toHaveValue("0.25");
   await expect(page.getByRole("button", { name: "Reset default frame duration to default" })).toHaveCount(0);
-  await input.fill("500");
-  expect(await getDefaultFrameDuration(page)).toBe(500);
+  await input.fill("0.5");
+  expect(await getDefaultFrameDuration(page)).toBe(0.5);
   await expect(page.getByRole("button", { name: "Reset default frame duration to default" })).toBeVisible();
-  await expect(page.locator("gnumarus-shell")).toContainText("Default frame duration: 500 ms");
+  await expect(page.locator("gnumarus-shell")).toContainText("Default frame duration: 0.5 s");
   await page.getByRole("button", { name: "Reset default frame duration to default" }).click();
-  expect(await getDefaultFrameDuration(page)).toBe(100);
+  expect(await getDefaultFrameDuration(page)).toBe(0.25);
   await expect(page.getByRole("button", { name: "Reset default frame duration to default" })).toHaveCount(0);
+});
+
+test("menubar closes on outside click and Escape", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const menubar = page.locator("gnumarus-shell .menubar");
+  const fileItem = menubar.getByRole("button", { name: "New", exact: true });
+  await page.getByRole("button", { name: "File" }).click();
+  await expect(fileItem).toBeVisible();
+  await page.locator("gnumarus-shell canvas").click();
+  await expect(fileItem).toBeHidden();
+  await page.getByRole("button", { name: "File" }).click();
+  await expect(fileItem).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(fileItem).toBeHidden();
+});
+
+test("menubar switches menus on hover while open", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const menubar = page.locator("gnumarus-shell .menubar");
+  const fileItem = menubar.getByRole("button", { name: "New", exact: true });
+  const editItem = menubar.getByRole("button", { name: "Settings", exact: true });
+  const helpItem = menubar.getByRole("button", { name: "Shortcuts", exact: true });
+  // Hovering with no menu open opens nothing.
+  await menubar.getByRole("button", { name: "Edit" }).hover();
+  await expect(fileItem).toBeHidden();
+  await expect(editItem).toBeHidden();
+  await page.getByRole("button", { name: "File" }).click();
+  await expect(fileItem).toBeVisible();
+  await menubar.getByRole("button", { name: "Edit" }).hover();
+  await expect(fileItem).toBeHidden();
+  await expect(editItem).toBeVisible();
+  await menubar.getByRole("button", { name: "Help" }).hover();
+  await expect(editItem).toBeHidden();
+  await expect(helpItem).toBeVisible();
 });
 
 test("playback advances frames by duration and stops on demand", async ({ page }) => {
@@ -1882,8 +1918,8 @@ test("playback advances frames by duration and stops on demand", async ({ page }
     const root = window as unknown as {
       __gnumarus?: { engine?: { setFrameDuration(f: number, d: number | null): boolean; setCurrentFrame(f: number): boolean } };
     };
-    root.__gnumarus?.engine?.setFrameDuration(0, 200);
-    root.__gnumarus?.engine?.setFrameDuration(2, 200);
+    root.__gnumarus?.engine?.setFrameDuration(0, 0.2);
+    root.__gnumarus?.engine?.setFrameDuration(2, 0.2);
     root.__gnumarus?.engine?.setCurrentFrame(1);
   });
   await expect(matrix.locator('[data-testid="anim-frame"][data-frame="1"]')).toHaveAttribute("aria-label", /current/);
@@ -5260,8 +5296,8 @@ test("File > Import loads layers, frames and durations from .ase", async ({ page
   expect(await readPixel(page, 0, 0)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
   expect(await readPixel(page, 3, 3)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
   expect(await animationFrameCount(page)).toBe(2);
-  expect(await frameDuration(page, 0)).toBe(100);
-  expect(await frameDuration(page, 1)).toBe(250);
+  expect(await frameDuration(page, 0)).toBe(0.1);
+  expect(await frameDuration(page, 1)).toBe(0.25);
 });
 
 test("File > Import loads frame tags as named animations", async ({ page }) => {
@@ -5748,7 +5784,7 @@ test("a ping-pong animation bounces without repeating endpoints", async ({ page 
   await selectAnimation(page, "boing");
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
   await matrix.getByRole("button", { name: "Play animation", exact: true }).click();
-  // Dense polls: frames flip every ~100ms, so the default poll backoff
+  // Dense polls: frames flip every ~250ms, so the default poll backoff
   // (100/250/500/1000ms) aliases and can miss a frame window deterministically.
   await expect.poll(async () => getMatrixFrame(page), { timeout: 10000, intervals: [50] }).toBe(1);
   await expect.poll(async () => getMatrixFrame(page), { timeout: 10000, intervals: [50] }).toBe(2);
@@ -5778,13 +5814,13 @@ test("animation duration overrides win over the project default", async ({ page 
   await addFrames(page, 1);
   await page.evaluate(() => {
     const root = window as unknown as { __gnumarus?: { engine?: { setDefaultFrameDuration(d: number): boolean } } };
-    root.__gnumarus?.engine?.setDefaultFrameDuration(2000);
+    root.__gnumarus?.engine?.setDefaultFrameDuration(2);
   });
-  await addAnimation(page, "fast,forward,1:100,2:100");
+  await addAnimation(page, "fast,forward,1:0.1,2:0.1");
   await selectAnimation(page, "fast");
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
   await matrix.getByRole("button", { name: "Play animation", exact: true }).click();
-  // With the 2000ms project default this would time out; overrides tick at 100ms.
+  // With the 2s project default this would time out; overrides tick at 0.1s.
   await expect.poll(async () => getMatrixFrame(page), { timeout: 1500 }).toBe(1);
   await matrix.getByRole("button", { name: "Stop animation", exact: true }).click();
 });

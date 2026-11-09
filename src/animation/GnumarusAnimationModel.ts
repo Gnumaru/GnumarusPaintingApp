@@ -40,24 +40,29 @@ export function animationCellKey(layerId: string, frame: number): string {
   return `${layerId}\n${frame}`;
 }
 
-export const GNUMARUS_DEFAULT_FRAME_DURATION_MS = 100;
-export const GNUMARUS_MIN_FRAME_DURATION_MS = 1;
-export const GNUMARUS_MAX_FRAME_DURATION_MS = 60000;
+export const GNUMARUS_DEFAULT_FRAME_DURATION_SEC = 0.25;
+export const GNUMARUS_MIN_FRAME_DURATION_SEC = 0.001;
+export const GNUMARUS_MAX_FRAME_DURATION_SEC = 60;
 
-/** Clamp a frame duration to the supported millisecond range. */
-export function clampFrameDurationMs(value: number): number {
+/** Clamp a frame duration to the supported range in seconds (full double precision). */
+export function clampFrameDurationSec(value: number): number {
   if (!Number.isFinite(value)) {
-    return GNUMARUS_DEFAULT_FRAME_DURATION_MS;
+    return GNUMARUS_DEFAULT_FRAME_DURATION_SEC;
   }
-  return Math.min(GNUMARUS_MAX_FRAME_DURATION_MS, Math.max(GNUMARUS_MIN_FRAME_DURATION_MS, Math.floor(value)));
+  return Math.min(GNUMARUS_MAX_FRAME_DURATION_SEC, Math.max(GNUMARUS_MIN_FRAME_DURATION_SEC, value));
 }
 
 /** Explicit per-frame duration wins; otherwise the project default applies. */
-export function effectiveFrameDurationMs(explicitMs: number | null | undefined, defaultMs: number): number {
-  if (explicitMs === null || explicitMs === undefined || !Number.isFinite(explicitMs)) {
-    return clampFrameDurationMs(defaultMs);
+export function effectiveFrameDurationSec(explicitSec: number | null | undefined, defaultSec: number): number {
+  if (explicitSec === null || explicitSec === undefined || !Number.isFinite(explicitSec)) {
+    return clampFrameDurationSec(defaultSec);
   }
-  return clampFrameDurationMs(explicitMs);
+  return clampFrameDurationSec(explicitSec);
+}
+
+/** Convert a duration in seconds to a setTimeout delay in whole milliseconds. */
+export function frameDurationTimeoutMs(durationSec: number): number {
+  return Math.max(1, Math.round(durationSec * 1000));
 }
 
 /** Split an animation cell key back into its layer id and frame number. */

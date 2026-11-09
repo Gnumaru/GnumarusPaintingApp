@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   animationCellKey,
-  clampFrameDurationMs,
+  clampFrameDurationSec,
   defaultFrameName,
-  effectiveFrameDurationMs,
+  effectiveFrameDurationSec,
+  frameDurationTimeoutMs,
   ensureFrameNames,
   insertFrameCells,
   insertFrameDurations,
@@ -13,9 +14,9 @@ import {
   swapFrameCells,
   swapFrameDurations,
   swapFrameNames,
-  GNUMARUS_DEFAULT_FRAME_DURATION_MS,
-  GNUMARUS_MAX_FRAME_DURATION_MS,
-  GNUMARUS_MIN_FRAME_DURATION_MS,
+  GNUMARUS_DEFAULT_FRAME_DURATION_SEC,
+  GNUMARUS_MAX_FRAME_DURATION_SEC,
+  GNUMARUS_MIN_FRAME_DURATION_SEC,
 } from "../src/animation/GnumarusAnimationModel";
 
 function bufferOf(width: number, height: number, fill: number): Uint8ClampedArray {
@@ -95,18 +96,23 @@ describe("GnumarusAnimationModel", () => {
   });
 
   it("clamps frame durations and falls back to the project default", () => {
-    expect(GNUMARUS_DEFAULT_FRAME_DURATION_MS).toBe(100);
-    expect(GNUMARUS_MIN_FRAME_DURATION_MS).toBe(1);
-    expect(GNUMARUS_MAX_FRAME_DURATION_MS).toBe(60000);
-    expect(clampFrameDurationMs(250)).toBe(250);
-    expect(clampFrameDurationMs(0)).toBe(1);
-    expect(clampFrameDurationMs(-50)).toBe(1);
-    expect(clampFrameDurationMs(999999)).toBe(60000);
-    expect(clampFrameDurationMs(Number.NaN)).toBe(100);
-    expect(effectiveFrameDurationMs(250, 100)).toBe(250);
-    expect(effectiveFrameDurationMs(null, 100)).toBe(100);
-    expect(effectiveFrameDurationMs(undefined, 400)).toBe(400);
-    expect(effectiveFrameDurationMs(Number.NaN, 100)).toBe(100);
+    expect(GNUMARUS_DEFAULT_FRAME_DURATION_SEC).toBe(0.25);
+    expect(GNUMARUS_MIN_FRAME_DURATION_SEC).toBe(0.001);
+    expect(GNUMARUS_MAX_FRAME_DURATION_SEC).toBe(60);
+    expect(clampFrameDurationSec(0.25)).toBe(0.25);
+    expect(clampFrameDurationSec(1 / 3)).toBe(1 / 3);
+    expect(clampFrameDurationSec(0)).toBe(0.001);
+    expect(clampFrameDurationSec(-50)).toBe(0.001);
+    expect(clampFrameDurationSec(999999)).toBe(60);
+    expect(clampFrameDurationSec(Number.NaN)).toBe(0.25);
+    expect(effectiveFrameDurationSec(0.25, 0.5)).toBe(0.25);
+    expect(effectiveFrameDurationSec(null, 0.5)).toBe(0.5);
+    expect(effectiveFrameDurationSec(undefined, 2)).toBe(2);
+    expect(effectiveFrameDurationSec(Number.NaN, 0.5)).toBe(0.5);
+    expect(frameDurationTimeoutMs(0.25)).toBe(250);
+    expect(frameDurationTimeoutMs(0.1)).toBe(100);
+    expect(frameDurationTimeoutMs(0.0004)).toBe(1);
+    expect(frameDurationTimeoutMs(2)).toBe(2000);
   });
 
   it("shifts cells and durations up on frame insertion", () => {

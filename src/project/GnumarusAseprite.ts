@@ -25,8 +25,8 @@
  * zlib output right after its pixels are decoded.
  */
 import {
-  clampFrameDurationMs,
-  GNUMARUS_DEFAULT_FRAME_DURATION_MS,
+  clampFrameDurationSec,
+  GNUMARUS_DEFAULT_FRAME_DURATION_SEC,
   type GnumarusTexturePixels,
 } from "../animation/GnumarusAnimationModel";
 import type {
@@ -312,7 +312,7 @@ export async function parseAsepriteFile(data: Uint8Array): Promise<GnumarusAsepr
   const linkedCels = new Map<string, GnumarusAseLinkedCel>();
   const tags: GnumarusAseTag[] = [];
   const durations = new Array<number>(frames).fill(
-    speed > 0 ? clampFrameDurationMs(speed) : GNUMARUS_DEFAULT_FRAME_DURATION_MS,
+    speed > 0 ? clampFrameDurationSec(speed / 1000) : GNUMARUS_DEFAULT_FRAME_DURATION_SEC,
   );
   const palette = new Map<number, { r: number; g: number; b: number; a: number }>();
   let sawNewPalette = false;
@@ -331,7 +331,7 @@ export async function parseAsepriteFile(data: Uint8Array): Promise<GnumarusAsepr
     const oldChunks = reader.u16("old chunk count");
     const duration = reader.u16("frame duration");
     if (duration > 0) {
-      durations[frame] = clampFrameDurationMs(duration);
+      durations[frame] = clampFrameDurationSec(duration / 1000);
     }
     reader.skip(2, "frame reserved");
     const newChunks = reader.u32("chunk count");
@@ -887,10 +887,10 @@ function buildAsepriteDocument(input: GnumarusAseBuildInput): GnumarusAsepriteDo
   });
 
   const defaultDuration =
-    input.durations[0] ?? GNUMARUS_DEFAULT_FRAME_DURATION_MS;
+    input.durations[0] ?? GNUMARUS_DEFAULT_FRAME_DURATION_SEC;
   const frameDurations: Array<{ frame: number; duration: number }> = [];
   input.durations.forEach((duration, frame) => {
-    const clamped = clampFrameDurationMs(duration);
+    const clamped = clampFrameDurationSec(duration);
     if (clamped !== defaultDuration) {
       frameDurations.push({ frame, duration: clamped });
     }

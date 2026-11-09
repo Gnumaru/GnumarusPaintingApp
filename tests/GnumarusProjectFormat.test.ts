@@ -46,7 +46,7 @@ describe("GnumarusProjectFormat", () => {
     expect(parsed.layers[0]?.width).toBeUndefined();
     expect(parsed.animation.frames).toBe(1);
     expect(parsed.animation.frameNames).toEqual(["F1"]);
-    expect(parsed.animation.defaultFrameDuration).toBe(100);
+    expect(parsed.animation.defaultFrameDuration).toBe(0.25);
     expect(parsed.animation.frameDurations).toEqual([]);
     expect(parsed.animation.textures).toEqual([
       { id: "layer0", name: "T1", width: 64, height: 64, file: "cells/layer0_frame0.png" },
@@ -100,17 +100,17 @@ describe("GnumarusProjectFormat", () => {
       { layer: "layer0", frame: 1, content: "content1" },
       { layer: "layer0", frame: 2, content: "content2" },
     );
-    project.animation.defaultFrameDuration = 100;
+    project.animation.defaultFrameDuration = 0.25;
     project.animation.frameDurations = [
-      { frame: 0, duration: 120 },
-      { frame: 2, duration: 500 },
+      { frame: 0, duration: 0.12 },
+      { frame: 2, duration: 0.5 },
     ];
     const parsed = parseProject(serializeProject(project));
     expect(parsed).toEqual(project);
-    expect(parsed.animation.defaultFrameDuration).toBe(100);
+    expect(parsed.animation.defaultFrameDuration).toBe(0.25);
     expect(parsed.animation.frameDurations).toEqual([
-      { frame: 0, duration: 120 },
-      { frame: 2, duration: 500 },
+      { frame: 0, duration: 0.12 },
+      { frame: 2, duration: 0.5 },
     ]);
   });
 
@@ -228,6 +228,26 @@ describe("GnumarusProjectFormat", () => {
     expect(parsed.animation.frameNames).toEqual(["Intro", "Outro"]);
   });
 
+  it("migrates version 1 millisecond durations to seconds", () => {
+    const raw = JSON.parse(serializeProject(createDefaultProject(8, 8))) as Record<string, unknown>;
+    raw["version"] = 1;
+    const animation = raw["animation"] as Record<string, unknown>;
+    animation["frames"] = 2;
+    animation["frameNames"] = ["F1", "F2"];
+    animation["defaultFrameDuration"] = 250;
+    animation["frameDurations"] = [{ frame: 1, duration: 500 }];
+    animation["namedAnimations"] = [
+      { name: "walk", loop: "forward", frames: [{ frame: 0, duration: 400 }] },
+    ];
+    const parsed = parseProject(JSON.stringify(raw));
+    expect(parsed.version).toBe(2);
+    expect(parsed.animation.defaultFrameDuration).toBe(0.25);
+    expect(parsed.animation.frameDurations).toEqual([{ frame: 1, duration: 0.5 }]);
+    expect(parsed.animation.namedAnimations).toEqual([
+      { name: "walk", loop: "forward", frames: [{ frame: 0, duration: 0.4 }] },
+    ]);
+  });
+
   it("defaults to no named animations for legacy files", () => {
     const raw = JSON.parse(serializeProject(createDefaultProject(8, 8))) as {
       animation: Record<string, unknown>;
@@ -249,13 +269,13 @@ describe("GnumarusProjectFormat", () => {
         name: "walk",
         loop: "forward",
         frames: [
-          { frame: 0, duration: 400 },
+          { frame: 0, duration: 0.4 },
           { frame: 1, duration: null },
           { frame: 2, duration: null },
           { frame: 3, duration: null },
         ],
       },
-      { name: "idle", loop: "ping-pong", frames: [{ frame: 1, duration: 200 }] },
+      { name: "idle", loop: "ping-pong", frames: [{ frame: 1, duration: 0.2 }] },
     ];
     project.animation.activeAnimation = "walk";
     const parsed = parseProject(serializeProject(project));

@@ -127,7 +127,9 @@ import {
   type GnumarusNamedAnimation,
 } from "../animation/GnumarusNamedAnimations";
 import {
-  GNUMARUS_DEFAULT_FRAME_DURATION_MS as DEFAULT_ANIMATION_FRAME_DURATION,
+  clampFrameDurationSec,
+  frameDurationTimeoutMs,
+  GNUMARUS_DEFAULT_FRAME_DURATION_SEC as DEFAULT_ANIMATION_FRAME_DURATION,
 } from "../animation/GnumarusAnimationModel";
 import "../color/GnumarusColorPicker";
 
@@ -1269,11 +1271,8 @@ export class GnumarusShell extends LitElement {
         <div class="menu">
           <button
             class=${this.fileMenuOpen ? "active" : ""}
-            @click=${(): void => {
-              this.fileMenuOpen = !this.fileMenuOpen;
-              this.editMenuOpen = false;
-              this.helpMenuOpen = false;
-            }}
+            @click=${(): void => this.toggleMenu("file")}
+            @mouseenter=${(): void => this.hoverMenu("file")}
           >
             File
           </button>
@@ -1292,11 +1291,8 @@ export class GnumarusShell extends LitElement {
         <div class="menu">
           <button
             class=${this.editMenuOpen ? "active" : ""}
-            @click=${(): void => {
-              this.editMenuOpen = !this.editMenuOpen;
-              this.fileMenuOpen = false;
-              this.helpMenuOpen = false;
-            }}
+            @click=${(): void => this.toggleMenu("edit")}
+            @mouseenter=${(): void => this.hoverMenu("edit")}
           >
             Edit
           </button>
@@ -1314,11 +1310,8 @@ export class GnumarusShell extends LitElement {
         <div class="menu">
           <button
             class=${this.helpMenuOpen ? "active" : ""}
-            @click=${(): void => {
-              this.helpMenuOpen = !this.helpMenuOpen;
-              this.fileMenuOpen = false;
-              this.editMenuOpen = false;
-            }}
+            @click=${(): void => this.toggleMenu("help")}
+            @mouseenter=${(): void => this.hoverMenu("help")}
           >
             Help
           </button>
@@ -2113,15 +2106,16 @@ export class GnumarusShell extends LitElement {
         <div class="settings-section">Animation</div>
         <div class="setting-row">
           <label
-            >Default frame duration (ms)
+            >Default frame duration (s)
             <input
               type="number"
               id="defaultFrameDuration"
-              min="1"
-              max="60000"
-              step="10"
-              .value=${String(Math.round(this.defaultFrameDuration))}
+              min="0.001"
+              max="60"
+              step="any"
+              .value=${String(this.defaultFrameDuration)}
               @input=${(): void => this.applyDefaultFrameDurationFromDialog()}
+              @change=${(): void => this.commitDefaultFrameDurationFromDialog()}
             />
           </label>
           ${this.defaultFrameDuration !== DEFAULT_ANIMATION_FRAME_DURATION
@@ -2217,14 +2211,14 @@ export class GnumarusShell extends LitElement {
         <h3>Frame duration</h3>
         <p>How long this frame shows during playback. Empty means the project default.</p>
         <label
-          >Duration (ms)
+          >Duration (s)
           <input
             type="number"
             id="frameDuration"
-            min="1"
-            max="60000"
-            step="10"
-            placeholder=${String(Math.round(this.defaultFrameDuration))}
+            min="0.001"
+            max="60"
+            step="any"
+            placeholder=${String(this.defaultFrameDuration)}
             .value=${this.durationValue === null ? "" : String(this.durationValue)}
           />
         </label>
@@ -2819,8 +2813,8 @@ export class GnumarusShell extends LitElement {
                     : html`<button
                         data-testid="anim-frame"
                         data-frame=${frame}
-                        aria-label="Frame ${frame + 1}${current ? ", current" : ""}: ${frameName}, ${duration} milliseconds"
-                        title="Frame ${frame + 1}${current ? " (current)" : ""}: ${frameName} — ${duration} ms"
+                        aria-label="Frame ${frame + 1}${current ? ", current" : ""}: ${frameName}, ${duration} seconds"
+                        title="Frame ${frame + 1}${current ? " (current)" : ""}: ${frameName} — ${duration} s"
                         @click=${(): void => this.onSelectFrame(frame)}
                         @dblclick=${(): void => this.onFrameRenameStart(frame)}
                         @contextmenu=${(event: MouseEvent): void => {
@@ -2988,6 +2982,7 @@ export class GnumarusShell extends LitElement {
   firstUpdated(): void {
     this.fsSupported = isFileSystemAccessSupported();
     window.addEventListener("keydown", this.onGlobalKeyDown);
+    window.addEventListener("pointerdown", this.onGlobalPointerDown);
     const storedChecker = this.loadCheckerSettings();
     this.checkerMode = storedChecker.mode;
     this.checkerSizeX = storedChecker.sizeX;
@@ -3099,6 +3094,58 @@ export class GnumarusShell extends LitElement {
     this.engine?.resetViewTransform();
   }
 
+  /** A click outside the menubar dismisses any open menu. */
+  private onGlobalPointerDown = (event: PointerEvent): void => {
+    if (!this.anyMenuOpen()) {
+      return;
+    }
+    const menubar = this.shadowRoot?.querySelector(".menubar") ?? null;
+    if (menubar !== null && event.composedPath().includes(menubar)) {
+      return;
+    }
+    this.closeAllMenus();
+  };
+
+  private anyMenuOpen(): boolean {
+    return this.fileMenuOpen || this.editMenuOpen || this.helpMenuOpen;
+  }
+
+  private closeAllMenus(): void {
+    this.fileMenuOpen = false;
+    this.editMenuOpen = false;
+    this.helpMenuOpen = false;
+  }
+
+  /** Header click toggles one menu, closing the others. */
+  private toggleMenu(which: "file" | "edit" | "help"): void {
+    const open = !(
+      which === "file" ? this.fileMenuOpen : which === "edit" ? this.editMenuOpen : this.helpMenuOpen
+    );
+    this.closeAllMenus();
+    if (which === "file") {
+      this.fileMenuOpen = open;
+    } else if (which === "edit") {
+      this.editMenuOpen = open;
+    } else {
+      this.helpMenuOpen = open;
+    }
+  }
+
+  /** Hover switches menus, but only while one is already open. */
+  private hoverMenu(which: "file" | "edit" | "help"): void {
+    if (!this.anyMenuOpen()) {
+      return;
+    }
+    this.closeAllMenus();
+    if (which === "file") {
+      this.fileMenuOpen = true;
+    } else if (which === "edit") {
+      this.editMenuOpen = true;
+    } else {
+      this.helpMenuOpen = true;
+    }
+  }
+
   private onGlobalKeyDown = (event: KeyboardEvent): void => {
     const key = event.key.toLowerCase();
     if ((event.ctrlKey || event.metaKey) && !event.altKey && key === "s") {
@@ -3141,6 +3188,7 @@ export class GnumarusShell extends LitElement {
       return;
     }
     if (event.key === "Escape") {
+      this.closeAllMenus();
       if (this.matrixMenu !== null) {
         this.matrixMenu = null;
       }
@@ -4843,19 +4891,41 @@ export class GnumarusShell extends LitElement {
     this.closeTexturePicker();
   }
 
-  private currentDialogDefaultFrameDuration(): number {
-    const input = this.shadowRoot?.getElementById("defaultFrameDuration") as HTMLInputElement | null;
-    const value = Math.floor(Number(input?.value ?? "100") || 100);
-    return Math.min(60000, Math.max(1, value));
-  }
-
   private applyDefaultFrameDurationFromDialog(): void {
-    const duration = this.currentDialogDefaultFrameDuration();
+    const input = this.shadowRoot?.getElementById("defaultFrameDuration") as HTMLInputElement | null;
+    const raw = (input?.value ?? "").trim();
+    if (raw === "") {
+      // Mid-typing (cleared field): keep the current value instead of snapping.
+      return;
+    }
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value <= 0) {
+      // Partial input like "0.": wait for more typing (blur commits via change).
+      return;
+    }
+    const duration = clampFrameDurationSec(value);
     this.defaultFrameDuration = duration;
     this.engine?.setDefaultFrameDuration(duration);
     this.refreshLayers();
     this.dirty = true;
-    this.statusMessage = `Default frame duration: ${duration} ms`;
+    this.statusMessage = `Default frame duration: ${duration} s`;
+  }
+
+  private commitDefaultFrameDurationFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("defaultFrameDuration") as HTMLInputElement | null;
+    const raw = (input?.value ?? "").trim();
+    if (raw === "") {
+      if (input !== null) {
+        input.value = String(this.defaultFrameDuration);
+      }
+      return;
+    }
+    const duration = clampFrameDurationSec(Number(raw));
+    this.defaultFrameDuration = duration;
+    this.engine?.setDefaultFrameDuration(duration);
+    this.refreshLayers();
+    this.dirty = true;
+    this.statusMessage = `Default frame duration: ${duration} s`;
   }
 
   private resetDefaultFrameDuration(): void {
@@ -5101,7 +5171,7 @@ export class GnumarusShell extends LitElement {
       const count = this.engine.getFrameCount();
       const frames = [];
       for (let frame = 0; frame < count; frame += 1) {
-        frames.push({ frame, delayMs: this.engine.getEffectiveFrameDuration(frame) });
+        frames.push({ frame, delayMs: frameDurationTimeoutMs(this.engine.getEffectiveFrameDuration(frame)) });
       }
       return { frames, loop: true, label: "frames" };
     }
@@ -5111,7 +5181,7 @@ export class GnumarusShell extends LitElement {
     }
     const frames = resolveExportSequence(animation).map((entry) => ({
       frame: entry.frame,
-      delayMs: entry.duration ?? this.engine?.getEffectiveFrameDuration(entry.frame) ?? 0,
+      delayMs: frameDurationTimeoutMs(entry.duration ?? this.engine?.getEffectiveFrameDuration(entry.frame) ?? 0),
     }));
     return { frames, loop: animation.loop !== "none", label: name };
   }
@@ -5420,13 +5490,14 @@ export class GnumarusShell extends LitElement {
       this.engine.setFrameDuration(target, null);
       this.statusMessage = `Frame ${target + 1} uses the project default`;
     } else {
-      const duration = Math.min(60000, Math.max(1, Math.floor(Number(raw) || 0)));
-      if (duration < 1) {
+      const value = Number(raw);
+      if (!Number.isFinite(value) || value <= 0) {
         this.closeFrameDurationDialog();
         return;
       }
+      const duration = clampFrameDurationSec(value);
       this.engine.setFrameDuration(target, duration);
-      this.statusMessage = `Frame ${target + 1} duration: ${duration} ms`;
+      this.statusMessage = `Frame ${target + 1} duration: ${duration} s`;
     }
     this.refreshLayers();
     this.dirty = true;
@@ -5640,7 +5711,7 @@ export class GnumarusShell extends LitElement {
     }
     const animation = this.playbackAnimation;
     if (animation === null) {
-      const delay = Math.max(1, this.engine.getEffectiveFrameDuration(this.engine.getCurrentFrame()));
+      const delay = frameDurationTimeoutMs(this.engine.getEffectiveFrameDuration(this.engine.getCurrentFrame()));
       if (this.playTimer !== null) {
         window.clearTimeout(this.playTimer);
       }
@@ -5662,7 +5733,7 @@ export class GnumarusShell extends LitElement {
       this.refreshLayers();
       return;
     }
-    const delay = Math.max(1, entry.duration ?? this.engine.getEffectiveFrameDuration(entry.frame));
+    const delay = frameDurationTimeoutMs(entry.duration ?? this.engine.getEffectiveFrameDuration(entry.frame));
     if (this.playTimer !== null) {
       window.clearTimeout(this.playTimer);
     }
@@ -6263,7 +6334,7 @@ export class GnumarusShell extends LitElement {
       }));
       const meta: GnumarusProjectMeta = {
         app: GNUMARUS_APP_ID,
-        version: 1,
+        version: 2,
         width: size.width,
         height: size.height,
         layers: exported.layers.map((layer) => ({

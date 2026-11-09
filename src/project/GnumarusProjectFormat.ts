@@ -3,11 +3,11 @@ import { IDENTITY_LAYER_TRANSFORM } from "../canvas/GnumarusViewportMath";
 import type { GnumarusAnimationLoop } from "../animation/GnumarusNamedAnimations";
 import { parseChannelLock, type GnumarusChannelLock } from "../canvas/GnumarusPixelBuffer";
 import {
-  clampFrameDurationMs,
+  clampFrameDurationSec,
   defaultFrameName,
   ensureFrameNames,
   normalizeFrameName,
-  GNUMARUS_DEFAULT_FRAME_DURATION_MS,
+  GNUMARUS_DEFAULT_FRAME_DURATION_SEC,
 } from "../animation/GnumarusAnimationModel";
 
 export interface GnumarusCellRef {
@@ -45,7 +45,7 @@ export interface GnumarusFrameDurationRef {
 export interface GnumarusNamedAnimationFrameMeta {
   /** 0-based project frame index. */
   frame: number;
-  /** Per-frame duration override in ms, or null for the project duration. */
+  /** Per-frame duration override in seconds, or null for the project duration. */
   duration: number | null;
 }
 
@@ -58,7 +58,7 @@ export interface GnumarusNamedAnimationMeta {
 export interface GnumarusAnimationMeta {
   frames: number;
   currentFrame: number;
-  /** Project-wide fallback in milliseconds when a frame has no explicit duration. */
+  /** Project-wide fallback in seconds when a frame has no explicit duration. */
   defaultFrameDuration: number;
   /** Only frames with an explicit duration are listed. */
   frameDurations: GnumarusFrameDurationRef[];
@@ -88,7 +88,7 @@ export interface GnumarusLayerMeta {
 
 export interface GnumarusProjectMeta {
   app: string;
-  version: 1;
+  version: 2;
   width: number;
   height: number;
   layers: GnumarusLayerMeta[];
@@ -116,7 +116,7 @@ export function textureFilePath(textureId: string): string {
 export function createDefaultProject(width: number, height: number): GnumarusProjectMeta {
   return {
     app: GNUMARUS_APP_ID,
-    version: 1,
+    version: 2,
     width,
     height,
     layers: [
@@ -131,7 +131,7 @@ export function createDefaultProject(width: number, height: number): GnumarusPro
     animation: {
       frames: 1,
       currentFrame: 0,
-      defaultFrameDuration: GNUMARUS_DEFAULT_FRAME_DURATION_MS,
+      defaultFrameDuration: GNUMARUS_DEFAULT_FRAME_DURATION_SEC,
       frameDurations: [],
       frameNames: [defaultFrameName(0)],
       namedAnimations: [],
@@ -202,7 +202,7 @@ function checkedName(value: unknown, what: string): string {
   return value;
 }
 
-function parseAnimationMeta(value: unknown, layerIds: Set<string>): GnumarusAnimationMeta {
+function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs: boolean): GnumarusAnimationMeta {
   if (!isRecord(value)) {
     throw new GnumarusProjectError("project.json has an invalid animation section");
   }
@@ -303,12 +303,12 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>): GnumarusAnim
     seenCells.add(key);
     checkedCells.push({ layer, frame: frame as number, content: content as string });
   }
-  let checkedDefaultMs = GNUMARUS_DEFAULT_FRAME_DURATION_MS;
+  let checkedDefaultSec = GNUMARUS_DEFAULT_FRAME_DURATION_SEC;
   if (defaultFrameDuration !== undefined) {
     if (typeof defaultFrameDuration !== "number" || !Number.isFinite(defaultFrameDuration)) {
       throw new GnumarusProjectError("project.json has an invalid default frame duration");
     }
-    checkedDefaultMs = clampFrameDurationMs(defaultFrameDuration);
+    checkedDefaultSec = clampFrameDurationSec(durationsInMs ? (defaultFrameDuration as number) / 1000 : (defaultFrameDuration as number));
   }
   const checkedDurations: GnumarusFrameDurationRef[] = [];
   if (frameDurations !== undefined) {
@@ -331,7 +331,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>): GnumarusAnim
         throw new GnumarusProjectError("project.json has a duplicated frame duration");
       }
       seenFrames.add(frame as number);
-      checkedDurations.push({ frame: frame as number, duration: clampFrameDurationMs(duration as number) });
+      checkedDurations.push({ frame: frame as number, duration: clampFrameDurationSec(durationsInMs ? (duration as number) / 1000 : (duration as number)) });
     }
     checkedDurations.sort((left, right) => left.frame - right.frame);
   }
@@ -350,11 +350,11 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>): GnumarusAnim
       checkedNames.push((entry as string).trim().slice(0, 64));
     }
   }
-  const checkedAnimations = parseNamedAnimationMetas(namedAnimations, frameCount);
+  const checkedAnimations = parseNamedAnimationMetas(namedAnimations, frameCount, durationsInMs);
   return {
     frames: frameCount,
     currentFrame: startFrame,
-    defaultFrameDuration: checkedDefaultMs,
+    defaultFrameDuration: checkedDefaultSec,
     frameDurations: checkedDurations,
     frameNames: checkedNames,
     namedAnimations: checkedAnimations,
@@ -366,7 +366,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>): GnumarusAnim
 }
 
 /** Strict named-animation list (absent in legacy files means none). */
-function parseNamedAnimationMetas(value: unknown, frameCount: number): GnumarusNamedAnimationMeta[] {
+function parseNamedAnimationMetas(value: unknown, frameCount: number, durationsInMs: boolean): GnumarusNamedAnimationMeta[] {
   if (value === undefined) {
     return [];
   }
@@ -408,7 +408,7 @@ function parseNamedAnimationMetas(value: unknown, frameCount: number): GnumarusN
       }
       checkedFrames.push({
         frame: frame as number,
-        duration: duration === undefined || duration === null ? null : clampFrameDurationMs(duration as number),
+        duration: duration === undefined || duration === null ? null : clampFrameDurationSec(durationsInMs ? (duration as number) / 1000 : (duration as number)),
       });
     }
     checked.push({ name: trimmed, loop, frames: checkedFrames });
@@ -461,7 +461,7 @@ function migrateLegacyLayersToAnimation(
   return {
     frames: 1,
     currentFrame: 0,
-    defaultFrameDuration: GNUMARUS_DEFAULT_FRAME_DURATION_MS,
+    defaultFrameDuration: GNUMARUS_DEFAULT_FRAME_DURATION_SEC,
     frameDurations: [],
     frameNames: [defaultFrameName(0)],
     namedAnimations: [],
@@ -486,9 +486,11 @@ export function parseProject(jsonText: string): GnumarusProjectMeta {
   if (app !== GNUMARUS_APP_ID) {
     throw new GnumarusProjectError("project.json app id mismatch");
   }
-  if (version !== 1) {
+  if (version !== 1 && version !== 2) {
     throw new GnumarusProjectError("unsupported project version");
   }
+  // Version 1 stored frame durations in milliseconds; version 2 uses seconds.
+  const durationsInMs = version === 1;
   if (typeof width !== "number" || typeof height !== "number" || width < 1 || height < 1) {
     throw new GnumarusProjectError("project.json has invalid dimensions");
   }
@@ -549,10 +551,10 @@ export function parseProject(jsonText: string): GnumarusProjectMeta {
   const checkedAnimation =
     animation === undefined
       ? migrateLegacyLayersToAnimation(checkedLayers, widthDim, heightDim)
-      : parseAnimationMeta(animation, layerIds);
+      : parseAnimationMeta(animation, layerIds, durationsInMs);
   return {
     app: GNUMARUS_APP_ID,
-    version: 1,
+    version: 2,
     width: Math.floor(width),
     height: Math.floor(height),
     layers: checkedLayers,
