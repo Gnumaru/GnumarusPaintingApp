@@ -213,8 +213,7 @@ export interface GnumarusExportFrame {
  * Walk an animation from its first entry until it stops (`none`) or
  * completes one full cycle (loops), returning the playback order.
  */
-export function resolveExportSequence(animation: GnumarusNamedAnimation): GnumarusExportFrame[] {
-  const sequence: GnumarusExportFrame[] = [];
+export function resolveExportSequence(animation: GnumarusNamedAnimation): GnumarusExportFrame[] {  const sequence: GnumarusExportFrame[] = [];
   if (animation.frames.length === 0) {
     return sequence;
   }
@@ -240,6 +239,26 @@ export function resolveExportSequence(animation: GnumarusNamedAnimation): Gnumar
     direction = step.direction;
   }
   return sequence;
+}
+
+/**
+ * Count, per 0-based frame index, how many of the given animations include
+ * it. Each animation counts once per frame even when it lists the frame
+ * several times; out-of-range and negative indices are ignored.
+ */
+export function countAnimationFrames(animations: readonly GnumarusNamedAnimation[]): Map<number, number> {
+  const counts = new Map<number, number>();
+  for (const animation of animations) {
+    const seen = new Set<number>();
+    for (const entry of animation.frames) {
+      if (!Number.isInteger(entry.frame) || entry.frame < 0 || seen.has(entry.frame)) {
+        continue;
+      }
+      seen.add(entry.frame);
+      counts.set(entry.frame, (counts.get(entry.frame) ?? 0) + 1);
+    }
+  }
+  return counts;
 }
 
 /**

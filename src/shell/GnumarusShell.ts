@@ -123,6 +123,7 @@ import {
 import { parseHexToRgbaBytes, rgbaBytesToHex } from "../color/GnumarusColorModels";
 import { type GnumarusTexturePixels } from "../animation/GnumarusAnimationModel";
 import {
+  countAnimationFrames,
   nextAnimationStep,
   parseNamedAnimation,
   GnumarusNamedAnimationError,
@@ -2775,6 +2776,7 @@ export class GnumarusShell extends LitElement {
               (entry) => entry.frame,
             ),
           );
+    const animationFrameCounts = countAnimationFrames(this.engine.getNamedAnimations());
     return html`
       <div class="anim-matrix" data-testid="animation-matrix" aria-label="Animation matrix" ?hidden=${this.uiHidden}>
         <div class="anim-scroll">
@@ -2819,6 +2821,11 @@ export class GnumarusShell extends LitElement {
               const duration = this.engine?.getEffectiveFrameDuration(frame) ?? 0;
               const frameName = matrix.frameNames[frame] ?? `F${frame + 1}`;
               const isRenaming = this.renamingFrame === frame;
+              const animationCount = animationFrameCounts.get(frame) ?? 0;
+              const animationPhrase =
+                animationCount === 0
+                  ? "in no animations"
+                  : `in ${animationCount} animation${animationCount === 1 ? "" : "s"}`;
               return html`
                 <div class="anim-frame-header ${current ? "current" : ""} ${inAnimation ? "in-animation" : ""}">
                   ${isRenaming
@@ -2842,8 +2849,8 @@ export class GnumarusShell extends LitElement {
                     : html`<button
                         data-testid="anim-frame"
                         data-frame=${frame}
-                        aria-label="Frame ${frame + 1}${current ? ", current" : ""}: ${frameName}, ${duration} seconds"
-                        title="Frame ${frame + 1}${current ? " (current)" : ""}: ${frameName} — ${duration} s"
+                        aria-label="Frame ${frame + 1}${current ? ", current" : ""}: ${frameName}, ${duration} seconds, ${animationPhrase}"
+                        title="Frame ${frame + 1}${current ? " (current)" : ""}: ${frameName} — ${duration} s, ${animationPhrase}"
                         @click=${(): void => this.onSelectFrame(frame)}
                         @dblclick=${(): void => this.onFrameRenameStart(frame)}
                         @contextmenu=${(event: MouseEvent): void => {

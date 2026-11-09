@@ -6129,6 +6129,22 @@ test("selecting an animation highlights its frame columns", async ({ page }) => 
   await expect(matrix.locator('.anim-frame-header:has([data-frame="0"])')).not.toHaveClass(/in-animation/);
 });
 
+test("frame headers show how many animations include each frame", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  const titleOf = async (frame: number): Promise<string | null> =>
+    matrix.locator(`[data-testid="anim-frame"][data-frame="${frame}"]`).getAttribute("title");
+  await expect.poll(() => titleOf(0)).toContain("in no animations");
+  await addFrames(page, 3);
+  await addAnimation(page, "walk,forward,1,3");
+  await addAnimation(page, "run,forward,2,3,4");
+  await expect.poll(() => titleOf(0)).toBe("Frame 1: F1 — 0.25 s, in 1 animation");
+  await expect.poll(() => titleOf(1)).toBe("Frame 2: F2 — 0.25 s, in 1 animation");
+  await expect.poll(() => titleOf(2)).toBe("Frame 3: F3 — 0.25 s, in 2 animations");
+  await expect.poll(() => titleOf(3)).toBe("Frame 4 (current): F4 — 0.25 s, in 1 animation");
+});
+
 test("forward playback follows the animation order and skips other frames", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

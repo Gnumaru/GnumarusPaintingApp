@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  countAnimationFrames,
   mapNamedAnimationFrames,
   nextAnimationStep,
   parseFrameList,
@@ -272,5 +273,33 @@ describe("GnumarusNamedAnimations", () => {
     expect(() => parseFrameList("3-1", 3)).toThrow(/before its start/);
     expect(() => parseFrameList("2:100", 3)).toThrow(/Invalid frame entry/);
     expect(() => parseFrameList("abc", 3)).toThrow(/Invalid frame entry/);
+  });
+
+  it("counts how many animations include each frame", () => {
+    const walk: GnumarusNamedAnimation = {
+      name: "walk",
+      loop: "forward",
+      frames: [
+        { frame: 0, duration: null },
+        { frame: 2, duration: null },
+      ],
+    };
+    const run: GnumarusNamedAnimation = {
+      name: "run",
+      loop: "forward",
+      frames: [
+        { frame: 2, duration: null },
+        { frame: 2, duration: null },
+        { frame: 5, duration: 0.5 },
+      ],
+    };
+    expect(countAnimationFrames([])).toEqual(new Map());
+    expect(countAnimationFrames([walk, run])).toEqual(
+      new Map([
+        [0, 1],
+        [2, 2],
+        [5, 1],
+      ]),
+    );
   });
 });

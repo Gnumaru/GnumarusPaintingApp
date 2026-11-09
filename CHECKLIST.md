@@ -201,6 +201,7 @@
 - [x] Photoshop PSD import (layers/pixels, rest ignored), unit + e2e tests green, docs updated
 - [x] GIMP XCF import (.xcf via magic dispatch, strict hand-written parser, groups flattened, single-frame project load)
 - [x] Unit tests (vitest) — 276 passed (previous 269 + 7 XCF import)
-- [x] E2E test (Playwright): previous 163 + Krita KRA File > Import — 164 passed
+- [x] E2E test (Playwright): previous 164 + frame header animation tooltips — 165 passed
 - [x] Krita KRA/KRZ import (.kra/.krz via zip+maindoc dispatch, strict hand-written tile parser, groups flattened, multi-frame project load)
-- [x] Unit tests (vitest) — 281 passed (previous 276 + 5 KRA import)
+- [x] Frame header tooltips show animation membership (pure count helper + unit test + E2E)
+- [x] Unit tests (vitest) — 282 passed (previous 281 + 1 animation-membership)

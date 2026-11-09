@@ -328,3 +328,7 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Unit tests with archives built via `fflate` zipSync plus hand-written tile stores (RGBA/GRAYA, BGRA swizzle, raw/LZF flags, defaultpixel, groups, visibility/opacity/locks, keyframe hold/offsets, framerate/range, rejection battery) cross-validated against real Krita test files (pixels vs mergedimage.png); E2E import test with an in-memory .kra.
 - PSD stays single-frame (checked): Photoshop timeline/frame animation lives in proprietary tagged blocks the PSD importer does not decode; out of scope for this task. "Proprietary" here means documented only partially by Adobe (timeline structures are largely reverse-engineered knowledge); community libraries (psd.js, ag-psd) have partial support and could be studied later.
 - Fixed along the way: tile payload size bound used the raw tile size instead of the worst-case LZF expansion (input + input/16 + overhead), rejecting valid dense tiles; found via the first unit-test run.
+
+## 62. Frame header tooltips show animation membership (implemented)
+- Each animation-matrix column header tooltip (and aria-label) names how many defined animations include that frame (`in no animations` / `in 1 animation` / `in N animations`), computed from the named animation frame lists.
+- Pure helper `countAnimationFrames` in `src/animation/GnumarusNamedAnimations.ts` with unit tests; E2E test defines animations via the Manage dialog and asserts header titles.
