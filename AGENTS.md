@@ -9,7 +9,7 @@
 - Always keep the `FEATURES_SUMMARY.md` file, containing a summarized list of all implemented features, and the `FEATURES_DETAIL.md` file, containing detailed explanations of all implemented features, up to date. update them before and after implementing things
 - always keep up to date a README.md file with a complete but succinct explanation of what the project is, what it's intended use is and what the project features and use cases are
 - Use any means or technology necessary, whether for testing purposes or as an intermediate step toward achieving the final objectives
-- Never use Git commands that could alter the state of files on disk or the staging area, such as `stash`, `checkout`, `pull`, `commit`, or `push`. Only use read-only operations, such as `log` and `status`
+- Never use Git commands that could alter the state of files on disk or the staging area, such as `stash`, `checkout`, `pull`, `commit`, or `push` unless told otherwise. Only use read-only operations, such as `log` and `status`
 - The code must be testable. Tests must be written for every implemented feature and must always be executed to prevent regressions. Both the build, the tests (and the deploy whenever applicable) must always be done at the end of each batch of changes
 - We cannot use GPL-licensed code or code under any other "viral" license that would require our own code to be GPL-licensed. We must only use code under other free licenses, such as MIT, BSD, Apache, public domain, or any other free license that does not require us to change the license of our entire codebase
 - RAM usage must be conservative. Only load into memory what is really necessary
