@@ -109,8 +109,8 @@ export function cellFilePath(layerId: string, frame: number): string {
   return `cells/${layerId}_frame${frame}.png`;
 }
 
-export function textureFilePath(textureId: string): string {
-  return `textures/${textureId}.png`;
+export function textureFilePath(textureId: string, ext = "png"): string {
+  return `textures/${textureId}.${ext}`;
 }
 
 export function createDefaultProject(width: number, height: number): GnumarusProjectMeta {
@@ -136,7 +136,7 @@ export function createDefaultProject(width: number, height: number): GnumarusPro
       frameNames: [defaultFrameName(0)],
       namedAnimations: [],
       activeAnimation: null,
-      textures: [{ id: "layer0", name: "T1", width, height, file: textureFilePath("layer0") }],
+      textures: [{ id: "layer0", name: "t1", width, height, file: textureFilePath("layer0") }],
       contents: [
         {
           id: "content1",
@@ -444,7 +444,7 @@ function migrateLegacyLayersToAnimation(
     const legacyCell = layer.cells?.[0];
     textures.push({
       id: layer.id,
-      name: `T${index + 1}`,
+      name: `t${index + 1}`,
       width,
       height,
       file: legacyCell?.file ?? textureFilePath(layer.id),

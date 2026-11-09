@@ -528,7 +528,7 @@ export class GnumarusCanvasEngine {
   private blendBeforeEraser: GnumarusBlendMode = "normal";
   private accumulate = true;
   private brushSize = 1;
-  private brushShape: GnumarusBrushShape = "square";
+  private brushShape: GnumarusBrushShape = "circle";
   private pencilAntialias = false;
   private pencilPixelPerfect = false;
   private curvePixelPerfect = false;
@@ -540,11 +540,11 @@ export class GnumarusCanvasEngine {
   private stabilizerTarget: { x: number; y: number } | null = null;
   private followLoopId: number | null = null;
   private lineWidth = 1;
-  private lineShape: GnumarusBrushShape = "square";
+  private lineShape: GnumarusBrushShape = "circle";
   private lineAntialias = false;
   private lineAnchor: { x: number; y: number; clientX: number; clientY: number } | null = null;
   private curveWidth = 1;
-  private curveShape: GnumarusBrushShape = "square";
+  private curveShape: GnumarusBrushShape = "circle";
   private curveAntialias = false;
   private curvePhase: "idle" | "dragging" | "awaitC1" | "awaitC2" = "idle";
   private curveP0: { x: number; y: number; clientX: number; clientY: number } | null = null;
@@ -1297,7 +1297,7 @@ export class GnumarusCanvasEngine {
   }
 
   private nextTextureName(): string {
-    return `T${this.textureNameCounter++}`;
+    return `t${this.textureNameCounter++}`;
   }
 
   private contentDisplaySize(content: GnumarusCellContent): { width: number; height: number } {
@@ -3303,7 +3303,7 @@ export class GnumarusCanvasEngine {
     }
     let maxTextureName = 0;
     for (const texture of data.textures) {
-      const match = /^T(\d+)$/.exec(texture.name);
+      const match = /^(?:[Tt]|[Tt]exture )(\d+)$/.exec(texture.name);
       if (match?.[1] !== undefined) {
         maxTextureName = Math.max(maxTextureName, Number.parseInt(match[1], 10) + 1);
       }

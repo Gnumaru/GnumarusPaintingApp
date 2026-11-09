@@ -372,3 +372,11 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Playwright tests for recent work carry the `@recent` tag in their titles (12 tests: action palette/search/shortcut, fit-all, crop-all x2, JXL still/lossy/animated/sheet + browser codec round-trip, animation delete confirm).
 - `npm run test:e2e` runs only `--grep @recent` (~25 s); `npm run test:e2e:full` runs the whole suite (~6 min, regressions, on explicit request).
 - Convention: tag new E2E tests with `@recent` when they land; move the tag to the next batch when a newer one arrives (untag tests whose feature is no longer "recent").
+
+## 67. Texture naming tN, circle default brush, JXL project storage (implemented)
+- Texture display names become lowercase `t1`, `t2`, ... (counter from 1) instead of `T1`: engine `nextTextureName`, project-format defaults, all four importers, legacy `T`/`Texture N` still parsed for the counter. Texture files switch from id-based (`textures/layer0.png`) to positional `textures/t1.jxl` stems recorded in `project.json` (loader already reads the `file` field, so old projects keep loading).
+- Circle becomes the default brush shape for pencil, line and curve (engine + shell inits; invalid input still parses to square).
+- Project textures save as JXL instead of PNG: new `GnumarusJxlExport.encodeTextureForStorage` honoring two new global settings (Edit > Settings, new Storage section): JXL lossless toggle (default on) and lossy quality 0-100 (default 50, hidden unless lossy), persisted in localStorage with per-setting reset arrows, Reset-defaults support and test hooks. Encoding uses effort 1 (fastest) via a new shim `effort` option (decode has no speed knob; single-threaded as before). Save falls back to PNG per texture if the codec fails; loading sniffs `.jxl` vs `.png` per file, so mixed/legacy projects open.
+- Unit tests for the settings module, effort plumbing and the frame-count helper; E2E for default circle shape, JXL save round-trip (lossless exact + lossy), settings UI/persistence, and texture `t1` naming.
+
+- Fixed along the way: multi-line test expectations that assumed square brushes (thick strokes, brush preview radius, AA rounding, cutout pixel counts); explicit square selection keeps their tuned geometry while the new default is covered separately.

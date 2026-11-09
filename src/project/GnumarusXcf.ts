@@ -805,7 +805,7 @@ export async function parseXcfFile(bytes: Uint8Array): Promise<GnumarusXcfDocume
     });
     textures.push({
       id: textureId,
-      name: `T${index + 1}`,
+      name: `t${index + 1}`,
       width: pixelLayer.width,
       height: pixelLayer.height,
       buffer: pixelLayer.buffer,

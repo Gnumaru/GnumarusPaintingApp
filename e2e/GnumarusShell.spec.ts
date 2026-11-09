@@ -2195,12 +2195,12 @@ test("pencil brush size and shape paint thick strokes", async ({ page }) => {
   await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toContainText("Brush size");
   await page.locator("gnumarus-shell input#brushSize").fill("3");
   await expect(page.locator("gnumarus-shell")).toContainText("Brush size: 3");
-  expect(await brushOf()).toEqual({ size: 3, shape: "square" });
-  await page.locator("gnumarus-shell select#brushShape").selectOption("circle");
-  await expect(page.locator("gnumarus-shell")).toContainText("Brush shape: circle");
   expect(await brushOf()).toEqual({ size: 3, shape: "circle" });
+  await page.locator("gnumarus-shell select#brushShape").selectOption("square");
+  await expect(page.locator("gnumarus-shell")).toContainText("Brush shape: square");
+  expect(await brushOf()).toEqual({ size: 3, shape: "square" });
   await page.locator("gnumarus-shell input#brushSize").fill("99");
-  expect(await brushOf()).toEqual({ size: 64, shape: "circle" });
+  expect(await brushOf()).toEqual({ size: 64, shape: "square" });
   await page.locator("gnumarus-shell input#brushSize").fill("3");
   await page.locator("gnumarus-shell select#brushShape").selectOption("square");
   await setPencil(page, "#ff0000");
@@ -2233,6 +2233,32 @@ test("pencil brush size and shape paint thick strokes", async ({ page }) => {
   expect(await readPixel(page, 4, 4)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 3, 3)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   expect(await readPixel(page, 4, 3)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("brush shape defaults to circle for pencil, line and curve", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const shapeOf = (kind: string): Promise<string> =>
+    page.evaluate((which: string) => {
+      const root = window as unknown as {
+        __gnumarus?: { engine?: { getBrushShape(): string; getLineShape(): string; getCurveShape(): string } };
+      };
+      if (which === "line") {
+        return root.__gnumarus?.engine?.getLineShape() ?? "";
+      }
+      if (which === "curve") {
+        return root.__gnumarus?.engine?.getCurveShape() ?? "";
+      }
+      return root.__gnumarus?.engine?.getBrushShape() ?? "";
+    }, kind);
+  expect(await shapeOf("pencil")).toBe("circle");
+  expect(await shapeOf("line")).toBe("circle");
+  expect(await shapeOf("curve")).toBe("circle");
+  await expect(page.locator("gnumarus-shell select#brushShape")).toHaveValue("circle");
+  await page.getByRole("button", { name: "Line", exact: true }).click();
+  await expect(page.locator("gnumarus-shell select#lineShape")).toHaveValue("circle");
+  await page.getByRole("button", { name: "Curve", exact: true }).click();
+  await expect(page.locator("gnumarus-shell select#curveShape")).toHaveValue("circle");
 });
 
 test("line tool draws two-click segments with width, shape and aliasing", async ({ page }) => {
@@ -2345,7 +2371,7 @@ test("brush and line previews follow the mouse", async ({ page }) => {
     return { w: tip?.style.width ?? "", radius: tip?.style.borderRadius ?? "" };
   });
   expect(tipSize.w).not.toBe("");
-  expect(tipSize.radius).toBe("0px");
+  expect(tipSize.radius).toBe("50%");
   await page.getByRole("button", { name: "Line" }).click();
   await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toContainText("Line width");
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -2625,6 +2651,7 @@ test("brush and line widths accept floats with AA-dependent rounding", async ({ 
   });
   await setPencil(page, "#ff0000");
   await page.getByRole("button", { name: "Pencil" }).click();
+  await page.locator("gnumarus-shell select#brushShape").selectOption("square");
   const brushOf = (): Promise<number> =>
     page.evaluate(() => {
       const root = window as unknown as { __gnumarus?: { engine?: { getBrushSize(): number } } };
@@ -4635,6 +4662,7 @@ async function cutRedBlock(page: import("@playwright/test").Page): Promise<void>
     const root = window as unknown as { __gnumarus?: { shell?: { setBrushSize(size: number): void } } };
     root.__gnumarus?.shell?.setBrushSize(3);
   });
+  await page.locator('gnumarus-shell select#brushShape').selectOption("square");
   const center = await layerScreenTarget(page, 32, 32);
   await page.mouse.click(center.x, center.y);
   await page.getByRole("button", { name: "Rectangular selection" }).click();
@@ -5269,6 +5297,7 @@ test("destructive 3d rotation auto-selects, tilts and merges", async ({ page }) 
     const root = window as unknown as { __gnumarus?: { shell?: { setBrushSize(size: number): void } } };
     root.__gnumarus?.shell?.setBrushSize(3);
   });
+  await page.locator('gnumarus-shell select#brushShape').selectOption("square");
   const target = await layerScreenTarget(page, 32, 32);
   await page.mouse.click(target.x, target.y);
   await page.keyboard.press("u");
@@ -6691,6 +6720,143 @@ test("File > Export JPEG quality changes the file size", async ({ page }) => {
   const big = await exportJpegSize("100");
   expect(small).toBeGreaterThan(0);
   expect(big).toBeGreaterThan(small);
+});
+
+async function stubProjectDirectory(
+  page: import("@playwright/test").Page,
+): Promise<{
+  writtenBlobs: () => Promise<Record<string, number[]>>;
+  writtenProject: () => Promise<string | null>;
+}> {
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      showDirectoryPicker?: () => Promise<unknown>;
+      __gnumarusProjectTest?: { files: Record<string, Blob> };
+    };
+    const state: { files: Record<string, Blob> } = { files: {} };
+    root.__gnumarusProjectTest = state;
+    root.showDirectoryPicker = async () => ({
+      name: "MockProject",
+      getFileHandle: async (name: string) => ({
+        getFile: async (): Promise<Blob> => {
+          const found = state.files[name];
+          if (found === undefined) {
+            throw new Error(`missing file ${name}`);
+          }
+          return found;
+        },
+        createWritable: async () => ({
+          write: async (data: string | Blob): Promise<void> => {
+            state.files[name] = data instanceof Blob ? data : new Blob([data]);
+          },
+          close: async (): Promise<void> => {},
+        }),
+      }),
+      getDirectoryHandle: async (name: string) => ({
+        name,
+        getFileHandle: async (child: string) => ({
+          getFile: async (): Promise<Blob> => {
+            const found = state.files[`${name}/${child}`];
+            if (found === undefined) {
+              throw new Error(`missing file ${name}/${child}`);
+            }
+            return found;
+          },
+          createWritable: async () => ({
+            write: async (data: string | Blob): Promise<void> => {
+              state.files[`${name}/${child}`] = data instanceof Blob ? data : new Blob([data]);
+            },
+            close: async (): Promise<void> => {},
+          }),
+        }),
+        getDirectoryHandle: async (): Promise<never> => {
+          throw new Error("no nested directories in project test");
+        },
+      }),
+    });
+  });
+  return {
+    writtenBlobs: (): Promise<Record<string, number[]>> =>
+      page.evaluate(async () => {
+        const root = window as unknown as {
+          __gnumarusProjectTest?: { files: Record<string, Blob> };
+        };
+        const out: Record<string, number[]> = {};
+        for (const [name, blob] of Object.entries(root.__gnumarusProjectTest?.files ?? {})) {
+          out[name] = Array.from(new Uint8Array(await blob.arrayBuffer()));
+        }
+        return out;
+      }),
+    writtenProject: (): Promise<string | null> =>
+      page.evaluate(async () => {
+        const root = window as unknown as {
+          __gnumarusProjectTest?: { files: Record<string, Blob> };
+        };
+        const blob = root.__gnumarusProjectTest?.files["project.json"];
+        return blob === undefined ? null : blob.text();
+      }),
+  };
+}
+
+test("project textures save as lossless JXL named tN and reopen", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  const meta = await project.writtenProject();
+  expect(meta).toContain('"textures/t1.jxl"');
+  expect(meta).toContain('"name": "t1"');
+  const files = await project.writtenBlobs();
+  expect(Object.keys(files).sort()).toEqual(["project.json", "textures/t1.jxl"]);
+  expect(files["textures/t1.jxl"]?.slice(0, 2)).toEqual([0xff, 0x0a]);
+  const decoded = await decodeJxlInPage(page, files["textures/t1.jxl"] ?? []);
+  expect(decoded?.width).toBe(64);
+  expect(decoded?.height).toBe(64);
+  expect(decoded?.center).toEqual([255, 0, 0, 255]);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("project texture lossy setting is honored and persists", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Project textures");
+  const dialog = page.locator("gnumarus-shell dialog#settingsDialog");
+  await expect(dialog.locator("select#storageFormat")).toHaveValue("lossless");
+  await dialog.locator("select#storageFormat").selectOption("lossy");
+  await dialog.locator("input#storageQuality").fill("10");
+  await expect(page.locator("gnumarus-shell")).toContainText("Project textures save as lossy JXL (quality 10)");
+  const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.storage.v1"));
+  expect(persisted).toContain('"lossless": false');
+  expect(persisted).toContain('"quality": 10');
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await setPencil(page, "#00ff00");
+  await paintCenter(page);
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  const files = await project.writtenBlobs();
+  expect(files["textures/t1.jxl"]?.slice(0, 2)).toEqual([0xff, 0x0a]);
+  const decoded = await decodeJxlInPage(page, files["textures/t1.jxl"] ?? []);
+  expect(decoded?.width).toBe(64);
+  expect(decoded?.height).toBe(64);
+  const center = decoded?.center ?? [0, 0, 0, 0];
+  expect(center[3]).toBeGreaterThan(0);
+  expect(center[1]).toBeGreaterThan(center[0]);
+  expect(center[1]).toBeGreaterThan(center[2]);
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.locator('gnumarus-shell [aria-label="Reset project texture format to default"]').click();
+  await expect(page.locator("gnumarus-shell select#storageFormat")).toHaveValue("lossless");
 });
 
 test("File > Export saves the current frame as lossless JXL @recent", async ({ page }) => {

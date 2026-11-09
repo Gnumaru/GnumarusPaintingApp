@@ -902,7 +902,7 @@ export async function parseKraFile(bytes: Uint8Array): Promise<GnumarusKraDocume
       const textureId = `texture${contentIndex}`;
       textures.push({
         id: textureId,
-        name: `T${contentIndex + 1}`,
+        name: `t${contentIndex + 1}`,
         width: frame.width,
         height: frame.height,
         buffer: frame.buffer,

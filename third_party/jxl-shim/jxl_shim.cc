@@ -132,7 +132,7 @@ emscripten::val jxl_decode_js(emscripten::val data) {
   return result;
 }
 
-emscripten::val jxl_encode_js(emscripten::val pixels, int w, int h, bool lossless, float quality) {
+emscripten::val jxl_encode_js(emscripten::val pixels, int w, int h, bool lossless, float quality, int effort) {
   emscripten::val result = emscripten::val::object();
   std::vector<uint8_t> input = emscripten::convertJSArrayToNumberVector<uint8_t>(pixels);
   if (w <= 0 || h <= 0 || w > 65536 || h > 65536 || input.size() != static_cast<size_t>(w) * h * 4) {
@@ -182,6 +182,13 @@ emscripten::val jxl_encode_js(emscripten::val pixels, int w, int h, bool lossles
     result.set("stage", 6);
     return result;
   }
+  if (effort >= 1 && effort <= 10) {
+    if (JxlEncoderFrameSettingsSetOption(opts, JXL_ENC_FRAME_SETTING_EFFORT, effort) != JXL_ENC_SUCCESS) {
+      result.set("ok", false);
+      result.set("stage", 20);
+      return result;
+    }
+  }
   if (lossless) {
     if (JxlEncoderSetFrameLossless(opts, JXL_TRUE) != JXL_ENC_SUCCESS) {
       result.set("ok", false);
@@ -227,7 +234,7 @@ emscripten::val jxl_encode_js(emscripten::val pixels, int w, int h, bool lossles
 }
 
 emscripten::val jxl_encode_animation_js(emscripten::val allPixels, int w, int h, emscripten::val durationsMs,
-                                        bool lossless, float quality, int numLoops) {
+                                        bool lossless, float quality, int numLoops, int effort) {
   emscripten::val result = emscripten::val::object();
   std::vector<uint8_t> input = emscripten::convertJSArrayToNumberVector<uint8_t>(allPixels);
   std::vector<uint32_t> durations = emscripten::convertJSArrayToNumberVector<uint32_t>(durationsMs);
@@ -285,6 +292,13 @@ emscripten::val jxl_encode_animation_js(emscripten::val allPixels, int w, int h,
     result.set("ok", false);
     result.set("stage", 7);
     return result;
+  }
+  if (effort >= 1 && effort <= 10) {
+    if (JxlEncoderFrameSettingsSetOption(opts, JXL_ENC_FRAME_SETTING_EFFORT, effort) != JXL_ENC_SUCCESS) {
+      result.set("ok", false);
+      result.set("stage", 20);
+      return result;
+    }
   }
   if (lossless) {
     if (JxlEncoderSetFrameLossless(opts, JXL_TRUE) != JXL_ENC_SUCCESS) {

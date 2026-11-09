@@ -377,7 +377,7 @@ describe("GnumarusXcfImport", () => {
     expect(pixelOf(doc.textures[1]?.buffer as Uint8ClampedArray, 16, 15, 15)).toEqual([255, 0, 0, 255]);
     expect(pixelOf(doc.textures[0]?.buffer as Uint8ClampedArray, 64, 0, 0)).toEqual([128, 128, 128, 255]);
     expect(pixelOf(doc.textures[0]?.buffer as Uint8ClampedArray, 64, 63, 63)).toEqual([128, 128, 128, 255]);
-    expect(doc.textures[0]?.name).toBe("T1");
+    expect(doc.textures[0]?.name).toBe("t1");
     expect(doc.contents[0]?.name).toBe("C1");
   });
 

@@ -77,6 +77,13 @@ import {
   serializeFitSettings,
 } from "../settings/GnumarusFitSettings";
 import {
+  DEFAULT_STORAGE_SETTINGS,
+  STORAGE_SETTINGS_STORAGE_KEY,
+  clampStorageQuality,
+  parseStorageSettings,
+  serializeStorageSettings,
+} from "../settings/GnumarusStorageSettings";
+import {
   DEFAULT_EXPAND_SETTINGS,
   EXPAND_SETTINGS_STORAGE_KEY,
   clampExpandStep,
@@ -95,6 +102,7 @@ import {
   type GnumarusStillFormat,
 } from "../export/GnumarusImageExport";
 import {
+  decodeJxlBytes,
   encodeJxlAnimation,
   encodeJxlStill,
   JXL_EXT,
@@ -1140,6 +1148,8 @@ export class GnumarusShell extends LitElement {
     toastMessage: { type: String },
     toastDurationSec: { type: Number },
     fitDefaultThreshold: { type: Number },
+    storageLossless: { type: Boolean },
+    storageQuality: { type: Number },
     expandStep: { type: Number },
     renamingFrame: { type: Number },
     brushSize: { type: Number },
@@ -1241,6 +1251,8 @@ export class GnumarusShell extends LitElement {
   declare toastMessage: string;
   declare toastDurationSec: number;
   declare fitDefaultThreshold: number;
+  declare storageLossless: boolean;
+  declare storageQuality: number;
   declare expandStep: number;
   declare renamingFrame: number | null;
   declare brushSize: number;
@@ -1351,10 +1363,12 @@ export class GnumarusShell extends LitElement {
     this.toastMessage = "";
     this.toastDurationSec = DEFAULT_TOAST_SETTINGS.durationSec;
     this.fitDefaultThreshold = DEFAULT_FIT_SETTINGS.alphaThreshold;
+    this.storageLossless = DEFAULT_STORAGE_SETTINGS.lossless;
+    this.storageQuality = DEFAULT_STORAGE_SETTINGS.quality;
     this.expandStep = DEFAULT_EXPAND_SETTINGS.step;
     this.renamingFrame = null;
     this.brushSize = 1;
-    this.brushShape = "square";
+    this.brushShape = "circle";
     this.pencilAntialias = false;
     this.pencilPixelPerfect = false;
     this.curvePixelPerfect = false;
@@ -1364,10 +1378,10 @@ export class GnumarusShell extends LitElement {
     this.blendMode = "normal";
     this.accumulate = true;
     this.lineWidth = 1;
-    this.lineShape = "square";
+    this.lineShape = "circle";
     this.lineAntialias = false;
     this.curveWidth = 1;
-    this.curveShape = "square";
+    this.curveShape = "circle";
     this.curveAntialias = false;
   }
 
@@ -2357,6 +2371,54 @@ export class GnumarusShell extends LitElement {
             : html``}
         </div>
         <div class="setting-row">
+          <label>Project textures
+            <select
+              id="storageFormat"
+              .value=${this.storageLossless ? "lossless" : "lossy"}
+              @change=${(): void => this.applyStorageFromDialog()}
+            >
+              <option value="lossless">Lossless JXL</option>
+              <option value="lossy">Lossy JXL</option>
+            </select>
+          </label>
+          ${this.storageLossless !== DEFAULT_STORAGE_SETTINGS.lossless
+            ? html`<button
+                class="reset-btn"
+                aria-label="Reset project texture format to default"
+                title="Reset to default"
+                @click=${(): void => this.resetStorageToDefault()}
+              >
+                ↻
+              </button>`
+            : html``}
+        </div>
+        ${this.storageLossless
+          ? html``
+          : html`<div class="setting-row">
+              <label
+                >Project texture lossy quality
+                <input
+                  type="number"
+                  id="storageQuality"
+                  min="0"
+                  max="100"
+                  step="1"
+                  .value=${String(this.storageQuality)}
+                  @input=${(): void => this.applyStorageFromDialog()}
+                />
+              </label>
+              ${this.storageQuality !== DEFAULT_STORAGE_SETTINGS.quality
+                ? html`<button
+                    class="reset-btn"
+                    aria-label="Reset project texture quality to default"
+                    title="Reset to default"
+                    @click=${(): void => this.resetStorageToDefault()}
+                  >
+                    ↻
+                  </button>`
+                : html``}
+            </div>`}
+        <div class="setting-row">
           <label
             >Cell texture expand step (pixels)
             <input
@@ -2380,7 +2442,6 @@ export class GnumarusShell extends LitElement {
               </button>`
             : html``}
         </div>
-        <div class="dialog-actions">
           <button @click=${(): void => this.resetCheckerDefaults()}>Reset defaults</button>
           <button @click=${(): void => this.closeSettingsDialog()}>Close</button>
         </div>
@@ -3239,6 +3300,9 @@ export class GnumarusShell extends LitElement {
     this.toastDurationSec = storedToast.durationSec;
     const storedFit = this.loadFitSettings();
     this.fitDefaultThreshold = storedFit.alphaThreshold;
+    const storedStorage = this.loadStorageSettings();
+    this.storageLossless = storedStorage.lossless;
+    this.storageQuality = storedStorage.quality;
     const storedExpand = this.loadExpandSettings();
     this.expandStep = storedExpand.step;
     const host = this.shadowRoot?.getElementById("canvasHost") ?? null;
@@ -4109,6 +4173,66 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = `Fit texture default alpha threshold: ${this.fitDefaultThreshold}`;
   }
 
+  private loadStorageSettings(): { lossless: boolean; quality: number } {
+    try {
+      const stored = window.localStorage.getItem(STORAGE_SETTINGS_STORAGE_KEY);
+      if (stored !== null) {
+        return parseStorageSettings(stored);
+      }
+    } catch {
+      // Corrupt or unavailable storage falls back to defaults.
+    }
+    return { ...DEFAULT_STORAGE_SETTINGS };
+  }
+
+  private persistStorage(): void {
+    try {
+      window.localStorage.setItem(
+        STORAGE_SETTINGS_STORAGE_KEY,
+        serializeStorageSettings({ lossless: this.storageLossless, quality: this.storageQuality }),
+      );
+    } catch {
+      // Storage failures must not break the settings flow.
+    }
+  }
+
+  private currentDialogStorageLossless(): boolean {
+    const input = this.shadowRoot?.getElementById("storageFormat") as HTMLSelectElement | null;
+    return (input?.value ?? "lossless") !== "lossy";
+  }
+
+  private currentDialogStorageQuality(): number {
+    const input = this.shadowRoot?.getElementById("storageQuality") as HTMLInputElement | null;
+    const raw = Number(input?.value ?? String(DEFAULT_STORAGE_SETTINGS.quality));
+    return clampStorageQuality(Number.isFinite(raw) ? Math.floor(raw) : DEFAULT_STORAGE_SETTINGS.quality);
+  }
+
+  private applyStorageFromDialog(): void {
+    this.storageLossless = this.currentDialogStorageLossless();
+    this.storageQuality = this.currentDialogStorageQuality();
+    this.persistStorage();
+    this.statusMessage = this.storageLossless
+      ? "Project textures save as lossless JXL"
+      : `Project textures save as lossy JXL (quality ${this.storageQuality})`;
+  }
+
+  private resetStorageToDefault(): void {
+    this.storageLossless = DEFAULT_STORAGE_SETTINGS.lossless;
+    this.storageQuality = DEFAULT_STORAGE_SETTINGS.quality;
+    this.persistStorage();
+    this.statusMessage = "Project texture storage reset to default";
+  }
+
+  /** Test hook: set project texture storage (lossless on/off, quality 0..100 clamped). */
+  setProjectStorage(lossless: boolean, quality: number): void {
+    this.storageLossless = lossless;
+    this.storageQuality = clampStorageQuality(quality);
+    this.persistStorage();
+    this.statusMessage = this.storageLossless
+      ? "Project textures save as lossless JXL"
+      : `Project textures save as lossy JXL (quality ${this.storageQuality})`;
+  }
+
   private loadExpandSettings(): { step: number } {
     try {
       const stored = window.localStorage.getItem(EXPAND_SETTINGS_STORAGE_KEY);
@@ -4342,7 +4466,7 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = `Brush size: ${clamped}`;
   }
 
-  /** Test hook: set the brush shape (square/circle, defaults to square). */
+  /** Test hook: set the brush shape (square/circle, defaults to circle). */
   setBrushShape(shape: GnumarusBrushShape): void {
     const parsed = parseBrushShape(shape);
     this.brushShape = parsed;
@@ -4555,7 +4679,7 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = `Line width: ${clamped}`;
   }
 
-  /** Test hook: set the line shape (square/circle, defaults to square). */
+  /** Test hook: set the line shape (square/circle, defaults to circle). */
   setLineShape(shape: GnumarusBrushShape): void {
     const parsed = parseBrushShape(shape);
     this.lineShape = parsed;
@@ -4616,7 +4740,7 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = `Curve width: ${clamped}`;
   }
 
-  /** Test hook: set the curve shape (square/circle, defaults to square). */
+  /** Test hook: set the curve shape (square/circle, defaults to circle). */
   setCurveShape(shape: GnumarusBrushShape): void {
     const parsed = parseBrushShape(shape);
     this.curveShape = parsed;
@@ -4790,6 +4914,10 @@ export class GnumarusShell extends LitElement {
     this.persistRotation();
     this.toastDurationSec = DEFAULT_TOAST_SETTINGS.durationSec;
     this.persistToast();
+    const storageSettings = { ...DEFAULT_STORAGE_SETTINGS };
+    this.storageLossless = storageSettings.lossless;
+    this.storageQuality = storageSettings.quality;
+    this.persistStorage();
     void this.refreshPreview();
     this.statusMessage = "Settings reset to defaults";
   }
@@ -6756,7 +6884,9 @@ export class GnumarusShell extends LitElement {
         if (blob === undefined) {
           throw new Error(`Missing texture file: ${texture.file}`);
         }
-        const decoded = await decodePngToBuffer(blob);
+        const decoded = texture.file.endsWith(".jxl")
+          ? await decodeJxlBytes(new Uint8Array(await blob.arrayBuffer()))
+          : await decodePngToBuffer(blob);
         if (decoded.width !== texture.width || decoded.height !== texture.height) {
           throw new Error(`Texture size mismatch: ${texture.file}`);
         }
@@ -7044,16 +7174,37 @@ export class GnumarusShell extends LitElement {
       const exported = this.engine.exportAnimationProject();
       const texturesMeta: GnumarusTextureMeta[] = [];
       const blobs = new Map<string, Blob>();
-      for (const texture of exported.textures) {
-        const file = textureFilePath(texture.id);
-        texturesMeta.push({
-          id: texture.id,
-          name: texture.name,
-          width: texture.width,
-          height: texture.height,
-          file,
-        });
-        blobs.set(file, await encodeBufferToPngBlob(texture.buffer, texture.width, texture.height));
+      const lossless = this.storageLossless;
+      const quality = this.storageQuality;
+      for (let index = 0; index < exported.textures.length; index += 1) {
+        const texture = exported.textures[index] as (typeof exported.textures)[number];
+        const stem = `t${index + 1}`;
+        try {
+          const bytes = await encodeJxlStill(texture.buffer, texture.width, texture.height, {
+            lossless,
+            quality,
+            effort: 1,
+          });
+          const file = textureFilePath(stem, "jxl");
+          texturesMeta.push({
+            id: texture.id,
+            name: texture.name,
+            width: texture.width,
+            height: texture.height,
+            file,
+          });
+          blobs.set(file, new Blob([bytes as Uint8Array<ArrayBuffer>], { type: "image/jxl" }));
+        } catch {
+          const file = textureFilePath(stem, "png");
+          texturesMeta.push({
+            id: texture.id,
+            name: texture.name,
+            width: texture.width,
+            height: texture.height,
+            file,
+          });
+          blobs.set(file, await encodeBufferToPngBlob(texture.buffer, texture.width, texture.height));
+        }
       }
       const contentsMeta: GnumarusContentMeta[] = exported.contents.map((content) => ({
         id: content.id,

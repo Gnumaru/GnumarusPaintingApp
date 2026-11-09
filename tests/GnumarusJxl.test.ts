@@ -38,8 +38,7 @@ describe("GnumarusJxl", () => {
     expect(Array.from(decoded.buffer)).toEqual(Array.from(original));
   });
 
-  it("round-trips lossy within tolerance", async () => {
-    const codec = await GnumarusJxlCodec.create();
+  it("round-trips lossy within tolerance", async () => {    const codec = await GnumarusJxlCodec.create();
     const original = gradient(16, 16);
     const encoded = codec.encode(original, 16, 16, { lossless: false, quality: 80 });
     expect(encoded.length).toBeGreaterThan(8);
@@ -74,6 +73,14 @@ describe("GnumarusJxl", () => {
     expect(codec.frameCount(animated)).toBe(2);
     expect(() => codec.frameCount(new Uint8Array(0))).toThrow(GnumarusJxlError);
     expect(() => codec.frameCount(new Uint8Array([1, 2, 3]))).toThrow(GnumarusJxlError);
+  });
+
+  it("honors the effort option", async () => {
+    const codec = await GnumarusJxlCodec.create();
+    const original = gradient(16, 16);
+    const fast = codec.encode(original, 16, 16, { lossless: true, effort: 1 });
+    expect(codec.frameCount(fast)).toBe(1);
+    expect(Array.from(codec.decode(fast).buffer)).toEqual(Array.from(original));
   });
 
   it("rejects invalid input", async () => {

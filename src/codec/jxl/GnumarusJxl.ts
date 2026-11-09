@@ -27,6 +27,11 @@ export interface GnumarusJxlEncodeOptions {
   lossless?: boolean;
   /** Lossy quality 0..100 (higher is better); ignored when lossless. */
   quality?: number;
+  /**
+   * Encoder effort 1 (fastest) to 10 (slowest, smallest files).
+   * Omitted (or out of range) keeps the libjxl default.
+   */
+  effort?: number;
 }
 
 const JXL_MAX_DIMENSION = 65536;
@@ -77,7 +82,7 @@ export class GnumarusJxlCodec {
       throw new GnumarusJxlError(`invalid JXL quality ${quality}`);
     }
     const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-    const result = this.module.jxl_encode_js(bytes, width, height, lossless, quality);
+    const result = this.module.jxl_encode_js(bytes, width, height, lossless, quality, options?.effort ?? 0);
     if (!result.ok || !(result.data instanceof Uint8Array) || result.data.length < 1) {
       throw new GnumarusJxlError(`failed to encode JXL data (stage ${result.stage ?? "?"})`);
     }
@@ -97,6 +102,7 @@ export class GnumarusJxlCodec {
     lossless: boolean,
     quality: number,
     numLoops: number,
+    options?: GnumarusJxlEncodeOptions,
   ): Uint8Array {
     if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
       throw new GnumarusJxlError(`cannot encode JXL with invalid dimensions ${width}x${height}`);
@@ -107,7 +113,7 @@ export class GnumarusJxlCodec {
     if (!lossless && (!Number.isFinite(quality) || quality < 0 || quality > 100)) {
       throw new GnumarusJxlError(`invalid JXL quality ${quality}`);
     }
-    const result = this.module.jxl_encode_animation_js(flat, width, height, durationsMs, lossless, quality, numLoops);
+    const result = this.module.jxl_encode_animation_js(flat, width, height, durationsMs, lossless, quality, numLoops, options?.effort ?? 0);
     if (!result.ok || !(result.data instanceof Uint8Array) || result.data.length < 1) {
       throw new GnumarusJxlError(`failed to encode JXL animation (stage ${result.stage ?? "?"})`);
     }

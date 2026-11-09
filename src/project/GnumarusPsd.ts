@@ -881,7 +881,7 @@ export async function parsePsdFile(bytes: Uint8Array): Promise<GnumarusPsdDocume
     layers.push({ id: layerId, name, visible: pixelLayer.visible, opacity: pixelLayer.opacity, lockedChannels: { ...unlocked } });
     textures.push({
       id: textureId,
-      name: `T${index + 1}`,
+      name: `t${index + 1}`,
       width: pixelLayer.width,
       height: pixelLayer.height,
       buffer: pixelLayer.buffer,

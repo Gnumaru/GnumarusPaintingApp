@@ -218,9 +218,14 @@
 - [x] Batch texture actions (fit-all with threshold dialog, crop-all-cells-to-canvas with shared-texture sequencing, single-undo fitBatch history)
 - [x] Unit tests (vitest) — 298 passed (previous 296 + 2 fitBatch history)
 - [x] E2E test (Playwright): previous 171 + fit-all (palette+dialog+undo) + crop-all (xcf offsets+undo, shared-texture sequencing) — 174 passed
+- [x] Unit tests (vitest) — 307 passed (previous 298 + storage settings + JXL effort/frame-count)
+- [x] E2E test (Playwright): previous 174 + brush-shape default + JXL project save/open + lossy setting persistence — 182 passed
 - [x] JXL export (still, spritesheet single/per-file, single-file animation) with lossless option
 - [x] File menu items as actions + New/Open/Save Project renames
 - [x] Animation list shows quoted name + frame ranges; delete requires Yes/No confirm
 - [x] Unit tests (vitest) — 301 passed (previous 298 + format summary + JXL animated round-trip/frame-count)
 - [x] E2E test (Playwright): previous 174 + JXL still/lossy/animated/sheet + delete confirm/cancel + menu renames — 179 passed
 - [x] E2E split: `@recent` tag + `test:e2e` (recent only) vs `test:e2e:full` (full suite)
+- [x] Texture names t1..tN + tN.jxl file stems (ids/loader untouched)
+- [x] Circle default brush shape (pencil/line/curve)
+- [x] JXL project texture storage (lossless default, effort 1) + lossless/lossy + quality settings

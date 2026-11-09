@@ -40,7 +40,15 @@ export interface GnumarusJxlQuality {
   lossless?: boolean;
   /** Lossy quality 0..100 (higher is better); ignored when lossless. */
   quality?: number;
+  /**
+   * Encoder effort 1 (fastest) to 10 (slowest, smallest files).
+   * Omitted keeps the libjxl default; decoding speed needs no setting.
+   */
+  effort?: number;
 }
+
+/** Project texture storage always encodes as fast as possible. */
+export const JXL_STORAGE_EFFORT = 1;
 
 /**
  * Encode RGBA pixels to a JXL file blob. Lossless by default; lossy maps
@@ -55,7 +63,7 @@ export async function encodeJxlStill(
   const lossless = options?.lossless ?? true;
   const quality = options?.quality ?? 90;
   const codec = await getCodec();
-  return codec.encode(buffer, width, height, { lossless, quality });
+  return codec.encode(buffer, width, height, { lossless, quality, effort: options?.effort });
 }
 
 export interface GnumarusJxlAnimationFrame {
@@ -67,6 +75,16 @@ export interface GnumarusJxlAnimationFrame {
  * Encode uniform RGBA frames to a single animated JXL file. Durations are
  * milliseconds (rounded up to at least 1); loop repeats forever.
  */
+export async function decodeJxlBytes(data: Uint8Array): Promise<{
+  width: number;
+  height: number;
+  buffer: Uint8ClampedArray;
+}> {
+  const codec = await getCodec();
+  const decoded = codec.decode(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+  return decoded;
+}
+
 export async function encodeJxlAnimation(
   frames: GnumarusJxlAnimationFrame[],
   width: number,
@@ -90,6 +108,8 @@ export async function encodeJxlAnimation(
     durations.push(Math.max(1, Math.round(frame.delayMs)));
   }
   const codec = await getCodec();
-  const result = codec.encodeAnimation(flat, width, height, durations, lossless, quality, loop ? 0 : 1);
+  const result = codec.encodeAnimation(flat, width, height, durations, lossless, quality, loop ? 0 : 1, {
+    effort: options?.effort,
+  });
   return result;
 }

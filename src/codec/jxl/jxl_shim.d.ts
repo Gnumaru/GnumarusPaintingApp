@@ -13,7 +13,7 @@ export interface JxlBridgeResult {
 
 export interface JxlShimModule {
   jxl_decode_js(data: Uint8Array): JxlBridgeResult;
-  jxl_encode_js(pixels: Uint8Array, w: number, h: number, lossless: boolean, quality: number): JxlBridgeResult;
+  jxl_encode_js(pixels: Uint8Array, w: number, h: number, lossless: boolean, quality: number, effort: number): JxlBridgeResult;
   jxl_encode_animation_js(
     pixels: Uint8Array,
     w: number,
@@ -22,6 +22,7 @@ export interface JxlShimModule {
     lossless: boolean,
     quality: number,
     numLoops: number,
+    effort: number,
   ): JxlBridgeResult;
   jxl_frame_count_js(data: Uint8Array): { ok: boolean; count?: number };
 }
