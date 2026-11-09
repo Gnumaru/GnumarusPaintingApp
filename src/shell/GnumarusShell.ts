@@ -6,11 +6,16 @@ import {
   type GnumarusLayerInfo,
 } from "../canvas/GnumarusCanvasEngine";
 import {
+  downloadBlob,
   isFilePickerSupported,
+  isFileSaveSupported,
   isFileSystemAccessSupported,
   pickAsepriteFile,
   pickProjectDirectory,
+  pickSaveFile,
   readProjectFiles,
+  writeBlobToDirectory,
+  writeBlobToFile,
   writeProjectFiles,
   type GnumarusDirectoryHandle,
 } from "../project/GnumarusFileSystem";
@@ -75,7 +80,17 @@ import {
   parseExpandSettings,
   serializeExpandSettings,
 } from "../settings/GnumarusExpandSettings";
-import { compositeFinalImage } from "../preview/GnumarusFinalRender";
+import { compositeFinalImage, type GnumarusPreviewBackground } from "../preview/GnumarusFinalRender";
+import {
+  detectStillFormats,
+  encodeStillImage,
+  exportBaseName,
+  findStillFormat,
+  frameFileStem,
+  type GnumarusStillFormat,
+} from "../export/GnumarusImageExport";
+import { createGifEncoder } from "../export/GnumarusGifExport";
+import { resolveExportSequence } from "../animation/GnumarusNamedAnimations";
 import { decodePngToBuffer, encodeBufferToPngBlob } from "../project/GnumarusPngCodec";
 import { parseAsepriteFile } from "../project/GnumarusAseprite";
 import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
@@ -1010,6 +1025,11 @@ export class GnumarusShell extends LitElement {
     durationValue: { type: Number },
     animationInput: { type: String },
     animationError: { type: String },
+    exportFrame: { type: Number },
+    exportFormat: { type: String },
+    exportFormats: { type: Array },
+    exportAnimation: { type: String },
+    exportAnimatedFormat: { type: String },
     playing: { type: Boolean },
     uiHidden: { type: Boolean },
     toastMessage: { type: String },
@@ -1093,6 +1113,11 @@ export class GnumarusShell extends LitElement {
   declare durationValue: number | null;
   declare animationInput: string;
   declare animationError: string | null;
+  declare exportFrame: number;
+  declare exportFormat: string;
+  declare exportFormats: GnumarusStillFormat[];
+  declare exportAnimation: string;
+  declare exportAnimatedFormat: string;
   declare playing: boolean;
   declare uiHidden: boolean;
   declare toastMessage: string;
@@ -1181,6 +1206,11 @@ export class GnumarusShell extends LitElement {
     this.durationValue = null;
     this.animationInput = "";
     this.animationError = null;
+    this.exportFrame = 1;
+    this.exportFormat = "image/png";
+    this.exportFormats = [];
+    this.exportAnimation = "";
+    this.exportAnimatedFormat = "gif";
     this.playing = false;
     this.playTimer = null;
     this.uiHidden = false;
@@ -1228,6 +1258,7 @@ export class GnumarusShell extends LitElement {
                   <button @click=${(): void => void this.openProject()}>Open</button>
                   <button title="Save (Ctrl+S)" @click=${(): void => void this.saveProject()}>Save</button>
                   <button @click=${(): void => void this.importAseprite()}>Import</button>
+                  <button @click=${(): void => void this.openExportDialog()}>Export</button>
                 </div>
               `
             : html``}
@@ -2222,6 +2253,74 @@ export class GnumarusShell extends LitElement {
           )}
         </ul>
       </dialog>
+      <dialog id="exportDialog">
+        <h3>Export frame</h3>
+        <label
+          >Frame
+          <input
+            type="number"
+            id="exportFrame"
+            min="1"
+            max=${this.engine?.getFrameCount() ?? 1}
+            step="1"
+            .value=${String(this.exportFrame)}
+          />
+        </label>
+        <label
+          >Format
+          <select
+            id="exportFormat"
+            .value=${this.exportFormat}
+            @change=${(event: Event): void => {
+              this.exportFormat = (event.target as HTMLSelectElement).value;
+            }}
+          >
+            ${this.exportFormats.map(
+              (format) => html`<option value=${format.mime}>${format.label}</option>`,
+            )}
+          </select>
+        </label>
+        <div class="dialog-actions">
+          <button @click=${(): void => this.closeExportDialog()}>Cancel</button>
+          <button id="exportOk" @click=${(): void => void this.confirmExportFrame()}>Export</button>
+        </div>
+        <h3>Export animation</h3>
+        <label
+          >Animation
+          <select
+            id="exportAnimation"
+            .value=${this.exportAnimation}
+            @change=${(event: Event): void => {
+              this.exportAnimation = (event.target as HTMLSelectElement).value;
+            }}
+          >
+            <option value="">All frames</option>
+            ${this.engine?.getNamedAnimations().map(
+              (animation) => html`<option value=${animation.name}>${animation.name}</option>`,
+            ) ?? html``}
+          </select>
+        </label>
+        <label
+          >Format
+          <select
+            id="exportAnimatedFormat"
+            .value=${this.exportAnimatedFormat}
+            @change=${(event: Event): void => {
+              this.exportAnimatedFormat = (event.target as HTMLSelectElement).value;
+            }}
+          >
+            <option value="gif">GIF animation</option>
+            ${this.exportFormats.map(
+              (format) => html`<option value=${format.mime}>${format.label} sequence</option>`,
+            )}
+          </select>
+        </label>
+        <div class="dialog-actions">
+          <button id="exportAnimatedOk" @click=${(): void => void this.confirmExportAnimated()}>
+            Export animation
+          </button>
+        </div>
+      </dialog>
       <dialog id="frameRenameDialog">
         <h3>Rename frame</h3>
         <label
@@ -2557,7 +2656,7 @@ export class GnumarusShell extends LitElement {
               const current = frame === matrix.currentFrame;
               const inAnimation = activeFrames !== null && activeFrames.has(frame);
               const duration = this.engine?.getEffectiveFrameDuration(frame) ?? 0;
-              const frameName = matrix.frameNames[frame] ?? `Frame ${frame + 1}`;
+              const frameName = matrix.frameNames[frame] ?? `F${frame + 1}`;
               const isRenaming = this.renamingFrame === frame;
               return html`
                 <div class="anim-frame-header ${current ? "current" : ""} ${inAnimation ? "in-animation" : ""}">
@@ -3034,7 +3133,7 @@ export class GnumarusShell extends LitElement {
   }
 
   private frameToastFor(frame: number, count: number): string {
-    const name = this.engine?.getFrameName(frame) ?? `Frame ${frame + 1}`;
+    const name = this.engine?.getFrameName(frame) ?? `F${frame + 1}`;
     return `Frame ${frame + 1}/${count}: ${name}`;
   }
 
@@ -4144,6 +4243,22 @@ export class GnumarusShell extends LitElement {
     window.addEventListener("pointerup", up);
   }
 
+  /** Canvas background settings shaped for the final compositor. */
+  private canvasBackground(
+    checker: GnumarusCheckerSettings,
+    background: GnumarusBackgroundSettings,
+  ): GnumarusPreviewBackground {
+    return {
+      mode: background.mode,
+      checkerMode: checker.mode,
+      sizeX: checker.sizeX,
+      sizeY: checker.sizeY,
+      colorA: checker.colorA,
+      colorB: checker.colorB,
+      color: background.color,
+    };
+  }
+
   private async refreshPreview(): Promise<void> {
     if (!this.previewOpen || this.engine === null) {
       return;
@@ -4172,15 +4287,7 @@ export class GnumarusShell extends LitElement {
     });
     const checker = this.engine.getCheckerSettings();
     const background = this.engine.getBackgroundSettings();
-    const flat = compositeFinalImage(size.width, size.height, inputs, {
-      mode: background.mode,
-      checkerMode: checker.mode,
-      sizeX: checker.sizeX,
-      sizeY: checker.sizeY,
-      colorA: checker.colorA,
-      colorB: checker.colorB,
-      color: background.color,
-    });
+    const flat = compositeFinalImage(size.width, size.height, inputs, this.canvasBackground(checker, background));
     canvas.width = size.width;
     canvas.height = size.height;
     const ctx = canvas.getContext("2d");
@@ -4202,7 +4309,7 @@ export class GnumarusShell extends LitElement {
       this.activeLayerId = "";
       this.floatingActive = false;
       this.layerText = "-";
-      this.frameText = "Frame 1/1: Frame 1";
+      this.frameText = "Frame 1/1: F1";
       return;
     }
     this.layers = this.engine.getLayers();
@@ -4715,6 +4822,252 @@ export class GnumarusShell extends LitElement {
       this.refreshLayers();
       this.dirty = true;
       this.statusMessage = `Animation ${value} selected`;
+    }
+  }
+
+  private async openExportDialog(): Promise<void> {
+    if (this.engine === null) {
+      return;
+    }
+    this.fileMenuOpen = false;
+    this.exportFrame = this.engine.getCurrentFrame() + 1;
+    this.exportFormats = detectStillFormats();
+    if (findStillFormat(this.exportFormats, this.exportFormat) === null) {
+      this.exportFormat = this.exportFormats[0]?.mime ?? "image/png";
+    }
+    this.exportAnimation = this.engine.getActiveAnimationName() ?? "";
+    if (
+      this.exportAnimation !== "" &&
+      !this.engine.getNamedAnimations().some((animation) => animation.name === this.exportAnimation)
+    ) {
+      this.exportAnimation = "";
+    }
+    if (this.exportAnimatedFormat !== "gif" && findStillFormat(this.exportFormats, this.exportAnimatedFormat) === null) {
+      this.exportAnimatedFormat = "gif";
+    }
+    await this.updateComplete;
+    const dialog = this.shadowRoot?.getElementById("exportDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+    const ok = this.shadowRoot?.getElementById("exportOk") as HTMLButtonElement | null;
+    ok?.focus();
+  }
+
+  private closeExportDialog(): void {
+    const dialog = this.shadowRoot?.getElementById("exportDialog") as HTMLDialogElement | null;
+    dialog?.close();
+  }
+
+  /**
+   * Save one blob through the OS save dialog (or the download fallback),
+   * returning false only when the user cancels.
+   */
+  private async saveExportBlob(blob: Blob, fileName: string, description: string): Promise<boolean> {
+    const mime = blob.type === "" ? "application/octet-stream" : blob.type;
+    const dot = fileName.lastIndexOf(".");
+    const ext = dot < 0 ? "bin" : fileName.slice(dot + 1);
+    try {
+      if (isFileSaveSupported()) {
+        const handle = await pickSaveFile(fileName, description, { [mime]: [`.${ext}`] });
+        if (handle === null) {
+          downloadBlob(blob, fileName);
+          return true;
+        }
+        await writeBlobToFile(handle, blob);
+        return true;
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return false;
+      }
+      throw error;
+    }
+    downloadBlob(blob, fileName);
+    return true;
+  }
+
+  private async confirmExportFrame(): Promise<void> {
+    if (this.engine === null) {
+      this.closeExportDialog();
+      return;
+    }
+    const frameCount = this.engine.getFrameCount();
+    const input = this.shadowRoot?.getElementById("exportFrame") as HTMLInputElement | null;
+    const raw = Math.floor(Number(input?.value ?? String(this.exportFrame)));
+    const frame = Number.isFinite(raw) ? Math.min(frameCount, Math.max(1, raw)) : 1;
+    this.exportFrame = frame;
+    const format = findStillFormat(this.exportFormats, this.exportFormat) ?? this.exportFormats[0] ?? null;
+    if (format === null) {
+      this.closeExportDialog();
+      this.statusMessage = "Export failed: no image format is available";
+      this.showToast("Export failed: no image format is available");
+      return;
+    }
+    const inputs = this.engine.getFrameFlattenInputs(frame - 1);
+    if (inputs === null) {
+      this.closeExportDialog();
+      this.statusMessage = "Export failed: invalid frame";
+      this.showToast("Export failed: invalid frame");
+      return;
+    }
+    try {
+      const size = this.engine.size;
+      const background = format.alpha
+        ? undefined
+        : this.canvasBackground(this.engine.getCheckerSettings(), this.engine.getBackgroundSettings());
+      const flat = compositeFinalImage(size.width, size.height, inputs, background);
+      const blob = await encodeStillImage(flat, size.width, size.height, format.mime);
+      if (blob === null) {
+        this.closeExportDialog();
+        this.statusMessage = `Export failed: ${format.label} encoding is not supported here`;
+        this.showToast(`Export failed: ${format.label} encoding is not supported here`);
+        return;
+      }
+      const fileName = `${exportBaseName(this.projectName)}-frame-${frame}.${format.ext}`;
+      this.closeExportDialog();
+      if (await this.saveExportBlob(blob, fileName, `${format.label} image`)) {
+        this.statusMessage = `Exported ${fileName}`;
+        this.showToast(`Exported ${fileName}`);
+      }
+    } catch (error) {
+      this.closeExportDialog();
+      const reason = error instanceof Error ? error.message : String(error);
+      this.statusMessage = `Export failed: ${reason}`;
+      this.showToast(`Export failed: ${reason}`);
+    }
+  }
+
+  /**
+   * Resolve the animated export selection: project frames in playback
+   * order with millisecond delays, plus whether it loops forever.
+   */
+  private resolveAnimatedExport(): { frames: Array<{ frame: number; delayMs: number }>; loop: boolean; label: string } | null {
+    if (this.engine === null) {
+      return null;
+    }
+    const select = this.shadowRoot?.getElementById("exportAnimation") as HTMLSelectElement | null;
+    const name = select?.value ?? this.exportAnimation;
+    this.exportAnimation = name;
+    if (name === "") {
+      const count = this.engine.getFrameCount();
+      const frames = [];
+      for (let frame = 0; frame < count; frame += 1) {
+        frames.push({ frame, delayMs: this.engine.getEffectiveFrameDuration(frame) });
+      }
+      return { frames, loop: true, label: "frames" };
+    }
+    const animation = this.engine.getNamedAnimations().find((entry) => entry.name === name) ?? null;
+    if (animation === null) {
+      return null;
+    }
+    const frames = resolveExportSequence(animation).map((entry) => ({
+      frame: entry.frame,
+      delayMs: entry.duration ?? this.engine?.getEffectiveFrameDuration(entry.frame) ?? 0,
+    }));
+    return { frames, loop: animation.loop !== "none", label: name };
+  }
+
+  private failAnimatedExport(message: string): void {
+    this.closeExportDialog();
+    this.statusMessage = message;
+    this.showToast(message);
+  }
+
+  private async confirmExportAnimated(): Promise<void> {
+    if (this.engine === null) {
+      this.closeExportDialog();
+      return;
+    }
+    const formatSelect = this.shadowRoot?.getElementById("exportAnimatedFormat") as HTMLSelectElement | null;
+    const formatValue = formatSelect?.value ?? this.exportAnimatedFormat;
+    this.exportAnimatedFormat = formatValue;
+    const resolved = this.resolveAnimatedExport();
+    if (resolved === null) {
+      this.failAnimatedExport("Export failed: unknown animation");
+      return;
+    }
+    if (resolved.frames.length === 0) {
+      this.failAnimatedExport(`Export failed: animation ${resolved.label} has no frames`);
+      return;
+    }
+    const base = exportBaseName(this.projectName);
+    try {
+      if (formatValue === "gif") {
+        const size = this.engine.size;
+        const encoder = createGifEncoder(size.width, size.height, resolved.loop);
+        for (const entry of resolved.frames) {
+          const inputs = this.engine.getFrameFlattenInputs(entry.frame);
+          if (inputs === null) {
+            this.failAnimatedExport("Export failed: invalid frame");
+            return;
+          }
+          encoder.addFrame(compositeFinalImage(size.width, size.height, inputs), entry.delayMs);
+        }
+        const blob = new Blob([encoder.finish() as Uint8Array<ArrayBuffer>], { type: "image/gif" });
+        const fileName = `${base}-${resolved.label}.gif`;
+        this.closeExportDialog();
+        if (await this.saveExportBlob(blob, fileName, "GIF animation")) {
+          this.statusMessage = `Exported ${fileName}`;
+          this.showToast(`Exported ${fileName}`);
+        }
+        return;
+      }
+      const format = findStillFormat(this.exportFormats, formatValue) ?? null;
+      if (format === null) {
+        this.failAnimatedExport("Export failed: no image format is available");
+        return;
+      }
+      const size = this.engine.size;
+      const background = format.alpha
+        ? undefined
+        : this.canvasBackground(this.engine.getCheckerSettings(), this.engine.getBackgroundSettings());
+      const blobs: Blob[] = [];
+      for (const entry of resolved.frames) {
+        const inputs = this.engine.getFrameFlattenInputs(entry.frame);
+        if (inputs === null) {
+          this.failAnimatedExport("Export failed: invalid frame");
+          return;
+        }
+        const flat = compositeFinalImage(size.width, size.height, inputs, background);
+        const blob = await encodeStillImage(flat, size.width, size.height, format.mime);
+        if (blob === null) {
+          this.failAnimatedExport(`Export failed: ${format.label} encoding is not supported here`);
+          return;
+        }
+        blobs.push(blob);
+      }
+      const stem = `${base}-${resolved.label}`;
+      this.closeExportDialog();
+      if (isFileSystemAccessSupported()) {
+        try {
+          const dir = await pickProjectDirectory();
+          for (let index = 0; index < blobs.length; index += 1) {
+            const blob = blobs[index];
+            if (blob === undefined) {
+              continue;
+            }
+            await writeBlobToDirectory(dir, `${frameFileStem(stem, index)}.${format.ext}`, blob);
+          }
+          this.statusMessage = `Exported ${blobs.length} files to ${dir.name}`;
+          this.showToast(`Exported ${blobs.length} files to ${dir.name}`);
+        } catch (error) {
+          if (!(error instanceof DOMException && error.name === "AbortError")) {
+            throw error;
+          }
+        }
+        return;
+      }
+      for (let index = 0; index < blobs.length; index += 1) {
+        const blob = blobs[index];
+        if (blob === undefined) {
+          continue;
+        }
+        downloadBlob(blob, `${frameFileStem(stem, index)}.${format.ext}`);
+      }
+      this.statusMessage = `Exported ${blobs.length} files`;
+      this.showToast(`Exported ${blobs.length} files`);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.failAnimatedExport(`Export failed: ${reason}`);
     }
   }
 

@@ -160,8 +160,8 @@ describe("GnumarusAnimationModel", () => {
   });
 
   it("builds default frame names and normalizes custom names", () => {
-    expect(defaultFrameName(0)).toBe("Frame 1");
-    expect(defaultFrameName(2)).toBe("Frame 3");
+    expect(defaultFrameName(0)).toBe("F1");
+    expect(defaultFrameName(2)).toBe("F3");
     expect(normalizeFrameName("  My Frame  ")).toBe("My Frame");
     expect(normalizeFrameName("   ")).toBeNull();
     expect(normalizeFrameName("")).toBeNull();
@@ -170,9 +170,9 @@ describe("GnumarusAnimationModel", () => {
   });
 
   it("ensures frame names with defaults", () => {
-    expect(ensureFrameNames(1)).toEqual(["Frame 1"]);
-    expect(ensureFrameNames(3, ["A"])).toEqual(["A", "Frame 2", "Frame 3"]);
-    expect(ensureFrameNames(2, ["  ", "B"])).toEqual(["Frame 1", "B"]);
+    expect(ensureFrameNames(1)).toEqual(["F1"]);
+    expect(ensureFrameNames(3, ["A"])).toEqual(["A", "F2", "F3"]);
+    expect(ensureFrameNames(2, ["  ", "B"])).toEqual(["F1", "B"]);
   });
 
   it("inserts and swaps frame names", () => {

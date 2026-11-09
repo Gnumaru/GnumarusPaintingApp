@@ -33,9 +33,15 @@ interface GnumarusOpenFilePickerOptions {
   types?: Array<{ description?: string; accept: Record<string, string[]> }>;
 }
 
+interface GnumarusSaveFilePickerOptions {
+  suggestedName?: string;
+  types?: Array<{ description?: string; accept: Record<string, string[]> }>;
+}
+
 interface GnumarusPickerWindow {
   showDirectoryPicker?: (options?: { mode?: string }) => Promise<GnumarusDirectoryHandle>;
   showOpenFilePicker?: (options?: GnumarusOpenFilePickerOptions) => Promise<GnumarusFileHandle[]>;
+  showSaveFilePicker?: (options?: GnumarusSaveFilePickerOptions) => Promise<GnumarusFileHandle>;
 }
 
 function pickerWindow(): GnumarusPickerWindow {
@@ -48,6 +54,10 @@ export function isFileSystemAccessSupported(): boolean {
 
 export function isFilePickerSupported(): boolean {
   return typeof pickerWindow().showOpenFilePicker === "function";
+}
+
+export function isFileSaveSupported(): boolean {
+  return typeof pickerWindow().showSaveFilePicker === "function";
 }
 
 export async function pickProjectDirectory(): Promise<GnumarusDirectoryHandle> {
@@ -73,6 +83,56 @@ export async function pickAsepriteFile(): Promise<GnumarusFileHandle | null> {
     types: [{ description: "Aseprite files", accept: { "application/octet-stream": [".ase", ".aseprite"] } }],
   });
   return handles[0] ?? null;
+}
+
+/**
+ * Save one blob through the OS save dialog. Returns the written handle, or
+ * null when the API is missing (callers fall back to a plain download).
+ * Throws AbortError when the user cancels (callers treat it as silent).
+ */
+export async function pickSaveFile(
+  suggestedName: string,
+  description: string,
+  accept: Record<string, string[]>,
+): Promise<GnumarusFileHandle | null> {
+  const showPicker = pickerWindow().showSaveFilePicker;
+  if (showPicker === undefined) {
+    return null;
+  }
+  return showPicker.call(window, { suggestedName, types: [{ description, accept }] });
+}
+
+export async function writeBlobToFile(handle: GnumarusFileHandle, blob: Blob): Promise<void> {
+  const writable = await handle.createWritable();
+  try {
+    await writable.write(blob);
+  } finally {
+    await writable.close();
+  }
+}
+
+export async function writeBlobToDirectory(
+  root: GnumarusDirectoryHandle,
+  fileName: string,
+  blob: Blob,
+): Promise<void> {
+  const handle = await resolveFile(root, fileName, true);
+  await writeBlobToFile(handle, blob);
+}
+
+/** Plain object-URL download fallback when the File System Access API is missing. */
+export function downloadBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    window.setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
 }
 
 async function resolveFile(

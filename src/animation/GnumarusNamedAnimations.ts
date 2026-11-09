@@ -185,3 +185,82 @@ export function mapNamedAnimationFrames(
     }),
   }));
 }
+
+export interface GnumarusExportFrame {
+  /** 0-based project frame index. */
+  frame: number;
+  /** Per-frame duration override in ms, or null for the project duration. */
+  duration: number | null;
+}
+
+/**
+ * Walk an animation from its first entry until it stops (`none`) or
+ * completes one full cycle (loops), returning the playback order.
+ */
+export function resolveExportSequence(animation: GnumarusNamedAnimation): GnumarusExportFrame[] {
+  const sequence: GnumarusExportFrame[] = [];
+  if (animation.frames.length === 0) {
+    return sequence;
+  }
+  const seen = new Set<string>();
+  let index = 0;
+  let direction: 1 | -1 = 1;
+  for (;;) {
+    const key = `${index}:${direction}`;
+    if (seen.has(key)) {
+      break;
+    }
+    seen.add(key);
+    const entry = animation.frames[index];
+    if (entry === undefined) {
+      break;
+    }
+    sequence.push({ frame: entry.frame, duration: entry.duration });
+    const step = nextAnimationStep(animation, index, direction);
+    if (step === null) {
+      break;
+    }
+    index = step.index;
+    direction = step.direction;
+  }
+  return sequence;
+}
+
+/**
+ * Parse a bare frame list like `1,3-5,7` (1-based, ranges with hyphens,
+ * order and repeats kept as given). Throws GnumarusNamedAnimationError.
+ */
+export function parseFrameList(text: string, frameCount: number): number[] {
+  const items = text
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+  if (items.length === 0) {
+    throw new GnumarusNamedAnimationError("Frame list is empty: use 1,3-5,7.");
+  }
+  const frames: number[] = [];
+  for (const item of items) {
+    const match = /^(\d+)(?:-(\d+))?$/.exec(item);
+    if (match === null || match[1] === undefined) {
+      throw new GnumarusNamedAnimationError(
+        `Invalid frame entry "${item}": use 7 or 3-5.`,
+      );
+    }
+    const first = parsePositiveInt(match[1], "frame number");
+    const last = match[2] === undefined ? first : parsePositiveInt(match[2], "range end");
+    if (last < first) {
+      throw new GnumarusNamedAnimationError(
+        `Invalid range "${item}": the range end comes before its start.`,
+      );
+    }
+    for (let frame = first; frame <= last; frame += 1) {
+      if (frame < 1 || frame > frameCount) {
+        throw new GnumarusNamedAnimationError(
+          `Frame ${frame} does not exist: this project has ${frameCount} frame${frameCount === 1 ? "" : "s"}.`,
+        );
+      }
+      frames.push(frame - 1);
+    }
+  }
+  return frames;
+}

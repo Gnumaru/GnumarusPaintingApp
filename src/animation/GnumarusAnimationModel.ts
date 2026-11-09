@@ -130,7 +130,7 @@ export function swapFrameDurations(
 
 /** Default display name for a frame index (0-based). */
 export function defaultFrameName(frame: number): string {
-  return `Frame ${frame + 1}`;
+  return `F${frame + 1}`;
 }
 
 /** Normalize a user-supplied frame name (trimmed, 1..64 chars). Null when empty. */

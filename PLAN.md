@@ -298,3 +298,9 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Pure module `src/animation/GnumarusNamedAnimations.ts`: `name,loop,frames` strings (`none`/`forward`/`ping-pong`, 1-based frames, `A-B` ranges, `:ms` per-frame or per-range overrides), strict parse errors, serialize with range collapsing, ping-pong-safe step function, frame-index remap helper.
 - Engine owns the list + active selection, remaps indices on frame insert/move/remove, persists via `project.json`.
 - Matrix corner gets an animation dropdown (All frames + names) and a manage dialog (add string, inline errors, delete); selected animation columns highlight; playback scopes to it (override durations, `none` stops at the end).
+
+## 58. Short default names + project export (in progress)
+- Default names become L1/L2/…, F1/F2/…, C1/C2/…, T1/T2/… (display names only; ids like layer0/content1/tex0 unchanged; stored custom names untouched). Landed: engine/format/shell generators + counter regexes + unit/e2e fallout fixed, full suites green, deployed.
+- File > Export dialog: static frame (frame picker + still format), animated image (named animation → GIF via own encoder, or frame sequence), spritesheet (animations and/or frame list, 8 layouts, still format or per-frame files).
+- Batch B landed: per-frame flatten API, still formats (PNG/JPEG/WebP + probed AVIF/HEIC/HEIF/JXL), File > Export dialog with static-frame export, save-picker + download fallback flows.
+- Batch C landed: animated export — `GnumarusGifExport.ts` wrapper around gifenc (per-frame palette, transparency via rgba4444+oneBitAlpha, dispose 2 on transparent frames / 1 on opaque, repeat 0 forever / -1 once) plus dialog section (animation picker, GIF vs image sequence) and directory-picker sequence save.

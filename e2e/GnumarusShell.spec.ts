@@ -2900,7 +2900,7 @@ test("PageUp and PageDown select layers with wrap-around and toast", async ({ pa
   await page.keyboard.press("PageUp");
   state = await getLayers(page);
   expect(state.active).toBe("layer0");
-  await expect(toast).toContainText("1/3: Layer 1");
+  await expect(toast).toContainText("1/3: L1");
   await page.keyboard.press("PageUp");
   state = await getLayers(page);
   expect(state.active).toBe("layer1");
@@ -2908,15 +2908,15 @@ test("PageUp and PageDown select layers with wrap-around and toast", async ({ pa
   await page.keyboard.press("PageUp");
   state = await getLayers(page);
   expect(state.active).toBe("layer2");
-  await expect(toast).toContainText("3/3: Layer 3");
+  await expect(toast).toContainText("3/3: L3");
   await page.keyboard.press("PageUp");
   state = await getLayers(page);
   expect(state.active).toBe("layer0");
-  await expect(toast).toContainText("1/3: Layer 1");
+  await expect(toast).toContainText("1/3: L1");
   await page.keyboard.press("PageDown");
   state = await getLayers(page);
   expect(state.active).toBe("layer2");
-  await expect(toast).toContainText("3/3: Layer 3");
+  await expect(toast).toContainText("3/3: L3");
   await page.keyboard.press("PageDown");
   state = await getLayers(page);
   expect(state.active).toBe("layer1");
@@ -3794,11 +3794,11 @@ test("automatic layer names start at 1", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   let state = await getLayers(page);
-  expect(state.layers[0]?.name).toBe("Layer 1");
+  expect(state.layers[0]?.name).toBe("L1");
   await page.getByRole("button", { name: "Add layer" }).click();
   await page.getByRole("button", { name: "Add layer" }).click();
   state = await getLayers(page);
-  expect(state.layers.map((layer) => layer.name)).toEqual(["Layer 1", "Layer 2", "Layer 3"]);
+  expect(state.layers.map((layer) => layer.name)).toEqual(["L1", "L2", "L3"]);
 });
 
 test("frames can be renamed like layers", async ({ page }) => {
@@ -3806,8 +3806,8 @@ test("frames can be renamed like layers", async ({ page }) => {
   await page.waitForSelector("gnumarus-shell canvas");
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
   await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
-  await expect(matrix.locator('[data-testid="anim-frame"][data-frame="0"]')).toContainText("Frame 1");
-  await expect(matrix.locator('[data-testid="anim-frame"][data-frame="1"]')).toContainText("Frame 2");
+  await expect(matrix.locator('[data-testid="anim-frame"][data-frame="0"]')).toContainText("F1");
+  await expect(matrix.locator('[data-testid="anim-frame"][data-frame="1"]')).toContainText("F2");
   const header = matrix.locator('[data-testid="anim-frame"][data-frame="1"]');
   await header.dblclick();
   const renameInput = matrix.locator('[data-testid="anim-frame-rename"][data-frame="1"]');
@@ -4197,7 +4197,7 @@ test("matrix layer names rename layers through a context menu", async ({ page })
   await page.waitForSelector("gnumarus-shell canvas");
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
   const nameCell = matrix.locator('[data-testid="anim-layer-name"][data-matrix-layer="layer0"]');
-  await expect(nameCell).toContainText("Layer 1");
+  await expect(nameCell).toContainText("L1");
   await nameCell.click({ button: "right" });
   await page.getByRole("button", { name: "Rename layer…" }).click();
   await expect(page.locator("gnumarus-shell dialog#layerRenameDialog")).toBeVisible();
@@ -5785,4 +5785,367 @@ test("animation duration overrides win over the project default", async ({ page 
   // With the 2000ms project default this would time out; overrides tick at 100ms.
   await expect.poll(async () => getMatrixFrame(page), { timeout: 1500 }).toBe(1);
   await matrix.getByRole("button", { name: "Stop animation", exact: true }).click();
+});
+
+async function stubSaveFilePicker(page: import("@playwright/test").Page): Promise<void> {
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      showSaveFilePicker?: (options?: unknown) => Promise<unknown>;
+      __gnumarusExportTest?: { fileName: string | null; blob: Blob | null };
+    };
+    const state: { fileName: string | null; blob: Blob | null } = { fileName: null, blob: null };
+    root.__gnumarusExportTest = state;
+    root.showSaveFilePicker = async (options?: unknown) => {
+      const name =
+        (options as { suggestedName?: string } | undefined)?.suggestedName ?? "export.bin";
+      return {
+        createWritable: async () => ({
+          write: async (data: string | Blob): Promise<void> => {
+            state.fileName = name;
+            state.blob = data instanceof Blob ? data : new Blob([data]);
+          },
+          close: async (): Promise<void> => {},
+        }),
+      };
+    };
+  });
+}
+
+async function exportedFile(page: import("@playwright/test").Page): Promise<{
+  fileName: string | null;
+  type: string;
+  width: number;
+  height: number;
+  center: number[];
+  corner: number[];
+} | null> {
+  return page.evaluate(async () => {
+    const root = window as unknown as {
+      __gnumarusExportTest?: { fileName: string | null; blob: Blob | null };
+    };
+    const state = root.__gnumarusExportTest;
+    if (state?.blob == null) {
+      return null;
+    }
+    const bitmap = await createImageBitmap(state.blob);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    if (context === null) {
+      bitmap.close();
+      return null;
+    }
+    context.drawImage(bitmap, 0, 0);
+    const result = {
+      fileName: state.fileName,
+      type: state.blob.type,
+      width: bitmap.width,
+      height: bitmap.height,
+      center: Array.from(context.getImageData(32, 32, 1, 1).data),
+      corner: Array.from(context.getImageData(0, 0, 1, 1).data),
+    };
+    bitmap.close();
+    return result;
+  });
+}
+
+test("File > Export saves the current frame as PNG with exact pixels", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator("input#exportFrame")).toHaveValue("1");
+  const options = await dialog.locator("select#exportFormat option").allTextContents();
+  expect(options).toEqual(expect.arrayContaining(["PNG", "JPEG", "WebP"]));
+  await dialog.locator("#exportOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported");
+  const file = await exportedFile(page);
+  expect(file?.fileName).toContain("frame-1.png");
+  expect(file?.type).toBe("image/png");
+  expect(file?.width).toBe(64);
+  expect(file?.height).toBe(64);
+  expect(file?.center).toEqual([0, 0, 0, 255]);
+  expect(file?.corner).toEqual([0, 0, 0, 0]);
+});
+
+test("File > Export flattens JPEG without alpha", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator("select#exportFormat").selectOption("image/jpeg");
+  await dialog.locator("#exportOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported");
+  const file = await exportedFile(page);
+  expect(file?.type).toBe("image/jpeg");
+  expect(file?.width).toBe(64);
+  // JPEG has no alpha: every decoded pixel is opaque.
+  expect(file?.corner?.[3]).toBe(255);
+});
+
+test("File > Export cancellation stays silent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell");
+  await page.evaluate(() => {
+    const root = window as unknown as { showSaveFilePicker?: () => Promise<never> };
+    root.showSaveFilePicker = async () => {
+      throw new DOMException("User cancelled", "AbortError");
+    };
+  });
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator("#exportOk").click();
+  await expect(page.locator('gnumarus-shell [data-testid="toast"]')).toBeHidden();
+});
+
+async function stubExportDirectory(page: import("@playwright/test").Page): Promise<void> {
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      showDirectoryPicker?: () => Promise<unknown>;
+      __gnumarusExportDirTest?: { dirName: string | null; files: Record<string, Blob> };
+    };
+    const state: { dirName: string | null; files: Record<string, Blob> } = {
+      dirName: "exports",
+      files: {},
+    };
+    root.__gnumarusExportDirTest = state;
+    root.showDirectoryPicker = async () => ({
+      name: "exports",
+      getFileHandle: async (name: string) => ({
+        createWritable: async () => ({
+          write: async (data: string | Blob): Promise<void> => {
+            state.files[name] = data instanceof Blob ? data : new Blob([data]);
+          },
+          close: async (): Promise<void> => {},
+        }),
+      }),
+      getDirectoryHandle: async () => {
+        throw new Error("no subdirectories in export test");
+      },
+    });
+  });
+}
+
+async function exportedGifBytes(page: import("@playwright/test").Page): Promise<{
+  fileName: string | null;
+  type: string;
+  header: string;
+  width: number;
+  height: number;
+  hasNetscape: boolean;
+  descriptors: number;
+} | null> {
+  return page.evaluate(async () => {
+    const root = window as unknown as {
+      __gnumarusExportTest?: { fileName: string | null; blob: Blob | null };
+    };
+    const state = root.__gnumarusExportTest;
+    if (state?.blob == null) {
+      return null;
+    }
+    const buffer = await state.blob.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    const view = new DataView(buffer);
+    let ascii = "";
+    for (let i = 0; i < 6; i += 1) {
+      ascii += String.fromCharCode(bytes[i] ?? 0);
+    }
+    const tag = "NETSCAPE2.0";
+    let hasNetscape = false;
+    for (let i = 0; i + tag.length <= bytes.length; i += 1) {
+      let match = true;
+      for (let j = 0; j < tag.length; j += 1) {
+        if (bytes[i + j] !== tag.charCodeAt(j)) {
+          match = false;
+          break;
+        }
+      }
+      if (match) {
+        hasNetscape = true;
+        break;
+      }
+    }
+    // Count image descriptors, skipping color tables and sub-blocks.
+    let descriptors = 0;
+    let i = 13;
+    const globalPacked = bytes[10] ?? 0;
+    if ((globalPacked & 0x80) !== 0) {
+      i += 3 * 2 ** ((globalPacked & 0x07) + 1);
+    }
+    while (i < bytes.length) {
+      const marker = bytes[i];
+      if (marker === 0x3b) {
+        break;
+      }
+      if (marker === 0x21) {
+        if (bytes[i + 1] === 0xf9) {
+          i += 8;
+          continue;
+        }
+        i += 2;
+        for (;;) {
+          const size = bytes[i] ?? 0;
+          i += 1;
+          if (size === 0) {
+            break;
+          }
+          i += size;
+        }
+        continue;
+      }
+      if (marker === 0x2c) {
+        descriptors += 1;
+        const packed = bytes[i + 9] ?? 0;
+        i += 10;
+        if ((packed & 0x80) !== 0) {
+          i += 3 * 2 ** ((packed & 0x07) + 1);
+        }
+        i += 1;
+        for (;;) {
+          const size = bytes[i] ?? 0;
+          i += 1;
+          if (size === 0) {
+            break;
+          }
+          i += size;
+        }
+        continue;
+      }
+      break;
+    }
+    return {
+      fileName: state.fileName,
+      type: state.blob.type,
+      header: ascii,
+      width: view.getUint16(6, true),
+      height: view.getUint16(8, true),
+      hasNetscape,
+      descriptors,
+    };
+  });
+}
+
+async function exportedSequence(page: import("@playwright/test").Page): Promise<{
+  names: string[];
+  dirName: string | null;
+  firstCenter: number[];
+  secondCenter: number[];
+} | null> {
+  return page.evaluate(async () => {
+    const root = window as unknown as {
+      __gnumarusExportDirTest?: { dirName: string | null; files: Record<string, Blob> };
+    };
+    const state = root.__gnumarusExportDirTest;
+    if (state === undefined) {
+      return null;
+    }
+    const names = Object.keys(state.files).sort();
+    async function center(name: string | undefined): Promise<number[]> {
+      if (name === undefined) {
+        return [];
+      }
+      const blob = state?.files[name];
+      if (blob === undefined) {
+        return [];
+      }
+      const bitmap = await createImageBitmap(blob);
+      const canvas = document.createElement("canvas");
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const context = canvas.getContext("2d");
+      if (context === null) {
+        bitmap.close();
+        return [];
+      }
+      context.drawImage(bitmap, 0, 0);
+      const pixels = Array.from(context.getImageData(32, 32, 1, 1).data);
+      bitmap.close();
+      return pixels;
+    }
+    return {
+      names,
+      dirName: state.dirName,
+      firstCenter: await center(names[0]),
+      secondCenter: await center(names[1]),
+    };
+  });
+}
+
+test("File > Export saves all frames as a looping GIF", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await addFrames(page, 1);
+  await paintCenter(page);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator("select#exportAnimation")).toHaveValue("");
+  await expect(dialog.locator("select#exportAnimatedFormat")).toHaveValue("gif");
+  await dialog.locator("#exportAnimatedOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported");
+  const gif = await exportedGifBytes(page);
+  expect(gif?.fileName).toContain("frames.gif");
+  expect(gif?.type).toBe("image/gif");
+  expect(gif?.header).toBe("GIF89a");
+  expect(gif?.width).toBe(64);
+  expect(gif?.height).toBe(64);
+  expect(gif?.descriptors).toBe(2);
+  expect(gif?.hasNetscape).toBe(true);
+});
+
+test("File > Export saves a play-once animation as GIF without repeat", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await addFrames(page, 1);
+  await addAnimation(page, "once,none,1,2");
+  await paintCenter(page);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator("select#exportAnimation").selectOption("once");
+  await dialog.locator("#exportAnimatedOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported");
+  const gif = await exportedGifBytes(page);
+  expect(gif?.fileName).toContain("once.gif");
+  expect(gif?.header).toBe("GIF89a");
+  expect(gif?.descriptors).toBe(2);
+  expect(gif?.hasNetscape).toBe(false);
+});
+
+test("File > Export saves a named animation as a PNG sequence", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await addFrames(page, 1);
+  await addAnimation(page, "go,none,1,2");
+  // Frame 1 keeps a black center dot; frame 2 stays blank.
+  await page.locator('gnumarus-shell [data-testid="anim-frame"][data-frame="0"]').click();
+  await paintCenter(page);
+  await stubExportDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator("select#exportAnimation").selectOption("go");
+  await dialog.locator("select#exportAnimatedFormat").selectOption("image/png");
+  await dialog.locator("#exportAnimatedOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported 2 files");
+  const sequence = await exportedSequence(page);
+  expect(sequence?.names).toEqual(["Untitled-go-001.png", "Untitled-go-002.png"]);
+  expect(sequence?.firstCenter).toEqual([0, 0, 0, 255]);
+  expect(sequence?.secondCenter).toEqual([0, 0, 0, 0]);
 });

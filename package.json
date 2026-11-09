@@ -13,6 +13,7 @@
     "deploy": "rm -rf /var/www/html/GnumarusPaintingAndAnimationApp && npm run build && cp -r dist /var/www/html/GnumarusPaintingAndAnimationApp"
   },
   "dependencies": {
+    "gifenc": "^1.0.3",
     "lit": "3.3.3",
     "three": "0.187.0"
   },

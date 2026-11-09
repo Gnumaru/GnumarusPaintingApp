@@ -122,7 +122,7 @@ export function createDefaultProject(width: number, height: number): GnumarusPro
     layers: [
       {
         id: "layer0",
-        name: "Layer 1",
+        name: "L1",
         visible: true,
         opacity: 1,
         lockedChannels: { r: false, g: false, b: false, a: false },
@@ -136,11 +136,11 @@ export function createDefaultProject(width: number, height: number): GnumarusPro
       frameNames: [defaultFrameName(0)],
       namedAnimations: [],
       activeAnimation: null,
-      textures: [{ id: "layer0", name: "Texture 1", width, height, file: textureFilePath("layer0") }],
+      textures: [{ id: "layer0", name: "T1", width, height, file: textureFilePath("layer0") }],
       contents: [
         {
           id: "content1",
-          name: "Content 1",
+          name: "C1",
           textureId: "layer0",
           transform: { ...IDENTITY_LAYER_TRANSFORM },
         },
@@ -444,7 +444,7 @@ function migrateLegacyLayersToAnimation(
     const legacyCell = layer.cells?.[0];
     textures.push({
       id: layer.id,
-      name: `Texture ${index + 1}`,
+      name: `T${index + 1}`,
       width,
       height,
       file: legacyCell?.file ?? textureFilePath(layer.id),
@@ -452,7 +452,7 @@ function migrateLegacyLayersToAnimation(
     const contentId = `content${index + 1}`;
     contents.push({
       id: contentId,
-      name: `Content ${index + 1}`,
+      name: `C${index + 1}`,
       textureId: layer.id,
       transform: layer.transform !== undefined ? { ...layer.transform } : { ...IDENTITY_LAYER_TRANSFORM },
     });

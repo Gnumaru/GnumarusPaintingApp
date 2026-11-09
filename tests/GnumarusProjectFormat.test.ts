@@ -15,14 +15,14 @@ describe("GnumarusProjectFormat", () => {
     expect(project.app).toBe(GNUMARUS_APP_ID);
     expect(project.layers.length).toBe(1);
     expect(project.animation.frames).toBe(1);
-    expect(project.animation.frameNames).toEqual(["Frame 1"]);
+    expect(project.animation.frameNames).toEqual(["F1"]);
     expect(project.animation.textures).toEqual([
-      { id: "layer0", name: "Texture 1", width: 64, height: 64, file: textureFilePath("layer0") },
+      { id: "layer0", name: "T1", width: 64, height: 64, file: textureFilePath("layer0") },
     ]);
     expect(project.animation.contents).toEqual([
       {
         id: "content1",
-        name: "Content 1",
+        name: "C1",
         textureId: "layer0",
         transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
       },
@@ -45,11 +45,11 @@ describe("GnumarusProjectFormat", () => {
     expect(parsed.layers[0]).toMatchObject({ id: "layer0" });
     expect(parsed.layers[0]?.width).toBeUndefined();
     expect(parsed.animation.frames).toBe(1);
-    expect(parsed.animation.frameNames).toEqual(["Frame 1"]);
+    expect(parsed.animation.frameNames).toEqual(["F1"]);
     expect(parsed.animation.defaultFrameDuration).toBe(100);
     expect(parsed.animation.frameDurations).toEqual([]);
     expect(parsed.animation.textures).toEqual([
-      { id: "layer0", name: "Texture 1", width: 64, height: 64, file: "cells/layer0_frame0.png" },
+      { id: "layer0", name: "T1", width: 64, height: 64, file: "cells/layer0_frame0.png" },
     ]);
     expect(parsed.animation.cells).toEqual([{ layer: "layer0", frame: 0, content: "content1" }]);
     const reparsed = parseProject(serializeProject(parsed));
@@ -216,7 +216,7 @@ describe("GnumarusProjectFormat", () => {
     const animation = raw.animation;
     delete animation["frameNames"];
     const parsed = parseProject(JSON.stringify(raw));
-    expect(parsed.animation.frameNames).toEqual(["Frame 1"]);
+    expect(parsed.animation.frameNames).toEqual(["F1"]);
   });
 
   it("round-trips custom frame names", () => {

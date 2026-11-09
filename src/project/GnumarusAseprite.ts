@@ -757,7 +757,7 @@ function buildAsepriteDocument(input: GnumarusAseBuildInput): GnumarusAsepriteDo
     layerIds.push(id);
     layers.push({
       id,
-      name: slot.name ?? `Layer ${layers.length + 1}`,
+      name: slot.name ?? `L${layers.length + 1}`,
       visible: slot.visible,
       opacity: slot.opacity,
       lockedChannels: unlockedChannels(),
@@ -832,7 +832,7 @@ function buildAsepriteDocument(input: GnumarusAseBuildInput): GnumarusAsepriteDo
     const contentId = `content${contents.length}`;
     contents.push({
       id: contentId,
-      name: `Content ${contents.length + 1}`,
+      name: `C${contents.length + 1}`,
       textureId,
       transform: {
         ...IDENTITY_LAYER_TRANSFORM,

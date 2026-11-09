@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   mapNamedAnimationFrames,
   nextAnimationStep,
+  parseFrameList,
   parseNamedAnimation,
+  resolveExportSequence,
   serializeNamedAnimation,
   GnumarusNamedAnimationError,
   type GnumarusNamedAnimation,
@@ -197,5 +199,69 @@ describe("GnumarusNamedAnimations", () => {
         ],
       },
     ]);
+  });
+
+  it("resolves one export cycle per loop mode", () => {
+    const forward: GnumarusNamedAnimation = {
+      name: "walk",
+      loop: "forward",
+      frames: [
+        { frame: 2, duration: null },
+        { frame: 0, duration: 400 },
+      ],
+    };
+    expect(resolveExportSequence(forward)).toEqual([
+      { frame: 2, duration: null },
+      { frame: 0, duration: 400 },
+    ]);
+    const once: GnumarusNamedAnimation = {
+      name: "once",
+      loop: "none",
+      frames: [
+        { frame: 0, duration: null },
+        { frame: 1, duration: null },
+      ],
+    };
+    expect(resolveExportSequence(once)).toEqual([
+      { frame: 0, duration: null },
+      { frame: 1, duration: null },
+    ]);
+    const boing: GnumarusNamedAnimation = {
+      name: "boing",
+      loop: "ping-pong",
+      frames: [
+        { frame: 0, duration: null },
+        { frame: 1, duration: null },
+        { frame: 2, duration: null },
+      ],
+    };
+    expect(resolveExportSequence(boing)).toEqual([
+      { frame: 0, duration: null },
+      { frame: 1, duration: null },
+      { frame: 2, duration: null },
+      { frame: 1, duration: null },
+      { frame: 0, duration: null },
+    ]);
+    const single: GnumarusNamedAnimation = {
+      name: "idle",
+      loop: "forward",
+      frames: [{ frame: 1, duration: 50 }],
+    };
+    expect(resolveExportSequence(single)).toEqual([{ frame: 1, duration: 50 }]);
+    const empty: GnumarusNamedAnimation = { name: "empty", loop: "forward", frames: [] };
+    expect(resolveExportSequence(empty)).toEqual([]);
+  });
+
+  it("parses bare frame lists with ranges", () => {
+    expect(parseFrameList("1,3-5,7", 7)).toEqual([0, 2, 3, 4, 6]);
+    expect(parseFrameList(" 2-2 ", 3)).toEqual([1]);
+    expect(parseFrameList("3,1", 3)).toEqual([2, 0]);
+    expect(() => parseFrameList("", 3)).toThrow(/empty/);
+    expect(parseFrameList("1,,2", 3)).toEqual([0, 1]);
+    expect(() => parseFrameList("0", 3)).toThrow(GnumarusNamedAnimationError);
+    expect(() => parseFrameList("4", 3)).toThrow(/does not exist/);
+    expect(() => parseFrameList("3-1", 3)).toThrow(/before its start/);
+    expect(() => parseFrameList("2:100", 3)).toThrow(/Invalid frame entry/);
+    expect(() => parseFrameList("abc", 3)).toThrow(/Invalid frame entry/);
   });
 });

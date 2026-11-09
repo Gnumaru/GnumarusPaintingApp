@@ -1037,7 +1037,7 @@ export class GnumarusCanvasEngine {
     const border = makeAxisLine(0xff00ff);
     this.borderMaterial = border.material;
     this.borderLine = border.line;
-    const first = this.createLayerInternal("layer0", "Layer 1", true, 1, createPixelBuffer(64, 64), 64, 64, {
+    const first = this.createLayerInternal("layer0", "L1", true, 1, createPixelBuffer(64, 64), 64, 64, {
       ...IDENTITY_LAYER_TRANSFORM,
     });
     this.layers.push(first);
@@ -1053,7 +1053,7 @@ export class GnumarusCanvasEngine {
     });
     this.contents.set("content1", {
       id: "content1",
-      name: "Content 1",
+      name: "C1",
       textureId: "layer0",
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
@@ -1171,6 +1171,10 @@ export class GnumarusCanvasEngine {
   }
 
   private resolveFrame(): Map<string, GnumarusResolvedCell> {
+    return this.resolveFrameAt(this.currentFrame);
+  }
+
+  private resolveFrameAt(frame: number): Map<string, GnumarusResolvedCell> {
     const textures = new Map<string, { width: number; height: number; buffer: Uint8ClampedArray }>();
     for (const [id, entry] of this.textures) {
       textures.set(id, { width: entry.width, height: entry.height, buffer: entry.buffer });
@@ -1184,8 +1188,47 @@ export class GnumarusCanvasEngine {
       textures,
       contents,
       this.cells,
-      this.currentFrame,
+      frame,
     );
+  }
+
+  /**
+   * Flatten inputs for an arbitrary frame without touching live render
+   * state (buffer references are shared read-only). Null for bad frames.
+   */
+  getFrameFlattenInputs(frame: number): Array<{
+    width: number;
+    height: number;
+    buffer: Uint8ClampedArray;
+    transform: GnumarusLayerTransform;
+    visible: boolean;
+    opacity: number;
+  }> | null {
+    if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
+      return null;
+    }
+    const resolved = this.resolveFrameAt(frame);
+    return this.layers.map((layer) => {
+      const cell = resolved.get(layer.id);
+      if (cell === undefined || cell.buffer === null || cell.width < 1 || cell.height < 1) {
+        return {
+          width: 0,
+          height: 0,
+          buffer: new Uint8ClampedArray(0),
+          transform: { ...IDENTITY_LAYER_TRANSFORM },
+          visible: false,
+          opacity: layer.opacity,
+        };
+      }
+      return {
+        width: cell.width,
+        height: cell.height,
+        buffer: cell.buffer,
+        transform: { ...cell.transform },
+        visible: layer.visible,
+        opacity: layer.opacity,
+      };
+    });
   }
 
   /** Point one layer render at its current-frame cell (shared buffer refs, no copies). */
@@ -1244,7 +1287,7 @@ export class GnumarusCanvasEngine {
   }
 
   private nextTextureName(): string {
-    return `Texture ${this.textureNameCounter++}`;
+    return `T${this.textureNameCounter++}`;
   }
 
   private contentDisplaySize(content: GnumarusCellContent): { width: number; height: number } {
@@ -1300,7 +1343,7 @@ export class GnumarusCanvasEngine {
     if (!Number.isInteger(at) || at < 0 || at > this.frameCount) {
       return -1;
     }
-    const name = `Frame ${this.frameNameCounter++}`;
+    const name = `F${this.frameNameCounter++}`;
     this.cells = insertFrameCells(this.cells, at);
     this.frameDurations = insertFrameDurations(this.frameDurations, at);
     this.frameNames = insertFrameNames(this.frameNames, at, name);
@@ -1654,7 +1697,7 @@ export class GnumarusCanvasEngine {
     const contentId = this.nextContentId();
     this.contents.set(contentId, {
       id: contentId,
-      name: `Content ${this.contentCounter - 1}`,
+      name: `C${this.contentCounter - 1}`,
       textureId,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
@@ -1679,7 +1722,7 @@ export class GnumarusCanvasEngine {
     const contentId = this.nextContentId();
     this.contents.set(contentId, {
       id: contentId,
-      name: `Content ${this.contentCounter - 1}`,
+      name: `C${this.contentCounter - 1}`,
       textureId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
@@ -1797,7 +1840,7 @@ export class GnumarusCanvasEngine {
       const createdId = this.nextContentId();
       content = {
         id: createdId,
-        name: `Content ${this.contentCounter - 1}`,
+        name: `C${this.contentCounter - 1}`,
         textureId: null,
         transform: { ...IDENTITY_LAYER_TRANSFORM },
       };
@@ -1931,7 +1974,7 @@ export class GnumarusCanvasEngine {
 
   private insertLayerAt(at: number): string {
     const id = `layer${this.layerCounter}`;
-    const name = `Layer ${this.layerCounter + 1}`;
+    const name = `L${this.layerCounter + 1}`;
     this.layerCounter += 1;
     const layer = this.createLayerInternal(
       id,
@@ -2933,7 +2976,7 @@ export class GnumarusCanvasEngine {
       const contentId = this.nextContentId();
       this.contents.set(contentId, {
         id: contentId,
-        name: `Content ${this.contentCounter - 1}`,
+        name: `C${this.contentCounter - 1}`,
         textureId: input.id,
         transform: {
           ...input.transform,
@@ -3067,7 +3110,7 @@ export class GnumarusCanvasEngine {
     this.frameNames = ensureFrameNames(data.frames, data.frameNames ?? []);
     this.frameNameCounter = data.frames + 1;
     for (const name of this.frameNames) {
-      const match = /^Frame (\d+)$/.exec(name);
+      const match = /^F(\d+)$/.exec(name);
       if (match?.[1] !== undefined) {
         this.frameNameCounter = Math.max(this.frameNameCounter, Number.parseInt(match[1], 10) + 1);
       }
@@ -3118,7 +3161,7 @@ export class GnumarusCanvasEngine {
     }
     let maxTextureName = 0;
     for (const texture of data.textures) {
-      const match = /^Texture (\d+)$/.exec(texture.name);
+      const match = /^T(\d+)$/.exec(texture.name);
       if (match?.[1] !== undefined) {
         maxTextureName = Math.max(maxTextureName, Number.parseInt(match[1], 10) + 1);
       }
@@ -3189,7 +3232,7 @@ export class GnumarusCanvasEngine {
     this.imageHeight = height;
     this.clearAllLayers();
     this.textureNameCounter = 1;
-    const first = this.createLayerInternal("layer0", "Layer 1", true, 1, createPixelBuffer(width, height), width, height, {
+    const first = this.createLayerInternal("layer0", "L1", true, 1, createPixelBuffer(width, height), width, height, {
       ...IDENTITY_LAYER_TRANSFORM,
     });
     this.layers.push(first);
@@ -3203,7 +3246,7 @@ export class GnumarusCanvasEngine {
     first.renderTextureId = "layer0";
     this.contents.set("content1", {
       id: "content1",
-      name: "Content 1",
+      name: "C1",
       textureId: "layer0",
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
