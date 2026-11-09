@@ -46,9 +46,12 @@ import {
 import {
   DEFAULT_GRID_SETTINGS,
   GRID_SETTINGS_STORAGE_KEY,
+  GNUMARUS_GRID_MAX_OPACITY_PERCENT,
   GNUMARUS_GRID_MAX_ZOOM,
+  GNUMARUS_GRID_MIN_OPACITY_PERCENT,
   GNUMARUS_GRID_MIN_ZOOM,
   clampGridMinZoom,
+  clampGridOpacityPercent,
   parseGridSettings,
   serializeGridSettings,
 } from "../settings/GnumarusGridSettings";
@@ -1037,6 +1040,7 @@ export class GnumarusShell extends LitElement {
     checkerSizeX: { type: Number },
     checkerSizeY: { type: Number },
     gridMinZoom: { type: Number },
+    gridOpacity: { type: Number },
     rotationStepDeg: { type: Number },
     floatingActive: { type: Boolean },
     backgroundMode: { type: String },
@@ -1125,6 +1129,7 @@ export class GnumarusShell extends LitElement {
   declare checkerSizeX: number;
   declare checkerSizeY: number;
   declare gridMinZoom: number;
+  declare gridOpacity: number;
   declare rotationStepDeg: number;
   declare floatingActive: boolean;
   declare backgroundMode: GnumarusBackgroundMode;
@@ -1228,6 +1233,7 @@ export class GnumarusShell extends LitElement {
     this.checkerSizeX = DEFAULT_CHECKER_SETTINGS.sizeX;
     this.checkerSizeY = DEFAULT_CHECKER_SETTINGS.sizeY;
     this.gridMinZoom = DEFAULT_GRID_SETTINGS.minZoom;
+    this.gridOpacity = DEFAULT_GRID_SETTINGS.opacityPercent;
     this.rotationStepDeg = DEFAULT_ROTATION_SETTINGS.stepDeg;
     this.floatingActive = false;
     this.backgroundMode = DEFAULT_BACKGROUND_SETTINGS.mode;
@@ -2103,6 +2109,30 @@ export class GnumarusShell extends LitElement {
                 aria-label="Reset pixel grid minimum zoom to default"
                 title="Reset to default"
                 @click=${(): void => this.resetGridMinZoomToDefault()}
+              >
+                ↻
+              </button>`
+            : html``}
+        </div>
+        <div class="setting-row">
+          <label
+            >Pixel grid opacity (percent)
+            <input
+              type="number"
+              id="gridOpacity"
+              min="0"
+              max="100"
+              step="1"
+              .value=${String(this.gridOpacity)}
+              @input=${(): void => this.applyGridOpacityFromDialog()}
+            />
+          </label>
+          ${this.gridOpacity !== DEFAULT_GRID_SETTINGS.opacityPercent
+            ? html`<button
+                class="reset-btn"
+                aria-label="Reset pixel grid opacity to default"
+                title="Reset to default"
+                @click=${(): void => this.resetGridOpacityToDefault()}
               >
                 ↻
               </button>`
@@ -3027,6 +3057,7 @@ export class GnumarusShell extends LitElement {
     this.checkerColorB = storedChecker.colorB;
     const storedGrid = this.loadGridSettings();
     this.gridMinZoom = storedGrid.minZoom;
+    this.gridOpacity = storedGrid.opacityPercent;
     const storedRotation = this.loadRotationSettings();
     this.rotationStepDeg = storedRotation.stepDeg;
     const storedBackground = this.loadBackgroundSettings();
@@ -3053,6 +3084,7 @@ export class GnumarusShell extends LitElement {
         },
         checker: storedChecker,
         gridMinZoom: storedGrid.minZoom,
+        gridOpacityPercent: storedGrid.opacityPercent,
         background: storedBackground,
         onStats: (stats): void => {
           this.zoomText = `${Math.round(stats.zoom * 100)}%`;
@@ -3534,7 +3566,7 @@ export class GnumarusShell extends LitElement {
     return { ...DEFAULT_CHECKER_SETTINGS };
   }
 
-  private loadGridSettings(): { minZoom: number } {
+  private loadGridSettings(): { minZoom: number; opacityPercent: number } {
     try {
       const stored = window.localStorage.getItem(GRID_SETTINGS_STORAGE_KEY);
       if (stored !== null) {
@@ -3562,6 +3594,30 @@ export class GnumarusShell extends LitElement {
     this.engine?.setGridMinZoom(minZoom);
     this.persistGrid();
     this.statusMessage = `Pixel grid minimum zoom: ${Math.round(minZoom * 100)}%`;
+  }
+
+  private currentDialogGridOpacity(): number {
+    const input = this.shadowRoot?.getElementById("gridOpacity") as HTMLInputElement | null;
+    const percent = Number(input?.value ?? "100") || 0;
+    return clampGridOpacityPercent(
+      Math.min(GNUMARUS_GRID_MAX_OPACITY_PERCENT, Math.max(GNUMARUS_GRID_MIN_OPACITY_PERCENT, Math.floor(percent))),
+    );
+  }
+
+  private applyGridOpacityFromDialog(): void {
+    const opacity = this.currentDialogGridOpacity();
+    this.gridOpacity = opacity;
+    this.engine?.setGridOpacityPercent(opacity);
+    this.persistGrid();
+    this.statusMessage = `Pixel grid opacity: ${opacity}%`;
+  }
+
+  /** Test hook: set the pixel grid opacity in percent (0..100, clamped). */
+  setGridOpacityPercent(value: number): void {
+    this.gridOpacity = clampGridOpacityPercent(value);
+    this.engine?.setGridOpacityPercent(this.gridOpacity);
+    this.persistGrid();
+    this.statusMessage = `Pixel grid opacity: ${this.gridOpacity}%`;
   }
 
   private loadRotationSettings(): { stepDeg: number } {
@@ -3805,7 +3861,10 @@ export class GnumarusShell extends LitElement {
 
   private persistGrid(): void {
     try {
-      window.localStorage.setItem(GRID_SETTINGS_STORAGE_KEY, serializeGridSettings({ minZoom: this.gridMinZoom }));
+      window.localStorage.setItem(
+        GRID_SETTINGS_STORAGE_KEY,
+        serializeGridSettings({ minZoom: this.gridMinZoom, opacityPercent: this.gridOpacity }),
+      );
     } catch {
       // Storage failures must not break the settings flow.
     }
@@ -4319,6 +4378,13 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = "Pixel grid minimum zoom reset to default";
   }
 
+  private resetGridOpacityToDefault(): void {
+    this.gridOpacity = DEFAULT_GRID_SETTINGS.opacityPercent;
+    this.engine?.setGridOpacityPercent(this.gridOpacity);
+    this.persistGrid();
+    this.statusMessage = "Pixel grid opacity reset to default";
+  }
+
   private currentDialogChecker(): GnumarusCheckerSettings {
     const modeInput = this.shadowRoot?.getElementById("checkerMode") as HTMLSelectElement | null;
     const sizeXInput = this.shadowRoot?.getElementById("checkerSizeX") as HTMLInputElement | null;
@@ -4362,6 +4428,8 @@ export class GnumarusShell extends LitElement {
     const gridSettings = { ...DEFAULT_GRID_SETTINGS };
     this.gridMinZoom = gridSettings.minZoom;
     this.engine?.setGridMinZoom(gridSettings.minZoom);
+    this.gridOpacity = gridSettings.opacityPercent;
+    this.engine?.setGridOpacityPercent(gridSettings.opacityPercent);
     this.persistGrid();
     const backgroundSettings = { ...DEFAULT_BACKGROUND_SETTINGS };
     this.backgroundMode = backgroundSettings.mode;

@@ -1,4 +1,4 @@
-import { compositePixelOver, parseHexColor } from "../canvas/GnumarusPixelBuffer";
+import { compositePixelOver, parseHexColor, type GnumarusRgba } from "../canvas/GnumarusPixelBuffer";
 import { layerPixelCenterToProject, IDENTITY_LAYER_TRANSFORM, layerLinearMatrix } from "../canvas/GnumarusViewportMath";
 import type { GnumarusLayerTransform } from "../canvas/GnumarusViewportMath";
 
@@ -104,6 +104,17 @@ export function compositeFinalImage(
   if (background !== undefined) {
     paintPreviewBackground(dst, width, height, background);
   }
+  const prepared = prepareFlattenLayers(layers);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const dstIndex = (y * width + x) * 4;
+      compositePreparedAt(prepared, width, height, x, y, dst, dstIndex);
+    }
+  }
+  return dst;
+}
+
+function prepareFlattenLayers(layers: GnumarusFlattenLayerInput[]): GnumarusPreparedLayer[] {
   const prepared: GnumarusPreparedLayer[] = [];
   for (const layer of layers) {
     if (!layer.visible) {
@@ -127,27 +138,55 @@ export function compositeFinalImage(
       matrix: layerLinearMatrix(layer.transform),
     });
   }
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const project = layerPixelCenterToProject(x, y, width, height, IDENTITY_LAYER_TRANSFORM);
-      const dstIndex = (y * width + x) * 4;
-      for (const layer of prepared) {
-        const determinant = layer.matrix.a * layer.matrix.d - layer.matrix.b * layer.matrix.c;
-        if (!(Math.abs(determinant) > 1e-9)) {
-          continue;
-        }
-        const rx = project.x - layer.transform.x;
-        const ry = project.y - layer.transform.y;
-        const qx = (layer.matrix.d * rx - layer.matrix.b * ry) / determinant;
-        const qy = (-layer.matrix.c * rx + layer.matrix.a * ry) / determinant;
-        const sx = Math.floor(qx / (layer.transform.flipX ? -1 : 1) + layer.width / 2);
-        const sy = Math.floor(qy / (layer.transform.flipY ? -1 : 1) + layer.height / 2);
-        if (sx < 0 || sy < 0 || sx >= layer.width || sy >= layer.height) {
-          continue;
-        }
-        compositePixelOver(dst, dstIndex, layer.buffer, (sy * layer.width + sx) * 4, layer.opacity);
-      }
+  return prepared;
+}
+
+function compositePreparedAt(
+  prepared: GnumarusPreparedLayer[],
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+  dst: Uint8ClampedArray,
+  dstIndex: number,
+): void {
+  const project = layerPixelCenterToProject(x, y, width, height, IDENTITY_LAYER_TRANSFORM);
+  for (const layer of prepared) {
+    const determinant = layer.matrix.a * layer.matrix.d - layer.matrix.b * layer.matrix.c;
+    if (!(Math.abs(determinant) > 1e-9)) {
+      continue;
     }
+    const rx = project.x - layer.transform.x;
+    const ry = project.y - layer.transform.y;
+    const qx = (layer.matrix.d * rx - layer.matrix.b * ry) / determinant;
+    const qy = (-layer.matrix.c * rx + layer.matrix.a * ry) / determinant;
+    const sx = Math.floor(qx / (layer.transform.flipX ? -1 : 1) + layer.width / 2);
+    const sy = Math.floor(qy / (layer.transform.flipY ? -1 : 1) + layer.height / 2);
+    if (sx < 0 || sy < 0 || sx >= layer.width || sy >= layer.height) {
+      continue;
+    }
+    compositePixelOver(dst, dstIndex, layer.buffer, (sy * layer.width + sx) * 4, layer.opacity);
   }
-  return dst;
+}
+
+/**
+ * Composite the same visible layers as `compositeFinalImage` for a single
+ * canvas pixel, without any background. Null when the pixel is outside
+ * the canvas. Shares the exact per-pixel math, so sampling matches export.
+ */
+export function compositeLayersAt(
+  projectWidth: number,
+  projectHeight: number,
+  layers: GnumarusFlattenLayerInput[],
+  x: number,
+  y: number,
+): GnumarusRgba | null {
+  const width = Math.max(1, Math.floor(projectWidth));
+  const height = Math.max(1, Math.floor(projectHeight));
+  if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= width || y >= height) {
+    return null;
+  }
+  const dst = new Uint8ClampedArray(4);
+  compositePreparedAt(prepareFlattenLayers(layers), width, height, x, y, dst, 0);
+  return { r: dst[0] ?? 0, g: dst[1] ?? 0, b: dst[2] ?? 0, a: dst[3] ?? 0 };
 }

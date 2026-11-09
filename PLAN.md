@@ -332,3 +332,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 ## 62. Frame header tooltips show animation membership (implemented)
 - Each animation-matrix column header tooltip (and aria-label) names how many defined animations include that frame (`in no animations` / `in 1 animation` / `in N animations`), computed from the named animation frame lists.
 - Pure helper `countAnimationFrames` in `src/animation/GnumarusNamedAnimations.ts` with unit tests; E2E test defines animations via the Manage dialog and asserts header titles.
+
+## 63. Composite eyedropper + grid opacity setting (implemented)
+- Eyedropper samples the composited canvas (all visible layers blended with opacity/transforms, no background) instead of only the active cell: new pure `compositeLayersAt` in `src/preview/GnumarusFinalRender.ts` reusing the exact `compositeFinalImage` per-pixel math for one project pixel; engine `pickColorAt` maps the client point to a canvas pixel and composites the current frame inputs; transparent composites still pick (same as before).
+- Pixel grid opacity setting: `opacityPercent` integer 0..100, default 100, in `GnumarusGridSettings` (parse/clamp/round/serialize, missing field defaults, legacy `minZoomPercent` kept); engine `gridOpacity` option + setter + `uOpacity` shader uniform multiplying the grid alpha; Settings row with number input + per-setting reset arrow + Reset-defaults support + `setGridOpacity` test hook; `getGridState` gains `opacity`.
+- Unit tests for the composite sampler and grid opacity parse/clamp/serialize/shader uniform; E2E for stacked-layer picks (bottom-only region, overlap blend) and the settings input.

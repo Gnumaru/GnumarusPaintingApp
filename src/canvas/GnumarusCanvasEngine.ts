@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { compositeLayersAt } from "../preview/GnumarusFinalRender";
 import {
   applyCoverageMask,
   clearPixelBuffer,
@@ -84,6 +85,7 @@ import {
 } from "../settings/GnumarusCheckerSettings";
 import {
   clampGridMinZoom,
+  clampGridOpacityPercent,
   DEFAULT_GRID_SETTINGS,
   shouldShowPixelGrid,
 } from "../settings/GnumarusGridSettings";
@@ -424,6 +426,7 @@ export const GRID_FRAGMENT_SHADER = [
   "varying vec2 vUv;",
   "uniform float uLayerW;",
   "uniform float uLayerH;",
+  "uniform float uOpacity;",
   "void main() {",
   "  if (uLayerW < 1.0 || uLayerH < 1.0) { discard; }",
   "  vec2 coord = vec2(vUv.x * uLayerW, vUv.y * uLayerH);",
@@ -431,7 +434,7 @@ export const GRID_FRAGMENT_SHADER = [
   "  vec2 g = abs(fract(coord - 0.5) - 0.5) / max(fw, vec2(1e-4));",
   "  float line = 1.0 - min(min(g.x, g.y), 1.0);",
   "  if (line < 0.02) { discard; }",
-  "  gl_FragColor = vec4(1.0, 1.0, 1.0, line * 0.45);",
+  "  gl_FragColor = vec4(1.0, 1.0, 1.0, line * 0.45 * uOpacity);",
   "}",
 ].join("\n");
 
@@ -449,6 +452,7 @@ export interface GnumarusEngineOptions {
   onTransformChanged?: () => void;
   checker?: GnumarusCheckerSettings;
   gridMinZoom?: number;
+  gridOpacityPercent?: number;
   background?: GnumarusBackgroundSettings;
 }
 
@@ -699,6 +703,7 @@ export class GnumarusCanvasEngine {
   private backgroundColor: string;
   private readonly backgroundColorVec: THREE.Vector3;
   private gridMinZoom: number;
+  private gridOpacityPercent: number;
   private readonly gridMaterial: THREE.ShaderMaterial;
   private readonly gridPlane: THREE.Mesh;
   private readonly axisXMaterial: THREE.LineBasicMaterial;
@@ -737,6 +742,9 @@ export class GnumarusCanvasEngine {
     this.backgroundColor = initialBackground.color;
     this.backgroundColorVec = checkerHexToVec(initialBackground.color);
     this.gridMinZoom = clampGridMinZoom(options.gridMinZoom ?? DEFAULT_GRID_SETTINGS.minZoom);
+    this.gridOpacityPercent = clampGridOpacityPercent(
+      options.gridOpacityPercent ?? DEFAULT_GRID_SETTINGS.opacityPercent,
+    );
     this.imageWidth = 64;
     this.imageHeight = 64;
     this.zoom = 8;
@@ -1005,6 +1013,7 @@ export class GnumarusCanvasEngine {
       uniforms: {
         uLayerW: { value: 64 },
         uLayerH: { value: 64 },
+        uOpacity: { value: 1 },
       },
       vertexShader: LAYER_VERTEX_SHADER,
       fragmentShader: GRID_FRAGMENT_SHADER,
@@ -6315,20 +6324,29 @@ export class GnumarusCanvasEngine {
   }
 
   /**
-   * Copy the active cell pixel under the client point into the paint color.
-   * Never paints, records history or materializes empty cells. Returns false
-   * when there is no pixel to sample.
+   * Copy the composited canvas pixel under the client point into the paint
+   * color: every visible layer blended exactly like the final render, so
+   * the picked color is what the user sees on screen regardless of which
+   * layer it comes from. No background is composited. Never paints,
+   * records history or materializes empty cells. Returns false when the
+   * point is outside the canvas.
    */
   pickColorAt(clientX: number, clientY: number): boolean {
-    const pixel = this.toImagePixel(clientX, clientY);
+    const project = this.clientToProject(clientX, clientY);
+    if (project === null) {
+      return false;
+    }
+    const pixel = projectToLayerPixel(project.x, project.y, this.imageWidth, this.imageHeight, {
+      ...IDENTITY_LAYER_TRANSFORM,
+    });
     if (pixel === null) {
       return false;
     }
-    const layer = this.activeLayer();
-    if (layer === null) {
+    const inputs = this.getFrameFlattenInputs(this.currentFrame);
+    if (inputs === null) {
       return false;
     }
-    const sampled = getPixel(layer.buffer, layer.width, layer.height, pixel.x, pixel.y);
+    const sampled = compositeLayersAt(this.imageWidth, this.imageHeight, inputs, pixel.x, pixel.y);
     if (sampled === null) {
       return false;
     }
@@ -6474,6 +6492,16 @@ export class GnumarusCanvasEngine {
     this.render();
   }
 
+  getGridOpacityPercent(): number {
+    return this.gridOpacityPercent;
+  }
+
+  setGridOpacityPercent(value: number): void {
+    this.gridOpacityPercent = clampGridOpacityPercent(value);
+    this.updateGrid();
+    this.render();
+  }
+
   applyGridMinZoom(value: number): void {
     this.setGridMinZoom(value);
   }
@@ -6502,11 +6530,19 @@ export class GnumarusCanvasEngine {
     return Array.from(this.floatingPlane.matrix.elements);
   }
 
-  getGridState(): { visible: boolean; minZoom: number; layerId: string | null; width: number; height: number } {
+  getGridState(): {
+    visible: boolean;
+    minZoom: number;
+    opacityPercent: number;
+    layerId: string | null;
+    width: number;
+    height: number;
+  } {
     const active = this.activeLayer();
     return {
       visible: this.gridPlane.visible === true,
       minZoom: this.gridMinZoom,
+      opacityPercent: this.gridOpacityPercent,
       layerId: active === null ? null : active.id,
       width: active === null ? 0 : active.width,
       height: active === null ? 0 : active.height,
@@ -6525,6 +6561,7 @@ export class GnumarusCanvasEngine {
     const visible = shouldShowPixelGrid(this.zoom, this.gridMinZoom);
     this.gridMaterial.uniforms["uLayerW"]!.value = active.width;
     this.gridMaterial.uniforms["uLayerH"]!.value = active.height;
+    this.gridMaterial.uniforms["uOpacity"]!.value = this.gridOpacityPercent / 100;
     this.gridPlane.visible = visible;
     if (visible) {
       this.writePlaneMatrix(this.gridPlane, active.width, active.height, active.transform, this.layers.length * 0.01 + 0.02);

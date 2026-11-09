@@ -205,3 +205,6 @@
 - [x] Krita KRA/KRZ import (.kra/.krz via zip+maindoc dispatch, strict hand-written tile parser, groups flattened, multi-frame project load)
 - [x] Frame header tooltips show animation membership (pure count helper + unit test + E2E)
 - [x] Unit tests (vitest) — 282 passed (previous 281 + 1 animation-membership)
+- [x] Composite eyedropper (samples flattened visible layers) + grid opacity setting (0-100, default 100)
+- [x] Unit tests (vitest) — 287 passed (previous 282 + 5 composite/grid)
+- [x] E2E test (Playwright): previous 165 + composite eyedropper + grid opacity — 167 passed

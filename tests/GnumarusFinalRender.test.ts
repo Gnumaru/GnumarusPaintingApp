@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createPixelBuffer, setPixel } from "../src/canvas/GnumarusPixelBuffer";
 import { IDENTITY_LAYER_TRANSFORM } from "../src/canvas/GnumarusViewportMath";
-import { compositeFinalImage } from "../src/preview/GnumarusFinalRender";
+import { compositeFinalImage, compositeLayersAt } from "../src/preview/GnumarusFinalRender";
 
 describe("GnumarusFinalRender", () => {
   it("renders transparent for empty layers", () => {
@@ -105,5 +105,48 @@ describe("GnumarusFinalRender", () => {
       color: "also-bad",
     });
     expect(Array.from(flat)).toEqual(new Array(16).fill(0));
+  });
+
+  it("samples one composited pixel without background", () => {
+    const red = createPixelBuffer(1, 1);
+    setPixel(red, 1, 1, 0, 0, { r: 255, g: 0, b: 0, a: 255 });
+    const blue = createPixelBuffer(1, 1);
+    setPixel(blue, 1, 1, 0, 0, { r: 0, g: 0, b: 255, a: 255 });
+    const layers = [
+      { width: 1, height: 1, buffer: red, transform: { ...IDENTITY_LAYER_TRANSFORM }, visible: true, opacity: 1 },
+      { width: 1, height: 1, buffer: blue, transform: { ...IDENTITY_LAYER_TRANSFORM }, visible: true, opacity: 0.5 },
+    ];
+    expect(compositeLayersAt(1, 1, layers, 0, 0)).toEqual({ r: 128, g: 0, b: 128, a: 255 });
+    // Matches the full-canvas composite at the same pixel.
+    const flat = compositeFinalImage(1, 1, layers);
+    expect({ r: flat[0], g: flat[1], b: flat[2], a: flat[3] }).toEqual(
+      compositeLayersAt(1, 1, layers, 0, 0),
+    );
+  });
+
+  it("samples transparency and rejects out-of-canvas pixels", () => {
+    expect(compositeLayersAt(2, 2, [], 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    expect(compositeLayersAt(2, 2, [], 2, 0)).toBeNull();
+    expect(compositeLayersAt(2, 2, [], 0, 2)).toBeNull();
+    expect(compositeLayersAt(2, 2, [], -1, 0)).toBeNull();
+    expect(compositeLayersAt(0, 0, [], 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  });
+
+  it("skips hidden and fully transparent layers when sampling", () => {
+    const red = createPixelBuffer(1, 1);
+    setPixel(red, 1, 1, 0, 0, { r: 255, g: 0, b: 0, a: 255 });
+    const green = createPixelBuffer(1, 1);
+    setPixel(green, 1, 1, 0, 0, { r: 0, g: 255, b: 0, a: 255 });
+    expect(
+      compositeLayersAt(1, 1, [
+        { width: 1, height: 1, buffer: red, transform: { ...IDENTITY_LAYER_TRANSFORM }, visible: true, opacity: 1 },
+        { width: 1, height: 1, buffer: green, transform: { ...IDENTITY_LAYER_TRANSFORM }, visible: false, opacity: 1 },
+      ], 0, 0),
+    ).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+    expect(
+      compositeLayersAt(1, 1, [
+        { width: 1, height: 1, buffer: red, transform: { ...IDENTITY_LAYER_TRANSFORM }, visible: true, opacity: 0 },
+      ], 0, 0),
+    ).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   });
 });

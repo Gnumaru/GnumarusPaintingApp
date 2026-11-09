@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clampGridMinZoom,
+  clampGridOpacityPercent,
   DEFAULT_GRID_SETTINGS,
   GNUMARUS_GRID_MAX_ZOOM,
   GNUMARUS_GRID_MIN_ZOOM,
@@ -11,8 +12,8 @@ import {
 } from "../src/settings/GnumarusGridSettings";
 
 describe("GnumarusGridSettings", () => {
-  it("defaults to 1000 percent", () => {
-    expect(DEFAULT_GRID_SETTINGS).toEqual({ minZoom: 10 });
+  it("defaults to 1000 percent and full opacity", () => {
+    expect(DEFAULT_GRID_SETTINGS).toEqual({ minZoom: 10, opacityPercent: 100 });
     expect(GNUMARUS_GRID_MIN_ZOOM).toBe(2);
     expect(GNUMARUS_GRID_MAX_ZOOM).toBe(64);
   });
@@ -27,21 +28,46 @@ describe("GnumarusGridSettings", () => {
     expect(clampGridMinZoom(Number.POSITIVE_INFINITY)).toBe(10);
   });
 
+  it("clamps the opacity percent to an integer 0..100", () => {
+    expect(clampGridOpacityPercent(100)).toBe(100);
+    expect(clampGridOpacityPercent(0)).toBe(0);
+    expect(clampGridOpacityPercent(33.4)).toBe(33);
+    expect(clampGridOpacityPercent(33.6)).toBe(34);
+    expect(clampGridOpacityPercent(-5)).toBe(0);
+    expect(clampGridOpacityPercent(140)).toBe(100);
+    expect(clampGridOpacityPercent(Number.NaN)).toBe(100);
+    expect(clampGridOpacityPercent(Number.POSITIVE_INFINITY)).toBe(100);
+  });
+
   it("round-trips settings", () => {
-    expect(parseGridSettings(serializeGridSettings({ minZoom: 4 }))).toEqual({ minZoom: 4 });
+    expect(parseGridSettings(serializeGridSettings({ minZoom: 4, opacityPercent: 55 }))).toEqual({
+      minZoom: 4,
+      opacityPercent: 55,
+    });
     expect(parseGridSettings(serializeGridSettings(DEFAULT_GRID_SETTINGS))).toEqual(DEFAULT_GRID_SETTINGS);
   });
 
   it("clamps parsed values", () => {
-    expect(parseGridSettings(JSON.stringify({ minZoom: 1 }))).toEqual({ minZoom: 2 });
-    expect(parseGridSettings(JSON.stringify({ minZoom: 100 }))).toEqual({ minZoom: 64 });
-    expect(parseGridSettings(JSON.stringify({ minZoomPercent: 400 }))).toEqual({ minZoom: 4 });
+    expect(parseGridSettings(JSON.stringify({ minZoom: 1 }))).toEqual({ minZoom: 2, opacityPercent: 100 });
+    expect(parseGridSettings(JSON.stringify({ minZoom: 100 }))).toEqual({ minZoom: 64, opacityPercent: 100 });
+    expect(parseGridSettings(JSON.stringify({ minZoomPercent: 400 }))).toEqual({ minZoom: 4, opacityPercent: 100 });
+    expect(parseGridSettings(JSON.stringify({ minZoom: 10, opacityPercent: 250 }))).toEqual({
+      minZoom: 10,
+      opacityPercent: 100,
+    });
+    expect(parseGridSettings(JSON.stringify({ minZoom: 10, opacityPercent: -3 }))).toEqual({
+      minZoom: 10,
+      opacityPercent: 0,
+    });
   });
 
   it("rejects invalid settings", () => {
     expect(() => parseGridSettings("not json")).toThrow(GnumarusGridSettingsError);
     expect(() => parseGridSettings("{}")).toThrow(GnumarusGridSettingsError);
     expect(() => parseGridSettings(JSON.stringify({ minZoom: "4x" }))).toThrow(GnumarusGridSettingsError);
+    expect(() => parseGridSettings(JSON.stringify({ minZoom: 10, opacityPercent: "loud" }))).toThrow(
+      GnumarusGridSettingsError,
+    );
   });
 
   it("hides the grid below 200 percent no matter the threshold", () => {

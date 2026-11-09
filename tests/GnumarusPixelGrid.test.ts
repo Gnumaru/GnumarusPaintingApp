@@ -14,4 +14,9 @@ describe("GnumarusPixelGridShader", () => {
     expect(GRID_FRAGMENT_SHADER).toContain("uLayerW");
     expect(GRID_FRAGMENT_SHADER).toContain("uLayerH");
   });
+
+  it("scales line alpha by the opacity uniform", () => {
+    expect(GRID_FRAGMENT_SHADER).toContain("uOpacity");
+    expect(GRID_FRAGMENT_SHADER).toContain("line * 0.45 * uOpacity");
+  });
 });

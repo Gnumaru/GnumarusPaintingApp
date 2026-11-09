@@ -976,6 +976,7 @@ test("layer resize is undoable and preserves top-left pixels", async ({ page }) 
 async function getGrid(page: import("@playwright/test").Page): Promise<{
   visible: boolean;
   minZoom: number;
+  opacityPercent: number;
   layerId: string | null;
   width: number;
   height: number;
@@ -984,7 +985,14 @@ async function getGrid(page: import("@playwright/test").Page): Promise<{
     const root = window as unknown as {
       __gnumarus?: {
         engine?: {
-          getGridState(): { visible: boolean; minZoom: number; layerId: string | null; width: number; height: number };
+          getGridState(): {
+            visible: boolean;
+            minZoom: number;
+            opacityPercent: number;
+            layerId: string | null;
+            width: number;
+            height: number;
+          };
         };
       };
     };
@@ -1055,6 +1063,27 @@ test("pixel grid threshold is configurable in Edit > Settings", async ({ page })
   expect((await getGrid(page)).minZoom).toBeCloseTo(2, 5);
   await page.locator("gnumarus-shell input#gridMinZoom").fill("99999");
   expect((await getGrid(page)).minZoom).toBeCloseTo(64, 5);
+});
+
+test("pixel grid opacity is configurable in Edit > Settings", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Pixel grid opacity");
+  expect((await getGrid(page)).opacityPercent).toBe(100);
+  await page.locator("gnumarus-shell input#gridOpacity").fill("50");
+  expect((await getGrid(page)).opacityPercent).toBe(50);
+  await expect(page.locator("gnumarus-shell")).toContainText("Pixel grid opacity: 50%");
+  const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.grid.v1"));
+  expect(persisted).toContain("50");
+  await page.locator("gnumarus-shell input#gridOpacity").fill("999");
+  expect((await getGrid(page)).opacityPercent).toBe(100);
+  await page.locator("gnumarus-shell input#gridOpacity").fill("0");
+  expect((await getGrid(page)).opacityPercent).toBe(0);
+  await page.getByRole("button", { name: "Reset pixel grid opacity to default" }).click();
+  expect((await getGrid(page)).opacityPercent).toBe(100);
+  await expect(page.locator("gnumarus-shell")).toContainText("Pixel grid opacity reset to default");
 });
 
 test("pixel grid follows the active layer transform", async ({ page }) => {
@@ -3592,8 +3621,7 @@ test("eyedropper copies the clicked pixel color", async ({ page }) => {
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
-test("holding Ctrl temporarily switches to the eyedropper", async ({ page }) => {
-  await page.goto("/");
+test("holding Ctrl temporarily switches to the eyedropper", async ({ page }) => {  await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
   const canvas = page.locator("gnumarus-shell canvas");
@@ -3615,6 +3643,34 @@ test("holding Ctrl temporarily switches to the eyedropper", async ({ page }) => 
   await page.keyboard.press("Delete");
   await page.mouse.click(cx, cy);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("eyedropper copies the composited color through empty layers", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const clickCenter = async (): Promise<void> => {
+    const canvas = page.locator("gnumarus-shell canvas");
+    const box = await canvas.boundingBox();
+    if (box === null) {
+      throw new Error("canvas has no bounding box");
+    }
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  };
+  await setPencil(page, "#ff0000");
+  await clickCenter();
+  await page.getByRole("button", { name: "Add layer" }).click();
+  // The new top layer is active and empty: the old eyedropper would copy
+  // its transparent pixel instead of the red square underneath.
+  await page.getByRole("button", { name: "Eyedropper" }).click();
+  await clickCenter();
+  await expect(page.locator("gnumarus-shell")).toContainText("Eyedropper: #ff0000");
+  // Opaque paint on the top layer wins the composite.
+  await page.keyboard.press("b");
+  await setPencil(page, "#0000ff");
+  await clickCenter();
+  await page.getByRole("button", { name: "Eyedropper" }).click();
+  await clickCenter();
+  await expect(page.locator("gnumarus-shell")).toContainText("Eyedropper: #0000ff");
 });
 
 test("frame menu adds frames before and after the clicked frame", async ({ page }) => {
