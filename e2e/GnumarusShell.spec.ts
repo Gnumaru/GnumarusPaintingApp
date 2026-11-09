@@ -3927,7 +3927,7 @@ test("Help menu lists every keyboard shortcut in a modal", async ({ page }) => {
   const dialog = page.locator("gnumarus-shell dialog#shortcutsDialog");
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText("Keyboard shortcuts");
-  for (const heading of ["File", "History", "Layers", "Frames", "Tools", "View", "Interface"]) {
+  for (const heading of ["File", "History", "Layers", "Frames", "Tools", "View", "Actions", "Interface"]) {
     await expect(dialog.getByRole("heading", { name: heading })).toBeVisible();
   }
   await expect(dialog).toContainText("Merge active layer down");
@@ -3936,9 +3936,67 @@ test("Help menu lists every keyboard shortcut in a modal", async ({ page }) => {
   await expect(dialog).toContainText("Merge floating selection into the cell");
   await expect(dialog).toContainText("Reset current cell texture to transparent");
   await expect(dialog).toContainText("Resize tool live");
+  await expect(dialog).toContainText("Quick action search");
+  await expect(dialog).toContainText("Reset canvas transform (zoom, pan and rotation)");
   await expect(dialog).toContainText("Hide/show all interface chrome");
   await dialog.getByRole("button", { name: "Close" }).click();
   await expect(dialog).toBeHidden();
+});
+
+test("quick action palette filters and runs actions", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { setZoom(z: number): void } } };
+    root.__gnumarus?.engine?.setZoom(16);
+  });
+  await page.keyboard.press("Control+Shift+P");
+  const dialog = page.locator("gnumarus-shell dialog#actionPaletteDialog");
+  await expect(dialog).toBeVisible();
+  const input = dialog.locator('[data-testid="action-palette-input"]');
+  await expect(input).toBeFocused();
+  await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveText(["Reset Canvas Transform"]);
+  await input.fill("xyz-nothing");
+  await expect(dialog.locator('[data-testid="action-palette-empty"]')).toBeVisible();
+  await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveCount(0);
+  await page.keyboard.press("Enter");
+  await expect(dialog).toBeVisible();
+  await input.fill("reset");
+  await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveText(["Reset Canvas Transform"]);
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await expect(dialog).toBeHidden();
+  await expect(page.locator("gnumarus-shell")).toContainText("Canvas transform reset");
+});
+
+test("quick action palette runs the clicked action and closes on Escape", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { setZoom(z: number): void } } };
+    root.__gnumarus?.engine?.setZoom(16);
+  });
+  await page.keyboard.press("Control+Shift+P");
+  const dialog = page.locator("gnumarus-shell dialog#actionPaletteDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator('[data-testid="action-palette-item"]').click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator("gnumarus-shell")).toContainText("Canvas transform reset");
+  await page.keyboard.press("Control+Shift+P");
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+});
+
+test("Digit0 resets the canvas transform", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { setZoom(z: number): void } } };
+    root.__gnumarus?.engine?.setZoom(16);
+  });
+  await page.keyboard.press("0");
+  await expect(page.locator("gnumarus-shell")).toContainText("Canvas transform reset");
 });
 
 test("final preview shows the canvas background", async ({ page }) => {

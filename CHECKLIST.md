@@ -208,3 +208,6 @@
 - [x] Composite eyedropper (samples flattened visible layers) + grid opacity setting (0-100, default 100)
 - [x] Unit tests (vitest) — 287 passed (previous 282 + 5 composite/grid)
 - [x] E2E test (Playwright): previous 165 + composite eyedropper + grid opacity — 167 passed
+- [x] Action system (registry, context requirements, similarity search) + quick action palette (Ctrl+Shift+P) + reset-canvas-transform action
+- [x] Unit tests (vitest) — 293 passed (previous 287 + 6 actions)
+- [x] E2E test (Playwright): previous 167 + action palette (filter/run/close) + Digit0 shortcut — 170 passed

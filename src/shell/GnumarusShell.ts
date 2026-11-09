@@ -133,6 +133,13 @@ import {
   type GnumarusNamedAnimation,
 } from "../animation/GnumarusNamedAnimations";
 import {
+  actionBlockedMessage,
+  GnumarusActionRegistry,
+  searchActions,
+  type GnumarusAction,
+  type GnumarusActionContext,
+} from "../actions/GnumarusActions";
+import {
   clampFrameDurationSec,
   frameDurationTimeoutMs,
   GNUMARUS_DEFAULT_FRAME_DURATION_SEC as DEFAULT_ANIMATION_FRAME_DURATION,
@@ -241,6 +248,7 @@ const GNUMARUS_SHORTCUTS: GnumarusShortcutSection[] = [
     entries: [
       { keys: "1 (main keyboard)", action: "Zoom to 100%" },
       { keys: "2 (main keyboard)", action: "Fit rotated canvas on screen" },
+      { keys: "0 (main keyboard)", action: "Reset canvas transform (zoom, pan and rotation)" },
       { keys: "4 (main and numpad)", action: "Rotate canvas counterclockwise by step" },
       { keys: "6 (main and numpad)", action: "Rotate canvas clockwise by step" },
       { keys: "5 (main and numpad)", action: "Reset canvas rotation" },
@@ -248,6 +256,15 @@ const GNUMARUS_SHORTCUTS: GnumarusShortcutSection[] = [
       { keys: "Ctrl+Alt+-", action: "Zoom out (numpad - also works)" },
       { keys: "Hold Space and drag", action: "Pan canvas" },
       { keys: "Shift+Left-drag (pencil, line, curve)", action: "Resize tool live from horizontal movement" },
+    ],
+  },
+  {
+    title: "Actions",
+    entries: [
+      {
+        keys: "Ctrl+Shift+P (Cmd+Shift+P on macOS)",
+        action: "Quick action search (type to filter, arrows to move, Enter to run)",
+      },
     ],
   },
   {
@@ -955,6 +972,30 @@ export class GnumarusShell extends LitElement {
       padding: 1px 6px;
       white-space: nowrap;
     }
+    .action-palette-list {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      max-height: 320px;
+      overflow-y: auto;
+      min-width: 320px;
+      max-width: min(560px, 80vw);
+      padding: 4px;
+      margin: 8px 0;
+    }
+    .action-palette-list button {
+      text-align: left;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      color: inherit;
+      padding: 6px 8px;
+      cursor: pointer;
+    }
+    .action-palette-list button.selected {
+      background: #3a5a8c;
+      border-color: #5a7aaa;
+    }
     .picker-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
@@ -1041,6 +1082,8 @@ export class GnumarusShell extends LitElement {
     checkerSizeY: { type: Number },
     gridMinZoom: { type: Number },
     gridOpacity: { type: Number },
+    actionPaletteQuery: { type: String },
+    actionPaletteIndex: { type: Number },
     rotationStepDeg: { type: Number },
     floatingActive: { type: Boolean },
     backgroundMode: { type: String },
@@ -1106,6 +1149,8 @@ export class GnumarusShell extends LitElement {
   };
 
   declare tool: GnumarusCanvasTool;
+  declare actionPaletteQuery: string;
+  declare actionPaletteIndex: number;
   declare rotText: string;
   declare flipText: string;
   declare colorValue: string;
@@ -1207,9 +1252,14 @@ export class GnumarusShell extends LitElement {
   private playbackDirection: 1 | -1 = 1;
   private toastTimer: number | null = null;
 
+  private readonly actionRegistry = new GnumarusActionRegistry();
+
   constructor() {
     super();
     this.tool = "pencil";
+    this.actionPaletteQuery = "";
+    this.actionPaletteIndex = 0;
+    this.registerActions();
     this.colorValue = "#000000";
     this.zoomText = "800%";
     this.rotText = "0°";
@@ -1338,7 +1388,13 @@ export class GnumarusShell extends LitElement {
                   <button ?disabled=${!this.canUndo} @click=${(): void => this.doUndo()}>Undo</button>
                   <button ?disabled=${!this.canRedo} @click=${(): void => this.doRedo()}>Redo</button>
                   <button @click=${(): void => this.openSettingsDialog()}>Settings</button>
-                  <button @click=${(): void => this.resetCanvasTransform()}>Reset Canvas Transform</button>
+                  <button
+                    @click=${(): void => {
+                      this.runAction("reset-canvas-transform");
+                    }}
+                  >
+                    Reset Canvas Transform
+                  </button>
                 </div>
               `
             : html``}
@@ -1916,6 +1972,48 @@ export class GnumarusShell extends LitElement {
         <div class="dialog-actions">
           <button @click=${(): void => this.closeShortcutsDialog()}>Close</button>
         </div>
+      </dialog>
+      <dialog id="actionPaletteDialog" @close=${(): void => this.closeActionPalette()}>
+        <h3>Run action</h3>
+        <input
+          type="text"
+          id="actionPaletteInput"
+          data-testid="action-palette-input"
+          placeholder="Type an action name…"
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="Search actions"
+          .value=${this.actionPaletteQuery}
+          @input=${(event: Event): void => {
+            this.actionPaletteQuery = (event.target as HTMLInputElement).value;
+            this.actionPaletteIndex = 0;
+          }}
+          @keydown=${(event: KeyboardEvent): void => this.onActionPaletteKeyDown(event)}
+        />
+        ${((): unknown => {
+          const results = this.paletteResults();
+          if (results.length === 0) {
+            return html`<p data-testid="action-palette-empty">No actions found</p>`;
+          }
+          const selected = Math.min(this.actionPaletteIndex, results.length - 1);
+          return html`<div class="action-palette-list" data-testid="action-palette-list" role="listbox">
+            ${results.map(
+              (action, index) => html`<button
+                role="option"
+                aria-selected=${index === selected ? "true" : "false"}
+                data-testid="action-palette-item"
+                data-action-id=${action.id}
+                class=${index === selected ? "selected" : ""}
+                title=${action.name}
+                @click=${(): void => {
+                  this.actionPaletteIndex = index;
+                  this.executePaletteSelection();
+                }}
+                >${action.name}</button
+              >`,
+            )}
+          </div>`;
+        })()}
       </dialog>
       <dialog id="settingsDialog">
         <h3>Settings</h3>
@@ -3247,6 +3345,14 @@ export class GnumarusShell extends LitElement {
         return;
       }
     }
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey && key === "p") {
+      const palette = this.shadowRoot?.getElementById("actionPaletteDialog") as HTMLDialogElement | null;
+      if (palette?.open === true || (!this.eventInField(event) && !this.eventInColorPicker(event))) {
+        event.preventDefault();
+        this.toggleActionPalette();
+      }
+      return;
+    }
     if (event.key === "Tab") {
       if (this.shadowRoot?.querySelector("dialog[open]") !== null || this.eventInField(event)) {
         return;
@@ -3254,8 +3360,7 @@ export class GnumarusShell extends LitElement {
       event.preventDefault();
       this.uiHidden = !this.uiHidden;
       return;
-    }
-    if (event.key === "Escape") {
+    }    if (event.key === "Escape") {
       this.closeAllMenus();
       if (this.matrixMenu !== null) {
         this.matrixMenu = null;
@@ -3293,6 +3398,11 @@ export class GnumarusShell extends LitElement {
     if (event.key === "Insert") {
       event.preventDefault();
       this.insertLayerAboveActive();
+      return;
+    }
+    if (event.code === "Digit0") {
+      event.preventDefault();
+      this.runAction("reset-canvas-transform");
       return;
     }
     if (
@@ -3528,6 +3638,115 @@ export class GnumarusShell extends LitElement {
     this.fileMenuOpen = false;
     this.engine?.resetViewTransform();
     this.statusMessage = "Canvas transform reset";
+  }
+
+  private registerActions(): void {
+    this.actionRegistry.register({
+      id: "reset-canvas-transform",
+      name: "Reset Canvas Transform",
+      requirements: [],
+      run: (): void => {
+        this.resetCanvasTransform();
+      },
+    });
+  }
+
+  private actionContext(): GnumarusActionContext {
+    return {
+      tool: this.tool,
+      hasFloatingSelection: this.engine?.hasFloatingSelection() ?? false,
+    };
+  }
+
+  /** Run a registered action by id; failures show an error toast with the reason. */
+  runAction(id: string): boolean {
+    const action = this.actionRegistry.get(id);
+    if (action === undefined) {
+      this.showToast(`Unknown action "${id}".`);
+      return false;
+    }
+    const result = this.actionRegistry.execute(id, this.actionContext());
+    if (!result.ok) {
+      this.showToast(actionBlockedMessage(action.name, result.reasons));
+      return false;
+    }
+    return true;
+  }
+
+  private paletteResults(): GnumarusAction[] {
+    return searchActions(this.actionRegistry.actions(), this.actionPaletteQuery);
+  }
+
+  private openActionPalette(): void {
+    this.closeAllMenus();
+    this.actionPaletteQuery = "";
+    this.actionPaletteIndex = 0;
+    this.requestUpdate();
+    const dialog = this.shadowRoot?.getElementById("actionPaletteDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+    void this.updateComplete.then(() => {
+      const input = this.shadowRoot?.getElementById("actionPaletteInput") as HTMLInputElement | null;
+      input?.focus();
+    });
+  }
+
+  private closeActionPalette(): void {
+    const dialog = this.shadowRoot?.getElementById("actionPaletteDialog") as HTMLDialogElement | null;
+    dialog?.close();
+    this.actionPaletteQuery = "";
+    this.actionPaletteIndex = 0;
+  }
+
+  private toggleActionPalette(): void {
+    const dialog = this.shadowRoot?.getElementById("actionPaletteDialog") as HTMLDialogElement | null;
+    if (dialog?.open === true) {
+      this.closeActionPalette();
+      return;
+    }
+    if (this.shadowRoot?.querySelector("dialog[open]") !== null) {
+      return;
+    }
+    this.openActionPalette();
+  }
+
+  private executePaletteSelection(): void {
+    const results = this.paletteResults();
+    const selected = results[Math.min(this.actionPaletteIndex, results.length - 1)];
+    if (selected === undefined) {
+      return;
+    }
+    this.closeActionPalette();
+    this.runAction(selected.id);
+  }
+
+  private scrollPaletteSelectionIntoView(): void {
+    void this.updateComplete.then(() => {
+      const selected = this.shadowRoot?.querySelector(".action-palette-list button.selected") ?? null;
+      selected?.scrollIntoView({ block: "nearest" });
+    });
+  }
+
+  private onActionPaletteKeyDown(event: KeyboardEvent): void {
+    const results = this.paletteResults();
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      event.stopPropagation();
+      this.actionPaletteIndex = results.length === 0 ? 0 : (this.actionPaletteIndex + 1) % results.length;
+      this.scrollPaletteSelectionIntoView();
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      event.stopPropagation();
+      this.actionPaletteIndex =
+        results.length === 0 ? 0 : (this.actionPaletteIndex - 1 + results.length) % results.length;
+      this.scrollPaletteSelectionIntoView();
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      this.executePaletteSelection();
+    } else if (event.key === "Escape") {
+      event.stopPropagation();
+      this.closeActionPalette();
+    }
   }
 
   private doUndo(): void {
