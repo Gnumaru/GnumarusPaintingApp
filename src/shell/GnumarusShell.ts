@@ -1643,6 +1643,7 @@ export class GnumarusShell extends LitElement {
         </div>
         <span class="app-title">Gnumaru's Painting and Animation App${this.dirty ? " — *modified*" : ""}</span>
       </div>
+      ${this.renderEditorOptions()}
       ${this.renderToolOptions()}
       <div class="body">
         <div class="toolbar" ?hidden=${this.uiHidden}>
@@ -3198,9 +3199,29 @@ export class GnumarusShell extends LitElement {
     `;
   }
 
+  /**
+   * Editor-level options bar, always visible regardless of the active tool
+   * (unlike the per-tool options below it). Hosts canvas-wide settings that
+   * are not tied to any single tool; painting tools honor them.
+   */
+  private renderEditorOptions() {
+    return html`
+      <div class="tool-options" data-testid="editor-options" aria-label="Editor options" ?hidden=${this.uiHidden}>
+        <label title="Repeat textures infinitely while painting. You can paint outside the texture and it wraps around to the other side. Only the active layer shows its neighbors."
+          >Wrap
+          <select id="wrapMode" .value=${this.wrapMode} @change=${(): void => this.applyWrapModeFromDialog()}>
+            <option value="off">Off</option>
+            <option value="x">Left-right</option>
+            <option value="y">Up-down</option>
+            <option value="both">Both</option>
+          </select>
+        </label>
+      </div>
+    `;
+  }
+
   private renderToolOptions() {
-    if (this.tool === "pencil") {
-      return html`
+    if (this.tool === "pencil") {      return html`
         <div class="tool-options" data-testid="tool-options" aria-label="Pencil options" ?hidden=${this.uiHidden}>
           <label title="Apply a saved brush preset (all pencil settings) to the current brush."
             >Preset
@@ -3253,15 +3274,6 @@ export class GnumarusShell extends LitElement {
               <option value="mirror-x">Left-right</option>
               <option value="mirror-y">Up-down</option>
               <option value="both">Four-way</option>
-            </select>
-          </label>
-          <label title="Repeat the texture infinitely while painting. You can paint outside the texture and it wraps around to the other side. Only the active layer shows its neighbors."
-            >Wrap
-            <select id="wrapMode" .value=${this.wrapMode} @change=${(): void => this.applyWrapModeFromDialog()}>
-              <option value="off">Off</option>
-              <option value="x">Left-right</option>
-              <option value="y">Up-down</option>
-              <option value="both">Both</option>
             </select>
           </label>
           <label title="Pixel paints hard aliased stamps (pixel art). Soft paints a round tip with hardness falloff. Image paints a grayscale tip as an alpha mask tinted with the paint color."

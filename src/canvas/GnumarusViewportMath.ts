@@ -315,6 +315,71 @@ export function normalizeRotation(radians: number): number {
   return result;
 }
 
+/** Project-space bbox union for the wrap background: canvas plus ghost tiles. */
+export interface GnumarusBackgroundUnion {
+  width: number;
+  height: number;
+  centerX: number;
+  centerY: number;
+}
+
+/**
+ * Background plane rect covering the canvas and every wrap ghost tile,
+ * with the min corner snapped down to whole checker cells (relative to the
+ * canvas origin) so the image-space checker pattern keeps its alignment.
+ * Identity (canvas rect) when wrapping is off or the layer is degenerate.
+ */
+export function backgroundUnionForWrap(
+  canvasWidth: number,
+  canvasHeight: number,
+  layerWidth: number,
+  layerHeight: number,
+  layer: GnumarusLayerTransform,
+  mode: GnumarusWrapMode,
+  cellX: number,
+  cellY: number,
+): GnumarusBackgroundUnion {
+  const canvas = {
+    minX: -canvasWidth / 2,
+    maxX: canvasWidth / 2,
+    minY: -canvasHeight / 2,
+    maxY: canvasHeight / 2,
+  };
+  if (mode === "off" || !(layerWidth >= 1 && layerHeight >= 1)) {
+    return { width: canvasWidth, height: canvasHeight, centerX: 0, centerY: 0 };
+  }
+  const corners = [
+    { x: 0, y: 0 },
+    { x: layerWidth, y: 0 },
+    { x: 0, y: layerHeight },
+    { x: layerWidth, y: layerHeight },
+  ].map((p) => layerImageToProject(p.x, p.y, layerWidth, layerHeight, layer));
+  const base = {
+    minX: Math.min(...corners.map((p) => p.x)),
+    maxX: Math.max(...corners.map((p) => p.x)),
+    minY: Math.min(...corners.map((p) => p.y)),
+    maxY: Math.max(...corners.map((p) => p.y)),
+  };
+  let minX = Math.min(canvas.minX, base.minX);
+  let maxX = Math.max(canvas.maxX, base.maxX);
+  let minY = Math.min(canvas.minY, base.minY);
+  let maxY = Math.max(canvas.maxY, base.maxY);
+  for (const offset of wrapTileOffsets(mode)) {
+    const shift = wrapTileShift(layer, offset.x, offset.y, layerWidth, layerHeight);
+    minX = Math.min(minX, base.minX + shift.x);
+    maxX = Math.max(maxX, base.maxX + shift.x);
+    minY = Math.min(minY, base.minY + shift.y);
+    maxY = Math.max(maxY, base.maxY + shift.y);
+  }
+  const cellW = Number.isFinite(cellX) && cellX >= 1 ? cellX : 1;
+  const cellH = Number.isFinite(cellY) && cellY >= 1 ? cellY : 1;
+  const snappedMinX = canvas.minX - Math.ceil((canvas.minX - minX) / cellW) * cellW;
+  const snappedMinY = canvas.minY - Math.ceil((canvas.minY - minY) / cellH) * cellH;
+  const width = Math.max(1, maxX - snappedMinX);
+  const height = Math.max(1, maxY - snappedMinY);
+  return { width, height, centerX: snappedMinX + width / 2, centerY: snappedMinY + height / 2 };
+}
+
 /** Integer texture-pixel box: sub-rectangle produced by cropping. */
 export interface GnumarusCropBox {
   left: number;

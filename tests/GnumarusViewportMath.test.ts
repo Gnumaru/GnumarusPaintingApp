@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  backgroundUnionForWrap,
   canvasResizeTextureBox,
   canvasVisibleTextureBox,
   clampCropBoxToMin1,
@@ -406,8 +407,7 @@ describe("GnumarusViewportMath", () => {  it("maps the container center to the i
     }
   });
 
-  it("wraps layer pixels per axis", () => {
-    expect(parseWrapMode("x")).toBe("x");
+  it("wraps layer pixels per axis", () => {    expect(parseWrapMode("x")).toBe("x");
     expect(parseWrapMode("y")).toBe("y");
     expect(parseWrapMode("both")).toBe("both");
     expect(parseWrapMode("off")).toBe("off");
@@ -438,5 +438,23 @@ describe("GnumarusViewportMath", () => {  it("maps the container center to the i
     expect(wrapTileShift(identity, 1, 0, 64, 64)).toEqual({ x: 64, y: 0 });
     expect(wrapTileShift(identity, -1, 1, 64, 32)).toEqual({ x: -64, y: 32 });
     expect(wrapTileShift({ ...identity, flipX: true }, 1, 0, 64, 64)).toEqual({ x: -64, y: 0 });
+  });
+
+  it("sizes the wrap background to canvas plus tiles, snapped to cells", () => {
+    const identity: GnumarusLayerTransform = {
+      x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1,
+      skewX: 0, skewY: 0, rotationX: 0, rotationY: 0,
+    };
+    expect(backgroundUnionForWrap(64, 64, 64, 64, identity, "off", 16, 16)).toEqual({
+      width: 64, height: 64, centerX: 0, centerY: 0,
+    });
+    expect(backgroundUnionForWrap(64, 64, 0, 0, identity, "x", 16, 16).width).toBe(64);
+    const horizontal = backgroundUnionForWrap(64, 64, 64, 64, identity, "x", 16, 16);
+    expect(horizontal).toEqual({ width: 192, height: 64, centerX: 0, centerY: 0 });
+    const both = backgroundUnionForWrap(64, 64, 64, 64, identity, "both", 16, 16);
+    expect(both).toEqual({ width: 192, height: 192, centerX: 0, centerY: 0 });
+    // Odd cell sizes snap the min corner down to whole cells.
+    const snapped = backgroundUnionForWrap(64, 64, 64, 64, identity, "x", 24, 16);
+    expect(snapped).toEqual({ width: 200, height: 64, centerX: -4, centerY: 0 });
   });
 });

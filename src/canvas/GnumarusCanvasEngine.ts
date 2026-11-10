@@ -94,6 +94,7 @@ import {
   wrapLayerPixel,
   wrapTileOffsets,
   wrapTileShift,
+  backgroundUnionForWrap,
   type GnumarusWrapMode,
 } from "./GnumarusViewportMath";
 import {
@@ -626,6 +627,8 @@ export class GnumarusCanvasEngine {
   private wrapMode: GnumarusWrapMode = "off";
   /** Ghost planes showing wrapped copies of the active layer (max 8). */
   private readonly wrapTiles: THREE.Mesh[] = [];
+  /** Last background plane size in project pixels (test hook). */
+  private backgroundPlaneSize: { width: number; height: number } = { width: 64, height: 64 };
   private airbrushRate = DEFAULT_AIRBRUSH_RATE;
   private airbrushTimer: number | null = null;
   private airbrushCarry = 0;
@@ -3952,6 +3955,7 @@ export class GnumarusCanvasEngine {
       return false;
     }
     this.wrapMode = parsed;
+    this.expandBackgroundForWrap();
     this.syncWrapTiles();
     this.emitStats();
     this.updatePreviews();
@@ -3967,6 +3971,64 @@ export class GnumarusCanvasEngine {
       }
     }
     return count;
+  }
+
+  /** Last background plane size in project pixels (test hook). */
+  getBackgroundPlaneSize(): { width: number; height: number } {
+    return { ...this.backgroundPlaneSize };
+  }
+
+  /**
+   * Grow the background plane to cover the canvas plus every wrap ghost
+   * tile, keeping the image-space checker aligned by snapping to whole
+   * cells. Canvas-sized when wrap is off or nothing tileable is showing.
+   */
+  private expandBackgroundForWrap(): void {
+    const layer = this.wrapMode === "off" ? null : this.activeLayer();
+    const usable =
+      layer !== null &&
+      layer.visible &&
+      layer.renderTextureId !== null &&
+      layer.width >= 1 &&
+      layer.height >= 1;
+    if (!usable || layer === null) {
+      this.writePlaneMatrix(
+        this.backgroundPlane,
+        this.imageWidth,
+        this.imageHeight,
+        IDENTITY_LAYER_TRANSFORM,
+        -0.02,
+      );
+      this.backgroundPlaneSize = { width: this.imageWidth, height: this.imageHeight };
+      return;
+    }
+    const union = backgroundUnionForWrap(
+      this.imageWidth,
+      this.imageHeight,
+      layer.width,
+      layer.height,
+      layer.transform,
+      this.wrapMode,
+      this.checkerSizeX,
+      this.checkerSizeY,
+    );
+    const uniforms = this.backgroundMaterial.uniforms;
+    const uW = uniforms["uImageW"];
+    const uH = uniforms["uImageH"];
+    if (uW !== undefined) {
+      uW.value = union.width;
+    }
+    if (uH !== undefined) {
+      uH.value = union.height;
+    }
+    this.writePlaneMatrix(
+      this.backgroundPlane,
+      union.width,
+      union.height,
+      { ...IDENTITY_LAYER_TRANSFORM, x: union.centerX, y: union.centerY },
+      -0.02,
+    );
+    this.backgroundPlaneSize = { width: union.width, height: union.height };
   }
 
   /**
@@ -8975,13 +9037,7 @@ export class GnumarusCanvasEngine {
       }
       this.writePlaneMatrix(layer.plane, layer.width, layer.height, layer.transform, i * 0.01);
     }
-    this.writePlaneMatrix(
-      this.backgroundPlane,
-      this.imageWidth,
-      this.imageHeight,
-      IDENTITY_LAYER_TRANSFORM,
-      -0.02,
-    );
+    this.expandBackgroundForWrap();
     this.syncWrapTiles();
     this.updateGrid();
     this.syncFloatingPlane();

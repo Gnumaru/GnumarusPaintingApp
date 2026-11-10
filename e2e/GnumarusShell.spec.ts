@@ -2841,6 +2841,50 @@ test("symmetry mirrors pixel dabs across axes @recent", async ({ page }) => {
   }
 });
 
+async function backgroundPlaneSize(page: import("@playwright/test").Page): Promise<{ width: number; height: number }> {
+  return page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getBackgroundPlaneSize(): { width: number; height: number } } };
+    };
+    return root.__gnumarus?.engine?.getBackgroundPlaneSize() ?? { width: -1, height: -1 };
+  });
+}
+
+test("editor bar stays visible across tools and holds wrap @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const editor = page.locator('gnumarus-shell [data-testid="editor-options"]');
+  await expect(editor).toBeVisible();
+  await expect(editor.locator("select#wrapMode")).toHaveValue("off");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await expect(editor).toBeVisible();
+  await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toHaveAttribute("aria-label", "Bucket options");
+  await editor.locator("select#wrapMode").selectOption("x");
+  await expect(page.locator("gnumarus-shell")).toContainText("Wrap: x");
+  await page.getByRole("button", { name: "Pencil" }).click();
+  await expect(editor.locator("select#wrapMode")).toHaveValue("x");
+});
+
+test("background grows with wrap tiles @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  expect(await backgroundPlaneSize(page)).toEqual({ width: 64, height: 64 });
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setWrapMode(mode: string): void } };
+    };
+    root.__gnumarus?.shell?.setWrapMode("x");
+  });
+  expect(await backgroundPlaneSize(page)).toEqual({ width: 192, height: 64 });
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setWrapMode(mode: string): void } };
+    };
+    root.__gnumarus?.shell?.setWrapMode("off");
+  });
+  expect(await backgroundPlaneSize(page)).toEqual({ width: 64, height: 64 });
+});
+
 async function readLayerPixel(page: import("@playwright/test").Page, x: number, y: number): Promise<GnumarusPixel | null> {
   return page.evaluate(([px, py]: number[]) => {
     const root = window as unknown as {
