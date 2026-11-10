@@ -8018,9 +8018,12 @@ export class GnumarusCanvasEngine {
       return;
     }
     const horizontal = drag.id === "sym-x-min" || drag.id === "sym-x-max";
+    // The stored axis lives in pixel-index space (paint mirrors at
+    // `2*axis - v`) while the pointer reports corner coords, so shift by
+    // half a pixel: the drawn guide (axis + 0.5) tracks the cursor.
     const next = {
-      x: horizontal ? floatPos.x : this.symmetryCenter.x,
-      y: horizontal ? this.symmetryCenter.y : floatPos.y,
+      x: horizontal ? floatPos.x - 0.5 : this.symmetryCenter.x,
+      y: horizontal ? this.symmetryCenter.y : floatPos.y - 0.5,
     };
     this.setSymmetryCenter(next.x, next.y);
   }
@@ -8100,8 +8103,9 @@ export class GnumarusCanvasEngine {
         return null;
       }
       const toLocal = (projectX: number, projectY: number): { x: number; y: number } => {
+        // `local` is zero-based, so the client point is already container-local.
         const client = projectToScreen(projectX, projectY, local, view);
-        return { x: client.x - rect.left, y: client.y - rect.top };
+        return { x: client.x, y: client.y };
       };
       const a = toLocal(clipped.ax, clipped.ay);
       const b = toLocal(clipped.bx, clipped.by);
@@ -8163,13 +8167,18 @@ export class GnumarusCanvasEngine {
     let vertical: { ax: number; ay: number; bx: number; by: number } | null = null;
     let horizontal: { ax: number; ay: number; bx: number; by: number } | null = null;
     if (this.symmetryMode === "mirror-x" || this.symmetryMode === "both") {
-      const p0 = layerImageToProject(this.symmetryCenter.x, 0, layer.width, layer.height, layer.transform);
-      const p1 = layerImageToProject(this.symmetryCenter.x, layer.height, layer.width, layer.height, layer.transform);
+      // The stored axis lives in pixel-index space (paint mirrors at
+      // `2*axis - v`); geometry uses corner coords, so the guide sits at
+      // axis + 0.5 — the true bisector of every mirrored pixel pair.
+      const axisX = this.symmetryCenter.x + 0.5;
+      const p0 = layerImageToProject(axisX, 0, layer.width, layer.height, layer.transform);
+      const p1 = layerImageToProject(axisX, layer.height, layer.width, layer.height, layer.transform);
       vertical = placeHandles("sym-x-min", "sym-x-max", p0.x, p0.y, p1.x - p0.x, p1.y - p0.y);
     }
     if (this.symmetryMode === "mirror-y" || this.symmetryMode === "both") {
-      const p0 = layerImageToProject(0, this.symmetryCenter.y, layer.width, layer.height, layer.transform);
-      const p1 = layerImageToProject(layer.width, this.symmetryCenter.y, layer.width, layer.height, layer.transform);
+      const axisY = this.symmetryCenter.y + 0.5;
+      const p0 = layerImageToProject(0, axisY, layer.width, layer.height, layer.transform);
+      const p1 = layerImageToProject(layer.width, axisY, layer.width, layer.height, layer.transform);
       horizontal = placeHandles("sym-y-min", "sym-y-max", p0.x, p0.y, p1.x - p0.x, p1.y - p0.y);
     }
     if (vertical === null && horizontal === null) {

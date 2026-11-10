@@ -451,3 +451,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - `M` flips the canvas view horizontally, `Shift+M` vertically — same `setFlip` toggles the loupe middle-click gestures use, but available from any tool (view state, not layer transform; history/settings untouched).
 - Engine key handler branch (no Ctrl/Alt/Meta, outside fields; Shift disambiguates via `event.shiftKey`, not key case, so Caps Lock stays horizontal).
 - Shortcuts modal View entries; E2E @recent (M toggles flipX, Shift+M toggles flipY, repeat restores).
+
+## 83. Symmetry guide half-pixel offset (implemented)
+- Bug: guides drawn at the index-space axis (`31.5` on a fresh 64x64) instead of the geometric mirror (`32` in corner coords) — vertical line half a canvas pixel left, horizontal half a pixel up vs the mirrored paint and the axis overlay, plus a container-offset shift (rect.left/top subtracted twice: projectToScreen with a zero-based local rect already returns container-local coords).
+- Fix keeps paint byte-identical (axis value stays index-space for `2*axis - v`): project guides at `axis + 0.5`, drag stores `pointer - 0.5` so the line tracks the cursor.
+- E2E @recent: default guides pass through the canvas center (vertical x, horizontal y within 1px).

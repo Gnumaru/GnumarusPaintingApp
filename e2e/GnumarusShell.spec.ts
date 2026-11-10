@@ -2873,6 +2873,45 @@ test("symmetry lives in the editor bar and shows axis lines @recent", async ({ p
   expect(overlay).toMatchObject({ visible: true });
 });
 
+test("symmetry guides pass through the canvas center @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setSymmetryMode(mode: string): void } };
+    };
+    root.__gnumarus?.shell?.setSymmetryMode("both");
+  });
+  const overlay = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          getSymmetryOverlayState(): {
+            visible: boolean;
+            vertical: { ax: number; ay: number; bx: number; by: number } | null;
+            horizontal: { ax: number; ay: number; bx: number; by: number } | null;
+          };
+        };
+      };
+    };
+    return root.__gnumarus?.engine?.getSymmetryOverlayState() ?? null;
+  });
+  if (overlay === null || overlay.vertical === null || overlay.horizontal === null) {
+    throw new Error("symmetry guides are missing");
+  }
+  // The default axis bisects every mirrored pixel pair, so each guide
+  // passes through the canvas center (the canvas fills its container).
+  expect(Math.abs(overlay.vertical.ax - overlay.vertical.bx)).toBeLessThan(1);
+  expect(Math.abs(overlay.vertical.ax - box.width / 2)).toBeLessThan(1.5);
+  expect(Math.abs(overlay.horizontal.ay - overlay.horizontal.by)).toBeLessThan(1);
+  expect(Math.abs(overlay.horizontal.ay - box.height / 2)).toBeLessThan(1.5);
+});
+
 test("symmetry axis drag moves the mirror and resets with Shift+click @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
