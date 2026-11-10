@@ -260,10 +260,10 @@
 - [x] E2E (@recent only, per policy): 29 passed (previous 24 + cleanup setting/fit/none/crop + brush quality/archive); full suite untouched
 - [x] Scrollbars no estilo do app
 - [x] Wrap-around de pintura (off/x/y/both) com tiling só na layer ativa
-- [x] Unit tests (vitest) — 364 passed (previous 360 + wrap parse/mirror/tiles + wrapped writers)
-- [x] E2E (@recent only, per policy): 33 passed (previous 29 + wrap-off no-op + wrap paint + tiles + scrollbar); full suite untouched
+- [x] Unit tests (vitest) — 362 passed (previous 364 − 2 string steps)
+- [x] E2E (@recent only, per policy): 32 passed (previous 33 − string leash test); full suite untouched
 - [x] Batch A: tilt/velocity dynamics + direction-following tips
-- [x] Batch B: airbrush + pulled-string stabilizer + GPU upload coalescing
+- [x] Batch B: airbrush + GPU upload coalescing (string stabilizer tried and removed as near-duplicate — see §79)
 - [x] Batch C: smudge/mixer brush
 - [x] Batch D: brush preset library (shareable JSON)
 - [x] Batch E: symmetry + tip rotation

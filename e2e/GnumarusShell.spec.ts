@@ -3229,27 +3229,6 @@ test("airbrush builds paint up while held @recent", async ({ page }) => {
   });
 });
 
-test("string stabilizer paints through its leash @recent", async ({ page }) => {
-  await page.goto("/");
-  await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
-  await page.evaluate(() => {
-    const root = window as unknown as {
-      __gnumarus?: { shell?: { setStabilizerMode(mode: string): void } };
-    };
-    root.__gnumarus?.shell?.setStabilizerMode("string");
-  });
-  await expect(page.locator("gnumarus-shell select#stabilizerMode")).toHaveValue("string");
-  await expect(page.locator("gnumarus-shell input#ropeLength")).toBeVisible();
-  const start = await layerScreenTarget(page, 8, 32);
-  const end = await layerScreenTarget(page, 56, 32);
-  await page.mouse.move(start.x, start.y);
-  await page.mouse.down();
-  await page.mouse.move(end.x, end.y, { steps: 8 });
-  await page.mouse.up();
-  expect(await paintedPixelCount(page)).toBeGreaterThan(0);
-});
-
 test("line tool draws two-click segments with width, shape and aliasing", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

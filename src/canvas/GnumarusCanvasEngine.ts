@@ -116,7 +116,6 @@ import {
   stabilizerDistance,
   stabilizerFollowStep,
   stabilizerRopeStep,
-  stabilizerStringStep,
   type GnumarusStabilizerMode,
 } from "./GnumarusStabilizer";
 import {
@@ -4341,18 +4340,15 @@ export class GnumarusCanvasEngine {
     if (this.stabilizerMode === "rope") {
       return stabilizerRopeStep(current, target, this.ropeLength);
     }
-    if (this.stabilizerMode === "string") {
-      return stabilizerStringStep(current, target, this.ropeLength);
-    }
     if (this.stabilizerMode === "follow") {
       return stabilizerFollowStep(current, target, this.followStrength);
     }
     return { x: target.x, y: target.y };
   }
 
-  /** Follow and string modes converge between events via the catch-up loop. */
+  /** Follow mode converges between events via the catch-up loop. */
   private stabilizerNeedsLoop(): boolean {
-    return this.stabilizerMode === "follow" || this.stabilizerMode === "string";
+    return this.stabilizerMode === "follow";
   }
 
   getLineWidth(): number {
@@ -6446,8 +6442,8 @@ export class GnumarusCanvasEngine {
   }
 
   /**
-   * Catch-up tick for follow/string modes: the paint focus keeps chasing the
-   * last cursor target even between pointer events, painting while the button
+   * Catch-up tick for follow mode: the paint focus keeps chasing the last
+   * cursor target even between pointer events, painting while the button
    * is held and updating only the preview while hovering.
    */
   private followTick(): void {

@@ -1,4 +1,4 @@
-export type GnumarusStabilizerMode = "none" | "rope" | "follow" | "string";
+export type GnumarusStabilizerMode = "none" | "rope" | "follow";
 
 export interface GnumarusStabilizerPoint {
   x: number;
@@ -14,12 +14,12 @@ export const GNUMARUS_MIN_FOLLOW_STRENGTH = 1;
 export const GNUMARUS_MAX_FOLLOW_STRENGTH = 100;
 
 export function parseStabilizerMode(value: unknown): GnumarusStabilizerMode {
-  if (value === "rope" || value === "follow" || value === "string" || value === "none") {
+  if (value === "rope" || value === "follow" || value === "none") {
     return value;
   }
   if (typeof value === "string") {
     const lowered = value.trim().toLowerCase();
-    if (lowered === "rope" || lowered === "follow" || lowered === "string" || lowered === "none") {
+    if (lowered === "rope" || lowered === "follow" || lowered === "none") {
       return lowered;
     }
   }
@@ -88,33 +88,4 @@ export function stabilizerFollowStep(
     return { x: current.x, y: current.y };
   }
   return { x: current.x + dx * clamped, y: current.y + dy * clamped };
-}
-
-/** Pull fraction per move for pulled-string mode (0..1). Default 0.35. */
-export const GNUMARUS_DEFAULT_STRING_PULL = 0.35;
-
-/**
- * One pulled-string step in layer-image space: like a rope leash with
- * slack — the focus stays put while the cursor is within the string
- * length, then chases the taut string with a smoothed pull instead of
- * snapping to the exact rope distance, so fast flicks trail softly.
- * Pull 1 behaves exactly like the rope.
- */
-export function stabilizerStringStep(
-  current: GnumarusStabilizerPoint,
-  target: GnumarusStabilizerPoint,
-  ropeLength: number,
-  pull: number = GNUMARUS_DEFAULT_STRING_PULL,
-): GnumarusStabilizerPoint {
-  const rope = clampRopeLength(ropeLength);
-  const clampedPull = Number.isFinite(pull) ? Math.min(1, Math.max(0.05, pull)) : GNUMARUS_DEFAULT_STRING_PULL;
-  const dx = target.x - current.x;
-  const dy = target.y - current.y;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-  if (!(dist > 0) || dist <= rope) {
-    return { x: current.x, y: current.y };
-  }
-  const excess = dist - rope;
-  const step = excess * clampedPull;
-  return { x: current.x + (dx / dist) * step, y: current.y + (dy / dist) * step };
 }

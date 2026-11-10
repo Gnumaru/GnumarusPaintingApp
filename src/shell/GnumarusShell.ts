@@ -3151,7 +3151,7 @@ export class GnumarusShell extends LitElement {
 
   private renderStabilizerOption() {
     return html`
-      <label title="Steady the stroke: rope leashes the tip, string trails it with a soft pull, follow chases the cursor."
+      <label title="Steady the stroke: rope leashes the tip, follow chases the cursor with smoothing."
         >Stabilizer
         <select
           id="stabilizerMode"
@@ -3160,14 +3160,13 @@ export class GnumarusShell extends LitElement {
         >
           <option value="none">None</option>
           <option value="rope">Rope</option>
-          <option value="string">String</option>
           <option value="follow">Follow</option>
         </select>
       </label>
-      ${this.stabilizerMode === "rope" || this.stabilizerMode === "string"
+      ${this.stabilizerMode === "rope"
         ? html`
             <label title="Leash length in layer pixels: the tip stays put until the cursor pulls beyond it."
-              >${this.stabilizerMode === "rope" ? "Rope length" : "String length"}
+              >Rope length
               <input
                 type="number"
                 id="ropeLength"
