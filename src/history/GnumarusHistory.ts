@@ -136,12 +136,21 @@ export interface GnumarusFitRecord {
   transforms: GnumarusFitTransformRecord[];
 }
 
+export interface GnumarusReloadRecord {
+  textureId: string;
+  width: number;
+  height: number;
+  beforeBuffer: Uint8ClampedArray;
+  afterBuffer: Uint8ClampedArray;
+}
+
 export type GnumarusHistoryEntry =
   | { type: "stroke"; layerId: string; diff: GnumarusImageDiff }
   | { type: "merge"; merge: GnumarusMergeRecord }
   | { type: "resize"; resize: GnumarusResizeRecord }
   | { type: "fit"; fit: GnumarusFitRecord }
-  | { type: "fitBatch"; fits: GnumarusFitRecord[] };
+  | { type: "fitBatch"; fits: GnumarusFitRecord[] }
+  | { type: "reloadBatch"; reloads: GnumarusReloadRecord[] };
 
 export interface GnumarusHistoryLayer {
   buffer: Uint8ClampedArray;
@@ -275,6 +284,26 @@ export class GnumarusHistory {
         this.redoStack.push(entry);
         return true;
       }
+      if (entry.type === "reloadBatch") {
+        if (applyFit === undefined) {
+          continue;
+        }
+        let applied = false;
+        for (let i = entry.reloads.length - 1; i >= 0; i -= 1) {
+          const reload = entry.reloads[i];
+          if (reload === undefined) {
+            continue;
+          }
+          if (applyFit(reload.textureId, reload.width, reload.height, reload.beforeBuffer, [])) {
+            applied = true;
+          }
+        }
+        if (!applied) {
+          continue;
+        }
+        this.redoStack.push(entry);
+        return true;
+      }
       const needsAssociate = !entry.merge.removedLayer;
       if (needsAssociate && associateCell === undefined) {
         continue;
@@ -395,6 +424,22 @@ export class GnumarusHistory {
             fit.transforms.map((record) => ({ contentId: record.contentId, transform: { ...record.after } })),
           );
           if (ok) {
+            applied = true;
+          }
+        }
+        if (!applied) {
+          continue;
+        }
+        this.undoStack.push(entry);
+        return true;
+      }
+      if (entry.type === "reloadBatch") {
+        if (applyFit === undefined) {
+          continue;
+        }
+        let applied = false;
+        for (const reload of entry.reloads) {
+          if (applyFit(reload.textureId, reload.width, reload.height, reload.afterBuffer, [])) {
             applied = true;
           }
         }

@@ -106,6 +106,19 @@ export function createPixelBuffer(width: number, height: number): Uint8ClampedAr
   return new Uint8ClampedArray(width * height * 4);
 }
 
+/** Byte-exact equality for two pixel buffers (lengths must match too). */
+export function buffersEqual(a: Uint8ClampedArray, b: Uint8ClampedArray): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index] !== b[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export const GNUMARUS_MIN_LAYER_DIM = 1;
 export const GNUMARUS_MAX_LAYER_DIM = 1024;
 

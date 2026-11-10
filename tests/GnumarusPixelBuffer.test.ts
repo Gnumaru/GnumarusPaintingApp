@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyCoverageMask,
+  buffersEqual,
   clampBrushSize,
   clampBrushSizeFloat,
   clearPixelBuffer,
@@ -507,5 +508,14 @@ describe("GnumarusPixelBuffer", () => {
     const full = createPixelBuffer(4, 4);
     full.fill(255);
     expect(findAlphaBoundingBox(full, 4, 4, 254)).toEqual({ left: 0, top: 0, width: 4, height: 4 });
+  });
+
+  it("compares pixel buffers by exact bytes", () => {
+    const a = createPixelBuffer(2, 1);
+    const b = createPixelBuffer(2, 1);
+    expect(buffersEqual(a, b)).toBe(true);
+    b[3] = 1;
+    expect(buffersEqual(a, b)).toBe(false);
+    expect(buffersEqual(a, createPixelBuffer(1, 1))).toBe(false);
   });
 });

@@ -14,7 +14,7 @@ interface JxlTestCodec {
  * garbage. This guards the bundling/serving path (MIME, locateFile),
  * which unit tests cannot cover.
  */
-test("jxl codec round-trips pixels in the browser @recent", async ({ page }) => {
+test("jxl codec round-trips pixels in the browser", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const result = await page.evaluate(async (): Promise<{ ok: boolean; diff?: number; badOk?: boolean }> => {

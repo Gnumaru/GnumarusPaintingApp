@@ -19,6 +19,7 @@
 - always ask me explicitly for aproval before adding any dependency to the project, be it through a package manager or by directly downloading the dependency code in the project directory
 - be thorough and meticulous while thinking about what actually needs to be implemented. always test what you have implemented and test for regressions, not only using unit tests but using end to end testing.
 - the name of this app is "Gnumaru's Painting and Animation App". Things like the build artifact (jar, exe, dll), the java package name, the dotnet/c++ namespace etc should be named like 'GnumarusXxxYyy'
+- you should not run every e2e test after every batch of changes. instead, keep two lists of e2e tests, a full list with all tests to check for regressions, that will only be run when I ask explicitly, and another list that will contain tests only for the current batch of changes. when the current batch finishes the tests will be removed from this 'recent' list and will be available only in the full list.
 
 - We are creating a frontend-only single page web application for digital painting, pixel art, vector art and frame-by-frame animation acelerated with webgl2
 

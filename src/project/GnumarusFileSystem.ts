@@ -131,6 +131,41 @@ export async function writeBlobToDirectory(
   await writeBlobToFile(handle, blob);
 }
 
+/** Read one file as bytes, or null when it does not exist. Other errors throw. */
+export async function readFileBytes(
+  root: GnumarusDirectoryHandle,
+  path: string,
+): Promise<Uint8Array | null> {
+  const missing = (error: unknown): boolean =>
+    error instanceof DOMException && error.name === "NotFoundError";
+  let handle: GnumarusFileHandle;
+  try {
+    handle = await resolveFile(root, path, false);
+  } catch (error) {
+    if (missing(error)) {
+      return null;
+    }
+    throw error;
+  }
+  try {
+    return new Uint8Array(await (await handle.getFile()).arrayBuffer());
+  } catch (error) {
+    if (missing(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/** Read and parse project.json, throwing a clear error when it is missing or corrupt. */
+export async function readProjectMeta(root: GnumarusDirectoryHandle): Promise<GnumarusProjectMeta> {
+  const bytes = await readFileBytes(root, GNUMARUS_PROJECT_FILE);
+  if (bytes === null) {
+    throw new Error(`${GNUMARUS_PROJECT_FILE} is missing from this folder`);
+  }
+  return parseProject(new TextDecoder().decode(bytes));
+}
+
 /** Plain object-URL download fallback when the File System Access API is missing. */
 export function downloadBlob(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob);

@@ -380,3 +380,6 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Unit tests for the settings module, effort plumbing and the frame-count helper; E2E for default circle shape, JXL save round-trip (lossless exact + lossy), settings UI/persistence, and texture `t1` naming.
 
 - Fixed along the way: multi-line test expectations that assumed square brushes (thick strokes, brush preview radius, AA rounding, cutout pixel counts); explicit square selection keeps their tuned geometry while the new default is covered separately.
+
+## 69. Reload All Textures action (landed)
+- New `reload-all-textures` action (Run action palette, no requirements): re-reads `project.json` from the saved directory for the texture id-to-file map, decodes each on-disk file (JXL sniffed by extension, PNG otherwise) and swaps same-size buffers in; unsaved project shows only an error toast; memory textures without a file entry or with missing/unreadable/size-mismatched files are skipped with counts; one undoable `reloadBatch` history entry; identical buffers count as applied without history.

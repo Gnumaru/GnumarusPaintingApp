@@ -12,6 +12,7 @@ import {
   drawLineSegment,
   findAlphaBoundingBox,
   GNUMARUS_MAX_TEXTURE_DIM,
+  buffersEqual,
   floodFill,
   getPixel,
   parseBrushShape,
@@ -127,6 +128,7 @@ import {
   type GnumarusFitRecord,
   type GnumarusHistoryEntry,
   type GnumarusMergedLayerSnapshot,
+  type GnumarusReloadRecord,
 } from "../history/GnumarusHistory";
 
 export interface GnumarusEngineStats {
@@ -3044,6 +3046,57 @@ export class GnumarusCanvasEngine {
     this.pushHistory({ type: "fitBatch", fits: records });
     this.refreshAfterBatchCrop(touched);
     return { cropped: records.length, unchanged, outside };
+  }
+
+  /**
+   * Replace texture pixels with freshly decoded file buffers (reload-all
+   * textures action). Same-size only: unknown ids and size mismatches are
+   * skipped. Buffers identical to memory count as applied without a
+   * history record; anything else records a single undoable history entry
+   * for the whole batch. Returns applied/skipped counts.
+   */
+  reloadTexturePixels(entries: Array<{ textureId: string; buffer: Uint8ClampedArray }>): {
+    applied: number;
+    skipped: number;
+  } {
+    const records: GnumarusReloadRecord[] = [];
+    const touched = new Set<string>();
+    let applied = 0;
+    let skipped = 0;
+    for (const { textureId, buffer } of entries) {
+      const entry = this.textures.get(textureId);
+      if (entry === undefined || buffer.length !== entry.width * entry.height * 4) {
+        skipped += 1;
+        continue;
+      }
+      this.commitFloatingIfHomeTexture(textureId);
+      if (buffersEqual(entry.buffer, buffer)) {
+        applied += 1;
+        touched.add(textureId);
+        continue;
+      }
+      const record: GnumarusReloadRecord = {
+        textureId,
+        width: entry.width,
+        height: entry.height,
+        beforeBuffer: new Uint8ClampedArray(entry.buffer),
+        afterBuffer: new Uint8ClampedArray(buffer),
+      };
+      if (!this.setTexturePixels(textureId, entry.width, entry.height, new Uint8ClampedArray(buffer))) {
+        skipped += 1;
+        continue;
+      }
+      records.push(record);
+      touched.add(textureId);
+      applied += 1;
+    }
+    if (records.length > 0) {
+      this.pushHistory({ type: "reloadBatch", reloads: records });
+    }
+    if (applied > 0) {
+      this.refreshAfterBatchCrop(touched);
+    }
+    return { applied, skipped };
   }
 
   private applyFitToSize(

@@ -443,4 +443,41 @@ describe("GnumarusHistory", () => {
     expect(history.undo(() => null, () => {}, undefined, () => false)).toBe(false);
     expect(history.canUndo()).toBe(false);
   });
+
+  it("undoes a reload batch in reverse and redoes it in order", () => {
+    const reload = (textureId: string): { textureId: string; width: number; height: number; beforeBuffer: Uint8ClampedArray; afterBuffer: Uint8ClampedArray } => ({
+      textureId,
+      width: 4,
+      height: 4,
+      beforeBuffer: createPixelBuffer(4, 4),
+      afterBuffer: createPixelBuffer(4, 4),
+    });
+    const history = new GnumarusHistory();
+    const calls: string[] = [];
+    const applyFit = (textureId: string, width: number, height: number): boolean => {
+      calls.push(`${textureId}:${width}x${height}`);
+      return true;
+    };
+    const findLayer = (): null => null;
+    const noop = (): void => {};
+    history.push({ type: "reloadBatch", reloads: [reload("texA"), reload("texB")] });
+    expect(history.undo(findLayer, noop, undefined, applyFit)).toBe(true);
+    expect(calls).toEqual(["texB:4x4", "texA:4x4"]);
+    expect(history.redo(findLayer, noop, undefined, applyFit)).toBe(true);
+    expect(calls).toEqual(["texB:4x4", "texA:4x4", "texA:4x4", "texB:4x4"]);
+    expect(history.canUndo()).toBe(true);
+    expect(history.canRedo()).toBe(false);
+  });
+
+  it("skips a reload batch when no texture applies", () => {
+    const history = new GnumarusHistory();
+    history.push({
+      type: "reloadBatch",
+      reloads: [
+        { textureId: "gone", width: 4, height: 4, beforeBuffer: createPixelBuffer(4, 4), afterBuffer: createPixelBuffer(4, 4) },
+      ],
+    });
+    expect(history.undo(() => null, () => {}, undefined, () => false)).toBe(false);
+    expect(history.canUndo()).toBe(false);
+  });
 });

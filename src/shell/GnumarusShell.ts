@@ -13,7 +13,9 @@ import {
   pickImportFile,
   pickProjectDirectory,
   pickSaveFile,
+  readFileBytes,
   readProjectFiles,
+  readProjectMeta,
   writeBlobToDirectory,
   writeBlobToFile,
   writeProjectFiles,
@@ -3843,6 +3845,14 @@ export class GnumarusShell extends LitElement {
         this.cropAllCellsToCanvas();
       },
     });
+    this.actionRegistry.register({
+      id: "reload-all-textures",
+      name: "Reload All Textures",
+      requirements: [],
+      run: (): void => {
+        void this.reloadAllTextures();
+      },
+    });
   }
 
   private actionContext(): GnumarusActionContext {
@@ -6696,6 +6706,76 @@ export class GnumarusShell extends LitElement {
         ? ` (${result.unchanged} unchanged${result.outside > 0 ? `, ${result.outside} outside` : ""})`
         : "";
     this.statusMessage = `Cropped ${result.cropped} texture${result.cropped === 1 ? "" : "s"} to canvas${rest}`;
+  }
+
+  /**
+   * Reload every texture from its file in the saved project directory.
+   * Only an error toast when the project was never saved; textures with
+   * no file on disk (or unreadable/decoded-size-mismatched files) are
+   * skipped with counts. One undoable history entry when pixels change.
+   */
+  private async reloadAllTextures(): Promise<void> {
+    if (this.engine === null) {
+      return;
+    }
+    if (this.directoryHandle === null) {
+      this.statusMessage = "Reload textures failed: the project has not been saved yet";
+      this.showToast("Reload textures failed: the project has not been saved yet");
+      return;
+    }
+    let files: Array<{ id: string; file: string }>;
+    try {
+      const project = await readProjectMeta(this.directoryHandle);
+      files = project.animation.textures.map((texture) => ({ id: texture.id, file: texture.file }));
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.statusMessage = `Reload textures failed: ${reason}`;
+      this.showToast(`Reload textures failed: ${reason}`);
+      return;
+    }
+    const decoded: Array<{ textureId: string; buffer: Uint8ClampedArray }> = [];
+    let skipped = 0;
+    for (const texture of this.engine.exportTextures()) {
+      const entry = files.find((file) => file.id === texture.id);
+      if (entry === undefined) {
+        skipped += 1;
+        continue;
+      }
+      let bytes: Uint8Array | null = null;
+      try {
+        bytes = await readFileBytes(this.directoryHandle, entry.file);
+      } catch {
+        skipped += 1;
+        continue;
+      }
+      if (bytes === null) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        const image = entry.file.endsWith(".jxl")
+          ? await decodeJxlBytes(bytes)
+          : await decodePngToBuffer(new Blob([bytes as Uint8Array<ArrayBuffer>]));
+        if (image.width !== texture.width || image.height !== texture.height) {
+          skipped += 1;
+          continue;
+        }
+        decoded.push({ textureId: texture.id, buffer: image.buffer });
+      } catch {
+        skipped += 1;
+      }
+    }
+    const result = this.engine.reloadTexturePixels(decoded);
+    skipped += result.skipped;
+    if (result.applied > 0) {
+      this.refreshLayers();
+      this.dirty = true;
+    }
+    const summary =
+      `Reloaded ${result.applied} texture${result.applied === 1 ? "" : "s"}` +
+      (skipped > 0 ? ` (${skipped} skipped)` : "");
+    this.statusMessage = summary;
+    this.showToast(summary);
   }
 
   private onCropCellToCanvasFromLayer(layerId: string): void {

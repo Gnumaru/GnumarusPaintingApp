@@ -3970,7 +3970,7 @@ test("Help menu lists every keyboard shortcut in a modal", async ({ page }) => {
   await expect(dialog).toBeHidden();
 });
 
-test("quick action palette filters and runs actions @recent", async ({ page }) => {
+test("quick action palette filters and runs actions", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.evaluate(() => {
@@ -3989,6 +3989,7 @@ test("quick action palette filters and runs actions @recent", async ({ page }) =
     "Import",
     "New Project",
     "Open Project",
+    "Reload All Textures",
     "Reset Canvas Transform",
     "Save Project",
   ]);
@@ -4005,7 +4006,7 @@ test("quick action palette filters and runs actions @recent", async ({ page }) =
   await expect(page.locator("gnumarus-shell")).toContainText("Canvas transform reset");
 });
 
-test("quick action palette runs the clicked action and closes on Escape @recent", async ({ page }) => {
+test("quick action palette runs the clicked action and closes on Escape", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.evaluate(() => {
@@ -4024,7 +4025,7 @@ test("quick action palette runs the clicked action and closes on Escape @recent"
   await expect(dialog).toBeHidden();
 });
 
-test("Digit0 resets the canvas transform @recent", async ({ page }) => {
+test("Digit0 resets the canvas transform", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.evaluate(() => {
@@ -4035,7 +4036,7 @@ test("Digit0 resets the canvas transform @recent", async ({ page }) => {
   await expect(page.locator("gnumarus-shell")).toContainText("Canvas transform reset");
 });
 
-test("Fit All Textures to Size fits every texture at once @recent", async ({ page }) => {
+test("Fit All Textures to Size fits every texture at once", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -4062,7 +4063,7 @@ test("Fit All Textures to Size fits every texture at once @recent", async ({ pag
   expect(await readPixel(page, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
 });
 
-test("Crop All Cells to Canvas crops shared textures sequentially @recent", async ({ page }) => {
+test("Crop All Cells to Canvas crops shared textures sequentially", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -4102,7 +4103,7 @@ test("Crop All Cells to Canvas crops shared textures sequentially @recent", asyn
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
-test("Crop All Cells to Canvas crops every cell at once @recent", async ({ page }) => {
+test("Crop All Cells to Canvas crops every cell at once", async ({ page }) => {
   const bytes = buildXcfBytes(4, 4, [
     { name: "Top", width: 4, height: 4, offsetX: 2, offsetY: 2, rgba: [0, 255, 0, 255] },
     { name: "Bottom", width: 4, height: 4, offsetX: 0, offsetY: 0, rgba: [0, 0, 255, 255] },
@@ -4136,6 +4137,87 @@ test("Crop All Cells to Canvas crops every cell at once @recent", async ({ page 
   state = await getLayers(page);
   expect(state.layers[1]?.transform).toMatchObject({ x: 2, y: 2 });
   expect(state.layers[1]?.width).toBe(4);
+});
+
+async function stubDirectoryWithFileStore(page: import("@playwright/test").Page): Promise<void> {
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      showDirectoryPicker?: () => Promise<unknown>;
+      __gnumarusDirTest?: { files: Record<string, Blob> };
+    };
+    const state: { files: Record<string, Blob> } = { files: {} };
+    root.__gnumarusDirTest = state;
+    interface MockFileHandle {
+      getFile(): Promise<File>;
+      createWritable(): Promise<{ write(data: string | Blob): Promise<void>; close(): Promise<void> }>;
+    }
+    function makeFileHandle(path: string): MockFileHandle {
+      return {
+        getFile: (): Promise<File> => Promise.resolve(new File([state.files[path] ?? new Blob([])], path)),
+        createWritable: (): Promise<{ write(data: string | Blob): Promise<void>; close(): Promise<void> }> =>
+          Promise.resolve({
+            write: (data: string | Blob): Promise<void> => {
+              state.files[path] = data instanceof Blob ? data : new Blob([data]);
+              return Promise.resolve();
+            },
+            close: (): Promise<void> => Promise.resolve(),
+          }),
+      };
+    }
+    function makeDir(prefix: string): unknown {
+      return {
+        name: prefix === "" ? "MockDir" : prefix,
+        getFileHandle: (fileName: string, options?: { create?: boolean }): Promise<MockFileHandle> => {
+          const path = prefix + fileName;
+          if (state.files[path] === undefined && options?.create !== true) {
+            return Promise.reject(new DOMException("File not found", "NotFoundError"));
+          }
+          return Promise.resolve(makeFileHandle(path));
+        },
+        getDirectoryHandle: (dirName: string): Promise<unknown> =>
+          Promise.resolve(makeDir(`${prefix}${dirName}/`)),
+      };
+    }
+    root.showDirectoryPicker = (): Promise<unknown> => Promise.resolve(makeDir(""));
+  });
+}
+
+async function runPaletteAction(page: import("@playwright/test").Page, query: string): Promise<void> {
+  await page.keyboard.press("Control+Shift+P");
+  const dialog = page.locator("gnumarus-shell dialog#actionPaletteDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator('[data-testid="action-palette-input"]').fill(query);
+  await page.keyboard.press("Enter");
+  await expect(dialog).toBeHidden();
+}
+
+test("Reload All Textures without a saved project shows an error toast @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await runPaletteAction(page, "reload all");
+  await expect(page.locator("gnumarus-shell")).toContainText(
+    "Reload textures failed: the project has not been saved yet",
+  );
+});
+
+test("Reload All Textures restores saved files, skips new textures and undoes @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubDirectoryWithFileStore(page);
+  await page.keyboard.press("Control+s");
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockDir");
+  // Paint after saving, then add a layer whose texture has no file on disk.
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await runPaletteAction(page, "reload all");
+  await expect(page.locator("gnumarus-shell")).toContainText("Reloaded 1 texture (1 skipped)");
+  // The saved layer is back to its on-disk (blank) pixels.
+  await page.locator('gnumarus-shell [data-layer-id="layer0"] .layer-name').click();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  // A single undo restores the painted pixels.
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
 });
 
 test("final preview shows the canvas background", async ({ page }) => {
@@ -6366,7 +6448,7 @@ test("named animations reject bad definitions and list valid ones", async ({ pag
   await expect(dialog).toBeHidden();
 });
 
-test("animation delete asks for confirmation @recent", async ({ page }) => {
+test("animation delete asks for confirmation", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await addFrames(page, 1);
@@ -6859,7 +6941,7 @@ test("project texture lossy setting is honored and persists", async ({ page }) =
   await expect(page.locator("gnumarus-shell select#storageFormat")).toHaveValue("lossless");
 });
 
-test("File > Export saves the current frame as lossless JXL @recent", async ({ page }) => {
+test("File > Export saves the current frame as lossless JXL", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await paintCenter(page);
@@ -6883,7 +6965,7 @@ test("File > Export saves the current frame as lossless JXL @recent", async ({ p
   expect(decoded?.center).toEqual([0, 0, 0, 255]);
 });
 
-test("File > Export saves lossy JXL when lossless is off @recent", async ({ page }) => {
+test("File > Export saves lossy JXL when lossless is off", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await paintCenter(page);
@@ -6905,7 +6987,7 @@ test("File > Export saves lossy JXL when lossless is off @recent", async ({ page
   expect(decoded?.center?.[3]).toBe(255);
 });
 
-test("File > Export saves all frames as a single-file JXL animation @recent", async ({ page }) => {
+test("File > Export saves all frames as a single-file JXL animation", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await addFrames(page, 1);
@@ -6927,7 +7009,7 @@ test("File > Export saves all frames as a single-file JXL animation @recent", as
   expect(decoded?.width).toBe(64);
 });
 
-test("File > Export saves an animation as a JXL spritesheet @recent", async ({ page }) => {
+test("File > Export saves an animation as a JXL spritesheet", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await addFrames(page, 1);
