@@ -2850,6 +2850,39 @@ async function backgroundPlaneSize(page: import("@playwright/test").Page): Promi
   });
 }
 
+async function canvasScreenPixel(
+  page: import("@playwright/test").Page,
+  clientX: number,
+  clientY: number,
+): Promise<{ r: number; g: number; b: number; a: number }> {
+  const shot = Array.from(await page.locator("gnumarus-shell canvas").screenshot());
+  const sampled = await page.evaluate(([png, px, py]: [number[], number, number]) => {
+    const target = document.querySelector("gnumarus-shell")?.shadowRoot?.querySelector("canvas") ?? null;
+    const rect = target?.getBoundingClientRect();
+    if (rect === undefined || rect.width <= 0) {
+      throw new Error("canvas box is missing");
+    }
+    const blob = new Blob([new Uint8Array(png)], { type: "image/png" });
+    return createImageBitmap(blob).then((bitmap) => {
+      const probe = document.createElement("canvas");
+      probe.width = bitmap.width;
+      probe.height = bitmap.height;
+      const context = probe.getContext("2d");
+      if (context === null) {
+        throw new Error("2D canvas unavailable");
+      }
+      context.drawImage(bitmap, 0, 0);
+      const scale = bitmap.width / rect.width;
+      const sx = Math.round((px - rect.left) * scale);
+      const sy = Math.round((py - rect.top) * scale);
+      const data = context.getImageData(sx, sy, 1, 1).data;
+      return { rgba: [data[0] ?? -1, data[1] ?? -1, data[2] ?? -1, data[3] ?? -1], sx, sy, sw: bitmap.width, sh: bitmap.height };
+    });
+  }, [shot, clientX, clientY] as [number[], number, number]);
+  const [r, g, b, a] = sampled.rgba;
+  return { r: r ?? 0, g: g ?? 0, b: b ?? 0, a: a ?? 0 };
+}
+
 test("editor bar stays visible across tools and holds wrap @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
@@ -2883,6 +2916,22 @@ test("background grows with wrap tiles @recent", async ({ page }) => {
     root.__gnumarus?.shell?.setWrapMode("off");
   });
   expect(await backgroundPlaneSize(page)).toEqual({ width: 64, height: 64 });
+});
+
+test("changing wrap mode repaints immediately @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  const outside = await layerScreenTarget(page, -10, 32);
+  const before = await canvasScreenPixel(page, outside.x, outside.y);
+  expect([before.r, before.g, before.b]).toEqual([51, 51, 51]);
+  await page.locator('gnumarus-shell [data-testid="editor-options"] select#wrapMode').selectOption("x");
+  // No painting in between: the ghost tile must already show the layer.
+  await expect
+    .poll(async () => canvasScreenPixel(page, outside.x, outside.y), { timeout: 5000 })
+    .toEqual({ r: 0, g: 0, b: 0, a: 255 });
 });
 
 async function readLayerPixel(page: import("@playwright/test").Page, x: number, y: number): Promise<GnumarusPixel | null> {

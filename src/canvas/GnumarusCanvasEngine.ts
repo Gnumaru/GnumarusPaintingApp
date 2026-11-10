@@ -3957,6 +3957,7 @@ export class GnumarusCanvasEngine {
     this.wrapMode = parsed;
     this.expandBackgroundForWrap();
     this.syncWrapTiles();
+    this.render();
     this.emitStats();
     this.updatePreviews();
     return true;
