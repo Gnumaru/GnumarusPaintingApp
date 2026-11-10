@@ -9,6 +9,7 @@ import {
   clearPixelBuffer,
   compositeOver,
   createPixelBuffer,
+  cropBufferBox,
   drawBrushLine,
   drawBrushStamp,
   drawCubicBezier,
@@ -514,6 +515,27 @@ describe("GnumarusPixelBuffer", () => {
     const full = createPixelBuffer(4, 4);
     full.fill(255);
     expect(findAlphaBoundingBox(full, 4, 4, 254)).toEqual({ left: 0, top: 0, width: 4, height: 4 });
+  });
+
+  it("cropBufferBox copies sub-rectangles clamped to the buffer", () => {
+    const buffer = createPixelBuffer(4, 4);
+    for (let i = 0; i < 16; i += 1) {
+      buffer[i * 4] = i;
+      buffer[i * 4 + 3] = 255;
+    }
+    const cropped = cropBufferBox(buffer, 4, 4, 1, 1, 2, 2);
+    expect(cropped?.width).toBe(2);
+    expect(cropped?.height).toBe(2);
+    expect(cropped === null ? [] : Array.from(cropped.buffer)).toEqual([
+      5, 0, 0, 255, 6, 0, 0, 255, 9, 0, 0, 255, 10, 0, 0, 255,
+    ]);
+    // Out-of-bounds boxes clamp instead of failing.
+    const clamped = cropBufferBox(buffer, 4, 4, 3, 3, 4, 4);
+    expect(clamped?.width).toBe(1);
+    expect(clamped?.height).toBe(1);
+    expect(cropBufferBox(buffer, 4, 4, 10, 10, 2, 2)).toBeNull();
+    expect(cropBufferBox(buffer, 4, 4, 0, 0, 0, 2)).toBeNull();
+    expect(cropBufferBox(new Uint8ClampedArray(3), 4, 4, 0, 0, 2, 2)).toBeNull();
   });
 
   it("compares pixel buffers by exact bytes", () => {

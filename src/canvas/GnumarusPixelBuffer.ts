@@ -249,6 +249,39 @@ export function findAlphaBoundingBox(
   return { left: minX, top: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
 }
 
+/**
+ * Copy a sub-rectangle out of an RGBA buffer (clamped to the buffer).
+ * Returns null for empty or fully out-of-bounds boxes.
+ */
+export function cropBufferBox(
+  buffer: Uint8ClampedArray,
+  width: number,
+  height: number,
+  left: number,
+  top: number,
+  boxWidth: number,
+  boxHeight: number,
+): { buffer: Uint8ClampedArray; width: number; height: number } | null {
+  if (buffer.length !== width * height * 4) {
+    return null;
+  }
+  const x0 = Math.max(0, Math.floor(left));
+  const y0 = Math.max(0, Math.floor(top));
+  const x1 = Math.min(width, x0 + Math.max(0, Math.floor(boxWidth)));
+  const y1 = Math.min(height, y0 + Math.max(0, Math.floor(boxHeight)));
+  const outWidth = x1 - x0;
+  const outHeight = y1 - y0;
+  if (outWidth < 1 || outHeight < 1) {
+    return null;
+  }
+  const out = new Uint8ClampedArray(outWidth * outHeight * 4);
+  for (let y = 0; y < outHeight; y += 1) {
+    const src = ((y0 + y) * width + x0) * 4;
+    out.set(buffer.subarray(src, src + outWidth * 4), y * outWidth * 4);
+  }
+  return { buffer: out, width: outWidth, height: outHeight };
+}
+
 export function clearPixelBuffer(buffer: Uint8ClampedArray, locked: GnumarusChannelLock | undefined = undefined): void {
   if (locked === undefined || areAllChannelsUnlocked(locked)) {
     buffer.fill(0);

@@ -19,6 +19,8 @@ export interface GnumarusStorageSettings {
   pngLevel: number;
   /** JPEG quality 0..100, default 95. */
   jpgQuality: number;
+  /** Brush tip JXL lossy quality 0..100, default 90. */
+  brushQuality: number;
 }
 
 export const DEFAULT_STORAGE_SETTINGS: GnumarusStorageSettings = {
@@ -27,6 +29,7 @@ export const DEFAULT_STORAGE_SETTINGS: GnumarusStorageSettings = {
   quality: 50,
   pngLevel: 9,
   jpgQuality: 95,
+  brushQuality: 90,
 };
 
 export const STORAGE_SETTINGS_STORAGE_KEY = "gnumarus.settings.storage.v1";
@@ -72,6 +75,13 @@ export function clampStorageJpgQuality(value: number): number {
   return Math.min(GNUMARUS_MAX_STORAGE_QUALITY, Math.max(GNUMARUS_MIN_STORAGE_QUALITY, Math.floor(value)));
 }
 
+export function clampBrushQuality(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_STORAGE_SETTINGS.brushQuality;
+  }
+  return Math.min(GNUMARUS_MAX_STORAGE_QUALITY, Math.max(GNUMARUS_MIN_STORAGE_QUALITY, Math.floor(value)));
+}
+
 export function parseStorageFormat(value: unknown): GnumarusStorageFormat {
   return value === "jpg" || value === "png" ? value : "jxl";
 }
@@ -86,7 +96,7 @@ export function parseStorageSettings(jsonText: string): GnumarusStorageSettings 
   if (!isRecord(parsed)) {
     throw new GnumarusStorageSettingsError("storage settings root must be an object");
   }
-  const { format, lossless, quality, pngLevel, jpgQuality } = parsed;
+  const { format, lossless, quality, pngLevel, jpgQuality, brushQuality } = parsed;
   if (typeof lossless !== "boolean" || typeof quality !== "number") {
     throw new GnumarusStorageSettingsError("storage settings have invalid fields");
   }
@@ -97,6 +107,8 @@ export function parseStorageSettings(jsonText: string): GnumarusStorageSettings 
     pngLevel: typeof pngLevel === "number" ? clampStoragePngLevel(pngLevel) : DEFAULT_STORAGE_SETTINGS.pngLevel,
     jpgQuality:
       typeof jpgQuality === "number" ? clampStorageJpgQuality(jpgQuality) : DEFAULT_STORAGE_SETTINGS.jpgQuality,
+    brushQuality:
+      typeof brushQuality === "number" ? clampBrushQuality(brushQuality) : DEFAULT_STORAGE_SETTINGS.brushQuality,
   };
 }
 
@@ -108,6 +120,7 @@ export function serializeStorageSettings(settings: GnumarusStorageSettings): str
       quality: clampStorageQuality(settings.quality),
       pngLevel: clampStoragePngLevel(settings.pngLevel),
       jpgQuality: clampStorageJpgQuality(settings.jpgQuality),
+      brushQuality: clampBrushQuality(settings.brushQuality),
     },
     null,
     2,

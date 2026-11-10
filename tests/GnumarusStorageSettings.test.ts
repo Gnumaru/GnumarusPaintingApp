@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  clampBrushQuality,
   clampStorageJpgQuality,
   clampStoragePngLevel,
   clampStorageQuality,
@@ -15,13 +16,14 @@ import {
 } from "../src/settings/GnumarusStorageSettings";
 
 describe("GnumarusStorageSettings", () => {
-  it("defaults to JXL lossless with PNG level 9 and JPEG quality 95", () => {
+  it("defaults to JXL lossless with PNG level 9, JPEG quality 95 and brush JXL quality 90", () => {
     expect(DEFAULT_STORAGE_SETTINGS).toEqual({
       format: "jxl",
       lossless: true,
       quality: 50,
       pngLevel: 9,
       jpgQuality: 95,
+      brushQuality: 90,
     });
     expect(GNUMARUS_MIN_STORAGE_QUALITY).toBe(0);
     expect(GNUMARUS_MAX_STORAGE_QUALITY).toBe(100);
@@ -50,10 +52,11 @@ describe("GnumarusStorageSettings", () => {
       quality: 75,
       pngLevel: 9,
       jpgQuality: 95,
+      brushQuality: 90,
     });
     expect(
       parseStorageSettings(JSON.stringify({ format: "png", lossless: true, quality: 50, pngLevel: 3, jpgQuality: 80 })),
-    ).toEqual({ format: "png", lossless: true, quality: 50, pngLevel: 3, jpgQuality: 80 });
+    ).toEqual({ format: "png", lossless: true, quality: 50, pngLevel: 3, jpgQuality: 80, brushQuality: 90 });
   });
 
   it("parses formats with a JXL fallback and clamps levels", () => {
@@ -79,6 +82,7 @@ describe("GnumarusStorageSettings", () => {
       quality: 100,
       pngLevel: 9,
       jpgQuality: 95,
+      brushQuality: 90,
     });
     expect(parseStorageSettings(JSON.stringify({ lossless: false, quality: -1 }))).toEqual({
       format: "jxl",
@@ -86,7 +90,25 @@ describe("GnumarusStorageSettings", () => {
       quality: 0,
       pngLevel: 9,
       jpgQuality: 95,
+      brushQuality: 90,
     });
+    expect(parseStorageSettings(JSON.stringify({ lossless: true, quality: 50, brushQuality: 250 }))).toEqual({
+      format: "jxl",
+      lossless: true,
+      quality: 50,
+      pngLevel: 9,
+      jpgQuality: 95,
+      brushQuality: 100,
+    });
+  });
+
+  it("clamps the brush tip JXL quality to an integer 0..100", () => {
+    expect(clampBrushQuality(90)).toBe(90);
+    expect(clampBrushQuality(0)).toBe(0);
+    expect(clampBrushQuality(101)).toBe(100);
+    expect(clampBrushQuality(-1)).toBe(0);
+    expect(clampBrushQuality(42.7)).toBe(42);
+    expect(clampBrushQuality(Number.NaN)).toBe(90);
   });
 
   it("rejects invalid settings", () => {

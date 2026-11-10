@@ -419,3 +419,10 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Batch D (preset library): versioned JSON preset (all pencil paint settings), built-ins (Pixel Hard, Soft Round, Chalk, Ink, Airbrush, Smudge), localStorage customs, export download + import file/hook, select/apply/save-as/delete UI; unit + E2E.
 - Batch E (symmetry): mirror-x/mirror-y/both dab mirroring for paint tips and mirrored segments for pixel tips; UI + hooks; unit + E2E.
 - Pixel-art mode stays untouched (all new features default off; pixel tip path unchanged).
+
+## 77. Dual-tip docs, brush tooltips, brush tip archive, import cleanup (implemented)
+- Dual tip explained (second image mask multiplied over the primary dab; black blocks, white passes; scale/strength; rotation-aware sampling).
+- Explanatory `title` tooltips on every pencil brush setting label.
+- Brush tip import: auto fit-to-size (alpha threshold 0) then JXL archive into an OPFS `brushes/` directory; new `brushQuality` storage setting (lossy JXL 0..100, default 90) with dialog row, reset arrow, persistence and test hook.
+- New import cleanup setting (`none`/`fit`/`crop`/`crop+fit`, default `crop+fit`): after open/import, `fit` runs fit-all-threshold-0, `crop` runs crop-all-to-canvas, `crop+fit` runs both in order; wired into openProject + all four importers with status suffix; dialog section, reset arrow, persistence, hooks.
+- Unit tests (crop helper, cleanup parse, brush quality parse) + E2E (OPFS archive round-trip, cleanup fit/crop/none, settings UI).

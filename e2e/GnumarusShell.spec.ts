@@ -2841,6 +2841,176 @@ test("symmetry mirrors pixel dabs across axes @recent", async ({ page }) => {
   }
 });
 
+async function textureDims(page: import("@playwright/test").Page): Promise<{ width: number; height: number }> {
+  return page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { exportTextures(): Array<{ width: number; height: number }> } };
+    };
+    const first = root.__gnumarus?.engine?.exportTextures()[0];
+    return { width: first?.width ?? -1, height: first?.height ?? -1 };
+  });
+}
+
+async function setImportCleanup(page: import("@playwright/test").Page, mode: string): Promise<void> {
+  await page.evaluate((which: string) => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setImportCleanup(mode: string): void } };
+    };
+    root.__gnumarus?.shell?.setImportCleanup(which);
+  }, mode);
+}
+
+test("import cleanup setting is configurable and persists @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#settingsDialog");
+  await expect(dialog.locator("select#importCleanup")).toHaveValue("crop+fit");
+  await dialog.locator("select#importCleanup").selectOption("fit");
+  await expect(page.locator("gnumarus-shell")).toContainText("Import cleanup: fit");
+  const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.importCleanup.v1"));
+  expect(persisted).toContain('"cleanup": "fit"');
+  await page.locator('gnumarus-shell [aria-label="Reset import cleanup to default"]').click();
+  await expect(dialog.locator("select#importCleanup")).toHaveValue("crop+fit");
+});
+
+test("import cleanup fit trims transparent borders on open @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  await setImportCleanup(page, "fit");
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject (fitted 1)");
+  expect(await textureDims(page)).toEqual({ width: 1, height: 1 });
+  expect(await paintedPixelCount(page)).toBe(1);
+});
+
+test("import cleanup none imports textures as-is @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  await setImportCleanup(page, "none");
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject");
+  expect(await textureDims(page)).toEqual({ width: 64, height: 64 });
+});
+
+async function redPngBytes(page: import("@playwright/test").Page, size: number): Promise<number[]> {
+  return page.evaluate(async (side: number) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = side;
+    canvas.height = side;
+    const context = canvas.getContext("2d");
+    if (context === null) {
+      throw new Error("2D canvas unavailable");
+    }
+    context.fillStyle = "#ff0000";
+    context.fillRect(0, 0, side, side);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (blob === null) {
+      throw new Error("PNG encode failed");
+    }
+    return Array.from(new Uint8Array(await blob.arrayBuffer()));
+  }, size);
+}
+
+test("import cleanup crop trims textures to the canvas @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  const metaText = await project.writtenProject();
+  expect(metaText).not.toBeNull();
+  const meta = JSON.parse(metaText as string) as {
+    animation: { textures: Array<{ id: string; name: string; width: number; height: number; file: string }> };
+  };
+  const texture = meta.animation.textures[0];
+  if (texture === undefined) {
+    throw new Error("saved project has no texture");
+  }
+  texture.width = 128;
+  texture.height = 128;
+  texture.file = "textures/big.png";
+  await project.seedFile("project.json", Array.from(new TextEncoder().encode(JSON.stringify(meta))));
+  await project.seedFile("textures/big.png", await redPngBytes(page, 128));
+  await setImportCleanup(page, "crop");
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject (cropped 1)");
+  expect(await textureDims(page)).toEqual({ width: 64, height: 64 });
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("brush quality setting persists and tips archive as JXL @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#settingsDialog");
+  await expect(dialog.locator("input#brushQuality")).toHaveValue("90");
+  await dialog.locator("input#brushQuality").fill("70");
+  await expect(page.locator("gnumarus-shell")).toContainText("Project textures save as lossless JXL");
+  const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.storage.v1"));
+  expect(persisted).toContain('"brushQuality": 70');
+  await dialog.getByRole("button", { name: "Close" }).click();
+  const installed = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        shell?: { setPaintTipFromPixels(w: number, h: number, rgba: number[]): boolean };
+        engine?: { getPaintTipImage(): { width: number; height: number } | null };
+      };
+    };
+    const rgba: number[] = new Array(16 * 4).fill(0);
+    rgba[5 * 4] = 255;
+    rgba[5 * 4 + 1] = 255;
+    rgba[5 * 4 + 2] = 255;
+    rgba[5 * 4 + 3] = 255;
+    const ok = root.__gnumarus?.shell?.setPaintTipFromPixels(4, 4, rgba) ?? false;
+    return { ok, tip: root.__gnumarus?.engine?.getPaintTipImage() ?? null };
+  });
+  expect(installed.ok).toBe(true);
+  expect(installed.tip?.width).toBe(1);
+  expect(installed.tip?.height).toBe(1);
+  const readBrushFile = (): Promise<number[]> =>
+    page.evaluate(async () => {
+      const storage = navigator.storage as unknown as { getDirectory(): Promise<unknown> };
+      const root = (await storage.getDirectory()) as unknown as {
+        getDirectoryHandle(name: string): Promise<{
+          getFileHandle(name: string): Promise<{ getFile(): Promise<Blob> }>;
+        }>;
+      };
+      const brushes = await root.getDirectoryHandle("brushes");
+      const file = await brushes.getFileHandle("4x4_tip.jxl");
+      return Array.from(new Uint8Array(await (await file.getFile()).arrayBuffer()));
+    });
+  await expect.poll(readBrushFile, { timeout: 10000 }).not.toEqual([]);
+  const archived = await readBrushFile();
+  expect(archived.slice(0, 2)).toEqual([0xff, 0x0a]);
+  const decoded = await decodeJxlInPage(page, archived);
+  expect(decoded?.width).toBe(1);
+  expect(decoded?.height).toBe(1);
+  for (const channel of decoded?.center ?? []) {
+    expect(channel).toBeGreaterThan(200);
+  }
+});
+
 test("brush presets apply, save and persist @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
@@ -7689,6 +7859,7 @@ async function stubProjectDirectory(
 ): Promise<{
   writtenBlobs: () => Promise<Record<string, number[]>>;
   writtenProject: () => Promise<string | null>;
+  seedFile: (path: string, bytes: number[]) => Promise<void>;
 }> {
   await page.evaluate(() => {
     const root = window as unknown as {
@@ -7757,6 +7928,18 @@ async function stubProjectDirectory(
         const blob = root.__gnumarusProjectTest?.files["project.json"];
         return blob === undefined ? null : blob.text();
       }),
+    seedFile: (path: string, bytes: number[]): Promise<void> =>
+      page.evaluate(
+        ({ name, data }: { name: string; data: number[] }) => {
+          const root = window as unknown as {
+            __gnumarusProjectTest?: { files: Record<string, Blob> };
+          };
+          if (root.__gnumarusProjectTest !== undefined) {
+            root.__gnumarusProjectTest.files[name] = new Blob([new Uint8Array(data)]);
+          }
+        },
+        { name: path, data: bytes },
+      ),
   };
 }
 

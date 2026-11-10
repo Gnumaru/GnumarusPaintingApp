@@ -253,6 +253,11 @@
 - [x] E2E (@recent only, per policy): 15 passed (previous 7 + soft/feather + spacing gaps + image tip + flow + grain + fuzzy + firm curve + dual); full suite untouched
 - [x] Unit tests (vitest) — 355 passed (previous 340 + presets/dynamics/airbrush/smudge/symmetry/rotation/string)
 - [x] E2E (@recent only, per policy): 24 passed (previous 15 + tilt broaden + speed fade + tip rotation + airbrush buildup + string leash + dry smudge + presets apply/save/persist + preset import + symmetry); full suite untouched
+- [x] Dual-tip explanation + tooltips on all brush settings
+- [x] Brush tip auto-fit (alpha 0) + JXL archive in OPFS brushes/ + brush quality setting (default 90)
+- [x] Import cleanup setting (none/fit/crop/crop+fit, default crop+fit) on open + all imports
+- [x] Unit tests (vitest) — 360 passed (previous 355 + cropBufferBox + cleanup parse + brush quality)
+- [x] E2E (@recent only, per policy): 29 passed (previous 24 + cleanup setting/fit/none/crop + brush quality/archive); full suite untouched
 - [x] Batch A: tilt/velocity dynamics + direction-following tips
 - [x] Batch B: airbrush + pulled-string stabilizer + GPU upload coalescing
 - [x] Batch C: smudge/mixer brush

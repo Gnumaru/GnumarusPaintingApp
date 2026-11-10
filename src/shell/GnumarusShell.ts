@@ -88,6 +88,7 @@ import {
 import {
   DEFAULT_STORAGE_SETTINGS,
   STORAGE_SETTINGS_STORAGE_KEY,
+  clampBrushQuality,
   clampStorageJpgQuality,
   clampStoragePngLevel,
   clampStorageQuality,
@@ -97,6 +98,14 @@ import {
   type GnumarusStorageFormat,
   type GnumarusStorageSettings,
 } from "../settings/GnumarusStorageSettings";
+import {
+  DEFAULT_IMPORT_CLEANUP,
+  IMPORT_CLEANUP_STORAGE_KEY,
+  parseImportCleanup,
+  parseImportCleanupSettings,
+  serializeImportCleanupSettings,
+  type GnumarusImportCleanup,
+} from "../settings/GnumarusImportSettings";
 import {
   DEFAULT_EXPAND_SETTINGS,
   EXPAND_SETTINGS_STORAGE_KEY,
@@ -123,6 +132,7 @@ import {
   JXL_EXT,
   JXL_LABEL,
   JXL_MIME,
+  JXL_STORAGE_EFFORT,
 } from "../export/GnumarusJxlExport";
 import { createGifEncoder } from "../export/GnumarusGifExport";
 import {
@@ -140,7 +150,9 @@ import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
 import {
   applyAlphaPlane,
   clampBrushSizeFloat,
+  cropBufferBox,
   extractAlphaPlane,
+  findAlphaBoundingBox,
   parseBlendMode,
   parseBrushShape,
   parsePressureResponse,
@@ -1222,6 +1234,8 @@ export class GnumarusShell extends LitElement {
     storageFormat: { type: String },
     storagePngLevel: { type: Number },
     storageJpegQuality: { type: Number },
+    brushQuality: { type: Number },
+    importCleanup: { type: String },
     expandStep: { type: Number },
     renamingFrame: { type: Number },
     brushSize: { type: Number },
@@ -1231,7 +1245,8 @@ export class GnumarusShell extends LitElement {
     brushHardness: { type: Number },
     brushSpacing: { type: Number },
     brushFlow: { type: Number },
-    paintFuzzy: { type: Number },    paintGrainStrength: { type: Number },
+    paintFuzzy: { type: Number },
+    paintGrainStrength: { type: Number },
     paintGrainScale: { type: Number },
     tiltSizeAmount: { type: Number },
     speedFadeAmount: { type: Number },
@@ -1350,6 +1365,8 @@ export class GnumarusShell extends LitElement {
   declare storageFormat: GnumarusStorageFormat;
   declare storagePngLevel: number;
   declare storageJpegQuality: number;
+  declare brushQuality: number;
+  declare importCleanup: GnumarusImportCleanup;
   declare expandStep: number;
   declare renamingFrame: number | null;
   declare brushSize: number;
@@ -1489,6 +1506,8 @@ export class GnumarusShell extends LitElement {
     this.storageFormat = DEFAULT_STORAGE_SETTINGS.format;
     this.storagePngLevel = DEFAULT_STORAGE_SETTINGS.pngLevel;
     this.storageJpegQuality = DEFAULT_STORAGE_SETTINGS.jpgQuality;
+    this.brushQuality = DEFAULT_STORAGE_SETTINGS.brushQuality;
+    this.importCleanup = DEFAULT_IMPORT_CLEANUP;
     this.expandStep = DEFAULT_EXPAND_SETTINGS.step;
     this.renamingFrame = null;
     this.brushSize = 1;
@@ -2658,6 +2677,52 @@ export class GnumarusShell extends LitElement {
           : html``}
         <div class="setting-row">
           <label
+            >Brush tip JXL quality
+            <input
+              type="number"
+              id="brushQuality"
+              min="0"
+              max="100"
+              step="1"
+              .value=${String(this.brushQuality)}
+              @input=${(): void => this.applyStorageFromDialog()}
+            />
+          </label>
+          ${this.brushQuality !== DEFAULT_STORAGE_SETTINGS.brushQuality
+            ? html`<button
+                class="reset-btn"
+                aria-label="Reset brush tip JXL quality to default"
+                title="Reset to default"
+                @click=${(): void => this.resetStorageToDefault()}
+              >
+                ↻
+              </button>`
+            : html``}
+        </div>
+        <div class="settings-section">Import</div>
+        <div class="setting-row">
+          <label
+            >Texture cleanup on open/import
+            <select id="importCleanup" .value=${this.importCleanup} @change=${(): void => this.applyImportCleanupFromDialog()}>
+              <option value="none">None</option>
+              <option value="fit">Fit (trim transparent borders)</option>
+              <option value="crop">Crop to canvas</option>
+              <option value="crop+fit">Crop + fit</option>
+            </select>
+          </label>
+          ${this.importCleanup !== DEFAULT_IMPORT_CLEANUP
+            ? html`<button
+                class="reset-btn"
+                aria-label="Reset import cleanup to default"
+                title="Reset to default"
+                @click=${(): void => this.resetImportCleanupToDefault()}
+              >
+                ↻
+              </button>`
+            : html``}
+        </div>
+        <div class="setting-row">
+          <label
             >Cell texture expand step (pixels)
             <input
               type="number"
@@ -3033,7 +3098,7 @@ export class GnumarusShell extends LitElement {
 
   private renderBlendModeOption() {
     return html`
-      <label
+      <label title="How paint combines with existing pixels: normal blends over, copy replaces, eraser clears alpha (E toggles)."
         >Blend mode
         <select id="blendMode" .value=${this.blendMode} @change=${(): void => this.applyBlendModeFromDialog()}>
           <option value="normal">Normal</option>
@@ -3046,7 +3111,7 @@ export class GnumarusShell extends LitElement {
 
   private renderAccumulateOption() {
     return html`
-      <label
+      <label title="When on, dabs build over each other while scrubbing; when off, the stroke keeps uniform coverage."
         ><input
           type="checkbox"
           id="accumulate"
@@ -3060,7 +3125,7 @@ export class GnumarusShell extends LitElement {
 
   private renderStabilizerOption() {
     return html`
-      <label
+      <label title="Steady the stroke: rope leashes the tip, string trails it with a soft pull, follow chases the cursor."
         >Stabilizer
         <select
           id="stabilizerMode"
@@ -3075,7 +3140,7 @@ export class GnumarusShell extends LitElement {
       </label>
       ${this.stabilizerMode === "rope" || this.stabilizerMode === "string"
         ? html`
-            <label
+            <label title="Leash length in layer pixels: the tip stays put until the cursor pulls beyond it."
               >${this.stabilizerMode === "rope" ? "Rope length" : "String length"}
               <input
                 type="number"
@@ -3091,7 +3156,7 @@ export class GnumarusShell extends LitElement {
         : html``}
       ${this.stabilizerMode === "follow"
         ? html`
-            <label
+            <label title="Chase fraction per move: 100 snaps to the cursor, lower values lag behind."
               >Follow strength
               <input
                 type="number"
@@ -3112,7 +3177,7 @@ export class GnumarusShell extends LitElement {
     if (this.tool === "pencil") {
       return html`
         <div class="tool-options" data-testid="tool-options" aria-label="Pencil options" ?hidden=${this.uiHidden}>
-          <label
+          <label title="Apply a saved brush preset (all pencil settings) to the current brush."
             >Preset
             <select id="brushPreset" @change=${(): void => this.applyBrushPresetFromDialog()}>
               ${[...BUILT_IN_BRUSH_PRESETS, ...this.brushPresets].map(
@@ -3120,7 +3185,7 @@ export class GnumarusShell extends LitElement {
               )}
             </select>
           </label>
-          <label
+          <label title="Name a preset, then Save stores the current settings, Delete removes a custom preset, Export downloads it as JSON, Import loads a preset file."
             >Preset name
             <input
               type="text"
@@ -3137,7 +3202,7 @@ export class GnumarusShell extends LitElement {
             <button @click=${(): void => this.openBrushPresetPicker()}>Import</button>
             <input type="file" id="brushPresetImport" accept="application/json,.json" hidden @change=${(): void => void this.importBrushPresetFromDialog()} />
           </label>
-          <label
+          <label title="Brush diameter in layer pixels (0.1–64). Shift+Left-drag also resizes the active tool."
             >Brush size
             <input
               type="number"
@@ -3149,14 +3214,14 @@ export class GnumarusShell extends LitElement {
               @input=${(): void => this.applyBrushSizeFromDialog()}
             />
           </label>
-          <label
+          <label title="Pixel tip footprint: full square or inscribed disk. Only used by the Pixel (hard) tip."
             >Brush shape
             <select id="brushShape" .value=${this.brushShape} @change=${(): void => this.applyBrushShapeFromDialog()}>
               <option value="square">Square</option>
               <option value="circle">Circle</option>
             </select>
           </label>
-          <label
+          <label title="Mirror every stroke across the canvas axes while painting."
             >Symmetry
             <select id="symmetryMode" .value=${this.symmetryMode} @change=${(): void => this.applySymmetryModeFromDialog()}>
               <option value="off">Off</option>
@@ -3165,7 +3230,7 @@ export class GnumarusShell extends LitElement {
               <option value="both">Four-way</option>
             </select>
           </label>
-          <label
+          <label title="Pixel paints hard aliased stamps (pixel art). Soft paints a round tip with hardness falloff. Image paints a grayscale tip as an alpha mask tinted with the paint color."
             >Brush tip
             <select id="brushTipKind" .value=${this.brushTipKind} @change=${(): void => this.applyBrushTipKindFromDialog()}>
               <option value="pixel">Pixel (hard)</option>
@@ -3175,7 +3240,7 @@ export class GnumarusShell extends LitElement {
           </label>
           ${this.brushTipKind === "pixel"
             ? html``
-            : html`<label
+            : html`<label title="Hardness of the soft tip edge: 100% is a hard disk, 0% fades across the whole radius."
                 >Tip softness
                 <input
                   type="number"
@@ -3187,7 +3252,7 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applyBrushHardnessFromDialog()}
                 />
               </label>
-              <label
+              <label title="Distance between dabs as a percent of the tip diameter. Under 100% dabs overlap; over 100% they separate."
                 >Tip spacing (%)
                 <input
                   type="number"
@@ -3199,7 +3264,7 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applyBrushSpacingFromDialog()}
                 />
               </label>
-              <label
+              <label title="Paint applied per dab. Lower flow needs overlapping dabs to reach full opacity."
                 >Flow (%)
                 <input
                   type="number"
@@ -3211,7 +3276,7 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applyBrushFlowFromDialog()}
                 />
               </label>
-              <label
+              <label title="Deterministic per-dab jitter of size, alpha and position. The same seed replays identically."
                 >Fuzzy (%)
                 <input
                   type="number"
@@ -3223,7 +3288,7 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applyPaintFuzzyFromDialog()}
                 />
               </label>
-              <label
+              <label title="Paper grain strength: multiplies each dab by anchored value noise."
                 >Grain (%)
                 <input
                   type="number"
@@ -3235,7 +3300,7 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applyPaintGrainFromDialog()}
                 />
               </label>
-              <label
+              <label title="Paper grain cell size in layer pixels."
                 >Grain size (px)
                 <input
                   type="number"
@@ -3247,7 +3312,7 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applyPaintGrainFromDialog()}
                 />
               </label>
-              <label
+              <label title="How much pen tilt broadens dabs. 0% disables tilt dynamics."
                 >Tilt size (%)
                 <input
                   type="number"
@@ -3259,7 +3324,7 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applyTiltSizeFromDialog()}
                 />
               </label>
-              <label
+              <label title="How much fast strokes lose flow. 0% disables speed dynamics."
                 >Speed fade (%)
                 <input
                   type="number"
@@ -3271,14 +3336,14 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applySpeedFadeFromDialog()}
                 />
               </label>
-              <label
+              <label title="Rotate the tip lookup with the stroke direction (image and dual masks only; the soft falloff is radial)."
                 >Tip rotation
                 <select id="tipAngleMode" .value=${this.tipAngleMode} @change=${(): void => this.applyTipAngleModeFromDialog()}>
                   <option value="none">None</option>
                   <option value="direction">Follow direction</option>
                 </select>
               </label>
-              <label
+              <label title="Timed dabs per second while the pointer is held, even without moving. 0 disables the airbrush."
                 >Airbrush (dabs/s)
                 <input
                   type="number"
@@ -3290,7 +3355,7 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applyAirbrushRateFromDialog()}
                 />
               </label>
-              <label
+              <label title="Pick up canvas paint into each dab (dry mixer). 0% paints only the brush color."
                 >Smudge (%)
                 <input
                   type="number"
@@ -3302,7 +3367,7 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applySmudgeFromDialog()}
                 />
               </label>
-              <label
+              <label title="How much brush color mixes into the picked-up paint. 0% moves paint, 100% paints."
                 >Wetness (%)
                 <input
                   type="number"
@@ -3314,7 +3379,7 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applySmudgeFromDialog()}
                 />
               </label>
-              <label
+              <label title="Second image mask multiplied over the primary dab: black blocks paint, white lets it through. Import a grayscale tip, Clear removes it."
                 >Dual tip ${this.paintDualName === "" ? "(none)" : `(${this.paintDualName})`}
                 <input type="file" id="paintDualImport" accept="image/*" hidden @change=${(): void => void this.importPaintDualFromDialog()} />
                 <button @click=${(): void => this.openPaintDualPicker()}>Import dual…</button>
@@ -3324,7 +3389,7 @@ export class GnumarusShell extends LitElement {
               </label>
               ${this.paintDualName === ""
                 ? html``
-                : html`<label
+                : html`<label title="Dual mask strength: 0% disables the second tip."
                     >Dual strength (%)
                     <input
                       type="number"
@@ -3336,7 +3401,7 @@ export class GnumarusShell extends LitElement {
                       @input=${(): void => this.applyPaintDualTuningFromDialog()}
                     />
                   </label>
-                  <label
+                  <label title="Dual tip size relative to the primary dab."
                     >Dual size (%)
                     <input
                       type="number"
@@ -3349,7 +3414,7 @@ export class GnumarusShell extends LitElement {
                     />
                   </label>`}`}
           ${this.brushTipKind === "image"
-            ? html`<label
+            ? html`<label title="Grayscale image tip: luminance becomes the dab alpha mask tinted with the paint color. Import a PNG (auto-trimmed, archived as JXL), Clear removes it."
                 >Image tip ${this.paintTipName === "" ? "(none)" : `(${this.paintTipName})`}
                 <input type="file" id="paintTipImport" accept="image/*" hidden @change=${(): void => void this.importPaintTipFromDialog()} />
                 <button @click=${(): void => this.openPaintTipPicker()}>Import tip…</button>
@@ -3358,7 +3423,7 @@ export class GnumarusShell extends LitElement {
                   : html`<button @click=${(): void => this.clearPaintTip()}>Clear</button>`}
               </label>`
             : html``}
-          <label
+          <label title="Map pen pressure to brush size, paint alpha, or both. Mice always paint at full pressure."
             >Pressure response
             <select
               id="pressureResponse"
@@ -3373,7 +3438,7 @@ export class GnumarusShell extends LitElement {
           </label>
           ${this.pressureResponse === "none"
             ? html``
-            : html`<label
+            : html`<label title="Pressure-to-size response shape: linear is 1:1, soft answers early, firm needs hard presses."
                 >Size curve
                 <select
                   id="pressureSizeCurve"
@@ -3385,7 +3450,7 @@ export class GnumarusShell extends LitElement {
                   <option value="firm">Firm</option>
                 </select>
               </label>
-              <label
+              <label title="Pressure-to-alpha response shape: linear is 1:1, soft answers early, firm needs hard presses."
                 >Alpha curve
                 <select
                   id="pressureAlphaCurve"
@@ -3397,7 +3462,7 @@ export class GnumarusShell extends LitElement {
                   <option value="firm">Firm</option>
                 </select>
               </label>`}
-          <label
+          <label title="Smooth stroke edges with partial-pixel coverage. Disables Pixel perfect."
             ><input
               type="checkbox"
               id="pencilAntialias"
@@ -3813,6 +3878,8 @@ export class GnumarusShell extends LitElement {
     this.storageFormat = storedStorage.format;
     this.storagePngLevel = storedStorage.pngLevel;
     this.storageJpegQuality = storedStorage.jpgQuality;
+    this.brushQuality = storedStorage.brushQuality;
+    this.importCleanup = this.loadImportCleanup();
     const storedExpand = this.loadExpandSettings();
     this.expandStep = storedExpand.step;
     this.brushPresets = this.loadBrushPresets();
@@ -4760,6 +4827,7 @@ export class GnumarusShell extends LitElement {
           quality: this.storageQuality,
           pngLevel: this.storagePngLevel,
           jpgQuality: this.storageJpegQuality,
+          brushQuality: this.brushQuality,
         }),
       );
     } catch {
@@ -4773,7 +4841,8 @@ export class GnumarusShell extends LitElement {
       this.storageLossless === DEFAULT_STORAGE_SETTINGS.lossless &&
       this.storageQuality === DEFAULT_STORAGE_SETTINGS.quality &&
       this.storagePngLevel === DEFAULT_STORAGE_SETTINGS.pngLevel &&
-      this.storageJpegQuality === DEFAULT_STORAGE_SETTINGS.jpgQuality
+      this.storageJpegQuality === DEFAULT_STORAGE_SETTINGS.jpgQuality &&
+      this.brushQuality === DEFAULT_STORAGE_SETTINGS.brushQuality
     );
   }
 
@@ -4829,12 +4898,22 @@ export class GnumarusShell extends LitElement {
       : `Project textures save as lossy JXL (quality ${this.storageQuality})`;
   }
 
+  private currentDialogBrushQuality(): number {
+    const input = this.shadowRoot?.getElementById("brushQuality") as HTMLInputElement | null;
+    if (input === null) {
+      return this.brushQuality;
+    }
+    const raw = Number(input.value);
+    return clampBrushQuality(Number.isFinite(raw) ? Math.floor(raw) : DEFAULT_STORAGE_SETTINGS.brushQuality);
+  }
+
   private applyStorageFromDialog(): void {
     this.storageFormat = this.currentDialogStorageFormat();
     this.storageLossless = this.currentDialogStorageLossless();
     this.storageQuality = this.currentDialogStorageQuality();
     this.storagePngLevel = this.currentDialogStoragePngLevel();
     this.storageJpegQuality = this.currentDialogStorageJpegQuality();
+    this.brushQuality = this.currentDialogBrushQuality();
     this.persistStorage();
     this.statusMessage = this.storageStatusMessage();
   }
@@ -4845,25 +4924,106 @@ export class GnumarusShell extends LitElement {
     this.storageFormat = DEFAULT_STORAGE_SETTINGS.format;
     this.storagePngLevel = DEFAULT_STORAGE_SETTINGS.pngLevel;
     this.storageJpegQuality = DEFAULT_STORAGE_SETTINGS.jpgQuality;
+    this.brushQuality = DEFAULT_STORAGE_SETTINGS.brushQuality;
     this.persistStorage();
     this.statusMessage = "Project texture storage reset to default";
   }
 
-  /** Test hook: set project texture storage (format, JXL mode/quality, PNG level, JPEG quality). */
+  /** Test hook: set project texture storage (format, JXL mode/quality, PNG level, JPEG quality, brush JXL quality). */
   setProjectStorage(
     lossless: boolean,
     quality: number,
     format: GnumarusStorageFormat = DEFAULT_STORAGE_SETTINGS.format,
     pngLevel = DEFAULT_STORAGE_SETTINGS.pngLevel,
     jpgQuality = DEFAULT_STORAGE_SETTINGS.jpgQuality,
+    brushQuality = DEFAULT_STORAGE_SETTINGS.brushQuality,
   ): void {
     this.storageFormat = parseStorageFormat(format);
     this.storageLossless = lossless;
     this.storageQuality = clampStorageQuality(quality);
     this.storagePngLevel = clampStoragePngLevel(pngLevel);
     this.storageJpegQuality = clampStorageJpgQuality(jpgQuality);
+    this.brushQuality = clampBrushQuality(brushQuality);
     this.persistStorage();
     this.statusMessage = this.storageStatusMessage();
+  }
+
+  /** Test hook: set the brush tip JXL quality (0..100, lossy). */
+  setBrushQuality(quality: number): void {
+    this.brushQuality = clampBrushQuality(quality);
+    this.persistStorage();
+    this.statusMessage = `Brush tip JXL quality: ${this.brushQuality}`;
+  }
+
+  private loadImportCleanup(): GnumarusImportCleanup {
+    try {
+      const stored = window.localStorage.getItem(IMPORT_CLEANUP_STORAGE_KEY);
+      if (stored !== null) {
+        return parseImportCleanupSettings(stored);
+      }
+    } catch {
+      // Corrupt or unavailable storage falls back to defaults.
+    }
+    return DEFAULT_IMPORT_CLEANUP;
+  }
+
+  private persistImportCleanup(): void {
+    try {
+      window.localStorage.setItem(IMPORT_CLEANUP_STORAGE_KEY, serializeImportCleanupSettings(this.importCleanup));
+    } catch {
+      // Storage failures must not break the settings flow.
+    }
+  }
+
+  /** Test hook: set the texture cleanup applied on open/import. */
+  setImportCleanup(mode: GnumarusImportCleanup): void {
+    this.importCleanup = parseImportCleanup(mode);
+    this.persistImportCleanup();
+    this.statusMessage = `Import cleanup: ${this.importCleanup}`;
+  }
+
+  private applyImportCleanupFromDialog(): void {
+    const select = this.shadowRoot?.getElementById("importCleanup") as HTMLSelectElement | null;
+    this.importCleanup = parseImportCleanup(select?.value ?? DEFAULT_IMPORT_CLEANUP);
+    this.persistImportCleanup();
+    this.statusMessage = `Import cleanup: ${this.importCleanup}`;
+  }
+
+  private resetImportCleanupToDefault(): void {
+    this.importCleanup = DEFAULT_IMPORT_CLEANUP;
+    this.persistImportCleanup();
+    this.statusMessage = "Import cleanup reset to default";
+  }
+
+  /**
+   * Run the configured texture cleanup right after a project open or file
+   * import: `crop` crops every texture to the canvas, `fit` removes fully
+   * transparent borders (threshold 0), `crop+fit` runs both in that order.
+   * Returns a status suffix ("" when nothing changed).
+   */
+  private applyImportCleanup(): string {
+    if (this.engine === null || this.importCleanup === "none") {
+      return "";
+    }
+    const parts: string[] = [];
+    if (this.importCleanup === "crop" || this.importCleanup === "crop+fit") {
+      const cropped = this.engine.cropAllCellsToCanvas();
+      if (cropped.cropped > 0) {
+        parts.push(`cropped ${cropped.cropped}`);
+      }
+    }
+    if (this.importCleanup === "fit" || this.importCleanup === "crop+fit") {
+      const fitted = this.engine.fitAllTexturesToSize(0);
+      if (fitted.fitted > 0) {
+        parts.push(`fitted ${fitted.fitted}`);
+      }
+    }
+    if (parts.length === 0) {
+      return "";
+    }
+    this.refreshLayers();
+    this.dirty = true;
+    return ` (${parts.join(", ")})`;
   }
 
   private loadExpandSettings(): { step: number } {
@@ -5141,17 +5301,11 @@ export class GnumarusShell extends LitElement {
 
   /**
    * Test hook: install an image tip from raw RGBA pixels (row-major).
+   * The pixels are auto-fitted (alpha threshold 0) and archived as JXL.
    * Returns false for invalid dimensions or buffers.
    */
   setPaintTipFromPixels(width: number, height: number, rgba: number[]): boolean {
-    const tip = paintTipImageFromRgba(new Uint8ClampedArray(rgba), width, height);
-    if (tip === null) {
-      return false;
-    }
-    this.engine?.setPaintTipImage({ width: tip.width, height: tip.height, alpha: tip.alpha });
-    this.paintTipName = `${width}x${height} tip`;
-    this.statusMessage = `Image tip: ${this.paintTipName}`;
-    return true;
+    return this.installImageTip("tip", `${width}x${height} tip`, new Uint8ClampedArray(rgba), width, height);
   }
 
   /** Clear the installed image tip (painting with the image kind then lays nothing). */
@@ -5211,12 +5365,101 @@ export class GnumarusShell extends LitElement {
       if (tip === null) {
         throw new Error("Tip image has no pixels.");
       }
-      this.engine?.setPaintTipImage({ width: tip.width, height: tip.height, alpha: tip.alpha });
-      this.paintTipName = `${file.name} (${tip.width}x${tip.height})`;
-      this.statusMessage = `Image tip: ${this.paintTipName}`;
+      this.installImageTip("tip", file.name, new Uint8ClampedArray(pixels), targetWidth, targetHeight);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       this.statusMessage = `Tip import failed: ${reason}`;
+    }
+  }
+
+  /**
+   * Fit brush pixels (alpha threshold 0), install them as an image or dual
+   * tip, and archive the fitted pixels as lossy JXL under OPFS `brushes/`.
+   * Returns false for invalid dimensions or buffers.
+   */
+  private installImageTip(
+    kind: "tip" | "dual",
+    fileLabel: string,
+    buffer: Uint8ClampedArray,
+    width: number,
+    height: number,
+  ): boolean {
+    let pixels = buffer;
+    let fittedWidth = width;
+    let fittedHeight = height;
+    const box = findAlphaBoundingBox(buffer, width, height, 0);
+    if (box !== null && (box.width !== width || box.height !== height)) {
+      const cropped = cropBufferBox(buffer, width, height, box.left, box.top, box.width, box.height);
+      if (cropped !== null) {
+        pixels = cropped.buffer;
+        fittedWidth = cropped.width;
+        fittedHeight = cropped.height;
+      }
+    }
+    const tip = paintTipImageFromRgba(new Uint8ClampedArray(pixels), fittedWidth, fittedHeight);
+    if (tip === null) {
+      return false;
+    }
+    const stored = { width: tip.width, height: tip.height, alpha: tip.alpha };
+    const label = `${fileLabel} (${fittedWidth}x${fittedHeight})`;
+    if (kind === "tip") {
+      this.engine?.setPaintTipImage(stored);
+      this.paintTipName = label;
+      this.statusMessage = `Image tip: ${label}`;
+    } else {
+      this.engine?.setPaintDualTip(stored);
+      this.paintDualName = label;
+      this.statusMessage = `Dual tip: ${label}`;
+    }
+    void this.archiveBrushTip(fileLabel, fittedWidth, fittedHeight, new Uint8ClampedArray(pixels));
+    return true;
+  }
+
+  /** Best-effort JXL archive of fitted brush pixels under OPFS `brushes/`. */
+  private async archiveBrushTip(
+    fileLabel: string,
+    width: number,
+    height: number,
+    buffer: Uint8ClampedArray,
+  ): Promise<void> {
+    try {
+      const storage = navigator.storage as unknown as { getDirectory?: () => Promise<unknown> } | undefined;
+      if (typeof storage?.getDirectory !== "function") {
+        return;
+      }
+      const root = (await storage.getDirectory()) as unknown as {
+        getDirectoryHandle: (
+          name: string,
+          options?: { create?: boolean },
+        ) => Promise<{
+          getFileHandle: (
+            name: string,
+            options?: { create?: boolean },
+          ) => Promise<{
+            createWritable: () => Promise<{
+              write: (data: Blob) => Promise<void>;
+              close: () => Promise<void>;
+            }>;
+          }>;
+        }>;
+      };
+      if (typeof root.getDirectoryHandle !== "function") {
+        return;
+      }
+      const brushes = await root.getDirectoryHandle("brushes", { create: true });
+      const safe =
+        fileLabel.replace(/[^a-zA-Z0-9-_]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || "tip";
+      const handle = await brushes.getFileHandle(`${safe}.jxl`, { create: true });
+      const writable = await handle.createWritable();
+      const bytes = await encodeJxlStill(buffer, width, height, {
+        lossless: false,
+        quality: this.brushQuality,
+        effort: JXL_STORAGE_EFFORT,
+      });
+      await writable.write(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: "image/jxl" }));
+      await writable.close();
+    } catch {
+      // Best effort: tips work from memory even when the archive fails.
     }
   }
 
@@ -5454,17 +5697,11 @@ export class GnumarusShell extends LitElement {
 
   /**
    * Test hook: install a dual tip from raw RGBA pixels (row-major).
+   * The pixels are auto-fitted (alpha threshold 0) and archived as JXL.
    * Returns false for invalid dimensions or buffers.
    */
   setPaintDualTipFromPixels(width: number, height: number, rgba: number[]): boolean {
-    const tip = paintTipImageFromRgba(new Uint8ClampedArray(rgba), width, height);
-    if (tip === null) {
-      return false;
-    }
-    this.engine?.setPaintDualTip({ width: tip.width, height: tip.height, alpha: tip.alpha });
-    this.paintDualName = `${width}x${height} dual`;
-    this.statusMessage = `Dual tip: ${this.paintDualName}`;
-    return true;
+    return this.installImageTip("dual", `${width}x${height} dual`, new Uint8ClampedArray(rgba), width, height);
   }
 
   /** Test hook: tune the dual tip size (25..400 percent) and strength (0..100). */
@@ -5513,6 +5750,7 @@ export class GnumarusShell extends LitElement {
       paintDualStrength: this.paintDualStrength,
       blendMode: this.blendMode,
       accumulate: this.accumulate,
+      symmetryMode: this.symmetryMode,
     };
   }
 
@@ -5559,6 +5797,8 @@ export class GnumarusShell extends LitElement {
     this.engine?.setBlendMode(preset.blendMode);
     this.accumulate = preset.accumulate;
     this.engine?.setAccumulate(preset.accumulate);
+    this.symmetryMode = preset.symmetryMode ?? "off";
+    this.engine?.setSymmetryMode(this.symmetryMode);
     this.statusMessage = `Preset: ${preset.name}`;
   }
 
@@ -5780,9 +6020,7 @@ export class GnumarusShell extends LitElement {
       if (tip === null) {
         throw new Error("Dual image has no pixels.");
       }
-      this.engine?.setPaintDualTip({ width: tip.width, height: tip.height, alpha: tip.alpha });
-      this.paintDualName = `${file.name} (${tip.width}x${tip.height})`;
-      this.statusMessage = `Dual tip: ${this.paintDualName}`;
+      this.installImageTip("dual", file.name, new Uint8ClampedArray(pixels), targetWidth, targetHeight);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       this.statusMessage = `Dual import failed: ${reason}`;
@@ -6250,7 +6488,11 @@ export class GnumarusShell extends LitElement {
     const storageSettings = { ...DEFAULT_STORAGE_SETTINGS };
     this.storageLossless = storageSettings.lossless;
     this.storageQuality = storageSettings.quality;
+    this.brushQuality = storageSettings.brushQuality;
     this.persistStorage();
+    const importSettings = DEFAULT_IMPORT_CLEANUP;
+    this.importCleanup = importSettings;
+    this.persistImportCleanup();
     void this.refreshPreview();
     this.statusMessage = "Settings reset to defaults";
   }
@@ -8369,7 +8611,11 @@ export class GnumarusShell extends LitElement {
       this.directoryHandle = dir;
       this.projectName = dir.name;
       this.dirty = false;
-      this.statusMessage = `Opened ${dir.name}`;
+      const openedCleanup = this.applyImportCleanup();
+      if (openedCleanup !== "") {
+        this.dirty = true;
+      }
+      this.statusMessage = `Opened ${dir.name}${openedCleanup}`;
     } catch (error) {
       this.statusMessage = error instanceof Error ? `Open failed: ${error.message}` : "Open failed";
     }
@@ -8462,7 +8708,7 @@ export class GnumarusShell extends LitElement {
           : imported.namedAnimations.length > 1
             ? `, ${imported.namedAnimations.length} animations`
             : "";
-      const summary = `Imported ${fileName} (${imported.layers.length} layers, ${imported.frames} frames${animationSuffix})`;
+      const summary = `Imported ${fileName} (${imported.layers.length} layers, ${imported.frames} frames${animationSuffix})${this.applyImportCleanup()}`;
       this.statusMessage = summary;
       this.showToast(summary);
     } catch (error) {
@@ -8509,7 +8755,7 @@ export class GnumarusShell extends LitElement {
     this.directoryHandle = null;
     this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
     this.dirty = true;
-    const summary = `Imported ${fileName} (${psd.layers.length} layer${psd.layers.length === 1 ? "" : "s"})`;
+    const summary = `Imported ${fileName} (${psd.layers.length} layer${psd.layers.length === 1 ? "" : "s"})${this.applyImportCleanup()}`;
     this.statusMessage = summary;
     this.showToast(summary);
   }
@@ -8550,7 +8796,7 @@ export class GnumarusShell extends LitElement {
     this.directoryHandle = null;
     this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
     this.dirty = true;
-    const summary = `Imported ${fileName} (${xcf.layers.length} layer${xcf.layers.length === 1 ? "" : "s"})`;
+    const summary = `Imported ${fileName} (${xcf.layers.length} layer${xcf.layers.length === 1 ? "" : "s"})${this.applyImportCleanup()}`;
     this.statusMessage = summary;
     this.showToast(summary);
   }
@@ -8592,7 +8838,7 @@ export class GnumarusShell extends LitElement {
     this.directoryHandle = null;
     this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
     this.dirty = true;
-    const summary = `Imported ${fileName} (${kra.layers.length} layer${kra.layers.length === 1 ? "" : "s"}, ${kra.frames} frame${kra.frames === 1 ? "" : "s"})`;
+    const summary = `Imported ${fileName} (${kra.layers.length} layer${kra.layers.length === 1 ? "" : "s"}, ${kra.frames} frame${kra.frames === 1 ? "" : "s"})${this.applyImportCleanup()}`;
     this.statusMessage = summary;
     this.showToast(summary);
   }
