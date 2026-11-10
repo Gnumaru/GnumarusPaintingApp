@@ -288,3 +288,6 @@
 - [x] E2E @recent guide-through-center (44 passed); unit 371 + build clean; docs updated
 - [x] sym-center intersection handle (both mode only, transparent, drags both axes)
 - [x] E2E @recent for center handle (45 passed); unit 371 + build clean; docs updated
+- [x] New dialog storage fields (format/mode/quality) applied on Create
+- [x] New dialog preset dropdown (7 presets) + pure module with unit tests
+- [x] E2E @recent for presets/storage (48 passed); unit 375 + build clean; docs updated

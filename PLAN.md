@@ -460,3 +460,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 ## 84. Four-way intersection handle (implemented)
 - Fifth `sym-center` handle at the guide crossing, only in `both` mode: highly transparent (fill-opacity 0.25, stroke-opacity 0.7, `move` cursor), drags both axes at once; Shift+click resets like the others.
 - `GnumarusSymmetryHandleId` alias replaces the repeated 4-id unions; E2E @recent (5 handles in both mode, 2 in single-axis; center drag moves x+y, Shift+click resets).
+
+## 85. New-project dialog storage + presets (implemented)
+- Dialog gains texture format (PNG/WebP/JXL), mode (lossless everywhere, lossy only WebP/JXL) and lossy quality 0..100 (only WebP/JXL lossy); Create applies them to the project storage settings (persisted).
+- Preset dropdown (`GnumarusNewProjectPresets`: 7 initial presets incl. pixel sprites/landscape, Notes LQ jxl q0, Sketches MQ jxl q50, digital painting jxl lossless) fills all dialog fields; manual edits switch back to Custom; PNG forces lossless.
+- Unit (preset list/values/limits) + E2E @recent (sprite preset → 16x16 webp save, Notes LQ → jxl q0, PNG → lossless).

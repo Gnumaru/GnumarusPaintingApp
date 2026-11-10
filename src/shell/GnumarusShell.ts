@@ -86,6 +86,10 @@ import {
   serializeFitSettings,
 } from "../settings/GnumarusFitSettings";
 import {
+  applyNewProjectPreset,
+  GNUMARUS_NEW_PROJECT_PRESETS,
+} from "../settings/GnumarusNewProjectPresets";
+import {
   DEFAULT_STORAGE_SETTINGS,
   STORAGE_SETTINGS_STORAGE_KEY,
   clampBrushQuality,
@@ -1204,6 +1208,10 @@ export class GnumarusShell extends LitElement {
     fsSupported: { type: Boolean },
     newWidth: { type: Number },
     newHeight: { type: Number },
+    newPreset: { type: String },
+    newStorageFormat: { type: String },
+    newStorageLossless: { type: Boolean },
+    newStorageQuality: { type: Number },
     resizeWidth: { type: Number },
     resizeHeight: { type: Number },
     resizingLayerId: { type: String },
@@ -1335,6 +1343,10 @@ export class GnumarusShell extends LitElement {
   declare fsSupported: boolean;
   declare newWidth: number;
   declare newHeight: number;
+  declare newPreset: string;
+  declare newStorageFormat: GnumarusStorageFormat;
+  declare newStorageLossless: boolean;
+  declare newStorageQuality: number;
   declare resizeWidth: number;
   declare resizeHeight: number;
   declare resizingLayerId: string | null;
@@ -1483,6 +1495,10 @@ export class GnumarusShell extends LitElement {
     this.fsSupported = true;
     this.newWidth = 64;
     this.newHeight = 64;
+    this.newPreset = "";
+    this.newStorageFormat = DEFAULT_STORAGE_SETTINGS.format;
+    this.newStorageLossless = DEFAULT_STORAGE_SETTINGS.lossless;
+    this.newStorageQuality = DEFAULT_STORAGE_SETTINGS.quality;
     this.resizeWidth = 64;
     this.resizeHeight = 64;
     this.resizingLayerId = null;
@@ -2168,8 +2184,73 @@ export class GnumarusShell extends LitElement {
       </div>
       <dialog id="newDialog">
         <h3>New canvas</h3>
-        <label>Width <input type="number" id="newWidth" min="1" max="16384" .value=${String(this.newWidth)} /></label>
-        <label>Height <input type="number" id="newHeight" min="1" max="16384" .value=${String(this.newHeight)} /></label>
+        <label
+          >Preset
+          <select id="newPreset" .value=${this.newPreset} @change=${(): void => this.applyNewPresetFromDialog()}>
+            <option value="">Custom</option>
+            ${GNUMARUS_NEW_PROJECT_PRESETS.map(
+              (preset) => html`<option value=${preset.name}>${preset.name}</option>`,
+            )}
+          </select>
+        </label>
+        <label
+          >Width
+          <input
+            type="number"
+            id="newWidth"
+            min="1"
+            max="16384"
+            .value=${String(this.newWidth)}
+            @input=${(): void => this.applyNewDimensionsFromDialog()}
+        /></label>
+        <label
+          >Height
+          <input
+            type="number"
+            id="newHeight"
+            min="1"
+            max="16384"
+            .value=${String(this.newHeight)}
+            @input=${(): void => this.applyNewDimensionsFromDialog()}
+        /></label>
+        <label
+          >Texture format
+          <select
+            id="newStorageFormat"
+            .value=${this.newStorageFormat}
+            @change=${(): void => this.applyNewStorageFromDialog()}
+          >
+            <option value="png">PNG</option>
+            <option value="webp">WebP</option>
+            <option value="jxl">JPEG XL</option>
+          </select>
+        </label>
+        <label
+          >Texture mode
+          <select
+            id="newStorageMode"
+            .value=${this.newStorageLossless ? "lossless" : "lossy"}
+            @change=${(): void => this.applyNewStorageFromDialog()}
+          >
+            <option value="lossless">Lossless</option>
+            ${this.newStorageFormat === "png"
+              ? html``
+              : html`<option value="lossy">Lossy</option>`}
+          </select>
+        </label>
+        ${this.newStorageFormat !== "png" && !this.newStorageLossless
+          ? html`<label
+              >Lossy quality
+              <input
+                type="number"
+                id="newStorageQuality"
+                min="0"
+                max="100"
+                step="1"
+                .value=${String(this.newStorageQuality)}
+                @input=${(): void => this.applyNewStorageFromDialog()}
+            /></label>`
+          : html``}
         <div class="dialog-actions">
           <button @click=${(): void => this.closeNewDialog()}>Cancel</button>
           <button @click=${(): void => void this.createNew()}>Create</button>
@@ -4392,6 +4473,12 @@ export class GnumarusShell extends LitElement {
 
   private openNewDialog(): void {
     this.fileMenuOpen = false;
+    // Refresh the dialog storage fields from the current global settings;
+    // the preset no longer necessarily applies after external changes.
+    this.newStorageFormat = this.storageFormat;
+    this.newStorageLossless = this.storageLossless;
+    this.newStorageQuality = this.storageQuality;
+    this.newPreset = "";
     const dialog = this.shadowRoot?.getElementById("newDialog") as HTMLDialogElement | null;
     dialog?.showModal();
   }
@@ -4399,6 +4486,55 @@ export class GnumarusShell extends LitElement {
   private closeNewDialog(): void {
     const dialog = this.shadowRoot?.getElementById("newDialog") as HTMLDialogElement | null;
     dialog?.close();
+  }
+
+  /** Apply the selected new-project preset to the dialog fields. */
+  private applyNewPresetFromDialog(): void {
+    const select = this.shadowRoot?.getElementById("newPreset") as HTMLSelectElement | null;
+    const name = select?.value ?? "";
+    this.newPreset = name;
+    const applied = applyNewProjectPreset(name);
+    if (applied === null) {
+      return;
+    }
+    this.newWidth = applied.width;
+    this.newHeight = applied.height;
+    this.newStorageFormat = applied.format;
+    this.newStorageLossless = applied.lossless;
+    this.newStorageQuality = applied.quality;
+  }
+
+  /** Track manual dimension edits (the preset no longer applies). */
+  private applyNewDimensionsFromDialog(): void {
+    const widthInput = this.shadowRoot?.getElementById("newWidth") as HTMLInputElement | null;
+    const heightInput = this.shadowRoot?.getElementById("newHeight") as HTMLInputElement | null;
+    const width = Math.floor(Number(widthInput?.value));
+    const height = Math.floor(Number(heightInput?.value));
+    if (Number.isFinite(width) && width >= 1) {
+      this.newWidth = Math.min(16384, width);
+    }
+    if (Number.isFinite(height) && height >= 1) {
+      this.newHeight = Math.min(16384, height);
+    }
+    this.newPreset = "";
+  }
+
+  /** Track manual storage edits (PNG forces lossless; the preset no longer applies). */
+  private applyNewStorageFromDialog(): void {
+    const formatInput = this.shadowRoot?.getElementById("newStorageFormat") as HTMLSelectElement | null;
+    const modeInput = this.shadowRoot?.getElementById("newStorageMode") as HTMLSelectElement | null;
+    const qualityInput = this.shadowRoot?.getElementById("newStorageQuality") as HTMLInputElement | null;
+    const format = parseStorageFormat(formatInput?.value ?? this.newStorageFormat);
+    const lossless = format === "png" ? true : (modeInput?.value ?? "lossless") !== "lossy";
+    let quality = this.newStorageQuality;
+    if (qualityInput !== null) {
+      const raw = Math.floor(Number(qualityInput.value));
+      quality = clampStorageQuality(Number.isFinite(raw) ? raw : DEFAULT_STORAGE_SETTINGS.quality);
+    }
+    this.newStorageFormat = format;
+    this.newStorageLossless = lossless;
+    this.newStorageQuality = quality;
+    this.newPreset = "";
   }
 
   private openResizeDialog(id: string): void {
@@ -8678,6 +8814,10 @@ export class GnumarusShell extends LitElement {
     const height = Math.min(16384, Math.max(1, Number(heightInput?.value ?? "64") || 64));
     this.newWidth = Math.floor(width);
     this.newHeight = Math.floor(height);
+    this.storageFormat = this.newStorageFormat;
+    this.storageLossless = this.newStorageLossless;
+    this.storageQuality = this.newStorageQuality;
+    this.persistStorage();
     this.engine?.newProject(this.newWidth, this.newHeight);
     this.refreshLayers();
     this.directoryHandle = null;
