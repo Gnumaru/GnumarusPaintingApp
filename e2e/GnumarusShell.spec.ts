@@ -338,6 +338,28 @@ test("M flips the canvas view horizontally and Shift+M vertically @recent", asyn
   expect(await getViewState(page)).toMatchObject({ flipX: false, flipY: false });
 });
 
+test("pencil stroke can start outside the texture and paint on entry @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  // Zoom to 100% so the canvas corners are well outside the 64x64 texture.
+  await page.keyboard.press("1");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.mouse.move(box.x + 8, box.y + 8);
+  await page.mouse.down();
+  // Still outside the texture: the stroke started but paints nothing.
+  await page.mouse.move(box.x + 16, box.y + 16, { steps: 2 });
+  expect(await paintedPixelCount(page)).toBe(0);
+  // Drag into the texture: paint appears from the edge.
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 10 });
+  await page.mouse.up();
+  expect(await paintedPixelCount(page)).toBeGreaterThan(0);
+});
+
 test("Control+Space drag zooms vertically like the loupe", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

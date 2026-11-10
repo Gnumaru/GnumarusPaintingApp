@@ -8631,10 +8631,8 @@ export class GnumarusCanvasEngine {
       this.refreshLayerStacking();
       this.lastMouseClient = { x: event.clientX, y: event.clientY };
       if (this.isStabilizing()) {
-        const pixel = this.wrapMode === "off" ? this.toImagePixel(event.clientX, event.clientY) : this.toPaintPixel(event.clientX, event.clientY);
-        if (pixel === null) {
-          return;
-        }
+        // The stabilizer works on unbounded float positions, so the stroke
+        // can start outside the texture (painting resumes on entry).
         const floatPos = this.clientToLayerImageFloat(event.clientX, event.clientY);
         if (floatPos === null) {
           return;
@@ -8664,7 +8662,7 @@ export class GnumarusCanvasEngine {
         this.updatePreviews();
         return;
       }
-      const pixel = this.wrapMode === "off" ? this.toImagePixel(event.clientX, event.clientY) : this.toPaintPixel(event.clientX, event.clientY);
+      const pixel = this.toStrokePixel(event.clientX, event.clientY);
       if (pixel === null) {
         return;
       }
@@ -9334,6 +9332,26 @@ export class GnumarusCanvasEngine {
       return null;
     }
     return { x: Math.floor(mapped.x), y: Math.floor(mapped.y) };
+  }
+
+  /**
+   * Stroke anchor mapping: the wrap-aware pointer pixel, but with wrap off
+   * an out-of-bounds press still yields an anchor (floored float position)
+   * so a stroke can start outside the texture and paint on entry. Writers
+   * skip out-of-bounds pixels. Null only for a missing or degenerate
+   * layer/view.
+   */
+  private toStrokePixel(clientX: number, clientY: number): { x: number; y: number } | null {
+    const mapped =
+      this.wrapMode === "off" ? this.toImagePixel(clientX, clientY) : this.toPaintPixel(clientX, clientY);
+    if (mapped !== null || this.wrapMode !== "off") {
+      return mapped;
+    }
+    const floatPos = this.clientToLayerImageFloat(clientX, clientY);
+    if (floatPos === null) {
+      return null;
+    }
+    return { x: Math.floor(floatPos.x), y: Math.floor(floatPos.y) };
   }
 
   /** Pointer angle around the viewport center (ignores canvas pan). Null at the center. */

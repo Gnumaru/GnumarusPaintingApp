@@ -465,3 +465,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Dialog gains texture format (PNG/WebP/JXL), mode (lossless everywhere, lossy only WebP/JXL) and lossy quality 0..100 (only WebP/JXL lossy); Create applies them to the project storage settings (persisted).
 - Preset dropdown (`GnumarusNewProjectPresets`: 7 initial presets incl. pixel sprites/landscape, Notes LQ jxl q0, Sketches MQ jxl q50, digital painting jxl lossless) fills all dialog fields; manual edits switch back to Custom; PNG forces lossless.
 - Unit (preset list/values/limits) + E2E @recent (sprite preset → 16x16 webp save, Notes LQ → jxl q0, PNG → lossless).
+
+## 86. Pencil strokes can start outside the texture (implemented)
+- Bug: with wrap off, pressing outside the cell texture starts no stroke (`toImagePixel` null gate), so dragging in paints nothing — even though mid-stroke excursions already resume on re-entry.
+- Fix (pencil only): pointerdown anchors the stroke at the floored float position when the press is outside (new `toStrokePixel` fallback); writers already skip OOB pixels and the pixel-perfect filter tracks OOB candidates, so paint-on-entry interpolates from the edge. Stabilized path drops its redundant integer gate (it already works on floats). Move/up logic untouched.
+- E2E @recent: press outside paints nothing, drag inside paints.
