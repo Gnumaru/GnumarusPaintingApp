@@ -1,19 +1,32 @@
 import { describe, expect, it } from "vitest";
 import {
+  clampStorageJpgQuality,
+  clampStoragePngLevel,
   clampStorageQuality,
   DEFAULT_STORAGE_SETTINGS,
+  GNUMARUS_MAX_STORAGE_PNG_LEVEL,
   GNUMARUS_MAX_STORAGE_QUALITY,
+  GNUMARUS_MIN_STORAGE_PNG_LEVEL,
   GNUMARUS_MIN_STORAGE_QUALITY,
+  parseStorageFormat,
   parseStorageSettings,
   serializeStorageSettings,
   GnumarusStorageSettingsError,
 } from "../src/settings/GnumarusStorageSettings";
 
 describe("GnumarusStorageSettings", () => {
-  it("defaults to lossless with quality 50", () => {
-    expect(DEFAULT_STORAGE_SETTINGS).toEqual({ lossless: true, quality: 50 });
+  it("defaults to JXL lossless with PNG level 9 and JPEG quality 95", () => {
+    expect(DEFAULT_STORAGE_SETTINGS).toEqual({
+      format: "jxl",
+      lossless: true,
+      quality: 50,
+      pngLevel: 9,
+      jpgQuality: 95,
+    });
     expect(GNUMARUS_MIN_STORAGE_QUALITY).toBe(0);
     expect(GNUMARUS_MAX_STORAGE_QUALITY).toBe(100);
+    expect(GNUMARUS_MIN_STORAGE_PNG_LEVEL).toBe(0);
+    expect(GNUMARUS_MAX_STORAGE_PNG_LEVEL).toBe(9);
   });
 
   it("clamps the lossy quality to an integer 0..100", () => {
@@ -32,19 +45,47 @@ describe("GnumarusStorageSettings", () => {
       serializeStorageSettings(DEFAULT_STORAGE_SETTINGS),
     );
     expect(parseStorageSettings(JSON.stringify({ lossless: false, quality: 75 }))).toEqual({
+      format: "jxl",
       lossless: false,
       quality: 75,
+      pngLevel: 9,
+      jpgQuality: 95,
     });
+    expect(
+      parseStorageSettings(JSON.stringify({ format: "png", lossless: true, quality: 50, pngLevel: 3, jpgQuality: 80 })),
+    ).toEqual({ format: "png", lossless: true, quality: 50, pngLevel: 3, jpgQuality: 80 });
+  });
+
+  it("parses formats with a JXL fallback and clamps levels", () => {
+    expect(parseStorageFormat("jpg")).toBe("jpg");
+    expect(parseStorageFormat("png")).toBe("png");
+    expect(parseStorageFormat("jxl")).toBe("jxl");
+    expect(parseStorageFormat("webp")).toBe("jxl");
+    expect(parseStorageFormat(undefined)).toBe("jxl");
+    expect(clampStoragePngLevel(4)).toBe(4);
+    expect(clampStoragePngLevel(4.9)).toBe(4);
+    expect(clampStoragePngLevel(-1)).toBe(0);
+    expect(clampStoragePngLevel(10)).toBe(9);
+    expect(clampStoragePngLevel(Number.NaN)).toBe(9);
+    expect(clampStorageJpgQuality(95)).toBe(95);
+    expect(clampStorageJpgQuality(200)).toBe(100);
+    expect(clampStorageJpgQuality(Number.NaN)).toBe(95);
   });
 
   it("clamps parsed quality values", () => {
     expect(parseStorageSettings(JSON.stringify({ lossless: true, quality: 250 }))).toEqual({
+      format: "jxl",
       lossless: true,
       quality: 100,
+      pngLevel: 9,
+      jpgQuality: 95,
     });
     expect(parseStorageSettings(JSON.stringify({ lossless: false, quality: -1 }))).toEqual({
+      format: "jxl",
       lossless: false,
       quality: 0,
+      pngLevel: 9,
+      jpgQuality: 95,
     });
   });
 

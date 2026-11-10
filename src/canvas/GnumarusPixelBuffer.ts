@@ -119,6 +119,45 @@ export function buffersEqual(a: Uint8ClampedArray, b: Uint8ClampedArray): boolea
   return true;
 }
 
+/**
+ * Split the alpha channel out as an opaque grayscale RGBA buffer
+ * (black is fully transparent, white is fully opaque).
+ */
+export function extractAlphaPlane(buffer: Uint8ClampedArray, width: number, height: number): Uint8ClampedArray {
+  if (buffer.length !== width * height * 4) {
+    throw new Error(`Cannot extract alpha: expected ${width * height * 4} bytes, got ${buffer.length}.`);
+  }
+  const plane = new Uint8ClampedArray(buffer.length);
+  for (let index = 0; index < width * height; index += 1) {
+    const alpha = buffer[index * 4 + 3] ?? 0;
+    plane[index * 4] = alpha;
+    plane[index * 4 + 1] = alpha;
+    plane[index * 4 + 2] = alpha;
+    plane[index * 4 + 3] = 255;
+  }
+  return plane;
+}
+
+/**
+ * Replace a color buffer's alpha with a grayscale plane's red channel.
+ * Both buffers must hold exactly width x height RGBA bytes.
+ */
+export function applyAlphaPlane(
+  color: Uint8ClampedArray,
+  alpha: Uint8ClampedArray,
+  width: number,
+  height: number,
+): Uint8ClampedArray {
+  if (color.length !== width * height * 4 || alpha.length !== width * height * 4) {
+    throw new Error(`Cannot apply alpha: expected ${width * height * 4} bytes per plane.`);
+  }
+  const out = new Uint8ClampedArray(color);
+  for (let index = 0; index < width * height; index += 1) {
+    out[index * 4 + 3] = alpha[index * 4] ?? 0;
+  }
+  return out;
+}
+
 export const GNUMARUS_MIN_LAYER_DIM = 1;
 export const GNUMARUS_MAX_LAYER_DIM = 1024;
 

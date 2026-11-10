@@ -121,6 +121,27 @@ export function encodeStillImage(
   });
 }
 
+/** Decode a JPEG blob to RGBA bytes through the browser image decoder. */
+export async function decodeJpegToBuffer(blob: Blob): Promise<{
+  width: number;
+  height: number;
+  buffer: Uint8ClampedArray;
+}> {
+  const bitmap = await createImageBitmap(blob);
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const context = canvas.getContext("2d");
+  if (context === null) {
+    bitmap.close();
+    throw new Error("2D canvas is unavailable for JPEG decoding.");
+  }
+  context.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  return { width: canvas.width, height: canvas.height, buffer: imageData.data };
+}
+
 /** Zero-padded frame file stem, e.g. `walk-007`. */
 export function frameFileStem(base: string, index: number): string {
   return `${base}-${String(index + 1).padStart(3, "0")}`;

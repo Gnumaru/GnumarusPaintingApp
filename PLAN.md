@@ -383,3 +383,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 
 ## 69. Reload All Textures action (landed)
 - New `reload-all-textures` action (Run action palette, no requirements): re-reads `project.json` from the saved directory for the texture id-to-file map, decodes each on-disk file (JXL sniffed by extension, PNG otherwise) and swaps same-size buffers in; unsaved project shows only an error toast; memory textures without a file entry or with missing/unreadable/size-mismatched files are skipped with counts; one undoable `reloadBatch` history entry; identical buffers count as applied without history.
+
+## 70. Project texture format setting: JXL/JPG/PNG (landed)
+- Storage settings gain `format` (jxl/jpg/png, default jxl), PNG compression level int 0-9 (default 9, pure fflate encoder) and JPEG quality int 0-100 (default 95, canvas encode); JXL keeps its lossless/lossy settings; dialog rows hide per format with reset arrows.
+- JPG stores alpha in a companion grayscale file (`t23.alpha.jpg`, same quality); loader/reload recombine color+alpha (missing companion means opaque).
+- JPG stores alpha in a companion grayscale file (`t23.alpha.jpg`, same quality); loader/reload recombine color+alpha (missing companion means opaque); PNG level honored via fflate `zlibSync` (canvas PNG encoder replaced).

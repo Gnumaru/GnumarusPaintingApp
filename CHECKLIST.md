@@ -230,5 +230,8 @@
 - [x] Circle default brush shape (pencil/line/curve)
 - [x] JXL project texture storage (lossless default, effort 1) + lossless/lossy + quality settings
 - [x] Reload All Textures action (palette, unsaved error toast, disk restore + skip counts, single undo)
+- [x] Project texture format setting (JXL/JPG/PNG + PNG level + JPEG quality with alpha companion)
+- [x] Unit tests (vitest) — 322 passed (previous 310 + storage format/levels + PNG codec + alpha planes)
+- [x] E2E test (Playwright): previous 184 + PNG save/reopen + JPEG save/companion/reload — 186 passed
 - [x] Unit tests (vitest) — 310 passed (previous 307 + reloadBatch undo/redo/skip + buffer equality)
 - [x] E2E test (Playwright): previous 182 + reload unsaved toast + reload restore/skip/undo — 184 passed

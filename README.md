@@ -27,7 +27,7 @@ Classic desktop-like painting app (top menu bar, central canvas, bottom status b
 - Layer resize: per-layer width/height 1..1024 via Resize button; expand fills transparent right and below, shrink crops right and below; undoable.
 - Channel lock: per-layer R/G/B/A toggles; paint, clear and Merge Down write only unlocked channels. Example: alpha locked + paint keeps old alpha; green locked + cyan paint yields blue.
 - Fit texture to size: layer and cell context menus open a modal with an alpha threshold (0..254, default from Settings, OK autofocused for Enter confirm); the texture is cropped to the smallest box with alpha above the threshold while keeping its apparent position; undoable.
-- Project texture storage (Edit > Settings): lossless JXL (default) or lossy JXL with 0..100 quality (default 50); textures are encoded with the fastest encoder setting.
+- Project texture storage (Edit > Settings): JPEG XL (default, lossless or lossy with 0..100 quality default 50), JPEG with 0..100 quality (default 95, alpha in a grayscale companion file) or PNG with 0..9 compression (default 9); textures are encoded with the fastest encoder setting.
 - Crop to canvas: layer and cell context menus crop the texture to what the canvas shows through the cell transform, keeping its apparent position; refuses fully-outside content; undoable.
 - Resize to canvas: layer and cell context menus grow/shrink the texture to cover the whole canvas; Ctrl+Shift+arrows expand the current cell texture by a configurable step (default 16px); both keep the apparent position and are undoable.
 - Textures named `t1`, `t2`, ... independent of layer names.

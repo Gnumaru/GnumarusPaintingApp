@@ -81,9 +81,14 @@ import {
 import {
   DEFAULT_STORAGE_SETTINGS,
   STORAGE_SETTINGS_STORAGE_KEY,
+  clampStorageJpgQuality,
+  clampStoragePngLevel,
   clampStorageQuality,
+  parseStorageFormat,
   parseStorageSettings,
   serializeStorageSettings,
+  type GnumarusStorageFormat,
+  type GnumarusStorageSettings,
 } from "../settings/GnumarusStorageSettings";
 import {
   DEFAULT_EXPAND_SETTINGS,
@@ -95,6 +100,7 @@ import {
 import { compositeFinalImage, type GnumarusPreviewBackground } from "../preview/GnumarusFinalRender";
 import {
   detectStillFormats,
+  decodeJpegToBuffer,
   encodeStillImage,
   exportBaseName,
   findStillFormat,
@@ -125,7 +131,9 @@ import { parsePsdFile } from "../project/GnumarusPsd";
 import { parseXcfFile } from "../project/GnumarusXcf";
 import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
 import {
+  applyAlphaPlane,
   clampBrushSizeFloat,
+  extractAlphaPlane,
   parseBlendMode,
   parseBrushShape,
   type GnumarusBlendMode,
@@ -1152,6 +1160,9 @@ export class GnumarusShell extends LitElement {
     fitDefaultThreshold: { type: Number },
     storageLossless: { type: Boolean },
     storageQuality: { type: Number },
+    storageFormat: { type: String },
+    storagePngLevel: { type: Number },
+    storageJpegQuality: { type: Number },
     expandStep: { type: Number },
     renamingFrame: { type: Number },
     brushSize: { type: Number },
@@ -1255,6 +1266,9 @@ export class GnumarusShell extends LitElement {
   declare fitDefaultThreshold: number;
   declare storageLossless: boolean;
   declare storageQuality: number;
+  declare storageFormat: GnumarusStorageFormat;
+  declare storagePngLevel: number;
+  declare storageJpegQuality: number;
   declare expandStep: number;
   declare renamingFrame: number | null;
   declare brushSize: number;
@@ -1367,6 +1381,9 @@ export class GnumarusShell extends LitElement {
     this.fitDefaultThreshold = DEFAULT_FIT_SETTINGS.alphaThreshold;
     this.storageLossless = DEFAULT_STORAGE_SETTINGS.lossless;
     this.storageQuality = DEFAULT_STORAGE_SETTINGS.quality;
+    this.storageFormat = DEFAULT_STORAGE_SETTINGS.format;
+    this.storagePngLevel = DEFAULT_STORAGE_SETTINGS.pngLevel;
+    this.storageJpegQuality = DEFAULT_STORAGE_SETTINGS.jpgQuality;
     this.expandStep = DEFAULT_EXPAND_SETTINGS.step;
     this.renamingFrame = null;
     this.brushSize = 1;
@@ -2373,30 +2390,44 @@ export class GnumarusShell extends LitElement {
             : html``}
         </div>
         <div class="setting-row">
-          <label>Project textures
+          <label>Project texture format
             <select
               id="storageFormat"
-              .value=${this.storageLossless ? "lossless" : "lossy"}
+              .value=${this.storageFormat}
               @change=${(): void => this.applyStorageFromDialog()}
             >
-              <option value="lossless">Lossless JXL</option>
-              <option value="lossy">Lossy JXL</option>
+              <option value="jxl">JPEG XL</option>
+              <option value="jpg">JPEG</option>
+              <option value="png">PNG</option>
             </select>
           </label>
-          ${this.storageLossless !== DEFAULT_STORAGE_SETTINGS.lossless
-            ? html`<button
+          ${this.storageIsDefault()
+            ? html``
+            : html`<button
                 class="reset-btn"
                 aria-label="Reset project texture format to default"
                 title="Reset to default"
                 @click=${(): void => this.resetStorageToDefault()}
               >
                 ↻
-              </button>`
-            : html``}
+              </button>`}
         </div>
-        ${this.storageLossless
-          ? html``
-          : html`<div class="setting-row">
+        ${this.storageFormat === "jxl"
+          ? html`<div class="setting-row">
+              <label>Project texture JXL mode
+                <select
+                  id="storageJxlMode"
+                  .value=${this.storageLossless ? "lossless" : "lossy"}
+                  @change=${(): void => this.applyStorageFromDialog()}
+                >
+                  <option value="lossless">Lossless JXL</option>
+                  <option value="lossy">Lossy JXL</option>
+                </select>
+              </label>
+            </div>`
+          : html``}
+        ${this.storageFormat === "jxl" && !this.storageLossless
+          ? html`<div class="setting-row">
               <label
                 >Project texture lossy quality
                 <input
@@ -2419,7 +2450,60 @@ export class GnumarusShell extends LitElement {
                     ↻
                   </button>`
                 : html``}
-            </div>`}
+            </div>`
+          : html``}
+        ${this.storageFormat === "png"
+          ? html`<div class="setting-row">
+              <label
+                >Project texture PNG compression
+                <input
+                  type="number"
+                  id="storagePngLevel"
+                  min="0"
+                  max="9"
+                  step="1"
+                  .value=${String(this.storagePngLevel)}
+                  @input=${(): void => this.applyStorageFromDialog()}
+                />
+              </label>
+              ${this.storagePngLevel !== DEFAULT_STORAGE_SETTINGS.pngLevel
+                ? html`<button
+                    class="reset-btn"
+                    aria-label="Reset project texture PNG compression to default"
+                    title="Reset to default"
+                    @click=${(): void => this.resetStorageToDefault()}
+                  >
+                    ↻
+                  </button>`
+                : html``}
+            </div>`
+          : html``}
+        ${this.storageFormat === "jpg"
+          ? html`<div class="setting-row">
+              <label
+                >Project texture JPEG quality
+                <input
+                  type="number"
+                  id="storageJpegQuality"
+                  min="0"
+                  max="100"
+                  step="1"
+                  .value=${String(this.storageJpegQuality)}
+                  @input=${(): void => this.applyStorageFromDialog()}
+                />
+              </label>
+              ${this.storageJpegQuality !== DEFAULT_STORAGE_SETTINGS.jpgQuality
+                ? html`<button
+                    class="reset-btn"
+                    aria-label="Reset project texture JPEG quality to default"
+                    title="Reset to default"
+                    @click=${(): void => this.resetStorageToDefault()}
+                  >
+                    ↻
+                  </button>`
+                : html``}
+            </div>`
+          : html``}
         <div class="setting-row">
           <label
             >Cell texture expand step (pixels)
@@ -3305,6 +3389,9 @@ export class GnumarusShell extends LitElement {
     const storedStorage = this.loadStorageSettings();
     this.storageLossless = storedStorage.lossless;
     this.storageQuality = storedStorage.quality;
+    this.storageFormat = storedStorage.format;
+    this.storagePngLevel = storedStorage.pngLevel;
+    this.storageJpegQuality = storedStorage.jpgQuality;
     const storedExpand = this.loadExpandSettings();
     this.expandStep = storedExpand.step;
     const host = this.shadowRoot?.getElementById("canvasHost") ?? null;
@@ -4183,7 +4270,7 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = `Fit texture default alpha threshold: ${this.fitDefaultThreshold}`;
   }
 
-  private loadStorageSettings(): { lossless: boolean; quality: number } {
+  private loadStorageSettings(): GnumarusStorageSettings {
     try {
       const stored = window.localStorage.getItem(STORAGE_SETTINGS_STORAGE_KEY);
       if (stored !== null) {
@@ -4199,48 +4286,116 @@ export class GnumarusShell extends LitElement {
     try {
       window.localStorage.setItem(
         STORAGE_SETTINGS_STORAGE_KEY,
-        serializeStorageSettings({ lossless: this.storageLossless, quality: this.storageQuality }),
+        serializeStorageSettings({
+          format: this.storageFormat,
+          lossless: this.storageLossless,
+          quality: this.storageQuality,
+          pngLevel: this.storagePngLevel,
+          jpgQuality: this.storageJpegQuality,
+        }),
       );
     } catch {
       // Storage failures must not break the settings flow.
     }
   }
 
-  private currentDialogStorageLossless(): boolean {
+  private storageIsDefault(): boolean {
+    return (
+      this.storageFormat === DEFAULT_STORAGE_SETTINGS.format &&
+      this.storageLossless === DEFAULT_STORAGE_SETTINGS.lossless &&
+      this.storageQuality === DEFAULT_STORAGE_SETTINGS.quality &&
+      this.storagePngLevel === DEFAULT_STORAGE_SETTINGS.pngLevel &&
+      this.storageJpegQuality === DEFAULT_STORAGE_SETTINGS.jpgQuality
+    );
+  }
+
+  private currentDialogStorageFormat(): GnumarusStorageFormat {
     const input = this.shadowRoot?.getElementById("storageFormat") as HTMLSelectElement | null;
-    return (input?.value ?? "lossless") !== "lossy";
+    return parseStorageFormat(input?.value ?? this.storageFormat);
+  }
+
+  private currentDialogStorageLossless(): boolean {
+    const input = this.shadowRoot?.getElementById("storageJxlMode") as HTMLSelectElement | null;
+    if (input === null) {
+      return this.storageLossless;
+    }
+    return input.value !== "lossy";
   }
 
   private currentDialogStorageQuality(): number {
     const input = this.shadowRoot?.getElementById("storageQuality") as HTMLInputElement | null;
-    const raw = Number(input?.value ?? String(DEFAULT_STORAGE_SETTINGS.quality));
+    if (input === null) {
+      return this.storageQuality;
+    }
+    const raw = Number(input.value);
     return clampStorageQuality(Number.isFinite(raw) ? Math.floor(raw) : DEFAULT_STORAGE_SETTINGS.quality);
   }
 
-  private applyStorageFromDialog(): void {
-    this.storageLossless = this.currentDialogStorageLossless();
-    this.storageQuality = this.currentDialogStorageQuality();
-    this.persistStorage();
-    this.statusMessage = this.storageLossless
+  private currentDialogStoragePngLevel(): number {
+    const input = this.shadowRoot?.getElementById("storagePngLevel") as HTMLInputElement | null;
+    if (input === null) {
+      return this.storagePngLevel;
+    }
+    const raw = Number(input.value);
+    return clampStoragePngLevel(Number.isFinite(raw) ? Math.floor(raw) : DEFAULT_STORAGE_SETTINGS.pngLevel);
+  }
+
+  private currentDialogStorageJpegQuality(): number {
+    const input = this.shadowRoot?.getElementById("storageJpegQuality") as HTMLInputElement | null;
+    if (input === null) {
+      return this.storageJpegQuality;
+    }
+    const raw = Number(input.value);
+    return clampStorageJpgQuality(Number.isFinite(raw) ? Math.floor(raw) : DEFAULT_STORAGE_SETTINGS.jpgQuality);
+  }
+
+  private storageStatusMessage(): string {
+    if (this.storageFormat === "png") {
+      return `Project textures save as PNG (compression ${this.storagePngLevel})`;
+    }
+    if (this.storageFormat === "jpg") {
+      return `Project textures save as JPEG (quality ${this.storageJpegQuality})`;
+    }
+    return this.storageLossless
       ? "Project textures save as lossless JXL"
       : `Project textures save as lossy JXL (quality ${this.storageQuality})`;
+  }
+
+  private applyStorageFromDialog(): void {
+    this.storageFormat = this.currentDialogStorageFormat();
+    this.storageLossless = this.currentDialogStorageLossless();
+    this.storageQuality = this.currentDialogStorageQuality();
+    this.storagePngLevel = this.currentDialogStoragePngLevel();
+    this.storageJpegQuality = this.currentDialogStorageJpegQuality();
+    this.persistStorage();
+    this.statusMessage = this.storageStatusMessage();
   }
 
   private resetStorageToDefault(): void {
     this.storageLossless = DEFAULT_STORAGE_SETTINGS.lossless;
     this.storageQuality = DEFAULT_STORAGE_SETTINGS.quality;
+    this.storageFormat = DEFAULT_STORAGE_SETTINGS.format;
+    this.storagePngLevel = DEFAULT_STORAGE_SETTINGS.pngLevel;
+    this.storageJpegQuality = DEFAULT_STORAGE_SETTINGS.jpgQuality;
     this.persistStorage();
     this.statusMessage = "Project texture storage reset to default";
   }
 
-  /** Test hook: set project texture storage (lossless on/off, quality 0..100 clamped). */
-  setProjectStorage(lossless: boolean, quality: number): void {
+  /** Test hook: set project texture storage (format, JXL mode/quality, PNG level, JPEG quality). */
+  setProjectStorage(
+    lossless: boolean,
+    quality: number,
+    format: GnumarusStorageFormat = DEFAULT_STORAGE_SETTINGS.format,
+    pngLevel = DEFAULT_STORAGE_SETTINGS.pngLevel,
+    jpgQuality = DEFAULT_STORAGE_SETTINGS.jpgQuality,
+  ): void {
+    this.storageFormat = parseStorageFormat(format);
     this.storageLossless = lossless;
     this.storageQuality = clampStorageQuality(quality);
+    this.storagePngLevel = clampStoragePngLevel(pngLevel);
+    this.storageJpegQuality = clampStorageJpgQuality(jpgQuality);
     this.persistStorage();
-    this.statusMessage = this.storageLossless
-      ? "Project textures save as lossless JXL"
-      : `Project textures save as lossy JXL (quality ${this.storageQuality})`;
+    this.statusMessage = this.storageStatusMessage();
   }
 
   private loadExpandSettings(): { step: number } {
@@ -6753,9 +6908,7 @@ export class GnumarusShell extends LitElement {
         continue;
       }
       try {
-        const image = entry.file.endsWith(".jxl")
-          ? await decodeJxlBytes(bytes)
-          : await decodePngToBuffer(new Blob([bytes as Uint8Array<ArrayBuffer>]));
+        const image = await this.decodeStoredTextureBytes(this.directoryHandle, entry.file, bytes);
         if (image.width !== texture.width || image.height !== texture.height) {
           skipped += 1;
           continue;
@@ -6947,6 +7100,42 @@ export class GnumarusShell extends LitElement {
     this.closeNewDialog();
   }
 
+  /**
+   * Decode one stored texture file: JXL and PNG directly, JPEG by
+   * recombining the color file with its grayscale `.alpha.jpg` companion
+   * (a missing companion means opaque).
+   */
+  private async decodeStoredTextureBytes(
+    dir: GnumarusDirectoryHandle,
+    file: string,
+    bytes: Uint8Array,
+  ): Promise<{ width: number; height: number; buffer: Uint8ClampedArray }> {
+    if (file.endsWith(".jxl")) {
+      return decodeJxlBytes(bytes);
+    }
+    if (file.endsWith(".jpg")) {
+      const color = await decodeJpegToBuffer(new Blob([bytes as Uint8Array<ArrayBuffer>]));
+      const alphaBytes = await readFileBytes(dir, `${file.slice(0, -".jpg".length)}.alpha.jpg`);
+      if (alphaBytes === null) {
+        const opaque = new Uint8ClampedArray(color.buffer);
+        for (let index = 3; index < opaque.length; index += 4) {
+          opaque[index] = 255;
+        }
+        return { width: color.width, height: color.height, buffer: opaque };
+      }
+      const alpha = await decodeJpegToBuffer(new Blob([alphaBytes as Uint8Array<ArrayBuffer>]));
+      if (alpha.width !== color.width || alpha.height !== color.height) {
+        throw new Error(`Alpha size mismatch: ${file}`);
+      }
+      return {
+        width: color.width,
+        height: color.height,
+        buffer: applyAlphaPlane(color.buffer, alpha.buffer, color.width, color.height),
+      };
+    }
+    return decodePngToBuffer(new Blob([bytes as Uint8Array<ArrayBuffer>]));
+  }
+
   private async openProject(): Promise<void> {
     this.fileMenuOpen = false;
     if (!isFileSystemAccessSupported()) {
@@ -6964,9 +7153,11 @@ export class GnumarusShell extends LitElement {
         if (blob === undefined) {
           throw new Error(`Missing texture file: ${texture.file}`);
         }
-        const decoded = texture.file.endsWith(".jxl")
-          ? await decodeJxlBytes(new Uint8Array(await blob.arrayBuffer()))
-          : await decodePngToBuffer(blob);
+        const decoded = await this.decodeStoredTextureBytes(
+          dir,
+          texture.file,
+          new Uint8Array(await blob.arrayBuffer()),
+        );
         if (decoded.width !== texture.width || decoded.height !== texture.height) {
           throw new Error(`Texture size mismatch: ${texture.file}`);
         }
@@ -7259,6 +7450,54 @@ export class GnumarusShell extends LitElement {
       for (let index = 0; index < exported.textures.length; index += 1) {
         const texture = exported.textures[index] as (typeof exported.textures)[number];
         const stem = `t${index + 1}`;
+        if (this.storageFormat === "jpg") {
+          const colorBlob = await encodeStillImage(
+            texture.buffer,
+            texture.width,
+            texture.height,
+            "image/jpeg",
+            this.storageJpegQuality / 100,
+          );
+          if (colorBlob === null) {
+            throw new Error("Failed to encode JPEG.");
+          }
+          const colorFile = textureFilePath(stem, "jpg");
+          texturesMeta.push({
+            id: texture.id,
+            name: texture.name,
+            width: texture.width,
+            height: texture.height,
+            file: colorFile,
+          });
+          blobs.set(colorFile, colorBlob);
+          const alphaBlob = await encodeStillImage(
+            extractAlphaPlane(texture.buffer, texture.width, texture.height),
+            texture.width,
+            texture.height,
+            "image/jpeg",
+            this.storageJpegQuality / 100,
+          );
+          if (alphaBlob === null) {
+            throw new Error("Failed to encode JPEG.");
+          }
+          blobs.set(textureFilePath(`${stem}.alpha`, "jpg"), alphaBlob);
+          continue;
+        }
+        if (this.storageFormat === "png") {
+          const file = textureFilePath(stem, "png");
+          texturesMeta.push({
+            id: texture.id,
+            name: texture.name,
+            width: texture.width,
+            height: texture.height,
+            file,
+          });
+          blobs.set(
+            file,
+            await encodeBufferToPngBlob(texture.buffer, texture.width, texture.height, this.storagePngLevel),
+          );
+          continue;
+        }
         try {
           const bytes = await encodeJxlStill(texture.buffer, texture.width, texture.height, {
             lossless,
@@ -7283,7 +7522,10 @@ export class GnumarusShell extends LitElement {
             height: texture.height,
             file,
           });
-          blobs.set(file, await encodeBufferToPngBlob(texture.buffer, texture.width, texture.height));
+          blobs.set(
+            file,
+            await encodeBufferToPngBlob(texture.buffer, texture.width, texture.height, this.storagePngLevel),
+          );
         }
       }
       const contentsMeta: GnumarusContentMeta[] = exported.contents.map((content) => ({

@@ -1,26 +1,41 @@
 /**
  * Project texture storage settings: how layer textures are encoded when
- * the project is saved. Textures always save as JPEG XL; `lossless`
- * selects mathematically lossless output, otherwise the 0-100 `quality`
- * maps to the codec distance. Loading sniffs `.jxl`/`.png` per file, so
- * these settings only affect future saves.
+ * the project is saved. `format` selects the container (default JXL);
+ * `lossless`/`quality` tune JXL output, `pngLevel` tunes PNG output and
+ * `jpgQuality` tunes JPEG output (color file plus a grayscale alpha
+ * companion). Loading sniffs `.jxl`/`.jpg`/`.png` per file, so these
+ * settings only affect future saves.
  */
+export type GnumarusStorageFormat = "jxl" | "jpg" | "png";
+
 export interface GnumarusStorageSettings {
+  /** Texture container format, default JXL. */
+  format: GnumarusStorageFormat;
   /** Lossless JXL output when true (default), lossy otherwise. */
   lossless: boolean;
-  /** Lossy quality 0..100, default 50; ignored when lossless. */
+  /** Lossy JXL quality 0..100, default 50; ignored unless JXL lossy. */
   quality: number;
+  /** PNG compression level 0..9, default 9. */
+  pngLevel: number;
+  /** JPEG quality 0..100, default 95. */
+  jpgQuality: number;
 }
 
 export const DEFAULT_STORAGE_SETTINGS: GnumarusStorageSettings = {
+  format: "jxl",
   lossless: true,
   quality: 50,
+  pngLevel: 9,
+  jpgQuality: 95,
 };
 
 export const STORAGE_SETTINGS_STORAGE_KEY = "gnumarus.settings.storage.v1";
 
 export const GNUMARUS_MIN_STORAGE_QUALITY = 0;
 export const GNUMARUS_MAX_STORAGE_QUALITY = 100;
+
+export const GNUMARUS_MIN_STORAGE_PNG_LEVEL = 0;
+export const GNUMARUS_MAX_STORAGE_PNG_LEVEL = 9;
 
 export class GnumarusStorageSettingsError extends Error {
   constructor(message: string) {
@@ -40,6 +55,27 @@ export function clampStorageQuality(value: number): number {
   return Math.min(GNUMARUS_MAX_STORAGE_QUALITY, Math.max(GNUMARUS_MIN_STORAGE_QUALITY, Math.floor(value)));
 }
 
+export function clampStoragePngLevel(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_STORAGE_SETTINGS.pngLevel;
+  }
+  return Math.min(
+    GNUMARUS_MAX_STORAGE_PNG_LEVEL,
+    Math.max(GNUMARUS_MIN_STORAGE_PNG_LEVEL, Math.floor(value)),
+  );
+}
+
+export function clampStorageJpgQuality(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_STORAGE_SETTINGS.jpgQuality;
+  }
+  return Math.min(GNUMARUS_MAX_STORAGE_QUALITY, Math.max(GNUMARUS_MIN_STORAGE_QUALITY, Math.floor(value)));
+}
+
+export function parseStorageFormat(value: unknown): GnumarusStorageFormat {
+  return value === "jpg" || value === "png" ? value : "jxl";
+}
+
 export function parseStorageSettings(jsonText: string): GnumarusStorageSettings {
   let parsed: unknown;
   try {
@@ -50,16 +86,29 @@ export function parseStorageSettings(jsonText: string): GnumarusStorageSettings 
   if (!isRecord(parsed)) {
     throw new GnumarusStorageSettingsError("storage settings root must be an object");
   }
-  const { lossless, quality } = parsed;
+  const { format, lossless, quality, pngLevel, jpgQuality } = parsed;
   if (typeof lossless !== "boolean" || typeof quality !== "number") {
     throw new GnumarusStorageSettingsError("storage settings have invalid fields");
   }
-  return { lossless, quality: clampStorageQuality(quality) };
+  return {
+    format: parseStorageFormat(format),
+    lossless,
+    quality: clampStorageQuality(quality),
+    pngLevel: typeof pngLevel === "number" ? clampStoragePngLevel(pngLevel) : DEFAULT_STORAGE_SETTINGS.pngLevel,
+    jpgQuality:
+      typeof jpgQuality === "number" ? clampStorageJpgQuality(jpgQuality) : DEFAULT_STORAGE_SETTINGS.jpgQuality,
+  };
 }
 
 export function serializeStorageSettings(settings: GnumarusStorageSettings): string {
   return JSON.stringify(
-    { lossless: settings.lossless, quality: clampStorageQuality(settings.quality) },
+    {
+      format: parseStorageFormat(settings.format),
+      lossless: settings.lossless,
+      quality: clampStorageQuality(settings.quality),
+      pngLevel: clampStoragePngLevel(settings.pngLevel),
+      jpgQuality: clampStorageJpgQuality(settings.jpgQuality),
+    },
     null,
     2,
   );

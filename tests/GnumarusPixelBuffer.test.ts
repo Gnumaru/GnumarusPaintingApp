@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   applyCoverageMask,
+  applyAlphaPlane,
   buffersEqual,
   clampBrushSize,
+  extractAlphaPlane,
   clampBrushSizeFloat,
   clearPixelBuffer,
   compositeOver,
@@ -517,5 +519,15 @@ describe("GnumarusPixelBuffer", () => {
     b[3] = 1;
     expect(buffersEqual(a, b)).toBe(false);
     expect(buffersEqual(a, createPixelBuffer(1, 1))).toBe(false);
+  });
+
+  it("splits and reapplies the alpha plane", () => {
+    const color = new Uint8ClampedArray([10, 20, 30, 40, 50, 60, 70, 80]);
+    const plane = extractAlphaPlane(color, 2, 1);
+    expect(Array.from(plane)).toEqual([40, 40, 40, 255, 80, 80, 80, 255]);
+    const flat = new Uint8ClampedArray([10, 20, 30, 255, 50, 60, 70, 255]);
+    expect(Array.from(applyAlphaPlane(flat, plane, 2, 1))).toEqual([10, 20, 30, 40, 50, 60, 70, 80]);
+    expect(() => extractAlphaPlane(color.slice(0, 4), 2, 1)).toThrow(/mismatch|expected/);
+    expect(() => applyAlphaPlane(flat, plane.slice(0, 4), 2, 1)).toThrow(/mismatch|expected/);
   });
 });

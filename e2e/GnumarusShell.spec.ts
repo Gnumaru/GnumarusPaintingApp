@@ -4191,7 +4191,7 @@ async function runPaletteAction(page: import("@playwright/test").Page, query: st
   await expect(dialog).toBeHidden();
 }
 
-test("Reload All Textures without a saved project shows an error toast @recent", async ({ page }) => {
+test("Reload All Textures without a saved project shows an error toast", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await runPaletteAction(page, "reload all");
@@ -4200,7 +4200,7 @@ test("Reload All Textures without a saved project shows an error toast @recent",
   );
 });
 
-test("Reload All Textures restores saved files, skips new textures and undoes @recent", async ({ page }) => {
+test("Reload All Textures restores saved files, skips new textures and undoes", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await stubDirectoryWithFileStore(page);
@@ -6910,10 +6910,10 @@ test("project texture lossy setting is honored and persists", async ({ page }) =
   await page.waitForSelector("gnumarus-shell canvas");
   await page.getByRole("button", { name: "Edit" }).click();
   await page.getByRole("button", { name: "Settings" }).click();
-  await expect(page.locator("gnumarus-shell")).toContainText("Project textures");
+  await expect(page.locator("gnumarus-shell")).toContainText("Project texture format");
   const dialog = page.locator("gnumarus-shell dialog#settingsDialog");
-  await expect(dialog.locator("select#storageFormat")).toHaveValue("lossless");
-  await dialog.locator("select#storageFormat").selectOption("lossy");
+  await expect(dialog.locator("select#storageFormat")).toHaveValue("jxl");
+  await dialog.locator("select#storageJxlMode").selectOption("lossy");
   await dialog.locator("input#storageQuality").fill("10");
   await expect(page.locator("gnumarus-shell")).toContainText("Project textures save as lossy JXL (quality 10)");
   const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.storage.v1"));
@@ -6938,7 +6938,110 @@ test("project texture lossy setting is honored and persists", async ({ page }) =
   await page.getByRole("button", { name: "Edit" }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await page.locator('gnumarus-shell [aria-label="Reset project texture format to default"]').click();
-  await expect(page.locator("gnumarus-shell select#storageFormat")).toHaveValue("lossless");
+  await expect(page.locator("gnumarus-shell select#storageFormat")).toHaveValue("jxl");
+});
+
+async function readJpegSamples(
+  page: import("@playwright/test").Page,
+  bytes: number[],
+): Promise<{ center: number[]; corner: number[] } | null> {
+  return page.evaluate(async (data: number[]) => {
+    const blob = new Blob([new Uint8Array(data)], { type: "image/jpeg" });
+    const bitmap = await createImageBitmap(blob);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    if (context === null) {
+      bitmap.close();
+      return null;
+    }
+    context.drawImage(bitmap, 0, 0);
+    const result = {
+      center: Array.from(context.getImageData(32, 32, 1, 1).data),
+      corner: Array.from(context.getImageData(0, 0, 1, 1).data),
+    };
+    bitmap.close();
+    return result;
+  }, bytes);
+}
+
+test("project textures save as PNG with a compression level and reopen @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#settingsDialog");
+  await dialog.locator("select#storageFormat").selectOption("png");
+  await expect(dialog.locator("input#storagePngLevel")).toHaveValue("9");
+  await expect(dialog.locator("input#storageJpegQuality")).toHaveCount(0);
+  await dialog.locator("input#storagePngLevel").fill("1");
+  await expect(page.locator("gnumarus-shell")).toContainText("Project textures save as PNG (compression 1)");
+  const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.storage.v1"));
+  expect(persisted).toContain('"format": "png"');
+  expect(persisted).toContain('"pngLevel": 1');
+  await dialog.getByRole("button", { name: "Close" }).click();
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  const meta = await project.writtenProject();
+  expect(meta).toContain('"textures/t1.png"');
+  const files = await project.writtenBlobs();
+  expect(Object.keys(files).sort()).toEqual(["project.json", "textures/t1.png"]);
+  expect(files["textures/t1.png"]?.slice(0, 4)).toEqual([137, 80, 78, 71]);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+});
+
+test("project textures save as JPEG with a grayscale alpha companion @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  // Bucket-fill the whole transparent canvas: solid blocks survive JPEG best.
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#settingsDialog");
+  await dialog.locator("select#storageFormat").selectOption("jpg");
+  await expect(dialog.locator("input#storageJpegQuality")).toHaveValue("95");
+  await expect(dialog.locator("input#storagePngLevel")).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Close" }).click();
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  const meta = await project.writtenProject();
+  expect(meta).toContain('"textures/t1.jpg"');
+  expect(meta).not.toContain(".alpha.jpg");
+  const files = await project.writtenBlobs();
+  expect(Object.keys(files).sort()).toEqual(["project.json", "textures/t1.alpha.jpg", "textures/t1.jpg"]);
+  expect(files["textures/t1.jpg"]?.slice(0, 2)).toEqual([255, 216]);
+  const color = await readJpegSamples(page, files["textures/t1.jpg"] ?? []);
+  expect(color?.center[0] ?? 0).toBeGreaterThan(200);
+  expect(color?.center[1] ?? 255).toBeLessThan(80);
+  const alpha = await readJpegSamples(page, files["textures/t1.alpha.jpg"] ?? []);
+  expect(alpha?.center[0] ?? 0).toBeGreaterThan(200);
+  expect(alpha?.corner[0] ?? 0).toBeGreaterThan(200);
+  // Paint over, then reload: the JPEG pair restores approximately.
+  await setPencil(page, "#00ff00");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 255, b: 0, a: 255 });
+  await runPaletteAction(page, "reload all");
+  await expect(page.locator("gnumarus-shell")).toContainText("Reloaded 1 texture");
+  const restored = await readPixel(page, 32, 32);
+  expect(restored?.r ?? 0).toBeGreaterThan(200);
+  expect(restored?.g ?? 255).toBeLessThan(80);
+  expect(restored?.b ?? 255).toBeLessThan(80);
+  expect(restored?.a ?? 0).toBeGreaterThan(200);
 });
 
 test("File > Export saves the current frame as lossless JXL", async ({ page }) => {
