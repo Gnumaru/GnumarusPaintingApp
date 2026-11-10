@@ -203,6 +203,7 @@ import {
   type GnumarusSymmetryMode,
   type GnumarusTipAngleMode,
 } from "../canvas/GnumarusPaintBrush";
+import { parseWrapMode, type GnumarusWrapMode } from "../canvas/GnumarusViewportMath";
 import {
   BRUSH_PRESET_STORAGE_KEY,
   BUILT_IN_BRUSH_PRESETS,
@@ -383,6 +384,28 @@ export class GnumarusShell extends LitElement {
     }
     [hidden] {
       display: none !important;
+    }
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: #555 #1e1e1e;
+    }
+    *::-webkit-scrollbar {
+      width: 10px;
+      height: 10px;
+    }
+    *::-webkit-scrollbar-track {
+      background: #1e1e1e;
+    }
+    *::-webkit-scrollbar-thumb {
+      background: #555;
+      border-radius: 5px;
+      border: 2px solid #1e1e1e;
+    }
+    *::-webkit-scrollbar-thumb:hover {
+      background: #0e639c;
+    }
+    *::-webkit-scrollbar-corner {
+      background: #1e1e1e;
     }
     .menubar {
       display: flex;
@@ -1252,6 +1275,7 @@ export class GnumarusShell extends LitElement {
     speedFadeAmount: { type: Number },
     tipAngleMode: { type: String },
     symmetryMode: { type: String },
+    wrapMode: { type: String },
     airbrushRate: { type: Number },
     smudgeRate: { type: Number },
     smudgeWet: { type: Number },
@@ -1384,6 +1408,7 @@ export class GnumarusShell extends LitElement {
   declare speedFadeAmount: number;
   declare tipAngleMode: GnumarusTipAngleMode;
   declare symmetryMode: GnumarusSymmetryMode;
+  declare wrapMode: GnumarusWrapMode;
   declare airbrushRate: number;
   declare smudgeRate: number;
   declare smudgeWet: number;
@@ -1525,6 +1550,7 @@ export class GnumarusShell extends LitElement {
     this.speedFadeAmount = DEFAULT_PAINT_DYNAMICS_AMOUNT;
     this.tipAngleMode = "none";
     this.symmetryMode = "off";
+    this.wrapMode = "off";
     this.airbrushRate = DEFAULT_AIRBRUSH_RATE;
     this.smudgeRate = DEFAULT_PAINT_SMUDGE_RATE;
     this.smudgeWet = DEFAULT_PAINT_SMUDGE_WET;
@@ -3230,6 +3256,15 @@ export class GnumarusShell extends LitElement {
               <option value="both">Four-way</option>
             </select>
           </label>
+          <label title="Repeat the texture infinitely while painting. You can paint outside the texture and it wraps around to the other side. Only the active layer shows its neighbors."
+            >Wrap
+            <select id="wrapMode" .value=${this.wrapMode} @change=${(): void => this.applyWrapModeFromDialog()}>
+              <option value="off">Off</option>
+              <option value="x">Left-right</option>
+              <option value="y">Up-down</option>
+              <option value="both">Both</option>
+            </select>
+          </label>
           <label title="Pixel paints hard aliased stamps (pixel art). Soft paints a round tip with hardness falloff. Image paints a grayscale tip as an alpha mask tinted with the paint color."
             >Brush tip
             <select id="brushTipKind" .value=${this.brushTipKind} @change=${(): void => this.applyBrushTipKindFromDialog()}>
@@ -3471,12 +3506,12 @@ export class GnumarusShell extends LitElement {
             />
             Anti-aliasing
           </label>
-          <label title="Keeps 1px strokes exactly 1px thick. Only applies at brush size 1 without anti-aliasing."
+          <label title="Keeps 1px strokes exactly 1px thick. Only applies at brush size 1 without anti-aliasing and with wrap off."
             ><input
               type="checkbox"
               id="pencilPixelPerfect"
               .checked=${this.pencilPixelPerfect}
-              ?disabled=${this.brushSize !== 1 || this.pencilAntialias}
+              ?disabled=${this.brushSize !== 1 || this.pencilAntialias || this.wrapMode !== "off"}
               @change=${(): void => this.applyPencilPixelPerfectFromDialog()}
             />
             Pixel perfect
@@ -3507,7 +3542,7 @@ export class GnumarusShell extends LitElement {
               <option value="circle">Circle</option>
             </select>
           </label>
-          <label
+          <label title="Smooth line edges with partial-pixel coverage."
             ><input
               type="checkbox"
               id="lineAntialias"
@@ -3542,7 +3577,7 @@ export class GnumarusShell extends LitElement {
               <option value="circle">Circle</option>
             </select>
           </label>
-          <label
+          <label title="Smooth curve edges with partial-pixel coverage."
             ><input
               type="checkbox"
               id="curveAntialias"
@@ -3551,12 +3586,12 @@ export class GnumarusShell extends LitElement {
             />
             Anti-aliasing
           </label>
-          <label title="Keeps 1px curves exactly 1px thick. Only applies at curve width 1 without anti-aliasing."
+          <label title="Keeps 1px curves exactly 1px thick. Only applies at curve width 1 without anti-aliasing and with wrap off."
             ><input
               type="checkbox"
               id="curvePixelPerfect"
               .checked=${this.curvePixelPerfect}
-              ?disabled=${this.curveWidth !== 1 || this.curveAntialias}
+              ?disabled=${this.curveWidth !== 1 || this.curveAntialias || this.wrapMode !== "off"}
               @change=${(): void => this.applyCurvePixelPerfectFromDialog()}
             />
             Pixel perfect
@@ -5641,6 +5676,22 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = `Symmetry: ${parsed}`;
   }
 
+  /** Test hook: set the wrap-around painting mode (off/x/y/both). */
+  setWrapMode(mode: GnumarusWrapMode): void {
+    const parsed = parseWrapMode(mode);
+    this.wrapMode = parsed;
+    this.engine?.setWrapMode(parsed);
+    this.statusMessage = `Wrap: ${parsed}`;
+  }
+
+  private applyWrapModeFromDialog(): void {
+    const select = this.shadowRoot?.getElementById("wrapMode") as HTMLSelectElement | null;
+    const mode = parseWrapMode(select?.value ?? "off");
+    this.wrapMode = mode;
+    this.engine?.setWrapMode(mode);
+    this.statusMessage = `Wrap: ${mode}`;
+  }
+
   private applySymmetryModeFromDialog(): void {
     const select = this.shadowRoot?.getElementById("symmetryMode") as HTMLSelectElement | null;
     const mode = parseSymmetryMode(select?.value ?? "off");
@@ -5727,8 +5778,7 @@ export class GnumarusShell extends LitElement {
   private currentBrushPreset(name: string): GnumarusBrushPreset {
     return {
       version: 1,
-      name,
-      brushSize: this.brushSize,
+      name,      brushSize: this.brushSize,
       brushShape: this.brushShape,
       brushTipKind: this.brushTipKind,
       brushHardness: this.brushHardness,
@@ -5751,6 +5801,7 @@ export class GnumarusShell extends LitElement {
       blendMode: this.blendMode,
       accumulate: this.accumulate,
       symmetryMode: this.symmetryMode,
+      wrapMode: this.wrapMode,
     };
   }
 
@@ -5799,6 +5850,8 @@ export class GnumarusShell extends LitElement {
     this.engine?.setAccumulate(preset.accumulate);
     this.symmetryMode = preset.symmetryMode ?? "off";
     this.engine?.setSymmetryMode(this.symmetryMode);
+    this.wrapMode = preset.wrapMode ?? "off";
+    this.engine?.setWrapMode(this.wrapMode);
     this.statusMessage = `Preset: ${preset.name}`;
   }
 

@@ -2841,6 +2841,95 @@ test("symmetry mirrors pixel dabs across axes @recent", async ({ page }) => {
   }
 });
 
+async function readLayerPixel(page: import("@playwright/test").Page, x: number, y: number): Promise<GnumarusPixel | null> {
+  return page.evaluate(([px, py]: number[]) => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { exportTextures(): Array<{ width: number; buffer: Uint8ClampedArray }> } };
+    };
+    const buffer = root.__gnumarus?.engine?.exportTextures()[0]?.buffer;
+    const width = root.__gnumarus?.engine?.exportTextures()[0]?.width ?? 0;
+    if (buffer === undefined || px < 0 || py < 0 || px >= width || py >= buffer.length / 4 / width) {
+      return null;
+    }
+    const i = (py * width + px) * 4;
+    return {
+      r: buffer[i] ?? 0,
+      g: buffer[i + 1] ?? 0,
+      b: buffer[i + 2] ?? 0,
+      a: buffer[i + 3] ?? 0,
+    };
+  }, [x, y]);
+}
+
+async function outsideLayerTarget(page: import("@playwright/test").Page, x: number, y: number): Promise<{ x: number; y: number }> {
+  return layerScreenTarget(page, x, y);
+}
+
+test("painting outside the texture does nothing with wrap off @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  const outside = await outsideLayerTarget(page, 70, 32);
+  await page.mouse.click(outside.x, outside.y);
+  expect(await paintedPixelCount(page)).toBe(0);
+});
+
+test("wrap-x paints outside pixels back into the texture @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setWrapMode(mode: string): void } };
+    };
+    root.__gnumarus?.shell?.setWrapMode("x");
+  });
+  const outside = await outsideLayerTarget(page, 70, 32);
+  await page.mouse.click(outside.x, outside.y);
+  expect(await readLayerPixel(page, 6, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await paintedPixelCount(page)).toBeGreaterThan(0);
+});
+
+test("wrap tiles show only for the active layer @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const tilesOf = (): Promise<number> =>
+    page.evaluate(() => {
+      const root = window as unknown as {
+        __gnumarus?: { engine?: { getWrapTileCount(): number } };
+      };
+      return root.__gnumarus?.engine?.getWrapTileCount() ?? -1;
+    });
+  expect(await tilesOf()).toBe(0);
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setWrapMode(mode: string): void } };
+    };
+    root.__gnumarus?.shell?.setWrapMode("both");
+  });
+  await expect.poll(tilesOf).toBe(8);
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setWrapMode(mode: string): void } };
+    };
+    root.__gnumarus?.shell?.setWrapMode("off");
+  });
+  await expect.poll(tilesOf).toBe(0);
+});
+
+test("scrollbars match the dark app theme @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const colors = await page.evaluate(() => {
+    const bar = document.querySelector("gnumarus-shell")?.shadowRoot?.querySelector(".layers-panel") ?? null;
+    if (bar === null) {
+      return null;
+    }
+    return getComputedStyle(bar as Element).scrollbarColor;
+  });
+  expect(colors).toContain("rgb(85, 85, 85)");
+});
+
 async function textureDims(page: import("@playwright/test").Page): Promise<{ width: number; height: number }> {
   return page.evaluate(() => {
     const root = window as unknown as {

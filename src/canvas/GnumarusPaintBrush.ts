@@ -15,6 +15,7 @@ import {
   type GnumarusChannelLock,
   type GnumarusRgba,
 } from "./GnumarusPixelBuffer";
+import { wrapLayerPixel, type GnumarusWrapMode } from "./GnumarusViewportMath";
 
 /** Paint tip kind: binary pixel stamps, soft round, or image alpha mask. */
 export type GnumarusBrushTipKind = "pixel" | "soft" | "image";
@@ -177,6 +178,7 @@ export function paintSoftDab(  buffer: Uint8ClampedArray,
   dual?: GnumarusPaintDualTip | null,
   tipAngle = 0,
   smudge?: GnumarusPaintSmudge | null,
+  wrap: GnumarusWrapMode = "off",
 ): void {
   if (!(diameter > 0) || !(alpha > 0)) {
     return;
@@ -191,8 +193,17 @@ export function paintSoftDab(  buffer: Uint8ClampedArray,
   let dabAlpha = alpha;
   const smudgeRate = smudge === undefined || smudge === null ? 0 : clampPaintSmudgeRate(smudge.rate);
   if (smudgeRate > 0 && smudge !== undefined && smudge !== null) {
-    const px = Math.min(width - 1, Math.max(0, Math.round(centerX)));
-    const py = Math.min(height - 1, Math.max(0, Math.round(centerY)));
+    let px = Math.round(centerX);
+    let py = Math.round(centerY);
+    if (wrap !== "off") {
+      const wrapped = wrapLayerPixel(px, py, width, height, wrap);
+      if (wrapped !== null) {
+        px = wrapped.x;
+        py = wrapped.y;
+      }
+    }
+    px = Math.min(width - 1, Math.max(0, px));
+    py = Math.min(height - 1, Math.max(0, py));
     const at = (py * width + px) * 4;
     const pickup: GnumarusRgba = {
       r: buffer[at] ?? 0,
@@ -211,6 +222,16 @@ export function paintSoftDab(  buffer: Uint8ClampedArray,
   const maxY = Math.ceil(centerY + reach);
   for (let y = minY; y <= maxY; y += 1) {
     for (let x = minX; x <= maxX; x += 1) {
+      let gx = x;
+      let gy = y;
+      if (wrap !== "off") {
+        const wrapped = wrapLayerPixel(x, y, width, height, wrap);
+        if (wrapped === null) {
+          continue;
+        }
+        gx = wrapped.x;
+        gy = wrapped.y;
+      }
       const u = radius > 1e-9 ? (x + 0.5 - centerX) / radius : 0;
       const v = radius > 1e-9 ? (y + 0.5 - centerY) / radius : 0;
       let coverage = softTipCoverage(u, v, hardness);
@@ -225,7 +246,7 @@ export function paintSoftDab(  buffer: Uint8ClampedArray,
         }
       }
       if (jitter !== undefined) {
-        coverage *= paintGrainFactor(jitter, x, y);
+        coverage *= paintGrainFactor(jitter, gx, gy);
         if (coverage <= 0) {
           continue;
         }
@@ -234,7 +255,7 @@ export function paintSoftDab(  buffer: Uint8ClampedArray,
       if (coverage <= 0) {
         continue;
       }
-      blendPixelCoverage(buffer, width, height, x, y, dabColor, coverage * dabAlpha, locked, blend);
+      blendPixelCoverage(buffer, width, height, gx, gy, dabColor, coverage * dabAlpha, locked, blend);
     }
   }
 }
@@ -259,6 +280,7 @@ export function stampPaintDabCoverage(
   jitter?: GnumarusPaintDabJitter,
   dual?: GnumarusPaintDualTip | null,
   tipAngle = 0,
+  wrap: GnumarusWrapMode = "off",
 ): void {
   if (!(diameter > 0) || !(alpha > 0)) {
     return;
@@ -279,11 +301,17 @@ export function stampPaintDabCoverage(
   const minY = Math.floor(centerY - reach);
   const maxY = Math.ceil(centerY + reach);
   for (let y = minY; y <= maxY; y += 1) {
-    if (y < 0 || y >= height) {
-      continue;
-    }
     for (let x = minX; x <= maxX; x += 1) {
-      if (x < 0 || x >= width) {
+      let gx = x;
+      let gy = y;
+      if (wrap !== "off") {
+        const wrapped = wrapLayerPixel(x, y, width, height, wrap);
+        if (wrapped === null) {
+          continue;
+        }
+        gx = wrapped.x;
+        gy = wrapped.y;
+      } else if (x < 0 || x >= width || y < 0 || y >= height) {
         continue;
       }
       const u = radius > 1e-9 ? (x + 0.5 - centerX) / radius : 0;
@@ -300,7 +328,7 @@ export function stampPaintDabCoverage(
         }
       }
       if (jitter !== undefined) {
-        coverage *= paintGrainFactor(jitter, x, y);
+        coverage *= paintGrainFactor(jitter, gx, gy);
         if (coverage <= 0) {
           continue;
         }
@@ -309,7 +337,7 @@ export function stampPaintDabCoverage(
       if (coverage <= 0) {
         continue;
       }
-      const at = y * width + x;
+      const at = gy * width + gx;
       const stamped = Math.round(Math.min(1, coverage * alpha) * 255);
       if (stamped > (mask[at] ?? 0)) {
         mask[at] = stamped;

@@ -90,6 +90,13 @@ import {
   type GnumarusTipAngleMode,
 } from "./GnumarusPaintBrush";
 import {
+  parseWrapMode,
+  wrapLayerPixel,
+  wrapTileOffsets,
+  wrapTileShift,
+  type GnumarusWrapMode,
+} from "./GnumarusViewportMath";
+import {
   GNUMARUS_MAX_SELECTION_SKEW,
   forwardSelectionPoint,
   inverseSelectionPoint,
@@ -617,6 +624,9 @@ export class GnumarusCanvasEngine {
   private strokeLastMoveT = 0;
   private strokeLastMovePos: { x: number; y: number } | null = null;
   private symmetryMode: GnumarusSymmetryMode = "off";
+  private wrapMode: GnumarusWrapMode = "off";
+  /** Ghost planes showing wrapped copies of the active layer (max 8). */
+  private readonly wrapTiles: THREE.Mesh[] = [];
   private airbrushRate = DEFAULT_AIRBRUSH_RATE;
   private airbrushTimer: number | null = null;
   private airbrushCarry = 0;
@@ -1119,6 +1129,15 @@ export class GnumarusCanvasEngine {
     this.backgroundPlane.matrixAutoUpdate = false;
     this.backgroundPlane.renderOrder = -1;
     this.scene.add(this.backgroundPlane);
+    for (let i = 0; i < 8; i += 1) {
+      const tile = new THREE.Mesh(this.sharedGeometry, this.backgroundMaterial);
+      tile.matrixAutoUpdate = false;
+      tile.frustumCulled = false;
+      tile.visible = false;
+      tile.renderOrder = -1;
+      this.scene.add(tile);
+      this.wrapTiles.push(tile);
+    }
     this.gridMaterial = new THREE.ShaderMaterial({
       uniforms: {
         uLayerW: { value: 64 },
@@ -1360,6 +1379,7 @@ export class GnumarusCanvasEngine {
       layer.transform = { ...IDENTITY_LAYER_TRANSFORM };
       layer.renderTextureId = null;
       layer.plane.visible = false;
+      this.syncWrapTiles();
       return;
     }
     const texId = resolved.textureId;
@@ -1381,6 +1401,7 @@ export class GnumarusCanvasEngine {
     layer.transform = { ...resolved.transform };
     layer.renderTextureId = texId;
     layer.plane.visible = layer.visible;
+    this.syncWrapTiles();
   }
 
   private syncAllLayerRenders(): void {
@@ -2054,6 +2075,7 @@ export class GnumarusCanvasEngine {
     this.stabilizerTarget = null;
     this.stopFollowLoop();
     this.resetPencilPixelPerfect();
+    this.syncWrapTiles();
     this.updateGrid();
     this.updateAxisOverlay();
     this.render();
@@ -3910,7 +3932,6 @@ export class GnumarusCanvasEngine {
   getSymmetryMode(): GnumarusSymmetryMode {
     return this.symmetryMode;
   }
-
   setSymmetryMode(mode: GnumarusSymmetryMode): boolean {
     const parsed = parseSymmetryMode(mode);
     if (parsed === this.symmetryMode) {
@@ -3920,6 +3941,82 @@ export class GnumarusCanvasEngine {
     this.emitStats();
     this.updatePreviews();
     return true;
+  }
+
+  getWrapMode(): GnumarusWrapMode {
+    return this.wrapMode;
+  }
+
+  setWrapMode(mode: GnumarusWrapMode): boolean {
+    const parsed = parseWrapMode(mode);
+    if (parsed === this.wrapMode) {
+      return false;
+    }
+    this.wrapMode = parsed;
+    this.syncWrapTiles();
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  /** Number of currently visible wrap ghost tiles (test hook). */
+  getWrapTileCount(): number {
+    let count = 0;
+    for (const tile of this.wrapTiles) {
+      if (tile.visible) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  /**
+   * Position ghost planes showing wrapped copies of the active layer.
+   * Only the active layer tiles (painting happens there); ghosts share the
+   * layer material/texture, so no extra VRAM is used.
+   */
+  private syncWrapTiles(): void {
+    let anyVisible = false;
+    for (const tile of this.wrapTiles) {
+      if (tile.visible) {
+        anyVisible = true;
+        break;
+      }
+    }
+    if (this.wrapMode === "off" && !anyVisible) {
+      return;
+    }
+    const layer = this.activeLayer();
+    const index = layer === null ? -1 : this.layers.indexOf(layer);
+    const offsets = this.wrapMode === "off" ? [] : wrapTileOffsets(this.wrapMode);
+    const active =
+      layer !== null &&
+      layer.visible &&
+      layer.renderTextureId !== null &&
+      layer.width >= 1 &&
+      layer.height >= 1;
+    for (let i = 0; i < this.wrapTiles.length; i += 1) {
+      const tile = this.wrapTiles[i];
+      if (tile === undefined) {
+        continue;
+      }
+      const offset = offsets[i];
+      if (offset === undefined || !active || layer === null) {
+        tile.visible = false;
+        continue;
+      }
+      const shift = wrapTileShift(layer.transform, offset.x, offset.y, layer.width, layer.height);
+      this.writePlaneMatrix(
+        tile,
+        layer.width,
+        layer.height,
+        { ...layer.transform, x: layer.transform.x + shift.x, y: layer.transform.y + shift.y },
+        index * 0.01,
+      );
+      tile.material = layer.material;
+      tile.renderOrder = index;
+      tile.visible = true;
+    }
   }
 
   getAirbrushRate(): number {
@@ -4007,6 +4104,7 @@ export class GnumarusCanvasEngine {
         drawBrushStamp(
           tex.buffer, tex.width, tex.height, Math.round(at.x), Math.round(at.y),
           this.brushSize, this.brushShape, this.pressureBrushColor(), layer.lockedChannels, this.blendMode,
+          this.wrapMode,
         );
         if (this.symmetryMode !== "off") {
           for (const mirror of mirrorSegmentEnds(
@@ -4158,18 +4256,19 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
-  /** Pixel perfect only applies to pixel tips at exactly 1px without anti-aliasing. */
+  /** Pixel perfect only applies to pixel tips at exactly 1px without anti-aliasing and no wrap. */
   private pencilPixelPerfectActive(): boolean {
     return (
       this.pencilPixelPerfect &&
       this.brushTipKind === "pixel" &&
       this.brushSize === 1 &&
-      !this.pencilAntialias
+      !this.pencilAntialias &&
+      this.wrapMode === "off"
     );
   }
 
   private curvePixelPerfectActive(): boolean {
-    return this.curvePixelPerfect && this.curveWidth === 1 && !this.curveAntialias;
+    return this.curvePixelPerfect && this.curveWidth === 1 && !this.curveAntialias && this.wrapMode === "off";
   }
 
   private resetPencilPixelPerfect(): void {
@@ -4463,13 +4562,14 @@ export class GnumarusCanvasEngine {
       stampPaintDabCoverage(
         this.strokeMask, tex.width, tex.height, x + offset.x, y + offset.y, dabSize,
         this.brushTipKind, this.brushHardness, this.paintTipImage, dabAlpha, jitter, dual, tipAngle,
+        this.wrapMode,
       );
       this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked, color);
     } else {
       paintSoftDab(
         tex.buffer, tex.width, tex.height, x + offset.x, y + offset.y, dabSize,
         this.brushTipKind, this.brushHardness, this.paintTipImage, color, dabAlpha,
-        locked, this.blendMode, jitter, dual, tipAngle, smudge,
+        locked, this.blendMode, jitter, dual, tipAngle, smudge, this.wrapMode,
       );
     }
     this.strokeDabIndex += 1;
@@ -4624,6 +4724,7 @@ export class GnumarusCanvasEngine {
         size,
         this.brushShape,
         this.pencilAntialias,
+        this.wrapMode,
       );
       this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked, color);
       return;
@@ -4642,6 +4743,7 @@ export class GnumarusCanvasEngine {
       color,
       locked,
       this.blendMode,
+      this.wrapMode,
     );
   }
 
@@ -6285,6 +6387,7 @@ export class GnumarusCanvasEngine {
           size,
           this.brushShape,
           this.pencilAntialias,
+          this.wrapMode,
         );
       }
       this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked, color);
@@ -6314,6 +6417,7 @@ export class GnumarusCanvasEngine {
         color,
         locked,
         this.blendMode,
+        this.wrapMode,
       );
     }
   }
@@ -6410,14 +6514,10 @@ export class GnumarusCanvasEngine {
     if (ensured === null) {
       return false;
     }
-    if (
-      !Number.isInteger(x) ||
-      !Number.isInteger(y) ||
-      x < 0 ||
-      y < 0 ||
-      x >= ensured.texture.width ||
-      y >= ensured.texture.height
-    ) {
+    if (!Number.isInteger(x) || !Number.isInteger(y)) {
+      return false;
+    }
+    if (this.wrapMode === "off" && (x < 0 || y < 0 || x >= ensured.texture.width || y >= ensured.texture.height)) {
       return false;
     }
     if (this.lineAnchor === null) {
@@ -6440,6 +6540,7 @@ export class GnumarusCanvasEngine {
         this.color,
         layer.lockedChannels,
         this.blendMode,
+        this.wrapMode,
       );
     } else {
       const mask = new Uint8Array(tex.width * tex.height);
@@ -6454,6 +6555,7 @@ export class GnumarusCanvasEngine {
         this.lineWidth,
         this.lineShape,
         this.lineAntialias,
+        this.wrapMode,
       );
       this.repaintFromMask(tex, base, mask, layer.lockedChannels, this.color);
     }
@@ -6532,6 +6634,7 @@ export class GnumarusCanvasEngine {
         this.color,
         layer.lockedChannels,
         this.blendMode,
+        this.wrapMode,
       );
     } else {
       const mask = new Uint8Array(tex.width * tex.height);
@@ -6546,6 +6649,7 @@ export class GnumarusCanvasEngine {
         this.curveWidth,
         this.curveShape,
         this.curveAntialias,
+        this.wrapMode,
       );
       this.repaintFromMask(tex, base, mask, layer.lockedChannels, this.color);
     }
@@ -7082,11 +7186,19 @@ export class GnumarusCanvasEngine {
 
   /** Fill at a client point (maps through view + layer transforms). */
   bucketFillAtClient(clientX: number, clientY: number): number {
-    const pixel = this.toImagePixel(clientX, clientY);
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return 0;
+    }
+    const pixel = this.toPaintPixel(clientX, clientY);
     if (pixel === null) {
       return 0;
     }
-    return this.bucketFillAt(pixel.x, pixel.y);
+    const seed = wrapLayerPixel(pixel.x, pixel.y, layer.width, layer.height, this.wrapMode);
+    if (seed === null) {
+      return 0;
+    }
+    return this.bucketFillAt(seed.x, seed.y);
   }
 
   /** Minimum zoom fraction from settings (0.01..1, default 0.01). */
@@ -7913,7 +8025,7 @@ export class GnumarusCanvasEngine {
         }
         this.syncLayerRender(layer);
         this.refreshLayerStacking();
-        const pixel = this.toImagePixel(event.clientX, event.clientY);
+        const pixel = this.wrapMode === "off" ? this.toImagePixel(event.clientX, event.clientY) : this.toPaintPixel(event.clientX, event.clientY);
         if (pixel === null) {
           return;
         }
@@ -7964,7 +8076,7 @@ export class GnumarusCanvasEngine {
           }
           this.syncLayerRender(layer);
           this.refreshLayerStacking();
-          const pixel = this.toImagePixel(event.clientX, event.clientY);
+          const pixel = this.wrapMode === "off" ? this.toImagePixel(event.clientX, event.clientY) : this.toPaintPixel(event.clientX, event.clientY);
           if (pixel === null) {
             return;
           }
@@ -8052,7 +8164,7 @@ export class GnumarusCanvasEngine {
       this.refreshLayerStacking();
       this.lastMouseClient = { x: event.clientX, y: event.clientY };
       if (this.isStabilizing()) {
-        const pixel = this.toImagePixel(event.clientX, event.clientY);
+        const pixel = this.wrapMode === "off" ? this.toImagePixel(event.clientX, event.clientY) : this.toPaintPixel(event.clientX, event.clientY);
         if (pixel === null) {
           return;
         }
@@ -8085,7 +8197,7 @@ export class GnumarusCanvasEngine {
         this.updatePreviews();
         return;
       }
-      const pixel = this.toImagePixel(event.clientX, event.clientY);
+      const pixel = this.wrapMode === "off" ? this.toImagePixel(event.clientX, event.clientY) : this.toPaintPixel(event.clientX, event.clientY);
       if (pixel === null) {
         return;
       }
@@ -8111,7 +8223,12 @@ export class GnumarusCanvasEngine {
       this.emitStats();
     });
     canvas.addEventListener("pointermove", (event: PointerEvent) => {
-      const pixel = this.toImagePixel(event.clientX, event.clientY);
+      const usePaintMapping =
+        this.wrapMode !== "off" &&
+        (this.tool === "pencil" || this.tool === "line" || this.tool === "curve" || this.tool === "bucket");
+      const pixel = usePaintMapping
+        ? this.toPaintPixel(event.clientX, event.clientY)
+        : this.toImagePixel(event.clientX, event.clientY);
       this.cursor = pixel;
       this.lastMouseClient = { x: event.clientX, y: event.clientY };
       if (this.tool === "curve" && this.curvePhase === "dragging" && pixel !== null) {
@@ -8481,7 +8598,7 @@ export class GnumarusCanvasEngine {
       if (this.tool !== "curve" || this.curvePhase !== "dragging" || event.button !== 0) {
         return;
       }
-      const pixel = this.toImagePixel(event.clientX, event.clientY);
+      const pixel = this.wrapMode === "off" ? this.toImagePixel(event.clientX, event.clientY) : this.toPaintPixel(event.clientX, event.clientY);
       if (pixel !== null) {
         this.curveP3 = { x: pixel.x, y: pixel.y, clientX: event.clientX, clientY: event.clientY };
       } else if (this.curveDragCurrent !== null) {
@@ -8710,6 +8827,38 @@ export class GnumarusCanvasEngine {
     );
   }
 
+  /**
+   * Paint mapping: like toImagePixel but without the in-bounds rejection,
+   * so strokes can start and continue outside the texture when wrap-around
+   * is on (writers wrap each pixel; with wrap off callers still bounds
+   * check via the returned coordinates). Null only for a missing or
+   * degenerate layer/view.
+   */
+  private toPaintPixel(clientX: number, clientY: number): { x: number; y: number } | null {
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return null;
+    }
+    if (layer.width < 1 || layer.height < 1 || layer.renderTextureId === null) {
+      return null;
+    }
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const project = screenToProject(
+      clientX,
+      clientY,
+      { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      this.viewTransform(),
+    );
+    if (project === null) {
+      return null;
+    }
+    const mapped = projectToLayerImageFloat(project.x, project.y, layer.width, layer.height, layer.transform);
+    if (mapped === null) {
+      return null;
+    }
+    return { x: Math.floor(mapped.x), y: Math.floor(mapped.y) };
+  }
+
   /** Pointer angle around the viewport center (ignores canvas pan). Null at the center. */
   private pointerAngle(clientX: number, clientY: number): number | null {
     const rect = this.renderer.domElement.getBoundingClientRect();
@@ -8837,6 +8986,7 @@ export class GnumarusCanvasEngine {
       IDENTITY_LAYER_TRANSFORM,
       -0.02,
     );
+    this.syncWrapTiles();
     this.updateGrid();
     this.syncFloatingPlane();
     this.updateAxisOverlay();

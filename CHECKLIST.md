@@ -258,6 +258,10 @@
 - [x] Import cleanup setting (none/fit/crop/crop+fit, default crop+fit) on open + all imports
 - [x] Unit tests (vitest) — 360 passed (previous 355 + cropBufferBox + cleanup parse + brush quality)
 - [x] E2E (@recent only, per policy): 29 passed (previous 24 + cleanup setting/fit/none/crop + brush quality/archive); full suite untouched
+- [x] Scrollbars no estilo do app
+- [x] Wrap-around de pintura (off/x/y/both) com tiling só na layer ativa
+- [x] Unit tests (vitest) — 364 passed (previous 360 + wrap parse/mirror/tiles + wrapped writers)
+- [x] E2E (@recent only, per policy): 33 passed (previous 29 + wrap-off no-op + wrap paint + tiles + scrollbar); full suite untouched
 - [x] Batch A: tilt/velocity dynamics + direction-following tips
 - [x] Batch B: airbrush + pulled-string stabilizer + GPU upload coalescing
 - [x] Batch C: smudge/mixer brush

@@ -177,6 +177,29 @@ describe("GnumarusPixelBuffer", () => {
     expect(parseBrushShape(undefined)).toBe("square");
   });
 
+  it("wraps painted pixels around texture edges", () => {
+    const buffer = createPixelBuffer(8, 8);
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    // Outside without wrap: nothing happens.
+    expect(setPixel(buffer, 8, 8, 10, 3, red, undefined, "normal", "off")).toBe(false);
+    expect(getPixel(buffer, 8, 8, 2, 3)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    // With horizontal wrap, x folds back into the texture.
+    expect(setPixel(buffer, 8, 8, 10, 3, red, undefined, "normal", "x")).toBe(true);
+    expect(getPixel(buffer, 8, 8, 2, 3)).toEqual(red);
+    // Vertical stays clamped when only x wraps.
+    expect(setPixel(buffer, 8, 8, 2, 10, red, undefined, "normal", "x")).toBe(false);
+    expect(setPixel(buffer, 8, 8, 2, 10, red, undefined, "normal", "both")).toBe(true);
+    expect(getPixel(buffer, 8, 8, 2, 2)).toEqual(red);
+    // Strokes crossing the edge continue on the other side.
+    const line = createPixelBuffer(8, 8);
+    drawBrushLine(line, 8, 8, 6, 4, 10, 4, 1, "square", red, undefined, "normal", "x");
+    expect(getPixel(line, 8, 8, 6, 4)).toEqual(red);
+    expect(getPixel(line, 8, 8, 7, 4)).toEqual(red);
+    expect(getPixel(line, 8, 8, 0, 4)).toEqual(red);
+    expect(getPixel(line, 8, 8, 2, 4)).toEqual(red);
+    expect(getPixel(line, 8, 8, 3, 4)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  });
+
   it("stamps square and circle tips", () => {
     const red = { r: 255, g: 0, b: 0, a: 255 };
     const square = createPixelBuffer(5, 5);

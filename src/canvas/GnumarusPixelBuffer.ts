@@ -1,3 +1,5 @@
+import { wrapLayerPixel, type GnumarusWrapMode } from "./GnumarusViewportMath";
+
 export interface GnumarusRgba {
   r: number;
   g: number;
@@ -312,11 +314,21 @@ export function setPixel(
   color: GnumarusRgba,
   locked: GnumarusChannelLock | undefined = undefined,
   blend: GnumarusBlendMode = "normal",
+  wrap: GnumarusWrapMode = "off",
 ): boolean {
-  if (x < 0 || y < 0 || x >= width || y >= height) {
+  let px = x;
+  let py = y;
+  if (wrap !== "off") {
+    const wrapped = wrapLayerPixel(x, y, width, height, wrap);
+    if (wrapped === null) {
+      return false;
+    }
+    px = wrapped.x;
+    py = wrapped.y;
+  } else if (x < 0 || y < 0 || x >= width || y >= height) {
     return false;
   }
-  const i = (y * width + x) * 4;
+  const i = (py * width + px) * 4;
   if (blend === "eraser") {
     // Eraser ignores RGB and subtracts the paint alpha from the pixel alpha.
     if (locked?.a !== true) {
@@ -377,6 +389,7 @@ export function drawPixelLine(
   color: GnumarusRgba,
   locked: GnumarusChannelLock | undefined = undefined,
   blend: GnumarusBlendMode = "normal",
+  wrap: GnumarusWrapMode = "off",
 ): void {
   let x = x0;
   let y = y0;
@@ -386,7 +399,7 @@ export function drawPixelLine(
   const sy = y0 < y1 ? 1 : -1;
   let err = dx - dy;
   for (;;) {
-    setPixel(buffer, width, height, x, y, color, locked, blend);
+    setPixel(buffer, width, height, x, y, color, locked, blend, wrap);
     if (x === x1 && y === y1) {
       break;
     }
@@ -579,6 +592,7 @@ export function drawBrushStamp(
   color: GnumarusRgba,
   locked: GnumarusChannelLock | undefined = undefined,
   blend: GnumarusBlendMode = "normal",
+  wrap: GnumarusWrapMode = "off",
 ): void {
   const tip = clampBrushSize(size);
   const anchor = Math.floor((tip - 1) / 2);
@@ -587,7 +601,7 @@ export function drawBrushStamp(
   if (shape === "square") {
     for (let dy = 0; dy < tip; dy += 1) {
       for (let dx = 0; dx < tip; dx += 1) {
-        setPixel(buffer, width, height, left + dx, top + dy, color, locked, blend);
+        setPixel(buffer, width, height, left + dx, top + dy, color, locked, blend, wrap);
       }
     }
     return;
@@ -598,7 +612,7 @@ export function drawBrushStamp(
     for (let dx = 0; dx < tip; dx += 1) {
       const distSquared = (dx - center) * (dx - center) + (dy - center) * (dy - center);
       if (distSquared <= threshold + 1e-9) {
-        setPixel(buffer, width, height, left + dx, top + dy, color, locked, blend);
+        setPixel(buffer, width, height, left + dx, top + dy, color, locked, blend, wrap);
       }
     }
   }
@@ -621,10 +635,11 @@ export function drawBrushLine(
   color: GnumarusRgba,
   locked: GnumarusChannelLock | undefined = undefined,
   blend: GnumarusBlendMode = "normal",
+  wrap: GnumarusWrapMode = "off",
 ): void {
   const tip = clampBrushSize(size);
   if (tip <= 1) {
-    drawPixelLine(buffer, width, height, x0, y0, x1, y1, color, locked, blend);
+    drawPixelLine(buffer, width, height, x0, y0, x1, y1, color, locked, blend, wrap);
     return;
   }
   let x = x0;
@@ -635,7 +650,7 @@ export function drawBrushLine(
   const sy = y0 < y1 ? 1 : -1;
   let err = dx - dy;
   for (;;) {
-    drawBrushStamp(buffer, width, height, x, y, tip, shape, color, locked, blend);
+    drawBrushStamp(buffer, width, height, x, y, tip, shape, color, locked, blend, wrap);
     if (x === x1 && y === y1) {
       break;
     }
@@ -662,27 +677,37 @@ export function blendPixelCoverage(
   coverage: number,
   locked: GnumarusChannelLock | undefined = undefined,
   blend: GnumarusBlendMode = "normal",
+  wrap: GnumarusWrapMode = "off",
 ): void {
   if (!(coverage > 0)) {
     return;
   }
-  if (x < 0 || y < 0 || x >= width || y >= height) {
+  let px = x;
+  let py = y;
+  if (wrap !== "off") {
+    const wrapped = wrapLayerPixel(x, y, width, height, wrap);
+    if (wrapped === null) {
+      return;
+    }
+    px = wrapped.x;
+    py = wrapped.y;
+  } else if (x < 0 || y < 0 || x >= width || y >= height) {
     return;
   }
   const clamped = Math.min(1, Math.max(0, coverage));
   if (blend === "eraser") {
     if (locked?.a !== true) {
-      const i = (y * width + x) * 4;
+      const i = (py * width + px) * 4;
       buffer[i + 3] = Math.max(0, Math.round(buffer[i + 3] - color.a * clamped));
     }
     return;
   }
   if (blend === "copy") {
     if (clamped >= 1) {
-      setPixel(buffer, width, height, x, y, color, locked, blend);
+      setPixel(buffer, width, height, px, py, color, locked, blend);
       return;
     }
-    const i = (y * width + x) * 4;
+    const i = (py * width + px) * 4;
     const inv = 1 - clamped;
     if (locked === undefined || areAllChannelsUnlocked(locked)) {
       buffer[i] = Math.round(buffer[i] * inv + color.r * clamped);
@@ -706,7 +731,7 @@ export function blendPixelCoverage(
     return;
   }
   // Normal painting: straight-alpha source-over with the coverage as opacity.
-  compositeNormal(buffer, (y * width + x) * 4, color, clamped, locked);
+  compositeNormal(buffer, (py * width + px) * 4, color, clamped, locked);
 }
 
 /**
@@ -732,13 +757,14 @@ export function drawLineSegment(
   color: GnumarusRgba,
   locked: GnumarusChannelLock | undefined = undefined,
   blend: GnumarusBlendMode = "normal",
+  wrap: GnumarusWrapMode = "off",
 ): void {
   const thick = antialiased ? clampBrushSizeFloat(lineWidth) : roundBrushSizeForAliased(lineWidth);
   if (!antialiased) {
     if (thick <= 1) {
-      drawPixelLine(buffer, width, height, x0, y0, x1, y1, color, locked, blend);
+      drawPixelLine(buffer, width, height, x0, y0, x1, y1, color, locked, blend, wrap);
     } else {
-      drawBrushLine(buffer, width, height, x0, y0, x1, y1, thick, shape, color, locked, blend);
+      drawBrushLine(buffer, width, height, x0, y0, x1, y1, thick, shape, color, locked, blend, wrap);
     }
     return;
   }
@@ -754,16 +780,16 @@ export function drawLineSegment(
     const maxY = Math.ceil(y0 + reach);
     for (let y = minY; y <= maxY; y += 1) {
       for (let x = minX; x <= maxX; x += 1) {
-        blendPixelCoverage(buffer, width, height, x, y, color, aaDotCoverageAt(x, y, x0, y0, half, shape), locked, blend);
+        blendPixelCoverage(buffer, width, height, x, y, color, aaDotCoverageAt(x, y, x0, y0, half, shape), locked, blend, wrap);
       }
     }
     return;
   }
   const pad = half + 1;
-  const minX = Math.max(0, Math.floor(Math.min(x0, x1) - pad));
-  const maxX = Math.min(width - 1, Math.ceil(Math.max(x0, x1) + pad));
-  const minY = Math.max(0, Math.floor(Math.min(y0, y1) - pad));
-  const maxY = Math.min(height - 1, Math.ceil(Math.max(y0, y1) + pad));
+  const minX = wrap === "off" ? Math.max(0, Math.floor(Math.min(x0, x1) - pad)) : Math.floor(Math.min(x0, x1) - pad);
+  const maxX = wrap === "off" ? Math.min(width - 1, Math.ceil(Math.max(x0, x1) + pad)) : Math.ceil(Math.max(x0, x1) + pad);
+  const minY = wrap === "off" ? Math.max(0, Math.floor(Math.min(y0, y1) - pad)) : Math.floor(Math.min(y0, y1) - pad);
+  const maxY = wrap === "off" ? Math.min(height - 1, Math.ceil(Math.max(y0, y1) + pad)) : Math.ceil(Math.max(y0, y1) + pad);
   for (let y = minY; y <= maxY; y += 1) {
     for (let x = minX; x <= maxX; x += 1) {
       blendPixelCoverage(
@@ -776,6 +802,7 @@ export function drawLineSegment(
         aaSegmentCoverageAt(x, y, x0, y0, x1, y1, half, shape),
         locked,
         blend,
+        wrap,
       );
     }
   }
@@ -807,12 +834,13 @@ export function drawCubicBezier(
   color: GnumarusRgba,
   locked: GnumarusChannelLock | undefined = undefined,
   blend: GnumarusBlendMode = "normal",
+  wrap: GnumarusWrapMode = "off",
 ): void {
   const chord = (a: GnumarusBezierPoint, b: GnumarusBezierPoint): number =>
     Math.sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
   const polygon = chord(p0, p1) + chord(p1, p2) + chord(p2, p3);
   if (!(polygon > 1e-9)) {
-    drawLineSegment(buffer, width, height, p0.x, p0.y, p0.x, p0.y, lineWidth, shape, antialiased, color, locked, blend);
+    drawLineSegment(buffer, width, height, p0.x, p0.y, p0.x, p0.y, lineWidth, shape, antialiased, color, locked, blend, wrap);
     return;
   }
   const segments = Math.min(200, Math.max(16, Math.ceil(polygon * 2)));
@@ -831,7 +859,7 @@ export function drawCubicBezier(
     const sy0 = antialiased ? prevY : Math.round(prevY);
     const sx1 = antialiased ? x : Math.round(x);
     const sy1 = antialiased ? y : Math.round(y);
-    drawLineSegment(buffer, width, height, sx0, sy0, sx1, sy1, lineWidth, shape, antialiased, color, locked, blend);
+    drawLineSegment(buffer, width, height, sx0, sy0, sx1, sy1, lineWidth, shape, antialiased, color, locked, blend, wrap);
     prevX = x;
     prevY = y;
   }
@@ -914,22 +942,29 @@ function stampDotCoverage(
   centerY: number,
   tip: number,
   shape: GnumarusBrushShape,
+  wrap: GnumarusWrapMode = "off",
 ): void {
   const anchor = Math.floor((tip - 1) / 2);
   const left = Math.round(centerX) - anchor;
   const top = Math.round(centerY) - anchor;
+  const stamp = (x: number, y: number): void => {
+    if (wrap !== "off") {
+      const wrapped = wrapLayerPixel(x, y, width, height, wrap);
+      if (wrapped === null) {
+        return;
+      }
+      mask[wrapped.y * width + wrapped.x] = 255;
+      return;
+    }
+    if (x < 0 || y < 0 || x >= width || y >= height) {
+      return;
+    }
+    mask[y * width + x] = 255;
+  };
   if (shape === "square") {
     for (let dy = 0; dy < tip; dy += 1) {
-      const y = top + dy;
-      if (y < 0 || y >= height) {
-        continue;
-      }
       for (let dx = 0; dx < tip; dx += 1) {
-        const x = left + dx;
-        if (x < 0 || x >= width) {
-          continue;
-        }
-        mask[y * width + x] = 255;
+        stamp(left + dx, top + dy);
       }
     }
     return;
@@ -937,18 +972,10 @@ function stampDotCoverage(
   const center = (tip - 1) / 2;
   const threshold = Math.max(0, (tip * tip) / 4 - 0.5);
   for (let dy = 0; dy < tip; dy += 1) {
-    const y = top + dy;
-    if (y < 0 || y >= height) {
-      continue;
-    }
     for (let dx = 0; dx < tip; dx += 1) {
       const distSquared = (dx - center) * (dx - center) + (dy - center) * (dy - center);
       if (distSquared <= threshold + 1e-9) {
-        const x = left + dx;
-        if (x < 0 || x >= width) {
-          continue;
-        }
-        mask[y * width + x] = 255;
+        stamp(left + dx, top + dy);
       }
     }
   }
@@ -971,10 +998,31 @@ export function stampSegmentCoverage(
   size: number,
   shape: GnumarusBrushShape,
   antialiased: boolean,
+  wrap: GnumarusWrapMode = "off",
 ): void {
   if (mask.length !== width * height) {
     return;
   }
+  const plot = (x: number, y: number, value: number): void => {
+    if (wrap !== "off") {
+      const wrapped = wrapLayerPixel(x, y, width, height, wrap);
+      if (wrapped === null) {
+        return;
+      }
+      const at = wrapped.y * width + wrapped.x;
+      if (value > (mask[at] ?? 0)) {
+        mask[at] = value;
+      }
+      return;
+    }
+    if (x < 0 || y < 0 || x >= width || y >= height) {
+      return;
+    }
+    const at = y * width + x;
+    if (value > (mask[at] ?? 0)) {
+      mask[at] = value;
+    }
+  };
   if (!antialiased) {
     const thick = roundBrushSizeForAliased(size);
     // Integer rasterization (Bresenham walkers require integers to terminate).
@@ -989,9 +1037,7 @@ export function stampSegmentCoverage(
       const sy = y < endY ? 1 : -1;
       let err = dx - dy;
       for (;;) {
-        if (x >= 0 && y >= 0 && x < width && y < height) {
-          mask[y * width + x] = 255;
-        }
+        plot(x, y, 255);
         if (x === endX && y === endY) {
           break;
         }
@@ -1013,7 +1059,7 @@ export function stampSegmentCoverage(
     const sy = y < endY ? 1 : -1;
     let err = dx - dy;
     for (;;) {
-      stampDotCoverage(mask, width, height, x, y, thick, shape);
+      stampDotCoverage(mask, width, height, x, y, thick, shape, wrap);
       if (x === endX && y === endY) {
         break;
       }
@@ -1032,19 +1078,15 @@ export function stampSegmentCoverage(
   const thick = clampBrushSizeFloat(size);
   const half = thick / 2;
   const pad = half + 1;
-  const minX = Math.max(0, Math.floor(Math.min(x0, x1) - pad));
-  const maxX = Math.min(width - 1, Math.ceil(Math.max(x0, x1) + pad));
-  const minY = Math.max(0, Math.floor(Math.min(y0, y1) - pad));
-  const maxY = Math.min(height - 1, Math.ceil(Math.max(y0, y1) + pad));
+  const minX = wrap === "off" ? Math.max(0, Math.floor(Math.min(x0, x1) - pad)) : Math.floor(Math.min(x0, x1) - pad);
+  const maxX = wrap === "off" ? Math.min(width - 1, Math.ceil(Math.max(x0, x1) + pad)) : Math.ceil(Math.max(x0, x1) + pad);
+  const minY = wrap === "off" ? Math.max(0, Math.floor(Math.min(y0, y1) - pad)) : Math.floor(Math.min(y0, y1) - pad);
+  const maxY = wrap === "off" ? Math.min(height - 1, Math.ceil(Math.max(y0, y1) + pad)) : Math.ceil(Math.max(y0, y1) + pad);
   for (let y = minY; y <= maxY; y += 1) {
     for (let x = minX; x <= maxX; x += 1) {
       const coverage = aaSegmentCoverageAt(x, y, x0, y0, x1, y1, half, shape);
       if (coverage > 0) {
-        const index = y * width + x;
-        const value = Math.min(255, Math.round(coverage * 255));
-        if (value > mask[index]!) {
-          mask[index] = value;
-        }
+        plot(x, y, Math.min(255, Math.round(coverage * 255)));
       }
     }
   }
@@ -1065,12 +1107,13 @@ export function drawCubicBezierCoverage(
   lineWidth: number,
   shape: GnumarusBrushShape,
   antialiased: boolean,
+  wrap: GnumarusWrapMode = "off",
 ): void {
   const chord = (a: GnumarusBezierPoint, b: GnumarusBezierPoint): number =>
     Math.sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
   const polygon = chord(p0, p1) + chord(p1, p2) + chord(p2, p3);
   if (!(polygon > 1e-9)) {
-    stampSegmentCoverage(mask, width, height, p0.x, p0.y, p0.x, p0.y, lineWidth, shape, antialiased);
+    stampSegmentCoverage(mask, width, height, p0.x, p0.y, p0.x, p0.y, lineWidth, shape, antialiased, wrap);
     return;
   }
   const segments = Math.min(200, Math.max(16, Math.ceil(polygon * 2)));
@@ -1083,7 +1126,7 @@ export function drawCubicBezierCoverage(
       it * it * it * p0.x + 3 * it * it * t * p1.x + 3 * it * t * t * p2.x + t * t * t * p3.x;
     const y =
       it * it * it * p0.y + 3 * it * it * t * p1.y + 3 * it * t * t * p2.y + t * t * t * p3.y;
-    stampSegmentCoverage(mask, width, height, prevX, prevY, x, y, lineWidth, shape, antialiased);
+    stampSegmentCoverage(mask, width, height, prevX, prevY, x, y, lineWidth, shape, antialiased, wrap);
     prevX = x;
     prevY = y;
   }

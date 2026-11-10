@@ -426,3 +426,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Brush tip import: auto fit-to-size (alpha threshold 0) then JXL archive into an OPFS `brushes/` directory; new `brushQuality` storage setting (lossy JXL 0..100, default 90) with dialog row, reset arrow, persistence and test hook.
 - New import cleanup setting (`none`/`fit`/`crop`/`crop+fit`, default `crop+fit`): after open/import, `fit` runs fit-all-threshold-0, `crop` runs crop-all-to-canvas, `crop+fit` runs both in order; wired into openProject + all four importers with status suffix; dialog section, reset arrow, persistence, hooks.
 - Unit tests (crop helper, cleanup parse, brush quality parse) + E2E (OPFS archive round-trip, cleanup fit/crop/none, settings UI).
+
+## 78. Scrollbars no estilo do app + modo wrap-around de pintura (implemented)
+- Scrollbars finas escuras com thumb arredondado e hover no azul de destaque (`#0e639c`), via `scrollbar-color` + `::-webkit-scrollbar` no escopo do shell.
+- Wrap-around (`off`/`x`/`y`/`both`, padrão off, session-only no lápis + hooks): repetição infinita da textura no(s) eixo(s); pintar fora da área replica dentro (módulo nos escritores de pixel — `setPixel`, stamps, cobertura AA, dabs — com carry de espaçamento na distância real); tiling exibido só na layer ativa via planos fantasmas que compartilham material/textura (sem VRAM extra), reposicionados em `layoutSceneTransforms`; ferramentas de seleção/transforme não embrulham; pixel-perfect desliga com wrap ligado.
+- Unit (wrapping puro + escritores com wrap + tiles) + E2E (pintar fora replica dentro, tiles visíveis via hook, nada muda com wrap off).

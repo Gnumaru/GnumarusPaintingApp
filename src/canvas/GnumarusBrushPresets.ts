@@ -11,6 +11,7 @@ import type { GnumarusPressureCurve } from "./GnumarusPaintBrush";
 import type { GnumarusPressureResponse } from "./GnumarusPixelBuffer";
 import type { GnumarusSymmetryMode } from "./GnumarusPaintBrush";
 import type { GnumarusTipAngleMode } from "./GnumarusPaintBrush";
+import type { GnumarusWrapMode } from "./GnumarusViewportMath";
 import type { GnumarusBrushShape } from "./GnumarusPixelBuffer";
 
 export interface GnumarusBrushPreset {
@@ -40,6 +41,8 @@ export interface GnumarusBrushPreset {
   accumulate: boolean;
   /** Symmetry mode; absent in older files means off. */
   symmetryMode?: GnumarusSymmetryMode;
+  /** Wrap-around mode; absent in older files means off. */
+  wrapMode?: GnumarusWrapMode;
 }
 
 export const BRUSH_PRESET_STORAGE_KEY = "gnumarus.brushPresets.v1";
@@ -74,6 +77,16 @@ function checkSymmetry(value: unknown): GnumarusSymmetryMode {
     return value;
   }
   throw new GnumarusBrushPresetError("preset has an invalid symmetryMode");
+}
+
+function checkWrapMode(value: unknown): GnumarusWrapMode {
+  if (value === undefined) {
+    return "off";
+  }
+  if (value === "x" || value === "y" || value === "both" || value === "off") {
+    return value;
+  }
+  throw new GnumarusBrushPresetError("preset has an invalid wrapMode");
 }
 
 /** Validate unknown JSON into a brush preset (v1 only). */
@@ -161,6 +174,7 @@ export function parseBrushPreset(jsonText: string): GnumarusBrushPreset {
     blendMode: checkString(parsed["blendMode"], "blendMode", ["normal", "copy", "eraser"]) as GnumarusBlendMode,
     accumulate,
     symmetryMode: checkSymmetry(parsed["symmetryMode"]),
+    wrapMode: checkWrapMode(parsed["wrapMode"]),
   };
   return preset;
 }
@@ -215,6 +229,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     blendMode: "normal",
     accumulate: true,
     symmetryMode: "off",
+    wrapMode: "off",
   },
   {
     version: 1,
@@ -242,6 +257,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     blendMode: "normal",
     accumulate: true,
     symmetryMode: "off",
+    wrapMode: "off",
   },
   {
     version: 1,
@@ -269,6 +285,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     blendMode: "normal",
     accumulate: true,
     symmetryMode: "off",
+    wrapMode: "off",
   },
   {
     version: 1,
@@ -296,6 +313,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     blendMode: "normal",
     accumulate: true,
     symmetryMode: "off",
+    wrapMode: "off",
   },
   {
     version: 1,
@@ -323,6 +341,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     blendMode: "normal",
     accumulate: true,
     symmetryMode: "off",
+    wrapMode: "off",
   },
   {
     version: 1,
@@ -350,5 +369,6 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     blendMode: "normal",
     accumulate: true,
     symmetryMode: "off",
+    wrapMode: "off",
   },
 ];

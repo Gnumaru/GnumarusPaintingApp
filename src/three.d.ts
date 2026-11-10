@@ -120,6 +120,8 @@ declare module "three" {
     readonly matrix: Matrix4;
     matrixAutoUpdate: boolean;
     matrixWorldNeedsUpdate: boolean;
+    frustumCulled: boolean;
+    material: MeshBasicMaterial | ShaderMaterial;
     renderOrder: number;
     visible: boolean;
     constructor(geometry: PlaneGeometry, material: MeshBasicMaterial | ShaderMaterial);

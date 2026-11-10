@@ -323,6 +323,82 @@ export interface GnumarusCropBox {
   height: number;
 }
 
+/** Wrap-around painting mode: repeat the texture infinitely per axis. */
+export type GnumarusWrapMode = "off" | "x" | "y" | "both";
+
+/** Parse a wrap mode, defaulting to off for missing or invalid input. */
+export function parseWrapMode(value: unknown): GnumarusWrapMode {
+  if (value === "x" || value === "y" || value === "both") {
+    return value;
+  }
+  return "off";
+}
+
+/**
+ * Floor float coords to pixels and wrap them into the texture on the
+ * enabled axes. Null when a non-wrapped axis is out of bounds (or the
+ * texture is degenerate), so painting outside only lands when wrapping
+ * covers that axis.
+ */
+export function wrapLayerPixel(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  mode: GnumarusWrapMode,
+): { x: number; y: number } | null {
+  if (!(width >= 1 && height >= 1)) {
+    return null;
+  }
+  const wrapX = mode === "x" || mode === "both";
+  const wrapY = mode === "y" || mode === "both";
+  const fx = Math.floor(x);
+  const fy = Math.floor(y);
+  if (!wrapX && (fx < 0 || fx >= width)) {
+    return null;
+  }
+  if (!wrapY && (fy < 0 || fy >= height)) {
+    return null;
+  }
+  return {
+    x: wrapX ? ((fx % width) + width) % width : fx,
+    y: wrapY ? ((fy % height) + height) % height : fy,
+  };
+}
+
+/** Tile offsets (in whole textures) for the ghost planes, excluding (0,0). */
+export function wrapTileOffsets(mode: GnumarusWrapMode): Array<{ x: number; y: number }> {
+  const xs = mode === "x" || mode === "both" ? [-1, 0, 1] : [0];
+  const ys = mode === "y" || mode === "both" ? [-1, 0, 1] : [0];
+  const out: Array<{ x: number; y: number }> = [];
+  for (const j of ys) {
+    for (const i of xs) {
+      if (i !== 0 || j !== 0) {
+        out.push({ x: i, y: j });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Project-space shift of tile (i,j): the layer-linear map applied to the
+ * whole-texture image offset (flip-aware), so tiles stay glued under
+ * rotation, scale, skew and flips.
+ */
+export function wrapTileShift(
+  layer: GnumarusLayerTransform,
+  i: number,
+  j: number,
+  width: number,
+  height: number,
+): { x: number; y: number } {
+  const matrix = layerLinearMatrix(layer);
+  const sx = i * width * (layer.flipX ? -1 : 1);
+  const sy = j * height * (layer.flipY ? -1 : 1);
+  return { x: matrix.a * sx + matrix.b * sy, y: matrix.c * sx + matrix.d * sy };
+}
+
 /**
  * Clamp a crop box so no dimension drops below 1px: textures are never
  * smaller than 1x1, so a shrinking action that would compute a 0 width or

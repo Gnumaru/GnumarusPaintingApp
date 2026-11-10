@@ -12,6 +12,10 @@ import {
   layerPixelToScreen,
   layerRotate3,
   normalizeRotation,
+  parseWrapMode,
+  wrapLayerPixel,
+  wrapTileOffsets,
+  wrapTileShift,
   projectToLayerImageFloat,
   projectToLayerPixel,
   rotatedBounds,
@@ -31,8 +35,7 @@ const PLAIN: GnumarusViewTransform = {
   flipY: false,
 };
 
-describe("GnumarusViewportMath", () => {
-  it("maps the container center to the image center", () => {
+describe("GnumarusViewportMath", () => {  it("maps the container center to the image center", () => {
     const pixel = screenToImagePixel(200, 150, RECT, 64, 64, PLAIN);
     expect(pixel).toEqual({ x: 32, y: 32 });
   });
@@ -401,5 +404,39 @@ describe("GnumarusViewportMath", () => {
         }
       }
     }
+  });
+
+  it("wraps layer pixels per axis", () => {
+    expect(parseWrapMode("x")).toBe("x");
+    expect(parseWrapMode("y")).toBe("y");
+    expect(parseWrapMode("both")).toBe("both");
+    expect(parseWrapMode("off")).toBe("off");
+    expect(parseWrapMode("diagonal")).toBe("off");
+    expect(wrapLayerPixel(70, 32, 64, 64, "x")).toEqual({ x: 6, y: 32 });
+    expect(wrapLayerPixel(-1, 32, 64, 64, "x")).toEqual({ x: 63, y: 32 });
+    expect(wrapLayerPixel(32, 70, 64, 64, "y")).toEqual({ x: 32, y: 6 });
+    expect(wrapLayerPixel(70, 70, 64, 64, "both")).toEqual({ x: 6, y: 6 });
+    expect(wrapLayerPixel(70, 32, 64, 64, "y")).toBeNull();
+    expect(wrapLayerPixel(32, 70, 64, 64, "x")).toBeNull();
+    expect(wrapLayerPixel(70, 32, 64, 64, "off")).toBeNull();
+    expect(wrapLayerPixel(32, 32, 64, 64, "off")).toEqual({ x: 32, y: 32 });
+    expect(wrapLayerPixel(0, 0, 0, 64, "both")).toBeNull();
+  });
+
+  it("lists wrap tile offsets excluding the origin", () => {
+    expect(wrapTileOffsets("off")).toEqual([]);
+    expect(wrapTileOffsets("x")).toEqual([{ x: -1, y: 0 }, { x: 1, y: 0 }]);
+    expect(wrapTileOffsets("y")).toEqual([{ x: 0, y: -1 }, { x: 0, y: 1 }]);
+    expect(wrapTileOffsets("both")).toHaveLength(8);
+  });
+
+  it("shifts tiles by whole textures through the layer transform", () => {
+    const identity: GnumarusLayerTransform = {
+      x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1,
+      skewX: 0, skewY: 0, rotationX: 0, rotationY: 0,
+    };
+    expect(wrapTileShift(identity, 1, 0, 64, 64)).toEqual({ x: 64, y: 0 });
+    expect(wrapTileShift(identity, -1, 1, 64, 32)).toEqual({ x: -64, y: 32 });
+    expect(wrapTileShift({ ...identity, flipX: true }, 1, 0, 64, 64)).toEqual({ x: -64, y: 0 });
   });
 });
