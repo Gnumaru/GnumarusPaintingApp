@@ -3603,7 +3603,7 @@ async function canvasCenter(page: import("@playwright/test").Page): Promise<{ x:
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
-test("pencil pressure size scales the stroke", async ({ page }) => {
+test("pencil pressure size scales the stroke @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await stubPenPointerCapture(page);
@@ -3623,7 +3623,7 @@ test("pencil pressure size scales the stroke", async ({ page }) => {
   expect(full).toBeGreaterThan(2 * half);
 });
 
-test("pencil pressure opacity scales the alpha", async ({ page }) => {
+test("pencil pressure opacity scales the alpha @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await stubPenPointerCapture(page);
@@ -3639,7 +3639,7 @@ test("pencil pressure opacity scales the alpha", async ({ page }) => {
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 64 });
 });
 
-test("pencil pressure none ignores pen pressure", async ({ page }) => {
+test("pencil pressure none ignores pen pressure @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await stubPenPointerCapture(page);
@@ -3657,7 +3657,7 @@ test("pencil pressure none ignores pen pressure", async ({ page }) => {
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 128 });
 });
 
-test("pencil pressure size+opacity applies both", async ({ page }) => {
+test("pencil pressure size+opacity applies both @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await stubPenPointerCapture(page);

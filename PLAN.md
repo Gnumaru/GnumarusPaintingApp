@@ -369,11 +369,11 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Unit tests for the summary formatter, animated shim round-trip (first-frame decode) and invalid inputs; E2E for JXL still/animated/sheet exports (signature + shim decode), menu renames, palette list, new modal display and delete confirm/cancel.
 
 ## 68. Split E2E runs: recent only by default, full on demand (implemented)
-- Playwright tests for recent work carry the `@recent` tag in their titles (12 tests: action palette/search/shortcut, fit-all, crop-all x2, JXL still/lossy/animated/sheet + browser codec round-trip, animation delete confirm).
+- Playwright tests for recent work carry the `@recent` tag in their titles (7 tests: 4 brush-pressure pencil responses size/opacity/none/both, plus minimum-zoom setting, matrix gear order, tiny-viewport statusbar).
 - `npm run test:e2e` runs only `--grep @recent` (~25 s); `npm run test:e2e:full` runs the whole suite (~6 min, regressions, on explicit request).
 - Convention: tag new E2E tests with `@recent` when they land; move the tag to the next batch when a newer one arrives (untag tests whose feature is no longer "recent").
 
-## 67. Texture naming tN, circle default brush, JXL project storage (implemented)
+## 69. Texture naming tN, circle default brush, JXL project storage (implemented)
 - Texture display names become lowercase `t1`, `t2`, ... (counter from 1) instead of `T1`: engine `nextTextureName`, project-format defaults, all four importers, legacy `T`/`Texture N` still parsed for the counter. Texture files switch from id-based (`textures/layer0.png`) to positional `textures/t1.jxl` stems recorded in `project.json` (loader already reads the `file` field, so old projects keep loading).
 - Circle becomes the default brush shape for pencil, line and curve (engine + shell inits; invalid input still parses to square).
 - Project textures save as JXL instead of PNG: new `GnumarusJxlExport.encodeTextureForStorage` honoring two new global settings (Edit > Settings, new Storage section): JXL lossless toggle (default on) and lossy quality 0-100 (default 50, hidden unless lossy), persisted in localStorage with per-setting reset arrows, Reset-defaults support and test hooks. Encoding uses effort 1 (fastest) via a new shim `effort` option (decode has no speed knob; single-threaded as before). Save falls back to PNG per texture if the codec fails; loading sniffs `.jxl` vs `.png` per file, so mixed/legacy projects open.
@@ -381,21 +381,21 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 
 - Fixed along the way: multi-line test expectations that assumed square brushes (thick strokes, brush preview radius, AA rounding, cutout pixel counts); explicit square selection keeps their tuned geometry while the new default is covered separately.
 
-## 69. Reload All Textures action (landed)
+## 70. Reload All Textures action (landed)
 - New `reload-all-textures` action (Run action palette, no requirements): re-reads `project.json` from the saved directory for the texture id-to-file map, decodes each on-disk file (JXL sniffed by extension, PNG otherwise) and swaps same-size buffers in; unsaved project shows only an error toast; memory textures without a file entry or with missing/unreadable/size-mismatched files are skipped with counts; one undoable `reloadBatch` history entry; identical buffers count as applied without history.
 
-## 70. Project texture format setting: JXL/JPG/PNG (landed)
+## 71. Project texture format setting: JXL/JPG/PNG (landed)
 - Storage settings gain `format` (jxl/jpg/png, default jxl), PNG compression level int 0-9 (default 9, pure fflate encoder) and JPEG quality int 0-100 (default 95, canvas encode); JXL keeps its lossless/lossy settings; dialog rows hide per format with reset arrows.
 - JPG stores alpha in a companion grayscale file (`t23.alpha.jpg`, same quality); loader/reload recombine color+alpha (missing companion means opaque).
 - JPG stores alpha in a companion grayscale file (`t23.alpha.jpg`, same quality); loader/reload recombine color+alpha (missing companion means opaque); PNG level honored via fflate `zlibSync` (canvas PNG encoder replaced).
 
-## 71. Big canvas, loupe tweaks, Space gestures (landed; pointer lock reverted)
+## 72. Big canvas, loupe tweaks, Space gestures (landed; pointer lock reverted)
 - New projects up to 16384x16384 (dialog max + create clamp; engine needs no change; needs big GPU textures + RAM).
 - Loupe zoom reacts to vertical drag only; loupe rotation pivots on the viewport center instead of the panned image center.
 - Ctrl+Space+left-drag zooms like the loupe; Shift+Space+left-drag rotates like the loupe (shortcuts modal documents both).
 - Minimum canvas zoom is a setting (1..100 whole percent, default 25, Canvas view section with reset arrow, persisted, live-clamps current zoom); fit honors it instead of flooring at 100%.
 - Pointer lock for Shift+left-drag brush sizing was tried and reverted: the canvas lives in shadow DOM, so the lock lands on the host element, starving canvas listeners and breaking pointer capture (proven by failing shift-drag tests). Absolute positioning stays, per the request's fallback clause.
 - Matrix column yields compressed space first (`flex: 0 1 auto`, scrolls internally as before) so the status bar survives tiny viewports.
-## 72. Brush pressure response (none/size/opacity/size+opacity) (landed)
+## 73. Brush pressure response (none/size/opacity/size+opacity) (landed)
 - Pencil tool option backed by engine state (session-only, like brush size): max pressure paints at full brush size/alpha; `size` scales effective size, `opacity` scales effective alpha, both combine; mouse reports full pressure (its 0.5 is meaningless), pen/touch use clamped pressure.
 - Pure helpers in PixelBuffer (response type + parse, pressure normalize, size/alpha multipliers) with unit tests; stroke paths thread per-event pressure (down/move, stabilizer reuses last); synthetic pen PointerEvents in e2e (setPointerCapture stubbed).
