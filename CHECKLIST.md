@@ -293,3 +293,4 @@
 - [x] E2E @recent for presets/storage (48 passed); unit 375 + build clean; docs updated
 - [x] Pencil stroke OOB start anchor (plain + stabilized paths)
 - [x] E2E @recent outside-press/drag-in (49 passed, fails pre-fix); unit 375 + build clean; docs updated
+- [x] Deterministic dist names (no content hash); two builds byte-identical listing; unit 375 green

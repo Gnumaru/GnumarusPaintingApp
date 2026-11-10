@@ -110,14 +110,14 @@ test("File > New preset fills dimensions and WebP lossless storage @recent", asy
   expect(Object.keys(files).sort()).toEqual(["project.json", "textures/t1.webp"]);
 });
 
-test("File > New Notes LQ preset uses JXL lossy quality 0 @recent", async ({ page }) => {
+test("File > New Notes XLQ preset uses JXL lossy quality 0 @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell");
   await page.getByRole("button", { name: "File" }).click();
   await page.getByRole("button", { name: "New Project" }).click();
   const dialog = page.locator("gnumarus-shell dialog#newDialog");
   await expect(dialog).toBeVisible();
-  await dialog.locator("select#newPreset").selectOption("Notes LQ");
+  await dialog.locator("select#newPreset").selectOption("Notes XLQ");
   await expect(dialog.locator("input#newWidth")).toHaveValue("1920");
   await expect(dialog.locator("input#newHeight")).toHaveValue("1080");
   await expect(dialog.locator("select#newStorageFormat")).toHaveValue("jxl");

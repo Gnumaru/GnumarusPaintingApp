@@ -26,9 +26,11 @@ export const GNUMARUS_NEW_PROJECT_PRESETS: GnumarusNewProjectPreset[] = [
   { name: "pixel sprite small", width: 16, height: 16, format: "webp", lossless: true, quality: 50 },
   { name: "pixel sprite medium", width: 48, height: 48, format: "webp", lossless: true, quality: 50 },
   { name: "pixel sprite large", width: 128, height: 128, format: "webp", lossless: true, quality: 50 },
-  { name: "Notes LQ", width: 1920, height: 1080, format: "jxl", lossless: false, quality: 0 },
-  { name: "Sketches MQ", width: 1920, height: 1080, format: "jxl", lossless: false, quality: 50 },
-  { name: "digital painting", width: 1920, height: 1080, format: "jxl", lossless: true, quality: 50 },
+  { name: "Notes XLQ", width: 1920, height: 1080, format: "jxl", lossless: false, quality: 0 },
+  { name: "Sketches MQ", width: 1920, height: 1080, format: "jxl", lossless: false, quality: 34 },
+  { name: "Sketches HQ", width: 1920, height: 1080, format: "jxl", lossless: false, quality: 75 },
+  { name: "digital painting lossless", width: 1920, height: 1080, format: "jxl", lossless: true, quality: 50 },
+  { name: "digital painting lossy", width: 1920, height: 1080, format: "jxl", lossless: false, quality: 95 },
 ];
 
 /** Dialog field values produced by applying a preset (or null when unknown). */

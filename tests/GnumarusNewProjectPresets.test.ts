@@ -5,15 +5,17 @@ import {
 } from "../src/settings/GnumarusNewProjectPresets";
 
 describe("GnumarusNewProjectPresets", () => {
-  it("ships the initial seven presets", () => {
+  it("ships the initial nine presets", () => {
     expect(GNUMARUS_NEW_PROJECT_PRESETS.map((preset) => preset.name)).toEqual([
       "pixel landscape",
       "pixel sprite small",
       "pixel sprite medium",
       "pixel sprite large",
-      "Notes LQ",
+      "Notes XLQ",
       "Sketches MQ",
-      "digital painting",
+      "Sketches HQ",
+      "digital painting lossless",
+      "digital painting lossy",
     ]);
   });
 
@@ -49,7 +51,7 @@ describe("GnumarusNewProjectPresets", () => {
       lossless: true,
       quality: 50,
     });
-    expect(applyNewProjectPreset("Notes LQ")).toEqual({
+    expect(applyNewProjectPreset("Notes XLQ")).toEqual({
       width: 1920,
       height: 1080,
       format: "jxl",
@@ -61,14 +63,28 @@ describe("GnumarusNewProjectPresets", () => {
       height: 1080,
       format: "jxl",
       lossless: false,
-      quality: 50,
+      quality: 34,
     });
-    expect(applyNewProjectPreset("digital painting")).toEqual({
+    expect(applyNewProjectPreset("Sketches HQ")).toEqual({
+      width: 1920,
+      height: 1080,
+      format: "jxl",
+      lossless: false,
+      quality: 75,
+    });
+    expect(applyNewProjectPreset("digital painting lossless")).toEqual({
       width: 1920,
       height: 1080,
       format: "jxl",
       lossless: true,
       quality: 50,
+    });
+    expect(applyNewProjectPreset("digital painting lossy")).toEqual({
+      width: 1920,
+      height: 1080,
+      format: "jxl",
+      lossless: false,
+      quality: 95,
     });
   });
 
