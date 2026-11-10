@@ -28,6 +28,7 @@ import {
   hashDabRandom,
   normalizePointerTilt,
   mirrorSegmentEnds,
+  mirrorSegmentEndsOnAxis,
   paintDabFuzzyAlpha,  paintDabFuzzyOffset,
   paintDabFuzzySize,
   paintGrainFactor,
@@ -355,6 +356,25 @@ describe("GnumarusPaintBrush", () => {
       { x0: 63, y0: 0, x1: 53, y1: 10 },
       { x0: 0, y0: 63, x1: 10, y1: 53 },
       { x0: 63, y0: 63, x1: 53, y1: 53 },
+    ]);
+  });
+
+  it("mirrors segments around a configurable axis", () => {
+    // Center axis matches the legacy center mirror exactly.
+    expect(mirrorSegmentEndsOnAxis(16, 32, 16, 32, 31.5, 31.5, "mirror-x")).toEqual([
+      { x0: 47, y0: 32, x1: 47, y1: 32 },
+    ]);
+    // Offset axis shifts the mirror: 2*40 - 16 = 64.
+    expect(mirrorSegmentEndsOnAxis(16, 32, 16, 32, 40, 31.5, "mirror-x")).toEqual([
+      { x0: 64, y0: 32, x1: 64, y1: 32 },
+    ]);
+    expect(mirrorSegmentEndsOnAxis(16, 20, 30, 40, 31.5, 10, "mirror-y")).toEqual([
+      { x0: 16, y0: 0, x1: 30, y1: -20 },
+    ]);
+    expect(mirrorSegmentEndsOnAxis(0, 0, 10, 10, 31.5, 31.5, "off")).toEqual([]);
+    // Fractional axes round to whole pixels.
+    expect(mirrorSegmentEndsOnAxis(16, 0, 16, 0, 10.2, 0, "mirror-x")).toEqual([
+      { x0: 4, y0: 0, x1: 4, y1: 0 },
     ]);
   });
 

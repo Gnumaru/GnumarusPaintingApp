@@ -380,6 +380,58 @@ export function backgroundUnionForWrap(
   return { width, height, centerX: snappedMinX + width / 2, centerY: snappedMinY + height / 2 };
 }
 
+/** Axis-aligned box segment for overlays, in container-local CSS pixels. */
+export interface GnumarusOverlaySegment {
+  ax: number;
+  ay: number;
+  bx: number;
+  by: number;
+}
+
+/**
+ * Clip a segment to an axis-aligned box (Liang-Barsky). Null when the
+ * segment misses the box entirely. Used for viewport-spanning guides.
+ */
+export function clipSegmentToRect(
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+): GnumarusOverlaySegment | null {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const edges: Array<[number, number]> = [
+    [-dx, ax - minX],
+    [dx, maxX - ax],
+    [-dy, ay - minY],
+    [dy, maxY - ay],
+  ];
+  for (const [p, q] of edges) {
+    if (Math.abs(p) < 1e-12) {
+      if (q < 0) {
+        return null;
+      }
+      continue;
+    }
+    const r = q / p;
+    if (p < 0) {
+      t0 = Math.max(t0, r);
+    } else {
+      t1 = Math.min(t1, r);
+    }
+    if (t0 > t1) {
+      return null;
+    }
+  }
+  return { ax: ax + dx * t0, ay: ay + dy * t0, bx: ax + dx * t1, by: ay + dy * t1 };
+}
+
 /** Integer texture-pixel box: sub-rectangle produced by cropping. */
 export interface GnumarusCropBox {
   left: number;

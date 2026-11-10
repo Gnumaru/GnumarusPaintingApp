@@ -104,6 +104,7 @@ declare module "three" {
 
   export class LineSegments {
     readonly geometry: BufferGeometry;
+    material: LineBasicMaterial | ShaderMaterial;
     matrixAutoUpdate: boolean;
     matrixWorldNeedsUpdate: boolean;
     frustumCulled: boolean;

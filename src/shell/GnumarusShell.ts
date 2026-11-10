@@ -3216,6 +3216,15 @@ export class GnumarusShell extends LitElement {
             <option value="both">Both</option>
           </select>
         </label>
+        <label title="Mirror every stroke across the canvas axes while painting (pencil only)."
+          >Symmetry
+          <select id="symmetryMode" .value=${this.symmetryMode} @change=${(): void => this.applySymmetryModeFromDialog()}>
+            <option value="off">Off</option>
+            <option value="mirror-x">Left-right</option>
+            <option value="mirror-y">Up-down</option>
+            <option value="both">Four-way</option>
+          </select>
+        </label>
       </div>
     `;
   }
@@ -3265,15 +3274,6 @@ export class GnumarusShell extends LitElement {
             <select id="brushShape" .value=${this.brushShape} @change=${(): void => this.applyBrushShapeFromDialog()}>
               <option value="square">Square</option>
               <option value="circle">Circle</option>
-            </select>
-          </label>
-          <label title="Mirror every stroke across the canvas axes while painting."
-            >Symmetry
-            <select id="symmetryMode" .value=${this.symmetryMode} @change=${(): void => this.applySymmetryModeFromDialog()}>
-              <option value="off">Off</option>
-              <option value="mirror-x">Left-right</option>
-              <option value="mirror-y">Up-down</option>
-              <option value="both">Four-way</option>
             </select>
           </label>
           <label title="Pixel paints hard aliased stamps (pixel art). Soft paints a round tip with hardness falloff. Image paints a grayscale tip as an alpha mask tinted with the paint color."

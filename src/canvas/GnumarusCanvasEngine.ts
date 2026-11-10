@@ -75,7 +75,7 @@ import {
   parsePressureCurve,
   parseSymmetryMode,
   parseTipAngleMode,
-  mirrorSegmentEnds,
+  mirrorSegmentEndsOnAxis,
   smoothStrokeVelocity,
   stampPaintDabCoverage,
   strokeDabPositions,
@@ -90,6 +90,7 @@ import {
   type GnumarusTipAngleMode,
 } from "./GnumarusPaintBrush";
 import {
+  clipSegmentToRect,
   parseWrapMode,
   wrapLayerPixel,
   wrapTileOffsets,
@@ -624,6 +625,17 @@ export class GnumarusCanvasEngine {
   private strokeLastMoveT = 0;
   private strokeLastMovePos: { x: number; y: number } | null = null;
   private symmetryMode: GnumarusSymmetryMode = "off";
+  /** Mirror point in active-layer pixels (default: layer center). */
+  private symmetryCenter: { x: number; y: number } = { x: 0, y: 0 };
+  /** Symmetry guide lines (vertical/horizontal mirror axes). */
+  private readonly symmetryLines: THREE.LineSegments[] = [];
+  /** Draggable symmetry axis handles (SVG overlay, container coords). */
+  private readonly symmetryHandles: Array<{ id: "sym-x-min" | "sym-x-max" | "sym-y-min" | "sym-y-max"; circle: SVGCircleElement }> = [];
+  private readonly symmetrySvg: SVGSVGElement;
+  /** Active symmetry handle drag, or null. */
+  private symmetryDrag: { id: "sym-x-min" | "sym-x-max" | "sym-y-min" | "sym-y-max" } | null = null;
+  /** Whether the symmetry overlay was visible the last time it synced. */
+  private symmetryOverlayVisible = false;
   private wrapMode: GnumarusWrapMode = "off";
   /** Ghost planes showing wrapped copies of the active layer (max 8). */
   private readonly wrapTiles: THREE.Mesh[] = [];
@@ -1105,6 +1117,33 @@ export class GnumarusCanvasEngine {
     }
     container.appendChild(this.previewSvg);
 
+    this.symmetrySvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    this.symmetrySvg.style.position = "absolute";
+    this.symmetrySvg.style.inset = "0";
+    this.symmetrySvg.style.width = "100%";
+    this.symmetrySvg.style.height = "100%";
+    this.symmetrySvg.style.pointerEvents = "none";
+    this.symmetrySvg.style.zIndex = "7";
+    this.symmetrySvg.style.overflow = "visible";
+    container.appendChild(this.symmetrySvg);
+    (["sym-x-min", "sym-x-max", "sym-y-min", "sym-y-max"] as const).forEach((id) => {
+      const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle") as SVGCircleElement;
+      circle.setAttribute("data-testid", "symmetry-handle");
+      circle.setAttribute("data-handle", id);
+      circle.setAttribute("r", "7");
+      circle.setAttribute("fill", "#ffffff");
+      circle.setAttribute("stroke", "#00ccff");
+      circle.setAttribute("stroke-width", "2");
+      circle.style.display = "none";
+      circle.style.pointerEvents = "auto";
+      circle.style.cursor = id === "sym-x-min" || id === "sym-x-max" ? "ew-resize" : "ns-resize";
+      circle.addEventListener("pointerdown", (event: PointerEvent) => {
+        this.beginSymmetryDrag(event, id);
+      });
+      this.symmetrySvg.appendChild(circle);
+      this.symmetryHandles.push({ id, circle });
+    });
+
     this.scene = new THREE.Scene();
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -10, 10);
     this.camera.position.set(0, 0, 1);
@@ -1177,6 +1216,17 @@ export class GnumarusCanvasEngine {
     const border = makeAxisLine(0xff00ff);
     this.borderMaterial = border.material;
     this.borderLine = border.line;
+    for (let i = 0; i < 2; i += 1) {
+      const material = new THREE.LineBasicMaterial({ color: 0x00ccff, transparent: true, depthWrite: false });
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(6), 3));
+      const line = new THREE.LineSegments(geometry, material);
+      line.frustumCulled = false;
+      line.renderOrder = 1002;
+      line.visible = false;
+      this.scene.add(line);
+      this.symmetryLines.push(line);
+    }
     const first = this.createLayerInternal("layer0", "L1", true, 1, createPixelBuffer(64, 64), 64, 64, {
       ...IDENTITY_LAYER_TRANSFORM,
     });
@@ -1204,6 +1254,7 @@ export class GnumarusCanvasEngine {
     this.frameNameCounter = 2;
     this.contentCounter = 2;
     this.textureCounter = 1;
+    this.resetSymmetryCenter();
     this.syncAllLayerRenders();
 
     this.resizeObserver = new ResizeObserver(() => this.layout());
@@ -2078,6 +2129,7 @@ export class GnumarusCanvasEngine {
     this.stopFollowLoop();
     this.resetPencilPixelPerfect();
     this.syncWrapTiles();
+    this.syncSymmetryOverlay();
     this.updateGrid();
     this.updateAxisOverlay();
     this.render();
@@ -3512,6 +3564,7 @@ export class GnumarusCanvasEngine {
     this.stabilizerTarget = null;
     this.stopFollowLoop();
     this.resetPencilPixelPerfect();
+    this.resetSymmetryCenter();
     this.syncImageUniforms();
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
@@ -3593,6 +3646,7 @@ export class GnumarusCanvasEngine {
     this.dropFloating();
     this.strokeBase = null;
     this.strokeLayerId = null;
+    this.resetSymmetryCenter();
     this.syncImageUniforms();
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
@@ -3940,9 +3994,55 @@ export class GnumarusCanvasEngine {
       return false;
     }
     this.symmetryMode = parsed;
+    this.syncSymmetryOverlay();
     this.emitStats();
     this.updatePreviews();
     return true;
+  }
+
+  getSymmetryCenter(): { x: number; y: number } {
+    return { ...this.symmetryCenter };
+  }
+
+  /** Reset the symmetry point to the active layer center. */
+  resetSymmetryCenter(): void {
+    const layer = this.activeLayer();
+    if (layer === null || layer.width < 1 || layer.height < 1) {
+      return;
+    }
+    this.symmetryCenter = { x: (layer.width - 1) / 2, y: (layer.height - 1) / 2 };
+    this.syncSymmetryOverlay();
+    this.emitStats();
+  }
+
+  /** Move the symmetry point, clamped to the active layer bounds. */
+  setSymmetryCenter(x: number, y: number): boolean {
+    const layer = this.activeLayer();
+    if (layer === null || layer.width < 1 || layer.height < 1) {
+      return false;
+    }
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return false;
+    }
+    const clamped = {
+      x: Math.min(layer.width - 1, Math.max(0, x)),
+      y: Math.min(layer.height - 1, Math.max(0, y)),
+    };
+    if (clamped.x === this.symmetryCenter.x && clamped.y === this.symmetryCenter.y) {
+      return false;
+    }
+    this.symmetryCenter = clamped;
+    this.syncSymmetryOverlay();
+    this.emitStats();
+    return true;
+  }
+
+  /** Mirror a dab position across the active symmetry axes. */
+  private mirrorDabPoint(x: number, y: number, mirrorX: boolean, mirrorY: boolean): { x: number; y: number } {
+    return {
+      x: mirrorX ? 2 * this.symmetryCenter.x - x : x,
+      y: mirrorY ? 2 * this.symmetryCenter.y - y : y,
+    };
   }
 
   getWrapMode(): GnumarusWrapMode {
@@ -4169,13 +4269,14 @@ export class GnumarusCanvasEngine {
           this.wrapMode,
         );
         if (this.symmetryMode !== "off") {
-          for (const mirror of mirrorSegmentEnds(
+          for (const mirror of mirrorSegmentEndsOnAxis(
             Math.round(at.x), Math.round(at.y), Math.round(at.x), Math.round(at.y),
-            tex.width, tex.height, this.symmetryMode,
+            this.symmetryCenter.x, this.symmetryCenter.y, this.symmetryMode,
           )) {
             drawBrushStamp(
               tex.buffer, tex.width, tex.height, mirror.x0, mirror.y0,
               this.brushSize, this.brushShape, this.pressureBrushColor(), layer.lockedChannels, this.blendMode,
+              this.wrapMode,
             );
           }
         }
@@ -4183,13 +4284,16 @@ export class GnumarusCanvasEngine {
         this.stampPaintDabAt(tex, layer.lockedChannels, at.x, at.y, airbrushAngle);
         if (this.symmetryMode !== "off") {
           if (this.symmetryMode === "mirror-x" || this.symmetryMode === "both") {
-            this.stampPaintDabAt(tex, layer.lockedChannels, tex.width - 1 - at.x, at.y, Math.PI - airbrushAngle);
+            const mirrored = this.mirrorDabPoint(at.x, at.y, true, false);
+            this.stampPaintDabAt(tex, layer.lockedChannels, mirrored.x, mirrored.y, Math.PI - airbrushAngle);
           }
           if (this.symmetryMode === "mirror-y" || this.symmetryMode === "both") {
-            this.stampPaintDabAt(tex, layer.lockedChannels, at.x, tex.height - 1 - at.y, -airbrushAngle);
+            const mirrored = this.mirrorDabPoint(at.x, at.y, false, true);
+            this.stampPaintDabAt(tex, layer.lockedChannels, mirrored.x, mirrored.y, -airbrushAngle);
           }
           if (this.symmetryMode === "both") {
-            this.stampPaintDabAt(tex, layer.lockedChannels, tex.width - 1 - at.x, tex.height - 1 - at.y, Math.PI + airbrushAngle);
+            const mirrored = this.mirrorDabPoint(at.x, at.y, true, true);
+            this.stampPaintDabAt(tex, layer.lockedChannels, mirrored.x, mirrored.y, Math.PI + airbrushAngle);
           }
         }
       }
@@ -4671,16 +4775,17 @@ export class GnumarusCanvasEngine {
     for (const dab of positions) {
       this.stampPaintDabAt(tex, locked, dab.x, dab.y, baseAngle);
       if (this.symmetryMode !== "off") {
-        const w = tex.width;
-        const h = tex.height;
         if (this.symmetryMode === "mirror-x" || this.symmetryMode === "both") {
-          this.stampPaintDabAt(tex, locked, w - 1 - dab.x, dab.y, Math.PI - baseAngle);
+          const mirrored = this.mirrorDabPoint(dab.x, dab.y, true, false);
+          this.stampPaintDabAt(tex, locked, mirrored.x, mirrored.y, Math.PI - baseAngle);
         }
         if (this.symmetryMode === "mirror-y" || this.symmetryMode === "both") {
-          this.stampPaintDabAt(tex, locked, dab.x, h - 1 - dab.y, -baseAngle);
+          const mirrored = this.mirrorDabPoint(dab.x, dab.y, false, true);
+          this.stampPaintDabAt(tex, locked, mirrored.x, mirrored.y, -baseAngle);
         }
         if (this.symmetryMode === "both") {
-          this.stampPaintDabAt(tex, locked, w - 1 - dab.x, h - 1 - dab.y, Math.PI + baseAngle);
+          const mirrored = this.mirrorDabPoint(dab.x, dab.y, true, true);
+          this.stampPaintDabAt(tex, locked, mirrored.x, mirrored.y, Math.PI + baseAngle);
         }
       }
     }
@@ -4703,7 +4808,9 @@ export class GnumarusCanvasEngine {
     if (this.symmetryMode === "off" || this.pencilPixelPerfectActive()) {
       return;
     }
-    for (const mirror of mirrorSegmentEnds(x0, y0, x1, y1, tex.width, tex.height, this.symmetryMode)) {
+    for (const mirror of mirrorSegmentEndsOnAxis(
+      x0, y0, x1, y1, this.symmetryCenter.x, this.symmetryCenter.y, this.symmetryMode,
+    )) {
       this.paintPencilLineSingle(tex, locked, mirror.x0, mirror.y0, mirror.x1, mirror.y1);
     }
   }
@@ -6410,8 +6517,7 @@ export class GnumarusCanvasEngine {
     locked: GnumarusChannelLock,
     from: { x: number; y: number },
     to: { x: number; y: number },
-  ): void {
-    // Quantize like toImagePixel for the aliased path so stabilized strokes
+  ): void {    // Quantize like toImagePixel for the aliased path so stabilized strokes
     // land on the same pixels as unstabilized ones (pixel x covers [x, x+1)).
     const qx0 = this.pencilAntialias ? from.x : Math.floor(from.x);
     const qy0 = this.pencilAntialias ? from.y : Math.floor(from.y);
@@ -6432,7 +6538,7 @@ export class GnumarusCanvasEngine {
         { x0: qx0, y0: qy0, x1: qx1, y1: qy1 },
         ...(this.symmetryMode === "off"
           ? []
-          : mirrorSegmentEnds(qx0, qy0, qx1, qy1, tex.width, tex.height, this.symmetryMode)),
+          : mirrorSegmentEndsOnAxis(qx0, qy0, qx1, qy1, this.symmetryCenter.x, this.symmetryCenter.y, this.symmetryMode)),
       ];
       for (const end of ends) {
         stampSegmentCoverage(
@@ -6459,7 +6565,7 @@ export class GnumarusCanvasEngine {
       { x0: qx0, y0: qy0, x1: qx1, y1: qy1 },
       ...(this.symmetryMode === "off"
         ? []
-        : mirrorSegmentEnds(qx0, qy0, qx1, qy1, tex.width, tex.height, this.symmetryMode)),
+        : mirrorSegmentEndsOnAxis(qx0, qy0, qx1, qy1, this.symmetryCenter.x, this.symmetryCenter.y, this.symmetryMode)),
     ];
     for (const end of lineEnds) {
       drawLineSegment(
@@ -7816,6 +7922,262 @@ export class GnumarusCanvasEngine {
     };
   }
 
+  /** Symmetry overlay state in container CSS pixels, for tests and UI. */
+  getSymmetryOverlayState(): {
+    visible: boolean;
+    vertical: { ax: number; ay: number; bx: number; by: number } | null;
+    horizontal: { ax: number; ay: number; bx: number; by: number } | null;
+  } {
+    const segments = this.symmetryOverlaySegments();
+    return {
+      visible: segments !== null,
+      vertical: segments === null ? null : segments.vertical,
+      horizontal: segments === null ? null : segments.horizontal,
+    };
+  }
+
+  /** Position the symmetry guides and their drag handles. */
+  private syncSymmetryOverlay(): void {
+    if (this.disposed) {
+      return;
+    }
+    const segments = this.symmetryOverlaySegments();
+    const visible = segments !== null;
+    const rect = this.container.getBoundingClientRect();
+    const width = Math.max(1, rect.width);
+    const height = Math.max(1, rect.height);
+    const lines = [this.symmetryLines[0], this.symmetryLines[1]];
+    const guides = visible && segments !== null ? [segments.vertical, segments.horizontal] : [null, null];
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      const guide = guides[i];
+      if (line === undefined || guide === undefined || guide === null) {
+        if (line !== undefined) {
+          line.visible = false;
+        }
+        continue;
+      }
+      const toScene = (x: number, y: number): [number, number] => [x - width / 2, height / 2 - y];
+      const [sax, say] = toScene(guide.ax, guide.ay);
+      const [sbx, sby] = toScene(guide.bx, guide.by);
+      const attribute = line.geometry.getAttribute("position") as THREE.BufferAttribute;
+      attribute.setXYZ(0, sax, say, 0.04);
+      attribute.setXYZ(1, sbx, sby, 0.04);
+      attribute.needsUpdate = true;
+      line.visible = true;
+    }
+    const active = visible && segments !== null ? segments.handles : [];
+    for (const handle of this.symmetryHandles) {
+      const found = active.find((entry) => entry.id === handle.id);
+      if (found === undefined) {
+        handle.circle.style.display = "none";
+        continue;
+      }
+      handle.circle.setAttribute("transform", `translate(${found.x} ${found.y})`);
+      handle.circle.style.display = "block";
+    }
+    if (visible || this.symmetryOverlayVisible) {
+      this.render();
+    }
+    this.symmetryOverlayVisible = visible;
+  }
+
+  private beginSymmetryDrag(event: PointerEvent, id: "sym-x-min" | "sym-x-max" | "sym-y-min" | "sym-y-max"): void {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.shiftKey) {
+      this.resetSymmetryCenter();
+      return;
+    }
+    this.symmetryDrag = { id };
+    const move = (moveEvent: PointerEvent): void => {
+      this.updateSymmetryDrag(moveEvent);
+    };
+    const up = (): void => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      this.symmetryDrag = null;
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  }
+
+  private updateSymmetryDrag(event: PointerEvent): void {
+    const drag = this.symmetryDrag;
+    if (drag === null) {
+      return;
+    }
+    const layer = this.activeLayer();
+    if (layer === null || layer.width < 1 || layer.height < 1) {
+      return;
+    }
+    const floatPos = this.clientToLayerImageFloat(event.clientX, event.clientY);
+    if (floatPos === null) {
+      return;
+    }
+    const horizontal = drag.id === "sym-x-min" || drag.id === "sym-x-max";
+    const next = {
+      x: horizontal ? floatPos.x : this.symmetryCenter.x,
+      y: horizontal ? this.symmetryCenter.y : floatPos.y,
+    };
+    this.setSymmetryCenter(next.x, next.y);
+  }
+
+  /**
+   * Symmetry guides in container-local CSS pixels: the active mirror axes
+   * clipped to the viewport, plus handle anchor points just outside the
+   * project area (clamped into view). Null when symmetry is off, the layer
+   * is missing/degenerate, or the transform is not invertible.
+   */
+  private symmetryOverlaySegments(): {
+    vertical: { ax: number; ay: number; bx: number; by: number } | null;
+    horizontal: { ax: number; ay: number; bx: number; by: number } | null;
+    handles: Array<{ id: "sym-x-min" | "sym-x-max" | "sym-y-min" | "sym-y-max"; x: number; y: number }>;
+  } | null {
+    const layer = this.activeLayer();
+    if (
+      layer === null ||
+      layer.width < 1 ||
+      layer.height < 1 ||
+      layer.renderTextureId === null ||
+      this.symmetryMode === "off"
+    ) {
+      return null;
+    }
+    const rect = this.container.getBoundingClientRect();
+    const width = Math.max(1, rect.width);
+    const height = Math.max(1, rect.height);
+    const local: GnumarusRect = { left: 0, top: 0, width, height };
+    const view = this.viewTransform();
+    // Project-space viewport bounds for clipping the infinite guides.
+    const corners = [
+      screenToProject(0, 0, local, view),
+      screenToProject(width, 0, local, view),
+      screenToProject(0, height, local, view),
+      screenToProject(width, height, local, view),
+    ];
+    if (corners.some((corner) => corner === null)) {
+      return null;
+    }
+    const proj = corners as Array<{ x: number; y: number }>;
+    const minX = Math.min(...proj.map((p) => p.x));
+    const maxX = Math.max(...proj.map((p) => p.x));
+    const minY = Math.min(...proj.map((p) => p.y));
+    const maxY = Math.max(...proj.map((p) => p.y));
+    // Project-space project bounds for placing handles outside the canvas.
+    const canvasMinX = -this.imageWidth / 2;
+    const canvasMaxX = this.imageWidth / 2;
+    const canvasMinY = -this.imageHeight / 2;
+    const canvasMaxY = this.imageHeight / 2;
+    const handles: Array<{ id: "sym-x-min" | "sym-x-max" | "sym-y-min" | "sym-y-max"; x: number; y: number }> = [];
+    const placeHandles = (
+      idMin: "sym-x-min" | "sym-x-max" | "sym-y-min" | "sym-y-max",
+      idMax: "sym-x-min" | "sym-x-max" | "sym-y-min" | "sym-y-max",
+      throughX: number,
+      throughY: number,
+      dirX: number,
+      dirY: number,
+    ): { ax: number; ay: number; bx: number; by: number } | null => {
+      const length = Math.sqrt(dirX * dirX + dirY * dirY);
+      if (!(length > 1e-9)) {
+        return null;
+      }
+      const ux = dirX / length;
+      const uy = dirY / length;
+      const clipped = clipSegmentToRect(
+        throughX - ux * 1e6,
+        throughY - uy * 1e6,
+        throughX + ux * 1e6,
+        throughY + uy * 1e6,
+        minX,
+        minY,
+        maxX,
+        maxY,
+      );
+      if (clipped === null) {
+        return null;
+      }
+      const toLocal = (projectX: number, projectY: number): { x: number; y: number } => {
+        const client = projectToScreen(projectX, projectY, local, view);
+        return { x: client.x - rect.left, y: client.y - rect.top };
+      };
+      const a = toLocal(clipped.ax, clipped.ay);
+      const b = toLocal(clipped.bx, clipped.by);
+      // Handles sit on the exits of the project area, pushed outward.
+      const exits = clipSegmentToRect(
+        throughX - ux * 1e6,
+        throughY - uy * 1e6,
+        throughX + ux * 1e6,
+        throughY + uy * 1e6,
+        canvasMinX,
+        canvasMinY,
+        canvasMaxX,
+        canvasMaxY,
+      );
+      const pushOut = 16;
+      const margin = 14;
+      const place = (
+        projectX: number,
+        projectY: number,
+        sign: number,
+        id: "sym-x-min" | "sym-x-max" | "sym-y-min" | "sym-y-max",
+      ): void => {
+        const base = toLocal(projectX, projectY);
+        const alongX = b.x - a.x;
+        const alongY = b.y - a.y;
+        const alongLength = Math.sqrt(alongX * alongX + alongY * alongY);
+        let hx = base.x;
+        let hy = base.y;
+        if (alongLength > 1e-9) {
+          hx = base.x + (alongX / alongLength) * sign * pushOut;
+          hy = base.y + (alongY / alongLength) * sign * pushOut;
+        }
+        handles.push({
+          id,
+          x: Math.min(width - margin, Math.max(margin, hx)),
+          y: Math.min(height - margin, Math.max(margin, hy)),
+        });
+      };
+      if (exits !== null) {
+        // Order exits along the viewport segment direction.
+        const dotA =
+          (exits.ax - clipped.ax) * (clipped.bx - clipped.ax) + (exits.ay - clipped.ay) * (clipped.by - clipped.ay);
+        const dotB =
+          (exits.bx - clipped.ax) * (clipped.bx - clipped.ax) + (exits.by - clipped.ay) * (clipped.by - clipped.ay);
+        if (dotA <= dotB) {
+          place(exits.ax, exits.ay, -1, idMin);
+          place(exits.bx, exits.by, 1, idMax);
+        } else {
+          place(exits.ax, exits.ay, 1, idMin);
+          place(exits.bx, exits.by, -1, idMax);
+        }
+      } else {
+        // Axis misses the project entirely: pin both handles to the ends.
+        place(clipped.ax, clipped.ay, -1, idMin);
+        place(clipped.bx, clipped.by, 1, idMax);
+      }
+      return { ax: a.x, ay: a.y, bx: b.x, by: b.y };
+    };
+    let vertical: { ax: number; ay: number; bx: number; by: number } | null = null;
+    let horizontal: { ax: number; ay: number; bx: number; by: number } | null = null;
+    if (this.symmetryMode === "mirror-x" || this.symmetryMode === "both") {
+      const p0 = layerImageToProject(this.symmetryCenter.x, 0, layer.width, layer.height, layer.transform);
+      const p1 = layerImageToProject(this.symmetryCenter.x, layer.height, layer.width, layer.height, layer.transform);
+      vertical = placeHandles("sym-x-min", "sym-x-max", p0.x, p0.y, p1.x - p0.x, p1.y - p0.y);
+    }
+    if (this.symmetryMode === "mirror-y" || this.symmetryMode === "both") {
+      const p0 = layerImageToProject(0, this.symmetryCenter.y, layer.width, layer.height, layer.transform);
+      const p1 = layerImageToProject(layer.width, this.symmetryCenter.y, layer.width, layer.height, layer.transform);
+      horizontal = placeHandles("sym-y-min", "sym-y-max", p0.x, p0.y, p1.x - p0.x, p1.y - p0.y);
+    }
+    if (vertical === null && horizontal === null) {
+      return null;
+    }
+    return { vertical, horizontal, handles };
+  }
+
   resetView(): void {
     const rect = this.container.getBoundingClientRect();
     if (rect.width > 0 && rect.height > 0) {
@@ -7855,6 +8217,14 @@ export class GnumarusCanvasEngine {
     this.scene.remove(this.borderLine);
     this.borderLine.geometry.dispose();
     this.borderMaterial.dispose();
+    for (const line of this.symmetryLines) {
+      this.scene.remove(line);
+      line.geometry.dispose();
+      line.material.dispose();
+    }
+    this.symmetrySvg.remove();
+    this.scene.remove(this.gridPlane);
+    this.gridMaterial.dispose();
     this.resizeObserver.disconnect();
     this.lineAnchor = null;
     this.lastMouseClient = null;
@@ -9040,6 +9410,7 @@ export class GnumarusCanvasEngine {
     }
     this.expandBackgroundForWrap();
     this.syncWrapTiles();
+    this.syncSymmetryOverlay();
     this.updateGrid();
     this.syncFloatingPlane();
     this.updateAxisOverlay();

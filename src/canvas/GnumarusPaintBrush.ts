@@ -564,6 +564,35 @@ export function parseSymmetryMode(value: unknown): GnumarusSymmetryMode {
 /**
  * Extra endpoint sets for one segment under symmetry: mirror-x flips
  * left-right, mirror-y flips up-down, both adds all three mirrors.
+ * Coordinates mirror around (`2 * axis - v`, rounded to whole pixels).
+ */
+export function mirrorSegmentEndsOnAxis(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  axisX: number,
+  axisY: number,
+  mode: GnumarusSymmetryMode,
+): Array<{ x0: number; y0: number; x1: number; y1: number }> {
+  const mirrors: Array<{ x0: number; y0: number; x1: number; y1: number }> = [];
+  const mirrorX = (v: number): number => Math.round(2 * axisX - v);
+  const mirrorY = (v: number): number => Math.round(2 * axisY - v);
+  if (mode === "mirror-x" || mode === "both") {
+    mirrors.push({ x0: mirrorX(x0), y0, x1: mirrorX(x1), y1 });
+  }
+  if (mode === "mirror-y" || mode === "both") {
+    mirrors.push({ x0, y0: mirrorY(y0), x1, y1: mirrorY(y1) });
+  }
+  if (mode === "both") {
+    mirrors.push({ x0: mirrorX(x0), y0: mirrorY(y0), x1: mirrorX(x1), y1: mirrorY(y1) });
+  }
+  return mirrors;
+}
+
+/**
+ * Extra endpoint sets for one segment under symmetry: mirror-x flips
+ * left-right, mirror-y flips up-down, both adds all three mirrors.
  * Coordinates mirror around the texture center (`size - 1 - v`).
  */
 export function mirrorSegmentEnds(
@@ -575,22 +604,7 @@ export function mirrorSegmentEnds(
   height: number,
   mode: GnumarusSymmetryMode,
 ): Array<{ x0: number; y0: number; x1: number; y1: number }> {
-  const mirrors: Array<{ x0: number; y0: number; x1: number; y1: number }> = [];
-  if (mode === "mirror-x" || mode === "both") {
-    mirrors.push({ x0: width - 1 - x0, y0, x1: width - 1 - x1, y1 });
-  }
-  if (mode === "mirror-y" || mode === "both") {
-    mirrors.push({ x0, y0: height - 1 - y0, x1, y1: height - 1 - y1 });
-  }
-  if (mode === "both") {
-    mirrors.push({
-      x0: width - 1 - x0,
-      y0: height - 1 - y0,
-      x1: width - 1 - x1,
-      y1: height - 1 - y1,
-    });
-  }
-  return mirrors;
+  return mirrorSegmentEndsOnAxis(x0, y0, x1, y1, (width - 1) / 2, (height - 1) / 2, mode);
 }
 
 /** Airbrush rate in dabs per second (0..20). Default 0 (off). */

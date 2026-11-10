@@ -261,7 +261,9 @@
 - [x] Scrollbars no estilo do app
 - [x] Wrap-around de pintura (off/x/y/both) com tiling só na layer ativa
 - [x] Unit tests (vitest) — 363 passed (previous 360 + wrap parse/mirror/tiles/writers + background union − 2 string steps)
-- [x] E2E (@recent only, per policy): 35 passed (previous 29 + wrap-off no-op + wrap paint + tiles + scrollbar + editor bar + background size + instant repaint on wrap change − string leash); full suite untouched
+- [x] E2E (@recent only, per policy): 37 passed (previous 35 + symmetry editor bar + axis drag/reset); full suite untouched
+- [x] Symmetry mode in the editor bar + on-canvas symmetry lines with draggable axis handles (Shift+click resets)
+- [x] Unit tests (vitest) — 365 passed (previous 363 + axis mirror + clip helper)
 - [x] Batch A: tilt/velocity dynamics + direction-following tips
 - [x] Batch B: airbrush + GPU upload coalescing (string stabilizer tried and removed as near-duplicate — see §79)
 - [x] Batch C: smudge/mixer brush

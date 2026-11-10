@@ -177,8 +177,7 @@ describe("GnumarusPixelBuffer", () => {
     expect(parseBrushShape(undefined)).toBe("square");
   });
 
-  it("wraps painted pixels around texture edges", () => {
-    const buffer = createPixelBuffer(8, 8);
+  it("wraps painted pixels around texture edges", () => {    const buffer = createPixelBuffer(8, 8);
     const red = { r: 255, g: 0, b: 0, a: 255 };
     // Outside without wrap: nothing happens.
     expect(setPixel(buffer, 8, 8, 10, 3, red, undefined, "normal", "off")).toBe(false);

@@ -434,3 +434,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 
 ## 79. Remove the string stabilizer (near-duplicate) (implemented)
 - `rope` and the removed `string` mode step identically whenever the cursor stays within the rope length (the common case: both do nothing), and only diverge on fast moves past the leash (rope snaps to the exact leash distance; string eased 35% of the excess per event/tick). A numeric replay over a fast bending stroke peaks at ~13px of path difference — same feel, and adjustable `follow` already covers the smoothing role. Removed: `string` mode, `stabilizerStringStep`, the pull constant, the select option, its unit + e2e tests and all doc mentions; rope (exact, no rAF loop) + follow (adjustable chase) + none remain.
+
+## 80. Symmetry to the editor bar, symmetry lines + draggable axis (implemented)
+- Symmetry mode moves from the pencil options to the always-visible editor options bar (still only affects the pencil, the only tool that ever mirrored).
+- Symmetry axis lines drawn on-canvas at the mirror point (one per active axis), plus draggable handles at the line ends outside the project area; dragging moves the axis along its perpendicular, Shift+click resets to the canvas center.
+- Mirror math takes the axis position (`mirror at 2*axis - x`, rounded; default = active layer center): `mirrorSegmentEndsOnAxis` pure helper, engine `symmetryCenter` state, all mirror call sites rewired; unit + E2E (lines visible, drag moves axis + mirrored paint follows, Shift+click resets).

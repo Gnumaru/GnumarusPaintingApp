@@ -2841,6 +2841,70 @@ test("symmetry mirrors pixel dabs across axes @recent", async ({ page }) => {
   }
 });
 
+test("symmetry lives in the editor bar and shows axis lines @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const editor = page.locator('gnumarus-shell [data-testid="editor-options"]');
+  await expect(editor.locator("select#symmetryMode")).toHaveValue("off");
+  await expect(page.locator('gnumarus-shell [aria-label="Pencil options"] select#symmetryMode')).toHaveCount(0);
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await expect(editor.locator("select#symmetryMode")).toBeVisible();
+  await editor.locator("select#symmetryMode").selectOption("mirror-x");
+  const overlay = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getSymmetryOverlayState(): unknown } };
+    };
+    return root.__gnumarus?.engine?.getSymmetryOverlayState() ?? null;
+  });
+  expect(overlay).toMatchObject({ visible: true });
+});
+
+test("symmetry axis drag moves the mirror and resets with Shift+click @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setSymmetryMode(mode: string): void } };
+    };
+    root.__gnumarus?.shell?.setSymmetryMode("mirror-x");
+  });
+  const centerOf = (): Promise<{ x: number; y: number }> =>
+    page.evaluate(() => {
+      const root = window as unknown as {
+        __gnumarus?: { engine?: { getSymmetryCenter(): { x: number; y: number } } };
+      };
+      return root.__gnumarus?.engine?.getSymmetryCenter() ?? { x: -1, y: -1 };
+    });
+  expect(await centerOf()).toEqual({ x: 31.5, y: 31.5 });
+  // Default axis mirrors (16,32) to (47,32).
+  const left = await layerScreenTarget(page, 16, 32);
+  await page.mouse.click(left.x, left.y);
+  expect(await readPixel(page, 47, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  // Drag the top handle left; the mirror follows the new axis.
+  const handle = page.locator('gnumarus-shell [data-testid="symmetry-handle"][data-handle="sym-x-min"]');
+  await expect(handle).toBeVisible();
+  const handleBox = await handle.boundingBox();
+  if (handleBox === null) {
+    throw new Error("symmetry handle has no bounding box");
+  }
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x + handleBox.width / 2 - 40, handleBox.y + handleBox.height / 2, { steps: 5 });
+  await page.mouse.up();
+  const moved = await centerOf();
+  expect(moved.x).toBeLessThan(31.5);
+  const mirrored = Math.round(2 * moved.x - 20);
+  const dot = await layerScreenTarget(page, 20, 40);
+  await page.mouse.click(dot.x, dot.y);
+  expect(await readLayerPixel(page, mirrored, 40)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  // Shift+click resets the axis to the canvas center.
+  await page.keyboard.down("Shift");
+  await handle.click();
+  await page.keyboard.up("Shift");
+  expect(await centerOf()).toEqual({ x: 31.5, y: 31.5 });
+});
+
 async function backgroundPlaneSize(page: import("@playwright/test").Page): Promise<{ width: number; height: number }> {
   return page.evaluate(() => {
     const root = window as unknown as {

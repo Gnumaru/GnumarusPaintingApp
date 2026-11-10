@@ -5,6 +5,7 @@ import {
   canvasVisibleTextureBox,
   clampCropBoxToMin1,
   clampZoom,
+  clipSegmentToRect,
   imageToScreenPixel,
   layerImageToProject,
   layerLinearMatrix,
@@ -456,5 +457,13 @@ describe("GnumarusViewportMath", () => {  it("maps the container center to the i
     // Odd cell sizes snap the min corner down to whole cells.
     const snapped = backgroundUnionForWrap(64, 64, 64, 64, identity, "x", 24, 16);
     expect(snapped).toEqual({ width: 200, height: 64, centerX: -4, centerY: 0 });
+  });
+
+  it("clips segments to an axis-aligned box", () => {
+    expect(clipSegmentToRect(10, 10, 20, 20, 0, 0, 64, 64)).toEqual({ ax: 10, ay: 10, bx: 20, by: 20 });
+    expect(clipSegmentToRect(-100, 0, -10, 0, 0, 0, 64, 64)).toBeNull();
+    expect(clipSegmentToRect(-100, 10, 100, 10, 0, 0, 64, 64)).toEqual({ ax: 0, ay: 10, bx: 64, by: 10 });
+    expect(clipSegmentToRect(5, 5, 5, 5, 0, 0, 64, 64)).toEqual({ ax: 5, ay: 5, bx: 5, by: 5 });
+    expect(clipSegmentToRect(0, 0, 0, 0, 10, 10, 64, 64)).toBeNull();
   });
 });
