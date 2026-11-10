@@ -241,3 +241,7 @@
 - [x] E2E test (Playwright): previous 184 + PNG save/reopen + JPEG save/companion/reload — 186 passed
 - [x] Unit tests (vitest) — 310 passed (previous 307 + reloadBatch undo/redo/skip + buffer equality)
 - [x] E2E test (Playwright): previous 182 + reload unsaved toast + reload restore/skip/undo — 184 passed
+
+- [x] Minimum canvas zoom setting 1..100% (default 25) + matrix gear left of + + matrix yields space first for tiny viewports
+- [x] Unit tests (vitest) — 324 passed (previous 319 + zoom settings)
+- [x] E2E (@recent only, per policy): 3 new tests green (zoom min, gear order, tiny-viewport statusbar) + neighbors green; full suite untouched

@@ -62,7 +62,6 @@ import {
 import {
   canvasResizeTextureBox,
   canvasVisibleTextureBox,
-  clampZoom,
   GNUMARUS_MAX_LAYER_SKEW,
   IDENTITY_LAYER_TRANSFORM,
   layerImageToProject,
@@ -461,11 +460,17 @@ export interface GnumarusEngineOptions {
   checker?: GnumarusCheckerSettings;
   gridMinZoom?: number;
   gridOpacityPercent?: number;
+  viewMinZoom?: number;
   background?: GnumarusBackgroundSettings;
 }
 
 /** Screen pixels of horizontal drag per tool-size unit for shift-drag resizing. */
 export const GNUMARUS_SIZE_DRAG_PX_PER_UNIT = 20;
+
+/** Clamp a view minimum-zoom fraction (0.01..1, default 0.25). */
+function normalizeViewMinZoom(value: number): number {
+  return Number.isFinite(value) ? Math.min(1, Math.max(0.01, value)) : 0.25;
+}
 
 function checkerHexToVec(hex: string): THREE.Vector3 {
   const parsed = parseHexColor(hex) ?? { r: 199, g: 199, b: 199, a: 255 };
@@ -713,6 +718,7 @@ export class GnumarusCanvasEngine {
   private backgroundColor: string;
   private readonly backgroundColorVec: THREE.Vector3;
   private gridMinZoom: number;
+  private viewMinZoom = 0.25;
   private gridOpacityPercent: number;
   private readonly gridMaterial: THREE.ShaderMaterial;
   private readonly gridPlane: THREE.Mesh;
@@ -755,6 +761,7 @@ export class GnumarusCanvasEngine {
     this.gridOpacityPercent = clampGridOpacityPercent(
       options.gridOpacityPercent ?? DEFAULT_GRID_SETTINGS.opacityPercent,
     );
+    this.viewMinZoom = normalizeViewMinZoom(options.viewMinZoom ?? 0.25);
     this.imageWidth = 64;
     this.imageHeight = 64;
     this.zoom = 8;
@@ -6398,8 +6405,21 @@ export class GnumarusCanvasEngine {
     return this.bucketFillAt(pixel.x, pixel.y);
   }
 
+  /** Minimum zoom fraction from settings (0.01..1, default 0.25). */
+  setViewMinZoom(value: number): void {
+    this.viewMinZoom = normalizeViewMinZoom(value);
+    this.setZoom(this.zoom);
+  }
+
+  private clampViewZoom(zoom: number): number {
+    if (Number.isNaN(zoom)) {
+      return 1;
+    }
+    return Math.min(64, Math.max(this.viewMinZoom, zoom));
+  }
+
   setZoom(zoom: number): void {
-    this.zoom = clampZoom(zoom);
+    this.zoom = this.clampViewZoom(zoom);
     this.layoutScene();
     this.render();
     this.updatePreviews();
@@ -6421,7 +6441,7 @@ export class GnumarusCanvasEngine {
     const dy = clientY - centerY - this.panY;
     const vx = (cos * dx + sin * dy) / this.zoom;
     const vy = (-sin * dx + cos * dy) / this.zoom;
-    const nextZoom = clampZoom(this.zoom * factor);
+    const nextZoom = this.clampViewZoom(this.zoom * factor);
     this.zoom = nextZoom;
     this.panX = clientX - centerX - (cos * vx - sin * vy) * nextZoom;
     this.panY = clientY - centerY - (sin * vx + cos * vy) * nextZoom;
@@ -6471,7 +6491,7 @@ export class GnumarusCanvasEngine {
     const bounds = rotatedBounds(this.imageWidth, this.imageHeight, this.rotation);
     if (rect.width > 0 && rect.height > 0 && bounds.width > 0 && bounds.height > 0) {
       const fit = Math.min(rect.width / bounds.width, rect.height / bounds.height);
-      this.zoom = clampZoom(Math.max(1, Math.floor(fit)));
+      this.zoom = this.clampViewZoom(fit >= 1 ? Math.floor(fit) : fit);
     } else {
       this.zoom = 8;
     }
@@ -6945,7 +6965,7 @@ export class GnumarusCanvasEngine {
     const rect = this.container.getBoundingClientRect();
     if (rect.width > 0 && rect.height > 0) {
       const fit = Math.min(rect.width / this.imageWidth, rect.height / this.imageHeight);
-      this.zoom = clampZoom(Math.max(1, Math.floor(fit)));
+      this.zoom = this.clampViewZoom(fit >= 1 ? Math.floor(fit) : fit);
     } else {
       this.zoom = 8;
     }

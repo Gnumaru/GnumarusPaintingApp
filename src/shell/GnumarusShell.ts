@@ -65,6 +65,13 @@ import {
   serializeRotationSettings,
 } from "../settings/GnumarusRotationSettings";
 import {
+  DEFAULT_ZOOM_SETTINGS,
+  ZOOM_SETTINGS_STORAGE_KEY,
+  clampZoomMinPercent,
+  parseZoomSettings,
+  serializeZoomSettings,
+} from "../settings/GnumarusZoomSettings";
+import {
   DEFAULT_TOAST_SETTINGS,
   TOAST_SETTINGS_STORAGE_KEY,
   clampToastDurationSec,
@@ -598,7 +605,7 @@ export class GnumarusShell extends LitElement {
       flex: 0 0 auto;
     }
     .anim-matrix {
-      flex: 0 0 auto;
+      flex: 0 1 auto;
       max-height: 148px;
       background: #252526;
       border-top: 1px solid #111;
@@ -1115,6 +1122,7 @@ export class GnumarusShell extends LitElement {
     actionPaletteQuery: { type: String },
     actionPaletteIndex: { type: Number },
     rotationStepDeg: { type: Number },
+    zoomMinPercent: { type: Number },
     floatingActive: { type: Boolean },
     backgroundMode: { type: String },
     backgroundColor: { type: String },
@@ -1216,6 +1224,7 @@ export class GnumarusShell extends LitElement {
   declare gridMinZoom: number;
   declare gridOpacity: number;
   declare rotationStepDeg: number;
+  declare zoomMinPercent: number;
   declare floatingActive: boolean;
   declare backgroundMode: GnumarusBackgroundMode;
   declare backgroundColor: string;
@@ -1335,6 +1344,7 @@ export class GnumarusShell extends LitElement {
     this.gridMinZoom = DEFAULT_GRID_SETTINGS.minZoom;
     this.gridOpacity = DEFAULT_GRID_SETTINGS.opacityPercent;
     this.rotationStepDeg = DEFAULT_ROTATION_SETTINGS.stepDeg;
+    this.zoomMinPercent = DEFAULT_ZOOM_SETTINGS.minZoomPercent;
     this.floatingActive = false;
     this.backgroundMode = DEFAULT_BACKGROUND_SETTINGS.mode;
     this.backgroundColor = DEFAULT_BACKGROUND_SETTINGS.color;
@@ -2321,6 +2331,30 @@ export class GnumarusShell extends LitElement {
               </button>`
             : html``}
         </div>
+        <div class="setting-row">
+          <label
+            >Minimum zoom (percent)
+            <input
+              type="number"
+              id="zoomMinZoom"
+              min="1"
+              max="100"
+              step="1"
+              .value=${String(this.zoomMinPercent)}
+              @input=${(): void => this.applyZoomMinFromDialog()}
+            />
+          </label>
+          ${this.zoomMinPercent !== DEFAULT_ZOOM_SETTINGS.minZoomPercent
+            ? html`<button
+                class="reset-btn"
+                aria-label="Reset minimum zoom to default"
+                title="Reset to default"
+                @click=${(): void => this.resetZoomMinToDefault()}
+              >
+                ↻
+              </button>`
+            : html``}
+        </div>
         <div class="settings-section">Animation</div>
         <div class="setting-row">
           <label
@@ -3151,6 +3185,13 @@ export class GnumarusShell extends LitElement {
         <div class="anim-scroll">
           <div class="anim-grid" style="grid-template-columns: ${columns};">
             <div class="anim-corner">
+              <button
+                aria-label="Manage animations"
+                title="Define named frame animations"
+                @click=${(): void => this.openAnimationDialog()}
+              >
+                ⚙</button
+              >
               <button aria-label="Add frame" title="Add frame" @click=${(): void => this.onAddFrame()}>+</button>
               <button
                 aria-label=${this.playing ? "Stop animation" : "Play animation"}
@@ -3176,13 +3217,6 @@ export class GnumarusShell extends LitElement {
                   `,
                 )}
               </select>
-              <button
-                aria-label="Manage animations"
-                title="Define named frame animations"
-                @click=${(): void => this.openAnimationDialog()}
-              >
-                ⚙</button
-              >
             </div>
             ${Array.from({ length: matrix.frameCount }, (_unused, frame) => {
               const current = frame === matrix.currentFrame;
@@ -3399,6 +3433,8 @@ export class GnumarusShell extends LitElement {
     this.gridOpacity = storedGrid.opacityPercent;
     const storedRotation = this.loadRotationSettings();
     this.rotationStepDeg = storedRotation.stepDeg;
+    const storedZoom = this.loadZoomSettings();
+    this.zoomMinPercent = storedZoom.minZoomPercent;
     const storedBackground = this.loadBackgroundSettings();
     this.backgroundMode = storedBackground.mode;
     this.backgroundColor = storedBackground.color;
@@ -3430,6 +3466,7 @@ export class GnumarusShell extends LitElement {
         checker: storedChecker,
         gridMinZoom: storedGrid.minZoom,
         gridOpacityPercent: storedGrid.opacityPercent,
+        viewMinZoom: storedZoom.minZoomPercent / 100,
         background: storedBackground,
         onStats: (stats): void => {
           this.zoomText = `${Math.round(stats.zoom * 100)}%`;
@@ -3468,6 +3505,7 @@ export class GnumarusShell extends LitElement {
       });
       this.engine.setColor(this.colorValue);
       this.engine.setRotationStepDeg(this.rotationStepDeg);
+      this.engine.setViewMinZoom(this.zoomMinPercent / 100);
       this.engine.setStabilizerMode(this.stabilizerMode);
       this.engine.setRopeLength(this.ropeLength);
       this.engine.setFollowStrength(this.followStrength);
@@ -4192,6 +4230,50 @@ export class GnumarusShell extends LitElement {
     this.engine?.setRotationStepDeg(this.rotationStepDeg);
     this.persistRotation();
     this.statusMessage = "Canvas rotation step reset to default";
+  }
+
+  private loadZoomSettings(): { minZoomPercent: number } {
+    try {
+      const stored = window.localStorage.getItem(ZOOM_SETTINGS_STORAGE_KEY);
+      if (stored !== null) {
+        return parseZoomSettings(stored);
+      }
+    } catch {
+      // Corrupt or unavailable storage falls back to defaults.
+    }
+    return { ...DEFAULT_ZOOM_SETTINGS };
+  }
+
+  private persistZoom(): void {
+    try {
+      window.localStorage.setItem(
+        ZOOM_SETTINGS_STORAGE_KEY,
+        serializeZoomSettings({ minZoomPercent: this.zoomMinPercent }),
+      );
+    } catch {
+      // Storage failures must not break the settings flow.
+    }
+  }
+
+  private currentDialogZoomMinPercent(): number {
+    const input = this.shadowRoot?.getElementById("zoomMinZoom") as HTMLInputElement | null;
+    const parsed = Number(input?.value ?? String(DEFAULT_ZOOM_SETTINGS.minZoomPercent));
+    return clampZoomMinPercent(Number.isFinite(parsed) ? Math.floor(parsed) : DEFAULT_ZOOM_SETTINGS.minZoomPercent);
+  }
+
+  private applyZoomMinFromDialog(): void {
+    const minZoomPercent = this.currentDialogZoomMinPercent();
+    this.zoomMinPercent = minZoomPercent;
+    this.engine?.setViewMinZoom(minZoomPercent / 100);
+    this.persistZoom();
+    this.statusMessage = `Minimum zoom: ${minZoomPercent}%`;
+  }
+
+  private resetZoomMinToDefault(): void {
+    this.zoomMinPercent = DEFAULT_ZOOM_SETTINGS.minZoomPercent;
+    this.engine?.setViewMinZoom(this.zoomMinPercent / 100);
+    this.persistZoom();
+    this.statusMessage = "Minimum zoom reset to default";
   }
 
   private loadToastSettings(): { durationSec: number } {
@@ -5113,6 +5195,9 @@ export class GnumarusShell extends LitElement {
     this.rotationStepDeg = DEFAULT_ROTATION_SETTINGS.stepDeg;
     this.engine?.setRotationStepDeg(this.rotationStepDeg);
     this.persistRotation();
+    this.zoomMinPercent = DEFAULT_ZOOM_SETTINGS.minZoomPercent;
+    this.engine?.setViewMinZoom(this.zoomMinPercent / 100);
+    this.persistZoom();
     this.toastDurationSec = DEFAULT_TOAST_SETTINGS.durationSec;
     this.persistToast();
     const storageSettings = { ...DEFAULT_STORAGE_SETTINGS };

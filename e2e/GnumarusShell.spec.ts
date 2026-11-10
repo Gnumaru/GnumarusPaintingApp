@@ -315,6 +315,58 @@ test("Shift+Space drag rotates like the loupe", async ({ page }) => {
   expect(Math.abs((await getViewState(page)).rotation - before)).toBeGreaterThan(Math.PI / 4);
 });
 
+test("minimum zoom is configurable and floors zoom-out @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#settingsDialog");
+  await expect(dialog.locator("input#zoomMinZoom")).toHaveValue("25");
+  await dialog.locator("input#zoomMinZoom").fill("10");
+  await expect(page.locator("gnumarus-shell")).toContainText("Minimum zoom: 10%");
+  const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.zoom.v1"));
+  expect(persisted).toContain('"minZoomPercent": 10');
+  await dialog.getByRole("button", { name: "Close" }).click();
+  // Ten ×0.8 steps from 100% land near 10.7%: below the old 50% floor.
+  await page.keyboard.press("1");
+  for (let i = 0; i < 10; i += 1) {
+    await page.keyboard.press("Control+Alt+-");
+  }
+  const zoom = (await getViewState(page)).zoom;
+  expect(zoom).toBeLessThan(0.5);
+  expect(zoom).toBeGreaterThanOrEqual(0.1);
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.locator('gnumarus-shell [aria-label="Reset minimum zoom to default"]').click();
+  await expect(dialog.locator("input#zoomMinZoom")).toHaveValue("25");
+});
+
+test("matrix corner shows the animation gear left of Add frame @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  const gear = await matrix.getByRole("button", { name: "Manage animations", exact: true }).boundingBox();
+  const plus = await matrix.getByRole("button", { name: "Add frame", exact: true }).boundingBox();
+  if (gear === null || plus === null) {
+    throw new Error("matrix corner buttons are missing");
+  }
+  expect(gear.x + gear.width).toBeLessThanOrEqual(plus.x);
+});
+
+test("status bar stays visible at tiny viewport heights @recent", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 200 });
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas", { state: "attached" });
+  await page.waitForTimeout(300);
+  const layout = await page.evaluate(() => {
+    const root = document.querySelector("gnumarus-shell")?.shadowRoot ?? null;
+    const bar = root?.querySelector(".statusbar") as HTMLElement | null;
+    const rect = bar?.getBoundingClientRect();
+    return { innerHeight: window.innerHeight, barBottom: rect ? Math.round(rect.bottom) : -1 };
+  });
+  expect(layout.barBottom).toBeLessThanOrEqual(layout.innerHeight);
+});
+
 test("loupe middle-click flips the canvas", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
@@ -3551,7 +3603,7 @@ async function canvasCenter(page: import("@playwright/test").Page): Promise<{ x:
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
-test("pencil pressure size scales the stroke @recent", async ({ page }) => {
+test("pencil pressure size scales the stroke", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await stubPenPointerCapture(page);
@@ -3571,7 +3623,7 @@ test("pencil pressure size scales the stroke @recent", async ({ page }) => {
   expect(full).toBeGreaterThan(2 * half);
 });
 
-test("pencil pressure opacity scales the alpha @recent", async ({ page }) => {
+test("pencil pressure opacity scales the alpha", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await stubPenPointerCapture(page);
@@ -3587,7 +3639,7 @@ test("pencil pressure opacity scales the alpha @recent", async ({ page }) => {
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 64 });
 });
 
-test("pencil pressure none ignores pen pressure @recent", async ({ page }) => {
+test("pencil pressure none ignores pen pressure", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await stubPenPointerCapture(page);
@@ -3605,7 +3657,7 @@ test("pencil pressure none ignores pen pressure @recent", async ({ page }) => {
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 128 });
 });
 
-test("pencil pressure size+opacity applies both @recent", async ({ page }) => {
+test("pencil pressure size+opacity applies both", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await stubPenPointerCapture(page);
