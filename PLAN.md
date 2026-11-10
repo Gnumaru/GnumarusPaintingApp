@@ -394,3 +394,6 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Loupe zoom reacts to vertical drag only; loupe rotation pivots on the viewport center instead of the panned image center.
 - Ctrl+Space+left-drag zooms like the loupe; Shift+Space+left-drag rotates like the loupe (shortcuts modal documents both).
 - Pointer lock for Shift+left-drag brush sizing was tried and reverted: the canvas lives in shadow DOM, so the lock lands on the host element, starving canvas listeners and breaking pointer capture (proven by failing shift-drag tests). Absolute positioning stays, per the request's fallback clause.
+## 72. Brush pressure response (none/size/opacity/size+opacity) (landed)
+- Pencil tool option backed by engine state (session-only, like brush size): max pressure paints at full brush size/alpha; `size` scales effective size, `opacity` scales effective alpha, both combine; mouse reports full pressure (its 0.5 is meaningless), pen/touch use clamped pressure.
+- Pure helpers in PixelBuffer (response type + parse, pressure normalize, size/alpha multipliers) with unit tests; stroke paths thread per-event pressure (down/move, stabilizer reuses last); synthetic pen PointerEvents in e2e (setPointerCapture stubbed).

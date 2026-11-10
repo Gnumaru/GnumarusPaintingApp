@@ -136,8 +136,10 @@ import {
   extractAlphaPlane,
   parseBlendMode,
   parseBrushShape,
+  parsePressureResponse,
   type GnumarusBlendMode,
   type GnumarusBrushShape,
+  type GnumarusPressureResponse,
 } from "../canvas/GnumarusPixelBuffer";
 import {
   GNUMARUS_DEFAULT_FOLLOW_STRENGTH,
@@ -1169,6 +1171,7 @@ export class GnumarusShell extends LitElement {
     renamingFrame: { type: Number },
     brushSize: { type: Number },
     brushShape: { type: String },
+    pressureResponse: { type: String },
     pencilAntialias: { type: Boolean },
     pencilPixelPerfect: { type: Boolean },
     curvePixelPerfect: { type: Boolean },
@@ -1275,6 +1278,7 @@ export class GnumarusShell extends LitElement {
   declare renamingFrame: number | null;
   declare brushSize: number;
   declare brushShape: GnumarusBrushShape;
+  declare pressureResponse: GnumarusPressureResponse;
   declare pencilAntialias: boolean;
   declare pencilPixelPerfect: boolean;
   declare curvePixelPerfect: boolean;
@@ -1390,6 +1394,7 @@ export class GnumarusShell extends LitElement {
     this.renamingFrame = null;
     this.brushSize = 1;
     this.brushShape = "circle";
+    this.pressureResponse = "none";
     this.pencilAntialias = false;
     this.pencilPixelPerfect = false;
     this.curvePixelPerfect = false;
@@ -2978,6 +2983,19 @@ export class GnumarusShell extends LitElement {
             <select id="brushShape" .value=${this.brushShape} @change=${(): void => this.applyBrushShapeFromDialog()}>
               <option value="square">Square</option>
               <option value="circle">Circle</option>
+            </select>
+          </label>
+          <label
+            >Pressure response
+            <select
+              id="pressureResponse"
+              .value=${this.pressureResponse}
+              @change=${(): void => this.applyPressureResponseFromDialog()}
+            >
+              <option value="none">None</option>
+              <option value="size">Size</option>
+              <option value="opacity">Opacity</option>
+              <option value="size+opacity">Size + opacity</option>
             </select>
           </label>
           <label
@@ -4641,6 +4659,14 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = `Brush shape: ${parsed}`;
   }
 
+  /** Test hook: set the brush pressure response (none/size/opacity/size+opacity). */
+  setPressureResponse(response: GnumarusPressureResponse): void {
+    const parsed = parsePressureResponse(response);
+    this.pressureResponse = parsed;
+    this.engine?.setPressureResponse(parsed);
+    this.statusMessage = `Pressure response: ${parsed}`;
+  }
+
   private currentDialogBrushSize(): number {
     const input = this.shadowRoot?.getElementById("brushSize") as HTMLInputElement | null;
     const parsed = Number(input?.value ?? "1");
@@ -4664,6 +4690,14 @@ export class GnumarusShell extends LitElement {
     this.brushShape = shape;
     this.engine?.setBrushShape(shape);
     this.statusMessage = `Brush shape: ${shape}`;
+  }
+
+  private applyPressureResponseFromDialog(): void {
+    const select = this.shadowRoot?.getElementById("pressureResponse") as HTMLSelectElement | null;
+    const response = parsePressureResponse(select?.value ?? "none");
+    this.pressureResponse = response;
+    this.engine?.setPressureResponse(response);
+    this.statusMessage = `Pressure response: ${response}`;
   }
 
   /** Test hook: enable or disable pencil anti-aliasing. */

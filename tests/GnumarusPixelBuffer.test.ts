@@ -19,8 +19,12 @@ import {
   floodFill,
   getPixel,
   parseBlendMode,
+  normalizePointerPressure,
   parseBrushShape,
   parseHexColor,
+  parsePressureResponse,
+  pressureAlphaMultiplier,
+  pressureSizeMultiplier,
   roundBrushSizeForAliased,
   setPixel,
   stampSegmentCoverage,
@@ -529,5 +533,35 @@ describe("GnumarusPixelBuffer", () => {
     expect(Array.from(applyAlphaPlane(flat, plane, 2, 1))).toEqual([10, 20, 30, 40, 50, 60, 70, 80]);
     expect(() => extractAlphaPlane(color.slice(0, 4), 2, 1)).toThrow(/mismatch|expected/);
     expect(() => applyAlphaPlane(flat, plane.slice(0, 4), 2, 1)).toThrow(/mismatch|expected/);
+  });
+
+  it("parses pressure responses with a none default", () => {
+    expect(parsePressureResponse("size")).toBe("size");
+    expect(parsePressureResponse("opacity")).toBe("opacity");
+    expect(parsePressureResponse("size+opacity")).toBe("size+opacity");
+    expect(parsePressureResponse("none")).toBe("none");
+    expect(parsePressureResponse("bogus")).toBe("none");
+    expect(parsePressureResponse(undefined)).toBe("none");
+  });
+
+  it("normalizes pointer pressure with mice pinned to full", () => {
+    expect(normalizePointerPressure("mouse", 0.5)).toBe(1);
+    expect(normalizePointerPressure("mouse", 0)).toBe(1);
+    expect(normalizePointerPressure("pen", 0.5)).toBe(0.5);
+    expect(normalizePointerPressure("pen", 2)).toBe(1);
+    expect(normalizePointerPressure("pen", -1)).toBe(0);
+    expect(normalizePointerPressure("pen", Number.NaN)).toBe(1);
+    expect(normalizePointerPressure("touch", 0.25)).toBe(0.25);
+  });
+
+  it("scales size and alpha per pressure mode", () => {
+    expect(pressureSizeMultiplier("none", 0.5)).toBe(1);
+    expect(pressureSizeMultiplier("size", 0.5)).toBe(0.5);
+    expect(pressureSizeMultiplier("size+opacity", 0.5)).toBe(0.5);
+    expect(pressureSizeMultiplier("opacity", 0.5)).toBe(1);
+    expect(pressureAlphaMultiplier("none", 0.5)).toBe(1);
+    expect(pressureAlphaMultiplier("opacity", 0.5)).toBe(0.5);
+    expect(pressureAlphaMultiplier("size+opacity", 0.5)).toBe(0.5);
+    expect(pressureAlphaMultiplier("size", 0.5)).toBe(1);
   });
 });

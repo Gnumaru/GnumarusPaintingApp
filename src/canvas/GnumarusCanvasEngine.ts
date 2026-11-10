@@ -15,7 +15,11 @@ import {
   buffersEqual,
   floodFill,
   getPixel,
+  normalizePointerPressure,
   parseBrushShape,
+  parsePressureResponse,
+  pressureAlphaMultiplier,
+  pressureSizeMultiplier,
   parseBlendMode,
   parseChannelLock,
   parseHexColor,
@@ -25,6 +29,7 @@ import {
   type GnumarusBlendMode,
   type GnumarusBrushShape,
   type GnumarusChannelLock,
+  type GnumarusPressureResponse,
   type GnumarusRgba,
 } from "./GnumarusPixelBuffer";
 import {
@@ -531,6 +536,8 @@ export class GnumarusCanvasEngine {
   private accumulate = true;
   private brushSize = 1;
   private brushShape: GnumarusBrushShape = "circle";
+  private pressureResponse: GnumarusPressureResponse = "none";
+  private strokePressure = 1;
   private pencilAntialias = false;
   private pencilPixelPerfect = false;
   private curvePixelPerfect = false;
@@ -3550,6 +3557,30 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
+  setPressureResponse(response: GnumarusPressureResponse): boolean {
+    const parsed = parsePressureResponse(response);
+    if (parsed === this.pressureResponse) {
+      return false;
+    }
+    this.pressureResponse = parsed;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  /** Pencil size scaled by the current stroke pressure when enabled. */
+  private pressureBrushSize(): number {
+    return clampBrushSizeFloat(this.brushSize * pressureSizeMultiplier(this.pressureResponse, this.strokePressure));
+  }
+
+  /** Pencil color with alpha scaled by the current stroke pressure when enabled. */
+  private pressureBrushColor(): GnumarusRgba {
+    return {
+      ...this.color,
+      a: Math.round(this.color.a * pressureAlphaMultiplier(this.pressureResponse, this.strokePressure)),
+    };
+  }
+
   getPencilAntialias(): boolean {
     return this.pencilAntialias;
   }
@@ -3844,9 +3875,10 @@ export class GnumarusCanvasEngine {
     base: Uint8ClampedArray,
     mask: Uint8Array,
     locked: GnumarusChannelLock,
+    color: GnumarusRgba,
   ): void {
     tex.buffer.set(base);
-    applyCoverageMask(tex.buffer, mask, tex.width, tex.height, this.color, this.blendMode, locked);
+    applyCoverageMask(tex.buffer, mask, tex.width, tex.height, color, this.blendMode, locked);
   }
 
   /**
@@ -3865,6 +3897,8 @@ export class GnumarusCanvasEngine {
     x1: number,
     y1: number,
   ): void {
+    const size = this.pressureBrushSize();
+    const color = this.pressureBrushColor();
     if (this.pencilPixelPerfectActive()) {
       const stroke = this.pencilPixelPerfectStroke;
       const base = this.strokeBase;
@@ -3884,7 +3918,7 @@ export class GnumarusCanvasEngine {
           }
           mask[y * tex.width + x] = 255;
         });
-        this.repaintFromMask(tex, base, mask, locked);
+        this.repaintFromMask(tex, base, mask, locked, color);
         return;
       }
       if (this.accumulate && base !== null) {
@@ -3901,7 +3935,7 @@ export class GnumarusCanvasEngine {
               tex.buffer[at + 3] = base[at + 3]!;
             }
           }
-          setPixel(tex.buffer, tex.width, tex.height, x, y, this.color, locked, this.blendMode);
+          setPixel(tex.buffer, tex.width, tex.height, x, y, color, locked, this.blendMode);
         });
         return;
       }
@@ -3915,11 +3949,11 @@ export class GnumarusCanvasEngine {
         y0,
         x1,
         y1,
-        this.brushSize,
+        size,
         this.brushShape,
         this.pencilAntialias,
       );
-      this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked);
+      this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked, color);
       return;
     }
     drawLineSegment(
@@ -3930,10 +3964,10 @@ export class GnumarusCanvasEngine {
       y0,
       x1,
       y1,
-      this.brushSize,
+      size,
       this.brushShape,
       this.pencilAntialias,
-      this.color,
+      color,
       locked,
       this.blendMode,
     );
@@ -3972,7 +4006,7 @@ export class GnumarusCanvasEngine {
         }
         mask[y * tex.width + x] = 255;
       });
-      this.repaintFromMask(tex, base, mask, locked);
+      this.repaintFromMask(tex, base, mask, locked, this.color);
       return;
     }
     walkCubicBezierPixels({ p0, c1, c2, p3 }, (x: number, y: number): void => {
@@ -5550,6 +5584,8 @@ export class GnumarusCanvasEngine {
     const qy0 = this.pencilAntialias ? from.y : Math.floor(from.y);
     const qx1 = this.pencilAntialias ? to.x : Math.floor(to.x);
     const qy1 = this.pencilAntialias ? to.y : Math.floor(to.y);
+    const size = this.pressureBrushSize();
+    const color = this.pressureBrushColor();
     if (this.pencilPixelPerfectActive()) {
       this.paintPencilLine(tex, locked, qx0, qy0, qx1, qy1);
       return;
@@ -5563,11 +5599,11 @@ export class GnumarusCanvasEngine {
         qy0,
         qx1,
         qy1,
-        this.brushSize,
+        size,
         this.brushShape,
         this.pencilAntialias,
       );
-      this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked);
+      this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked, color);
       return;
     }
     // The aliased rasterizer walks integer pixels with Bresenham and only
@@ -5581,10 +5617,10 @@ export class GnumarusCanvasEngine {
       qy0,
       qx1,
       qy1,
-      this.brushSize,
+      size,
       this.brushShape,
       this.pencilAntialias,
-      this.color,
+      color,
       locked,
       this.blendMode,
     );
@@ -5728,7 +5764,7 @@ export class GnumarusCanvasEngine {
         this.lineShape,
         this.lineAntialias,
       );
-      this.repaintFromMask(tex, base, mask, layer.lockedChannels);
+      this.repaintFromMask(tex, base, mask, layer.lockedChannels, this.color);
     }
     this.lineAnchor = null;
     const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
@@ -5820,7 +5856,7 @@ export class GnumarusCanvasEngine {
         this.curveShape,
         this.curveAntialias,
       );
-      this.repaintFromMask(tex, base, mask, layer.lockedChannels);
+      this.repaintFromMask(tex, base, mask, layer.lockedChannels, this.color);
     }
     this.resetCurveState();
     const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
@@ -7332,6 +7368,7 @@ export class GnumarusCanvasEngine {
           this.strokeMask = new Uint8Array(tex.width * tex.height);
         }
         this.resetPencilPixelPerfect();
+        this.strokePressure = normalizePointerPressure(event.pointerType, event.pressure);
         this.paintStabilizedSegment(tex, layer.lockedChannels, this.stabilizerPos, this.stabilizerPos);
         this.markTextureViewsDirty(tex.id);
         this.render();
@@ -7355,6 +7392,7 @@ export class GnumarusCanvasEngine {
         this.strokeMask = new Uint8Array(tex.width * tex.height);
       }
       this.resetPencilPixelPerfect();
+      this.strokePressure = normalizePointerPressure(event.pointerType, event.pressure);
       this.paintPencilLine(tex, layer.lockedChannels, pixel.x, pixel.y, pixel.x, pixel.y);
       this.markTextureViewsDirty(tex.id);
       this.render();
@@ -7592,6 +7630,7 @@ export class GnumarusCanvasEngine {
               const prev = this.stabilizerPos;
               this.stabilizerPos = next;
               if (this.drawing && this.strokeLayerId !== null) {
+                this.strokePressure = normalizePointerPressure(event.pointerType, event.pressure);
                 const layer = this.activeLayer();
                 const tex = this.strokeLayerId === null ? undefined : this.textures.get(this.strokeLayerId);
                 if (layer !== null && tex !== undefined) {
@@ -7622,6 +7661,7 @@ export class GnumarusCanvasEngine {
         if (tex === undefined) {
           return;
         }
+        this.strokePressure = normalizePointerPressure(event.pointerType, event.pressure);
         this.paintPencilLine(tex, layer.lockedChannels, this.lastPixel.x, this.lastPixel.y, pixel.x, pixel.y);
         this.lastPixel = pixel;
         this.markTextureViewsDirty(tex.id);

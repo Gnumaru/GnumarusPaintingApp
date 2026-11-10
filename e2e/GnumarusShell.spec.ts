@@ -84,7 +84,7 @@ test("File > New creates a canvas with the requested size", async ({ page }) => 
   await expect(page.locator("gnumarus-shell")).toContainText("64 x 64");
 });
 
-test("File > New accepts canvas sizes up to 16384 @recent", async ({ page }) => {
+test("File > New accepts canvas sizes up to 16384", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell");
   const canvasSize = (): Promise<{ width: number; height: number } | null> =>
@@ -224,7 +224,7 @@ test("loupe left-drag zooms and right-drag rotates", async ({ page }) => {
   await expect(page.locator("gnumarus-shell")).toContainText("°");
 });
 
-test("loupe rotation pivots on the viewport center @recent", async ({ page }) => {
+test("loupe rotation pivots on the viewport center", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const canvas = page.locator("gnumarus-shell canvas");
@@ -258,7 +258,7 @@ test("loupe rotation pivots on the viewport center @recent", async ({ page }) =>
   expect((await getViewState(page)).rotation).toBeCloseTo(Math.PI / 2, 1);
 });
 
-test("Control+Space drag zooms vertically like the loupe @recent", async ({ page }) => {
+test("Control+Space drag zooms vertically like the loupe", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const canvas = page.locator("gnumarus-shell canvas");
@@ -293,7 +293,7 @@ test("Control+Space drag zooms vertically like the loupe @recent", async ({ page
   await page.keyboard.up("Control");
 });
 
-test("Shift+Space drag rotates like the loupe @recent", async ({ page }) => {
+test("Shift+Space drag rotates like the loupe", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const canvas = page.locator("gnumarus-shell canvas");
@@ -3474,6 +3474,149 @@ test("shift-drag adjusts line and curve widths", async ({ page }) => {
     return root.__gnumarus?.engine?.getCurveWidth() ?? 0;
   });
   expect(curveWidth).toBeCloseTo(Math.max(0.1, 1 - 40 / 20), 5);
+});
+
+async function stubPenPointerCapture(page: import("@playwright/test").Page): Promise<void> {
+  // Synthetic pen PointerEvents carry no OS pointer, so capture would throw.
+  await page.evaluate(() => {
+    const proto = HTMLCanvasElement.prototype as unknown as { setPointerCapture(id: number): void };
+    proto.setPointerCapture = () => {};
+  });
+}
+
+async function penDot(
+  page: import("@playwright/test").Page,
+  x: number,
+  y: number,
+  pressure: number,
+): Promise<void> {
+  await page.evaluate(
+    ([px, py, p]: number[]) => {
+      const root = document.querySelector("gnumarus-shell")?.shadowRoot ?? null;
+      const target = root?.querySelector("canvas") as HTMLCanvasElement | null;
+      if (target === null) {
+        throw new Error("canvas is missing");
+      }
+      const base = {
+        pointerId: 7,
+        pointerType: "pen",
+        button: 0,
+        clientX: px,
+        clientY: py,
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+      };
+      target.dispatchEvent(new PointerEvent("pointerdown", { ...base, buttons: 1, pressure: p }));
+      target.dispatchEvent(new PointerEvent("pointerup", { ...base, buttons: 0, pressure: p }));
+    },
+    [x, y, pressure],
+  );
+}
+
+async function paintedPixelCount(page: import("@playwright/test").Page): Promise<number> {
+  return page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { exportTextures(): Array<{ buffer: Uint8ClampedArray }> } };
+    };
+    const buffer = root.__gnumarus?.engine?.exportTextures()[0]?.buffer;
+    if (buffer === undefined) {
+      return -1;
+    }
+    let count = 0;
+    for (let index = 3; index < buffer.length; index += 4) {
+      if ((buffer[index] ?? 0) > 0) {
+        count += 1;
+      }
+    }
+    return count;
+  });
+}
+
+async function blurActiveElement(page: import("@playwright/test").Page): Promise<void> {
+  // Shortcuts ignore key events from fields; blur first so Ctrl+Z reaches the shell.
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+  });
+}
+
+async function canvasCenter(page: import("@playwright/test").Page): Promise<{ x: number; y: number }> {
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
+test("pencil pressure size scales the stroke @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubPenPointerCapture(page);
+  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.locator("gnumarus-shell input#brushSize").fill("10");
+  await page.locator("gnumarus-shell select#pressureResponse").selectOption("size");
+  await expect(page.locator("gnumarus-shell")).toContainText("Pressure response: size");
+  const center = await canvasCenter(page);
+  await penDot(page, center.x, center.y, 1);
+  const full = await paintedPixelCount(page);
+  await blurActiveElement(page);
+  await page.keyboard.press("Control+z");
+  expect(await paintedPixelCount(page)).toBe(0);
+  await penDot(page, center.x, center.y, 0.5);
+  const half = await paintedPixelCount(page);
+  expect(half).toBeGreaterThan(0);
+  expect(full).toBeGreaterThan(2 * half);
+});
+
+test("pencil pressure opacity scales the alpha @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubPenPointerCapture(page);
+  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.locator("gnumarus-shell select#pressureResponse").selectOption("opacity");
+  await setPencil(page, "#00000080");
+  const center = await canvasCenter(page);
+  await penDot(page, center.x, center.y, 1);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 128 });
+  await blurActiveElement(page);
+  await page.keyboard.press("Control+z");
+  await penDot(page, center.x, center.y, 0.5);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 64 });
+});
+
+test("pencil pressure none ignores pen pressure @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubPenPointerCapture(page);
+  await page.getByRole("button", { name: "Pencil" }).click();
+  await expect(page.locator("gnumarus-shell select#pressureResponse")).toHaveValue("none");
+  await page.locator("gnumarus-shell input#brushSize").fill("10");
+  const center = await canvasCenter(page);
+  await penDot(page, center.x, center.y, 0.5);
+  expect(await paintedPixelCount(page)).toBeGreaterThan(50);
+  await blurActiveElement(page);
+  await page.keyboard.press("Control+z");
+  await setPencil(page, "#00000080");
+  await page.locator("gnumarus-shell input#brushSize").fill("1");
+  await penDot(page, center.x, center.y, 0.5);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 128 });
+});
+
+test("pencil pressure size+opacity applies both @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubPenPointerCapture(page);
+  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.locator("gnumarus-shell input#brushSize").fill("10");
+  await page.locator("gnumarus-shell select#pressureResponse").selectOption("size+opacity");
+  await setPencil(page, "#00000080");
+  const center = await canvasCenter(page);
+  await penDot(page, center.x, center.y, 0.5);
+  expect(await paintedPixelCount(page)).toBeLessThan(40);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 64 });
 });
 
 async function loadTinyLayer(

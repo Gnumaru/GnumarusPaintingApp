@@ -496,6 +496,38 @@ export function parseBrushShape(value: unknown): GnumarusBrushShape {
   return value === "circle" ? "circle" : "square";
 }
 
+export type GnumarusPressureResponse = "none" | "size" | "opacity" | "size+opacity";
+
+/** Parse a pressure response, defaulting to none for missing or invalid input. */
+export function parsePressureResponse(value: unknown): GnumarusPressureResponse {
+  return value === "size" || value === "opacity" || value === "size+opacity" ? value : "none";
+}
+
+/**
+ * Normalize a pointer pressure reading to 0..1. Mouse buttons report a
+ * fixed 0.5, which carries no information, so mice always read full
+ * pressure; pens and touch use their clamped reading (garbage reads full).
+ */
+export function normalizePointerPressure(pointerType: string, pressure: number): number {
+  if (pointerType === "mouse") {
+    return 1;
+  }
+  if (!Number.isFinite(pressure)) {
+    return 1;
+  }
+  return Math.min(1, Math.max(0, pressure));
+}
+
+/** Stroke size multiplier for a pressure mode (max pressure paints full size). */
+export function pressureSizeMultiplier(response: GnumarusPressureResponse, pressure: number): number {
+  return response === "size" || response === "size+opacity" ? pressure : 1;
+}
+
+/** Stroke alpha multiplier for a pressure mode (max pressure paints full alpha). */
+export function pressureAlphaMultiplier(response: GnumarusPressureResponse, pressure: number): number {
+  return response === "opacity" || response === "size+opacity" ? pressure : 1;
+}
+
 /**
  * Stamp a solid brush tip centered near (centerX, centerY).
  * Square paints the full size x size box; circle paints the disk mask

@@ -232,6 +232,9 @@
 - [x] Reload All Textures action (palette, unsaved error toast, disk restore + skip counts, single undo)
 - [x] Project texture format setting (JXL/JPG/PNG + PNG level + JPEG quality with alpha companion)
 - [x] Big canvas to 16384, loupe vertical zoom + viewport-center rotation, Ctrl+Space zoom, Shift+Space rotate (pointer lock reverted: impossible on shadow-DOM canvas)
+- [x] Brush pressure response for the pencil (none/size/opacity/size+opacity)
+- [x] Unit tests (vitest) — 319 passed (previous 316 + pressure helpers)
+- [x] E2E (@recent only, per policy): 4 new tests green (pressure size/opacity/none/both); full suite untouched
 - [x] Unit tests (vitest) — 316 passed
 - [x] E2E (@recent only, per policy): 4 new tests green (New sizes, pivot, Ctrl+Space, Shift+Space) + neighbors (loupe/shift-drag/New/shortcuts) green; full suite untouched
 - [x] Unit tests (vitest) — 322 passed (previous 310 + storage format/levels + PNG codec + alpha planes)
