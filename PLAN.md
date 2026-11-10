@@ -446,3 +446,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Export: WebP for single frame, spritesheet (still path) and single-file animation (WebPAnimEncoder), each with Lossless checkbox + quality like JXL. WebP stills go through WASM instead of canvas so lossless is honored.
 - Project texture storage gains `webp` (lossless default, lossy quality 0..100 — same `lossless`/`quality` fields and UI pattern as JXL); save encodes WebP, open sniffs `.webp`.
 - Unit (codec round-trip lossless/lossy/animation/frame count/invalid, storage parse webp) + recent E2E (storage webp save/reload, export still/animation/sheet webp).
+
+## 82. M / Shift+M flip canvas view (implemented)
+- `M` flips the canvas view horizontally, `Shift+M` vertically — same `setFlip` toggles the loupe middle-click gestures use, but available from any tool (view state, not layer transform; history/settings untouched).
+- Engine key handler branch (no Ctrl/Alt/Meta, outside fields; Shift disambiguates via `event.shiftKey`, not key case, so Caps Lock stays horizontal).
+- Shortcuts modal View entries; E2E @recent (M toggles flipX, Shift+M toggles flipY, repeat restores).

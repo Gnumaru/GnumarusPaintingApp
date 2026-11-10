@@ -9158,6 +9158,16 @@ export class GnumarusCanvasEngine {
           this.setTool("destransform3d");
           return;
         }
+        if (event.key === "m" || event.key === "M") {
+          // M flips the canvas view horizontally, Shift+M vertically —
+          // the same setFlip toggles the loupe middle-click gestures use.
+          if (event.shiftKey) {
+            this.setFlip(this.flipX, !this.flipY);
+          } else {
+            this.setFlip(!this.flipX, this.flipY);
+          }
+          return;
+        }
         if (event.code === "Digit4" || event.code === "Numpad4") {
           this.rotateByDegrees(-this.rotationStepDeg);
           return;

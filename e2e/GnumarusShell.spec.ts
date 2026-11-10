@@ -258,6 +258,20 @@ test("loupe rotation pivots on the viewport center", async ({ page }) => {
   expect((await getViewState(page)).rotation).toBeCloseTo(Math.PI / 2, 1);
 });
 
+test("M flips the canvas view horizontally and Shift+M vertically @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  expect(await getViewState(page)).toMatchObject({ flipX: false, flipY: false });
+  await page.keyboard.press("m");
+  expect(await getViewState(page)).toMatchObject({ flipX: true, flipY: false });
+  await page.keyboard.press("m");
+  expect(await getViewState(page)).toMatchObject({ flipX: false, flipY: false });
+  await page.keyboard.press("Shift+m");
+  expect(await getViewState(page)).toMatchObject({ flipX: false, flipY: true });
+  await page.keyboard.press("Shift+m");
+  expect(await getViewState(page)).toMatchObject({ flipX: false, flipY: false });
+});
+
 test("Control+Space drag zooms vertically like the loupe", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

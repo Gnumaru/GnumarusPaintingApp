@@ -282,3 +282,5 @@
 - [ ] Export WebP: single frame + spritesheet (WASM stills, lossless toggle) + single-file animation
 - [ ] Project texture storage webp (lossless/lossy 0..100, save + open sniff)
 - [ ] Unit + @recent E2E for WebP; docs (PLAN/FEATURES/README) updated
+- [x] M / Shift+M canvas view flip (engine handler + shortcuts modal)
+- [x] E2E @recent for M / Shift+M (43 passed); unit 371 + build clean; docs updated

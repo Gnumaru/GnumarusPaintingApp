@@ -352,6 +352,8 @@ const GNUMARUS_SHORTCUTS: GnumarusShortcutSection[] = [
       { keys: "4 (main and numpad)", action: "Rotate canvas counterclockwise by step" },
       { keys: "6 (main and numpad)", action: "Rotate canvas clockwise by step" },
       { keys: "5 (main and numpad)", action: "Reset canvas rotation" },
+      { keys: "M", action: "Flip canvas view horizontally" },
+      { keys: "Shift+M", action: "Flip canvas view vertically" },
       { keys: "Ctrl+Alt+=", action: "Zoom in (numpad + also works)" },
       { keys: "Ctrl+Alt+-", action: "Zoom out (numpad - also works)" },
       { keys: "Hold Space and drag, or middle-drag", action: "Pan canvas" },
