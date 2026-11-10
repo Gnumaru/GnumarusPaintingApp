@@ -63,7 +63,8 @@ describe("GnumarusStorageSettings", () => {
     expect(parseStorageFormat("jpg")).toBe("jpg");
     expect(parseStorageFormat("png")).toBe("png");
     expect(parseStorageFormat("jxl")).toBe("jxl");
-    expect(parseStorageFormat("webp")).toBe("jxl");
+    expect(parseStorageFormat("webp")).toBe("webp");
+    expect(parseStorageFormat("avif")).toBe("jxl");
     expect(parseStorageFormat(undefined)).toBe("jxl");
     expect(clampStoragePngLevel(4)).toBe(4);
     expect(clampStoragePngLevel(4.9)).toBe(4);

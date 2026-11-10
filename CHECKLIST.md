@@ -273,3 +273,12 @@
 - [x] E2E (@recent only, per policy): 7 passed (pressure x4 + zoom min + gear + statusbar); shortcuts modal + Meta+z undo/redo + zoom-default-1 assertions green
 - [x] Unit tests (vitest) — 324 passed (previous 319 + zoom settings)
 - [x] E2E (@recent only, per policy): 3 new tests green (zoom min, gear order, tiny-viewport statusbar) + neighbors green; full suite untouched
+- [x] libwebp submodule + Emscripten build (third_party/libwebp v1.6.0, build-webp-wasm.sh, webp-shim, build-webp-shim.sh)
+- [x] src/codec/webp + GnumarusWebpExport (still/animation/frame count, WASM fetch); 6 codec unit tests green (lossless exact incl. `config.exact` transparent RGB, WebPDecodeRGBA stills + AnimDecoder first frame)
+- [x] Export WebP: single frame + spritesheet (WASM stills, lossless toggle) + single-file animation
+- [x] Project texture storage webp (lossless/lossy 0..100, save + open sniff)
+- [x] Unit tests 371 passed (previous 365 + 6 webp); E2E @recent 42 passed (previous 37 + 5 webp); build clean
+- [x] Docs (PLAN/FEATURES/README) updated
+- [ ] Export WebP: single frame + spritesheet (WASM stills, lossless toggle) + single-file animation
+- [ ] Project texture storage webp (lossless/lossy 0..100, save + open sniff)
+- [ ] Unit + @recent E2E for WebP; docs (PLAN/FEATURES/README) updated

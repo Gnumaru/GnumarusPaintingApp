@@ -134,6 +134,15 @@ import {
   JXL_MIME,
   JXL_STORAGE_EFFORT,
 } from "../export/GnumarusJxlExport";
+import {
+  decodeWebpBytes,
+  encodeWebpAnimation,
+  encodeWebpStill,
+  WEBP_EXT,
+  WEBP_LABEL,
+  WEBP_MIME,
+  WEBP_STORAGE_EFFORT,
+} from "../export/GnumarusWebpExport";
 import { createGifEncoder } from "../export/GnumarusGifExport";
 import {
   composeSheet,
@@ -1238,15 +1247,18 @@ export class GnumarusShell extends LitElement {
     exportFormats: { type: Array },
     exportQuality: { type: Number },
     exportJxlLossless: { type: Boolean },
+    exportWebpLossless: { type: Boolean },
     exportAnimation: { type: String },
     exportAnimatedFormat: { type: String },
     exportAnimatedQuality: { type: Number },
     exportAnimatedJxlLossless: { type: Boolean },
+    exportAnimatedWebpLossless: { type: Boolean },
     exportSheetLayout: { type: String },
     exportSheetFormat: { type: String },
     exportSheetCount: { type: Number },
     exportSheetQuality: { type: Number },
     exportSheetJxlLossless: { type: Boolean },
+    exportSheetWebpLossless: { type: Boolean },
     playing: { type: Boolean },
     uiHidden: { type: Boolean },
     toastMessage: { type: String },
@@ -1370,15 +1382,18 @@ export class GnumarusShell extends LitElement {
   declare exportFormats: GnumarusStillFormat[];
   declare exportQuality: number;
   declare exportJxlLossless: boolean;
+  declare exportWebpLossless: boolean;
   declare exportAnimation: string;
   declare exportAnimatedFormat: string;
   declare exportAnimatedQuality: number;
   declare exportAnimatedJxlLossless: boolean;
+  declare exportAnimatedWebpLossless: boolean;
   declare exportSheetLayout: string;
   declare exportSheetFormat: string;
   declare exportSheetCount: number;
   declare exportSheetQuality: number;
   declare exportSheetJxlLossless: boolean;
+  declare exportSheetWebpLossless: boolean;
   declare playing: boolean;
   declare uiHidden: boolean;
   declare toastMessage: string;
@@ -1511,15 +1526,18 @@ export class GnumarusShell extends LitElement {
     this.exportFormats = [];
     this.exportQuality = GNUMARUS_DEFAULT_STILL_QUALITY;
     this.exportJxlLossless = true;
+    this.exportWebpLossless = true;
     this.exportAnimation = "";
     this.exportAnimatedFormat = "gif";
     this.exportAnimatedQuality = GNUMARUS_DEFAULT_STILL_QUALITY;
     this.exportAnimatedJxlLossless = true;
+    this.exportAnimatedWebpLossless = true;
     this.exportSheetLayout = "line";
     this.exportSheetFormat = "image/png";
     this.exportSheetCount = 2;
     this.exportSheetQuality = GNUMARUS_DEFAULT_STILL_QUALITY;
     this.exportSheetJxlLossless = true;
+    this.exportSheetWebpLossless = true;
     this.playing = false;
     this.playTimer = null;
     this.uiHidden = false;
@@ -2595,6 +2613,7 @@ export class GnumarusShell extends LitElement {
               @change=${(): void => this.applyStorageFromDialog()}
             >
               <option value="jxl">JPEG XL</option>
+              <option value="webp">WebP</option>
               <option value="jpg">JPEG</option>
               <option value="png">PNG</option>
             </select>
@@ -2610,21 +2629,21 @@ export class GnumarusShell extends LitElement {
                 ↻
               </button>`}
         </div>
-        ${this.storageFormat === "jxl"
+        ${this.storageFormat === "jxl" || this.storageFormat === "webp"
           ? html`<div class="setting-row">
-              <label>Project texture JXL mode
+              <label>Project texture ${this.storageFormat === "webp" ? "WebP" : "JXL"} mode
                 <select
                   id="storageJxlMode"
                   .value=${this.storageLossless ? "lossless" : "lossy"}
                   @change=${(): void => this.applyStorageFromDialog()}
                 >
-                  <option value="lossless">Lossless JXL</option>
-                  <option value="lossy">Lossy JXL</option>
+                  <option value="lossless">Lossless ${this.storageFormat === "webp" ? "WebP" : "JXL"}</option>
+                  <option value="lossy">Lossy ${this.storageFormat === "webp" ? "WebP" : "JXL"}</option>
                 </select>
               </label>
             </div>`
           : html``}
-        ${this.storageFormat === "jxl" && !this.storageLossless
+        ${this.storageLossless === false && (this.storageFormat === "jxl" || this.storageFormat === "webp")
           ? html`<div class="setting-row">
               <label
                 >Project texture lossy quality
@@ -2880,20 +2899,27 @@ export class GnumarusShell extends LitElement {
             )}
           </select>
         </label>
-        ${this.exportFormat === JXL_MIME
+        ${this.exportFormat === JXL_MIME || this.exportFormat === WEBP_MIME
           ? html`<label
               >Lossless
               <input
                 type="checkbox"
-                id="exportJxlLossless"
-                ?checked=${this.exportJxlLossless}
+                id=${this.exportFormat === WEBP_MIME ? "exportWebpLossless" : "exportJxlLossless"}
+                ?checked=${this.exportFormat === WEBP_MIME ? this.exportWebpLossless : this.exportJxlLossless}
                 @change=${(event: Event): void => {
-                  this.exportJxlLossless = (event.target as HTMLInputElement).checked;
+                  const checked = (event.target as HTMLInputElement).checked;
+                  if (this.exportFormat === WEBP_MIME) {
+                    this.exportWebpLossless = checked;
+                  } else {
+                    this.exportJxlLossless = checked;
+                  }
                 }}
               />
             </label>`
           : html``}
-        ${this.exportFormat === "image/png" || (this.exportFormat === JXL_MIME && this.exportJxlLossless)
+        ${this.exportFormat === "image/png" ||
+        (this.exportFormat === JXL_MIME && this.exportJxlLossless) ||
+        (this.exportFormat === WEBP_MIME && this.exportWebpLossless)
           ? html``
           : html`<label
               >Quality
@@ -2942,27 +2968,36 @@ export class GnumarusShell extends LitElement {
           >
             <option value="gif">GIF animation</option>
             <option value="jxl">JXL animation</option>
+            <option value="webp">WebP animation</option>
             ${this.exportFormats.map(
               (format) => html`<option value=${format.mime}>${format.label} sequence</option>`,
             )}
           </select>
         </label>
-        ${this.exportAnimatedFormat === "jxl"
+        ${this.exportAnimatedFormat === "jxl" || this.exportAnimatedFormat === "webp"
           ? html`<label
               >Lossless
               <input
                 type="checkbox"
-                id="exportAnimatedJxlLossless"
-                ?checked=${this.exportAnimatedJxlLossless}
+                id=${this.exportAnimatedFormat === "webp" ? "exportAnimatedWebpLossless" : "exportAnimatedJxlLossless"}
+                ?checked=${this.exportAnimatedFormat === "webp"
+                  ? this.exportAnimatedWebpLossless
+                  : this.exportAnimatedJxlLossless}
                 @change=${(event: Event): void => {
-                  this.exportAnimatedJxlLossless = (event.target as HTMLInputElement).checked;
+                  const checked = (event.target as HTMLInputElement).checked;
+                  if (this.exportAnimatedFormat === "webp") {
+                    this.exportAnimatedWebpLossless = checked;
+                  } else {
+                    this.exportAnimatedJxlLossless = checked;
+                  }
                 }}
               />
             </label>`
           : html``}
         ${this.exportAnimatedFormat === "gif" ||
         this.exportAnimatedFormat === "image/png" ||
-        (this.exportAnimatedFormat === "jxl" && this.exportAnimatedJxlLossless)
+        (this.exportAnimatedFormat === "jxl" && this.exportAnimatedJxlLossless) ||
+        (this.exportAnimatedFormat === "webp" && this.exportAnimatedWebpLossless)
           ? html``
           : html`<label
               >Quality
@@ -3038,21 +3073,29 @@ export class GnumarusShell extends LitElement {
             )}
           </select>
         </label>
-        ${this.exportSheetFormat === JXL_MIME
+        ${this.exportSheetFormat === JXL_MIME || this.exportSheetFormat === WEBP_MIME
           ? html`<label
               >Lossless
               <input
                 type="checkbox"
-                id="exportSheetJxlLossless"
-                ?checked=${this.exportSheetJxlLossless}
+                id=${this.exportSheetFormat === WEBP_MIME ? "exportSheetWebpLossless" : "exportSheetJxlLossless"}
+                ?checked=${this.exportSheetFormat === WEBP_MIME
+                  ? this.exportSheetWebpLossless
+                  : this.exportSheetJxlLossless}
                 @change=${(event: Event): void => {
-                  this.exportSheetJxlLossless = (event.target as HTMLInputElement).checked;
+                  const checked = (event.target as HTMLInputElement).checked;
+                  if (this.exportSheetFormat === WEBP_MIME) {
+                    this.exportSheetWebpLossless = checked;
+                  } else {
+                    this.exportSheetJxlLossless = checked;
+                  }
                 }}
               />
             </label>`
           : html``}
         ${this.exportSheetFormat === "image/png" ||
-        (this.exportSheetFormat === JXL_MIME && this.exportSheetJxlLossless)
+        (this.exportSheetFormat === JXL_MIME && this.exportSheetJxlLossless) ||
+        (this.exportSheetFormat === WEBP_MIME && this.exportSheetWebpLossless)
           ? html``
           : html`<label
               >Quality
@@ -4938,6 +4981,11 @@ export class GnumarusShell extends LitElement {
     }
     if (this.storageFormat === "jpg") {
       return `Project textures save as JPEG (quality ${this.storageJpegQuality})`;
+    }
+    if (this.storageFormat === "webp") {
+      return this.storageLossless
+        ? "Project textures save as lossless WebP"
+        : `Project textures save as lossy WebP (quality ${this.storageQuality})`;
     }
     return this.storageLossless
       ? "Project textures save as lossless JXL"
@@ -7285,6 +7333,10 @@ export class GnumarusShell extends LitElement {
       // Browsers never encode JXL through a canvas; our WASM codec does.
       this.exportFormats = [...this.exportFormats, { mime: JXL_MIME, ext: JXL_EXT, label: JXL_LABEL, alpha: true }];
     }
+    if (findStillFormat(this.exportFormats, WEBP_MIME) === null) {
+      // Canvas WebP has no lossless option; our WASM codec does.
+      this.exportFormats = [...this.exportFormats, { mime: WEBP_MIME, ext: WEBP_EXT, label: WEBP_LABEL, alpha: true }];
+    }
     if (findStillFormat(this.exportFormats, this.exportFormat) === null) {
       this.exportFormat = this.exportFormats[0]?.mime ?? "image/png";
     }
@@ -7298,6 +7350,7 @@ export class GnumarusShell extends LitElement {
     if (
       this.exportAnimatedFormat !== "gif" &&
       this.exportAnimatedFormat !== "jxl" &&
+      this.exportAnimatedFormat !== "webp" &&
       findStillFormat(this.exportFormats, this.exportAnimatedFormat) === null
     ) {
       this.exportAnimatedFormat = "gif";
@@ -7346,9 +7399,10 @@ export class GnumarusShell extends LitElement {
   }
 
   /**
-   * Encode through a canvas, except JXL which goes through the WASM libjxl
-   * codec (browsers cannot encode JXL). Quality percent is 1-100 or
-   * undefined for the browser default; JXL ignores it when lossless.
+   * Encode through a canvas, except JXL and WebP which go through their WASM
+   * codecs (browsers cannot encode JXL at all and canvas WebP has no
+   * lossless option). Quality percent is 1-100 or undefined for the browser
+   * default; the WASM codecs ignore it when lossless.
    */
   private async encodeExportStill(
     buffer: Uint8ClampedArray,
@@ -7356,15 +7410,26 @@ export class GnumarusShell extends LitElement {
     height: number,
     format: GnumarusStillFormat,
     qualityPercent: number | undefined,
-    jxlLossless: boolean,
+    wasmLossless: boolean,
   ): Promise<Blob | null> {
     if (format.mime === JXL_MIME) {
       try {
         const bytes = await encodeJxlStill(buffer, width, height, {
-          lossless: jxlLossless,
+          lossless: wasmLossless,
           quality: qualityPercent ?? GNUMARUS_DEFAULT_STILL_QUALITY,
         });
         return new Blob([bytes as Uint8Array<ArrayBuffer>], { type: JXL_MIME });
+      } catch {
+        return null;
+      }
+    }
+    if (format.mime === WEBP_MIME) {
+      try {
+        const bytes = await encodeWebpStill(buffer, width, height, {
+          lossless: wasmLossless,
+          quality: qualityPercent ?? GNUMARUS_DEFAULT_STILL_QUALITY,
+        });
+        return new Blob([bytes as Uint8Array<ArrayBuffer>], { type: WEBP_MIME });
       } catch {
         return null;
       }
@@ -7412,7 +7477,7 @@ export class GnumarusShell extends LitElement {
         size.height,
         format,
         format.mime === "image/png" ? undefined : quality,
-        this.exportJxlLossless,
+        format.mime === WEBP_MIME ? this.exportWebpLossless : this.exportJxlLossless,
       );
       if (blob === null) {
         this.closeExportDialog();
@@ -7548,6 +7613,45 @@ export class GnumarusShell extends LitElement {
         }
         return;
       }
+      if (formatValue === "webp") {
+        const size = this.engine.size;
+        const animatedQualityInput = this.shadowRoot?.getElementById(
+          "exportAnimatedQuality",
+        ) as HTMLInputElement | null;
+        const animatedQuality = normalizeStillQualityPercent(
+          Number(animatedQualityInput?.value ?? this.exportAnimatedQuality),
+        );
+        this.exportAnimatedQuality = animatedQuality;
+        const frames: Array<{ buffer: Uint8ClampedArray; delayMs: number }> = [];
+        for (const entry of resolved.frames) {
+          const inputs = this.engine.getFrameFlattenInputs(entry.frame);
+          if (inputs === null) {
+            this.failAnimatedExport("Export failed: invalid frame");
+            return;
+          }
+          frames.push({
+            buffer: compositeFinalImage(size.width, size.height, inputs),
+            delayMs: entry.delayMs,
+          });
+        }
+        try {
+          const bytes = await encodeWebpAnimation(frames, size.width, size.height, resolved.loop, {
+            lossless: this.exportAnimatedWebpLossless,
+            quality: animatedQuality,
+          });
+          const blob = new Blob([bytes as Uint8Array<ArrayBuffer>], { type: WEBP_MIME });
+          const fileName = `${base}-${resolved.label}.webp`;
+          this.closeExportDialog();
+          if (await this.saveExportBlob(blob, fileName, "WebP animation")) {
+            this.statusMessage = `Exported ${fileName}`;
+            this.showToast(`Exported ${fileName}`);
+          }
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          this.failAnimatedExport(`Export failed: ${reason}`);
+        }
+        return;
+      }
       const format = findStillFormat(this.exportFormats, formatValue) ?? null;
       if (format === null) {
         this.failAnimatedExport("Export failed: no image format is available");
@@ -7573,7 +7677,14 @@ export class GnumarusShell extends LitElement {
           return;
         }
         const flat = compositeFinalImage(size.width, size.height, inputs, background);
-        const blob = await this.encodeExportStill(flat, size.width, size.height, format, animatedQualityOrDefault, this.exportAnimatedJxlLossless);
+        const blob = await this.encodeExportStill(
+          flat,
+          size.width,
+          size.height,
+          format,
+          animatedQualityOrDefault,
+          format.mime === WEBP_MIME ? this.exportAnimatedWebpLossless : this.exportAnimatedJxlLossless,
+        );
         if (blob === null) {
           this.failAnimatedExport(`Export failed: ${format.label} encoding is not supported here`);
           return;
@@ -7747,7 +7858,7 @@ export class GnumarusShell extends LitElement {
             size.height,
             format,
             sheetQualityValue,
-            this.exportSheetJxlLossless,
+            format.mime === WEBP_MIME ? this.exportSheetWebpLossless : this.exportSheetJxlLossless,
           );
           if (blob === null) {
             fail(`Export failed: ${format.label} encoding is not supported here`);
@@ -7780,7 +7891,7 @@ export class GnumarusShell extends LitElement {
         sheet.height,
         format,
         sheetQualityValue,
-        this.exportSheetJxlLossless,
+        format.mime === WEBP_MIME ? this.exportSheetWebpLossless : this.exportSheetJxlLossless,
       );
       if (blob === null) {
         fail(`Export failed: ${format.label} encoding is not supported here`);
@@ -8575,9 +8686,9 @@ export class GnumarusShell extends LitElement {
   }
 
   /**
-   * Decode one stored texture file: JXL and PNG directly, JPEG by
-   * recombining the color file with its grayscale `.alpha.jpg` companion
-   * (a missing companion means opaque).
+   * Decode one stored texture file: JXL and WebP through their WASM codecs,
+   * PNG directly, JPEG by recombining the color file with its grayscale
+   * `.alpha.jpg` companion (a missing companion means opaque).
    */
   private async decodeStoredTextureBytes(
     dir: GnumarusDirectoryHandle,
@@ -8586,6 +8697,9 @@ export class GnumarusShell extends LitElement {
   ): Promise<{ width: number; height: number; buffer: Uint8ClampedArray }> {
     if (file.endsWith(".jxl")) {
       return decodeJxlBytes(bytes);
+    }
+    if (file.endsWith(".webp")) {
+      return decodeWebpBytes(bytes);
     }
     if (file.endsWith(".jpg")) {
       const color = await decodeJpegToBuffer(new Blob([bytes as Uint8Array<ArrayBuffer>]));
@@ -8974,6 +9088,38 @@ export class GnumarusShell extends LitElement {
             file,
             await encodeBufferToPngBlob(texture.buffer, texture.width, texture.height, this.storagePngLevel),
           );
+          continue;
+        }
+        if (this.storageFormat === "webp") {
+          try {
+            const bytes = await encodeWebpStill(texture.buffer, texture.width, texture.height, {
+              lossless,
+              quality,
+              effort: WEBP_STORAGE_EFFORT,
+            });
+            const file = textureFilePath(stem, "webp");
+            texturesMeta.push({
+              id: texture.id,
+              name: texture.name,
+              width: texture.width,
+              height: texture.height,
+              file,
+            });
+            blobs.set(file, new Blob([bytes as Uint8Array<ArrayBuffer>], { type: "image/webp" }));
+          } catch {
+            const file = textureFilePath(stem, "png");
+            texturesMeta.push({
+              id: texture.id,
+              name: texture.name,
+              width: texture.width,
+              height: texture.height,
+              file,
+            });
+            blobs.set(
+              file,
+              await encodeBufferToPngBlob(texture.buffer, texture.width, texture.height, this.storagePngLevel),
+            );
+          }
           continue;
         }
         try {

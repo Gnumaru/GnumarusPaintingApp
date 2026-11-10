@@ -1,19 +1,19 @@
 /**
  * Project texture storage settings: how layer textures are encoded when
  * the project is saved. `format` selects the container (default JXL);
- * `lossless`/`quality` tune JXL output, `pngLevel` tunes PNG output and
- * `jpgQuality` tunes JPEG output (color file plus a grayscale alpha
- * companion). Loading sniffs `.jxl`/`.jpg`/`.png` per file, so these
- * settings only affect future saves.
+ * `lossless`/`quality` tune JXL and WebP output, `pngLevel` tunes PNG
+ * output and `jpgQuality` tunes JPEG output (color file plus a grayscale
+ * alpha companion). Loading sniffs `.jxl`/`.webp`/`.jpg`/`.png` per file,
+ * so these settings only affect future saves.
  */
-export type GnumarusStorageFormat = "jxl" | "jpg" | "png";
+export type GnumarusStorageFormat = "jxl" | "webp" | "jpg" | "png";
 
 export interface GnumarusStorageSettings {
   /** Texture container format, default JXL. */
   format: GnumarusStorageFormat;
-  /** Lossless JXL output when true (default), lossy otherwise. */
+  /** Lossless JXL/WebP output when true (default), lossy otherwise. */
   lossless: boolean;
-  /** Lossy JXL quality 0..100, default 50; ignored unless JXL lossy. */
+  /** Lossy JXL/WebP quality 0..100, default 50; ignored unless lossy. */
   quality: number;
   /** PNG compression level 0..9, default 9. */
   pngLevel: number;
@@ -83,7 +83,7 @@ export function clampBrushQuality(value: number): number {
 }
 
 export function parseStorageFormat(value: unknown): GnumarusStorageFormat {
-  return value === "jpg" || value === "png" ? value : "jxl";
+  return value === "webp" || value === "jpg" || value === "png" ? value : "jxl";
 }
 
 export function parseStorageSettings(jsonText: string): GnumarusStorageSettings {

@@ -1,3 +1,6 @@
 [submodule "libjxl"]
 	path = third_party/libjxl
 	url = https://github.com/libjxl/libjxl
+[submodule "libwebp"]
+	path = third_party/libwebp
+	url = https://github.com/webmproject/libwebp

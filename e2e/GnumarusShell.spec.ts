@@ -7931,7 +7931,7 @@ test("File > Export saves the current frame as PNG with exact pixels", async ({ 
   await paintCenter(page);
   await stubSaveFilePicker(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Export" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   await expect(dialog.locator("input#exportFrame")).toHaveValue("1");
@@ -7954,7 +7954,7 @@ test("File > Export flattens JPEG without alpha", async ({ page }) => {
   await paintCenter(page);
   await stubSaveFilePicker(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Export" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator("select#exportFormat").selectOption("image/jpeg");
@@ -7977,7 +7977,7 @@ test("File > Export cancellation stays silent", async ({ page }) => {
     };
   });
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Export" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator("#exportOk").click();
@@ -7990,7 +7990,7 @@ test("File > Export lists only formats the browser truly encodes", async ({ page
   await paintCenter(page);
   await stubSaveFilePicker(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Export" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   const values = await dialog.locator("select#exportFormat option").evaluateAll((options) =>
@@ -8042,7 +8042,7 @@ test("File > Export JPEG quality changes the file size", async ({ page }) => {
   await paintCenter(page);
   await stubSaveFilePicker(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Export" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   // The lossless default offers no quality control.
@@ -8338,7 +8338,7 @@ test("File > Export saves the current frame as lossless JXL", async ({ page }) =
   await paintCenter(page);
   await stubSaveFilePicker(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Export" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator("select#exportFormat").selectOption("image/jxl");
@@ -8362,7 +8362,7 @@ test("File > Export saves lossy JXL when lossless is off", async ({ page }) => {
   await paintCenter(page);
   await stubSaveFilePicker(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Export" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator("select#exportFormat").selectOption("image/jxl");
@@ -8385,7 +8385,7 @@ test("File > Export saves all frames as a single-file JXL animation", async ({ p
   await paintCenter(page);
   await stubSaveFilePicker(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Export" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator("select#exportAnimatedFormat").selectOption("jxl");
@@ -8400,6 +8400,141 @@ test("File > Export saves all frames as a single-file JXL animation", async ({ p
   expect(decoded?.width).toBe(64);
 });
 
+test("project textures save as lossless WebP and reopen @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  // Bucket-fill the whole transparent canvas so the default crop+fit import
+  // cleanup keeps the 64x64 texture as is after reopening.
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#settingsDialog");
+  await dialog.locator("select#storageFormat").selectOption("webp");
+  await expect(dialog.locator("select#storageJxlMode")).toHaveValue("lossless");
+  await expect(page.locator("gnumarus-shell")).toContainText("Project textures save as lossless WebP");
+  const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.storage.v1"));
+  expect(persisted).toContain('"format": "webp"');
+  await dialog.getByRole("button", { name: "Close" }).click();
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  const meta = await project.writtenProject();
+  expect(meta).toContain('"textures/t1.webp"');
+  const files = await project.writtenBlobs();
+  expect(Object.keys(files).sort()).toEqual(["project.json", "textures/t1.webp"]);
+  expect(files["textures/t1.webp"]?.slice(0, 4)).toEqual([0x52, 0x49, 0x46, 0x46]);
+  expect(files["textures/t1.webp"]?.slice(8, 12)).toEqual([0x57, 0x45, 0x42, 0x50]);
+  const decoded = await decodeWebpInPage(page, files["textures/t1.webp"] ?? []);
+  expect(decoded?.width).toBe(64);
+  expect(decoded?.height).toBe(64);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 0, 0)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("File > Export saves the current frame as lossless WebP @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator("select#exportFormat").selectOption("image/webp");
+  await expect(dialog.locator('input#exportWebpLossless')).toBeChecked();
+  await dialog.locator("#exportOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported");
+  const file = await exportedJxlBytes(page);
+  expect(file?.fileName).toContain("frame-1.webp");
+  expect(file?.type).toBe("image/webp");
+  expect(file?.bytes.slice(0, 4)).toEqual([0x52, 0x49, 0x46, 0x46]);
+  expect(file?.bytes.slice(8, 12)).toEqual([0x57, 0x45, 0x42, 0x50]);
+  const decoded = await decodeWebpInPage(page, file?.bytes ?? []);
+  expect(decoded?.width).toBe(64);
+  expect(decoded?.height).toBe(64);
+  expect(decoded?.frames).toBe(1);
+  expect(decoded?.center).toEqual([0, 0, 0, 255]);
+});
+
+test("File > Export saves lossy WebP when lossless is off @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator("select#exportFormat").selectOption("image/webp");
+  await dialog.locator("#exportWebpLossless").uncheck();
+  await dialog.locator("input#exportQuality").fill("50");
+  await dialog.locator("#exportOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported");
+  const file = await exportedJxlBytes(page);
+  expect(file?.type).toBe("image/webp");
+  expect(file?.bytes.slice(0, 4)).toEqual([0x52, 0x49, 0x46, 0x46]);
+  const decoded = await decodeWebpInPage(page, file?.bytes ?? []);
+  expect(decoded?.width).toBe(64);
+  expect(decoded?.center?.[3]).toBe(255);
+});
+
+test("File > Export saves all frames as a single-file WebP animation @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await addFrames(page, 1);
+  await paintCenter(page);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator("select#exportAnimatedFormat").selectOption("webp");
+  await dialog.locator("#exportAnimatedOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported");
+  const file = await exportedJxlBytes(page);
+  expect(file?.fileName).toContain("frames.webp");
+  expect(file?.type).toBe("image/webp");
+  expect(file?.bytes.slice(0, 4)).toEqual([0x52, 0x49, 0x46, 0x46]);
+  const decoded = await decodeWebpInPage(page, file?.bytes ?? []);
+  expect(decoded?.frames).toBe(2);
+  expect(decoded?.width).toBe(64);
+});
+
+test("File > Export saves an animation as a WebP spritesheet @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await addFrames(page, 1);
+  await addAnimation(page, "go,none,1,2");
+  await page.locator('gnumarus-shell [data-testid="anim-frame"][data-frame="0"]').click();
+  await paintCenter(page);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("checkbox", { name: "go" }).check();
+  await expect(dialog.locator("select#exportSheetLayout")).toHaveValue("line");
+  await dialog.locator("select#exportSheetFormat").selectOption("image/webp");
+  await dialog.locator("#exportSheetOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported");
+  const file = await exportedJxlBytes(page);
+  expect(file?.fileName).toContain("sheet.webp");
+  expect(file?.type).toBe("image/webp");
+  const decoded = await decodeWebpInPage(page, file?.bytes ?? []);
+  expect(decoded?.width).toBe(128);
+  expect(decoded?.height).toBe(64);
+  const at = (x: number, y: number): number => (y * 128 + x) * 4;
+  expect(decoded?.pixels.slice(at(32, 32), at(32, 32) + 4)).toEqual([0, 0, 0, 255]);
+  expect(decoded?.pixels.slice(at(96, 32), at(96, 32) + 4)).toEqual([0, 0, 0, 0]);
+});
+
 test("File > Export saves an animation as a JXL spritesheet", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
@@ -8409,7 +8544,7 @@ test("File > Export saves an animation as a JXL spritesheet", async ({ page }) =
   await paintCenter(page);
   await stubSaveFilePicker(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Export" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   await dialog.getByRole("checkbox", { name: "go" }).check();
@@ -8580,6 +8715,44 @@ interface JxlDecodedFrame {
   frames: number;
 }
 
+interface WebpDecodedFrame {
+  width: number;
+  height: number;
+  center: number[];
+  pixels: number[];
+  frames: number;
+}
+
+async function decodeWebpInPage(
+  page: import("@playwright/test").Page,
+  bytes: number[],
+): Promise<WebpDecodedFrame | null> {
+  return page.evaluate(async (data: number[]) => {
+    const shimUrl = "/src/codec/webp/webp_shim.js";
+    const ns: unknown = await import(/* @vite-ignore */ shimUrl);
+    const factory = (ns as { default: (overrides?: { wasmBinary?: Uint8Array }) => Promise<unknown> }).default;
+    const wasm = new Uint8Array(await (await fetch("/src/codec/webp/webp_shim.wasm")).arrayBuffer());
+    const codec = (await factory({ wasmBinary: wasm })) as {
+      webp_decode_js(input: Uint8Array): { ok: boolean; width?: number; height?: number; buffer?: Uint8Array };
+      webp_frame_count_js(input: Uint8Array): { ok: boolean; count?: number };
+    };
+    const input = new Uint8Array(data);
+    const decoded = codec.webp_decode_js(input);
+    if (!decoded.ok || decoded.width === undefined || decoded.height === undefined || !(decoded.buffer instanceof Uint8Array)) {
+      return null;
+    }
+    const counted = codec.webp_frame_count_js(input);
+    const at = (decoded.height >> 1) * decoded.width + (decoded.width >> 1);
+    return {
+      width: decoded.width,
+      height: decoded.height,
+      center: Array.from(decoded.buffer.subarray(at * 4, at * 4 + 4)),
+      pixels: Array.from(decoded.buffer),
+      frames: counted.ok === true && typeof counted.count === "number" ? counted.count : -1,
+    };
+  }, bytes);
+}
+
 async function decodeJxlInPage(
   page: import("@playwright/test").Page,
   bytes: number[],
@@ -8663,7 +8836,7 @@ test("File > Export saves all frames as a looping GIF", async ({ page }) => {
   await paintCenter(page);
   await stubSaveFilePicker(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Export" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   await expect(dialog.locator("select#exportAnimation")).toHaveValue("");
@@ -8688,7 +8861,7 @@ test("File > Export saves a play-once animation as GIF without repeat", async ({
   await paintCenter(page);
   await stubSaveFilePicker(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Export" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator("select#exportAnimation").selectOption("once");
@@ -8711,7 +8884,7 @@ test("File > Export saves a named animation as a PNG sequence", async ({ page })
   await paintCenter(page);
   await stubExportDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Export" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator("select#exportAnimation").selectOption("go");
@@ -8734,7 +8907,7 @@ test("File > Export saves an animation as a single-line spritesheet", async ({ p
   await paintCenter(page);
   await stubSaveFilePicker(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Export" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   await dialog.getByRole("checkbox", { name: "go" }).check();
@@ -8799,7 +8972,7 @@ test("File > Export saves one animation per line with ragged rows", async ({ pag
   await paintCenter(page);
   await stubSaveFilePicker(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Export" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   await dialog.getByRole("checkbox", { name: "a", exact: true }).check();
@@ -8824,7 +8997,7 @@ test("File > Export saves a manual frame list as individual files", async ({ pag
   await paintCenter(page);
   await stubExportDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Export" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator("input#exportSheetFrames").fill("1,2");
@@ -8841,7 +9014,7 @@ test("File > Export spritesheet without sources fails loudly", async ({ page }) 
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Export" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator("#exportSheetOk").click();
