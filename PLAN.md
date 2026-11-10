@@ -388,3 +388,9 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Storage settings gain `format` (jxl/jpg/png, default jxl), PNG compression level int 0-9 (default 9, pure fflate encoder) and JPEG quality int 0-100 (default 95, canvas encode); JXL keeps its lossless/lossy settings; dialog rows hide per format with reset arrows.
 - JPG stores alpha in a companion grayscale file (`t23.alpha.jpg`, same quality); loader/reload recombine color+alpha (missing companion means opaque).
 - JPG stores alpha in a companion grayscale file (`t23.alpha.jpg`, same quality); loader/reload recombine color+alpha (missing companion means opaque); PNG level honored via fflate `zlibSync` (canvas PNG encoder replaced).
+
+## 71. Big canvas, loupe tweaks, Space gestures (landed; pointer lock reverted)
+- New projects up to 16384x16384 (dialog max + create clamp; engine needs no change; needs big GPU textures + RAM).
+- Loupe zoom reacts to vertical drag only; loupe rotation pivots on the viewport center instead of the panned image center.
+- Ctrl+Space+left-drag zooms like the loupe; Shift+Space+left-drag rotates like the loupe (shortcuts modal documents both).
+- Pointer lock for Shift+left-drag brush sizing was tried and reverted: the canvas lives in shadow DOM, so the lock lands on the host element, starving canvas listeners and breaking pointer capture (proven by failing shift-drag tests). Absolute positioning stays, per the request's fallback clause.

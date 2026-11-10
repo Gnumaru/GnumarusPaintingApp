@@ -84,6 +84,30 @@ test("File > New creates a canvas with the requested size", async ({ page }) => 
   await expect(page.locator("gnumarus-shell")).toContainText("64 x 64");
 });
 
+test("File > New accepts canvas sizes up to 16384 @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell");
+  const canvasSize = (): Promise<{ width: number; height: number } | null> =>
+    page.evaluate(() => {
+      const root = window as unknown as { __gnumarus?: { engine?: { size: { width: number; height: number } } } };
+      return root.__gnumarus?.engine?.size ?? null;
+    });
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "New Project" }).click();
+  await page.locator("gnumarus-shell input#newWidth").fill("1920");
+  await page.locator("gnumarus-shell input#newHeight").fill("1080");
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("New 1920 x 1080 canvas");
+  expect(await canvasSize()).toEqual({ width: 1920, height: 1080 });
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "New Project" }).click();
+  await page.locator("gnumarus-shell input#newWidth").fill("20000");
+  await page.locator("gnumarus-shell input#newHeight").fill("100");
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("New 16384 x 100 canvas");
+  expect(await canvasSize()).toEqual({ width: 16384, height: 100 });
+});
+
 test("pencil draws a solid pixel on the WebGL2 canvas", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell");
@@ -198,6 +222,97 @@ test("loupe left-drag zooms and right-drag rotates", async ({ page }) => {
   expect(rotation).toBeGreaterThan(Math.PI / 3);
   expect(rotation).toBeLessThan(Math.PI * 0.75);
   await expect(page.locator("gnumarus-shell")).toContainText("°");
+});
+
+test("loupe rotation pivots on the viewport center @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  // Pan the canvas away from the viewport center with Space+drag.
+  await page.keyboard.down(" ");
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx + 50, cy + 30, { steps: 5 });
+  await page.mouse.up();
+  await page.keyboard.up(" ");
+  const pan = await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: unknown } };
+    const engine = root.__gnumarus?.engine as unknown as { panX: number; panY: number };
+    return { x: engine.panX, y: engine.panY };
+  });
+  expect(pan.x).toBe(50);
+  expect(pan.y).toBe(30);
+  // Dragging from east to south around the viewport center turns π/2
+  // no matter where the panned canvas sits.
+  await page.getByRole("button", { name: "Loupe" }).click();
+  await page.mouse.move(cx + 60, cy);
+  await page.mouse.down({ button: "right" });
+  await page.mouse.move(cx, cy + 60, { steps: 5 });
+  await page.mouse.up({ button: "right" });
+  expect((await getViewState(page)).rotation).toBeCloseTo(Math.PI / 2, 1);
+});
+
+test("Control+Space drag zooms vertically like the loupe @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  const beforeZoom = (await getViewState(page)).zoom;
+  await page.keyboard.down("Control");
+  await page.keyboard.down(" ");
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx, cy - 60, { steps: 5 });
+  await page.mouse.up();
+  const zoomed = (await getViewState(page)).zoom;
+  expect(zoomed).toBeGreaterThan(beforeZoom);
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx, cy + 60, { steps: 5 });
+  await page.mouse.up();
+  const zoomedOut = (await getViewState(page)).zoom;
+  expect(zoomedOut).toBeLessThan(zoomed);
+  // Horizontal movement does nothing.
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx + 80, cy, { steps: 4 });
+  await page.mouse.up();
+  expect((await getViewState(page)).zoom).toBe(zoomedOut);
+  await page.keyboard.up(" ");
+  await page.keyboard.up("Control");
+});
+
+test("Shift+Space drag rotates like the loupe @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  const before = (await getViewState(page)).rotation;
+  await page.keyboard.down("Shift");
+  await page.keyboard.down(" ");
+  await page.mouse.move(cx + 60, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx, cy + 60, { steps: 5 });
+  await page.mouse.up();
+  await page.keyboard.up(" ");
+  await page.keyboard.up("Shift");
+  expect(Math.abs((await getViewState(page)).rotation - before)).toBeGreaterThan(Math.PI / 4);
 });
 
 test("loupe middle-click flips the canvas", async ({ page }) => {
@@ -6966,7 +7081,7 @@ async function readJpegSamples(
   }, bytes);
 }
 
-test("project textures save as PNG with a compression level and reopen @recent", async ({ page }) => {
+test("project textures save as PNG with a compression level and reopen", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -6999,7 +7114,7 @@ test("project textures save as PNG with a compression level and reopen @recent",
   expect(await readPixel(page, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
 });
 
-test("project textures save as JPEG with a grayscale alpha companion @recent", async ({ page }) => {
+test("project textures save as JPEG with a grayscale alpha companion", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");

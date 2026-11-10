@@ -7002,13 +7002,30 @@ export class GnumarusCanvasEngine {
         }
         return;
       }
+      if (this.spaceDown && event.button === 0 && (event.ctrlKey || event.shiftKey)) {
+        // Ctrl+Space+left-drag zooms like the loupe; Shift+Space+left-drag
+        // rotates like the loupe. Plain Space+left-drag still pans below.
+        if (event.ctrlKey) {
+          this.loupeZooming = true;
+          this.loupeAnchor = { x: event.clientX, y: event.clientY };
+        } else {
+          const angle = this.pointerAngle(event.clientX, event.clientY);
+          if (angle === null) {
+            return;
+          }
+          this.rotating = true;
+          this.lastPointerAngle = angle;
+        }
+        canvas.setPointerCapture(event.pointerId);
+        return;
+      }
       if (event.button === 1 || this.spaceDown) {
         this.panning = true;
         canvas.setPointerCapture(event.pointerId);
         return;
       }
       if (event.button === 2 && (this.tool === "loupe" || this.tool === "transform")) {
-        // Right-drag rotates around the image (loupe) or layer (transform) center.
+        // Right-drag rotates around the viewport (loupe) or layer (transform) center.
         const angle =
           this.tool === "loupe"
             ? this.pointerAngle(event.clientX, event.clientY)
@@ -7034,7 +7051,10 @@ export class GnumarusCanvasEngine {
         (this.tool === "pencil" || this.tool === "line" || this.tool === "curve")
       ) {
         // Shift+Left-drag resizes the active size tool from horizontal
-        // movement only; no painting starts.
+        // movement only; no painting starts. (Pointer lock was tried here
+        // to freeze the cursor, but the canvas lives in shadow DOM: the
+        // lock lands on the host element, starving canvas listeners and
+        // breaking pointer capture. Absolute positioning stays.)
         const startSize =
           this.tool === "pencil" ? this.brushSize : this.tool === "line" ? this.lineWidth : this.curveWidth;
         this.sizeDrag = { tool: this.tool, startClientX: event.clientX, startSize };
@@ -7095,7 +7115,7 @@ export class GnumarusCanvasEngine {
         return;
       }
       if (this.tool === "loupe") {
-        // Left-drag with the loupe tool zooms: up/right zooms in.
+        // Left-drag with the loupe tool zooms: up zooms in, down zooms out.
         this.loupeZooming = true;
         this.loupeAnchor = { x: event.clientX, y: event.clientY };
         canvas.setPointerCapture(event.pointerId);
@@ -7473,7 +7493,8 @@ export class GnumarusCanvasEngine {
         return;
       }
       if (this.loupeZooming && this.loupeAnchor !== null) {
-        const amount = event.movementX - event.movementY;
+        // Vertical movement only: up zooms in, down zooms out.
+        const amount = -event.movementY;
         if (amount !== 0) {
           this.zoomAtPoint(this.loupeAnchor.x, this.loupeAnchor.y, 1 + amount * 0.004);
         }
@@ -7935,11 +7956,11 @@ export class GnumarusCanvasEngine {
     );
   }
 
-  /** Pointer angle around the image center, clockwise-positive. Null at the center. */
+  /** Pointer angle around the viewport center (ignores canvas pan). Null at the center. */
   private pointerAngle(clientX: number, clientY: number): number | null {
     const rect = this.renderer.domElement.getBoundingClientRect();
-    const dx = clientX - (rect.left + rect.width / 2 + this.panX);
-    const dy = clientY - (rect.top + rect.height / 2 + this.panY);
+    const dx = clientX - (rect.left + rect.width / 2);
+    const dy = clientY - (rect.top + rect.height / 2);
     if (Math.abs(dx) < 1 && Math.abs(dy) < 1) {
       return null;
     }

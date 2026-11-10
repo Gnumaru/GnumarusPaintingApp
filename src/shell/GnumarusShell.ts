@@ -281,6 +281,8 @@ const GNUMARUS_SHORTCUTS: GnumarusShortcutSection[] = [
       { keys: "Ctrl+Alt+=", action: "Zoom in (numpad + also works)" },
       { keys: "Ctrl+Alt+-", action: "Zoom out (numpad - also works)" },
       { keys: "Hold Space and drag", action: "Pan canvas" },
+      { keys: "Hold Ctrl+Space, left-drag up/down", action: "Zoom canvas in/out like the loupe" },
+      { keys: "Hold Shift+Space and left-drag", action: "Rotate canvas like the loupe" },
       { keys: "Shift+Left-drag (pencil, line, curve)", action: "Resize tool live from horizontal movement" },
     ],
   },
@@ -1974,8 +1976,8 @@ export class GnumarusShell extends LitElement {
       </div>
       <dialog id="newDialog">
         <h3>New canvas</h3>
-        <label>Width <input type="number" id="newWidth" min="1" max="1024" .value=${String(this.newWidth)} /></label>
-        <label>Height <input type="number" id="newHeight" min="1" max="1024" .value=${String(this.newHeight)} /></label>
+        <label>Width <input type="number" id="newWidth" min="1" max="16384" .value=${String(this.newWidth)} /></label>
+        <label>Height <input type="number" id="newHeight" min="1" max="16384" .value=${String(this.newHeight)} /></label>
         <div class="dialog-actions">
           <button @click=${(): void => this.closeNewDialog()}>Cancel</button>
           <button @click=${(): void => void this.createNew()}>Create</button>
@@ -7087,8 +7089,8 @@ export class GnumarusShell extends LitElement {
     this.stopPlayback();
     const widthInput = this.shadowRoot?.getElementById("newWidth") as HTMLInputElement | null;
     const heightInput = this.shadowRoot?.getElementById("newHeight") as HTMLInputElement | null;
-    const width = Math.min(1024, Math.max(1, Number(widthInput?.value ?? "64") || 64));
-    const height = Math.min(1024, Math.max(1, Number(heightInput?.value ?? "64") || 64));
+    const width = Math.min(16384, Math.max(1, Number(widthInput?.value ?? "64") || 64));
+    const height = Math.min(16384, Math.max(1, Number(heightInput?.value ?? "64") || 64));
     this.newWidth = Math.floor(width);
     this.newHeight = Math.floor(height);
     this.engine?.newProject(this.newWidth, this.newHeight);
