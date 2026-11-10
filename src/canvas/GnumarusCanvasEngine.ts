@@ -9,6 +9,7 @@ import {
   createPixelBuffer,
   drawCubicBezier,
   drawCubicBezierCoverage,
+  drawBrushStamp,
   drawLineSegment,
   findAlphaBoundingBox,
   GNUMARUS_MAX_TEXTURE_DIM,
@@ -36,36 +37,57 @@ import {
   walkCubicBezierPixels,
 } from "./GnumarusPixelPerfect";
 import {
+  airbrushDabsDue,
+  clampAirbrushRate,
   clampBrushFlow,
+  DEFAULT_AIRBRUSH_RATE,
   clampBrushHardness,
   clampBrushSpacing,
   clampPaintDualScale,
   clampPaintDualStrength,
+  clampPaintDynamicsAmount,
   clampPaintFuzzy,
   clampPaintGrainScale,
   clampPaintGrainStrength,
+  clampPaintSmudgeRate,
+  clampPaintSmudgeWet,
   DEFAULT_BRUSH_FLOW,
   DEFAULT_BRUSH_HARDNESS,
   DEFAULT_BRUSH_SPACING,
   DEFAULT_PAINT_DUAL_SCALE,
   DEFAULT_PAINT_DUAL_STRENGTH,
+  DEFAULT_PAINT_DYNAMICS_AMOUNT,
   DEFAULT_PAINT_FUZZY,
   DEFAULT_PAINT_GRAIN_SCALE,
   DEFAULT_PAINT_GRAIN_STRENGTH,
+  DEFAULT_PAINT_SMUDGE_RATE,
+  DEFAULT_PAINT_SMUDGE_WET,
+  blendDabAngle,
   evalPressureCurve,
+  normalizePointerTilt,
   paintDabFuzzyAlpha,
   paintDabFuzzyOffset,
   paintDabFuzzySize,
   paintSoftDab,
+  paintSpeedFlowGain,
+  paintTiltSizeGain,
   parseBrushTipKind,
   parsePressureCurve,
+  parseSymmetryMode,
+  parseTipAngleMode,
+  mirrorSegmentEnds,
+  smoothStrokeVelocity,
   stampPaintDabCoverage,
   strokeDabPositions,
+  strokeSpeedNorm,
   type GnumarusBrushTipKind,
   type GnumarusPaintDabJitter,
   type GnumarusPaintDualTip,
+  type GnumarusPaintSmudge,
   type GnumarusPaintTipImage,
   type GnumarusPressureCurve,
+  type GnumarusSymmetryMode,
+  type GnumarusTipAngleMode,
 } from "./GnumarusPaintBrush";
 import {
   GNUMARUS_MAX_SELECTION_SKEW,
@@ -87,6 +109,7 @@ import {
   stabilizerDistance,
   stabilizerFollowStep,
   stabilizerRopeStep,
+  stabilizerStringStep,
   type GnumarusStabilizerMode,
 } from "./GnumarusStabilizer";
 import {
@@ -582,6 +605,25 @@ export class GnumarusCanvasEngine {
   private paintGrainStrength = DEFAULT_PAINT_GRAIN_STRENGTH;
   private paintGrainScale = DEFAULT_PAINT_GRAIN_SCALE;
   private paintSeed = 1;
+  private strokeTiltMag = 0;
+  private strokeVelocity = 0;
+  private velocityOverride: number | null = null;
+  private tiltSizeAmount = DEFAULT_PAINT_DYNAMICS_AMOUNT;
+  private speedFadeAmount = DEFAULT_PAINT_DYNAMICS_AMOUNT;
+  private smudgeRate = DEFAULT_PAINT_SMUDGE_RATE;
+  private smudgeWet = DEFAULT_PAINT_SMUDGE_WET;
+  private tipAngleMode: GnumarusTipAngleMode = "none";
+  private strokeDabAngle = 0;
+  private strokeLastMoveT = 0;
+  private strokeLastMovePos: { x: number; y: number } | null = null;
+  private symmetryMode: GnumarusSymmetryMode = "off";
+  private airbrushRate = DEFAULT_AIRBRUSH_RATE;
+  private airbrushTimer: number | null = null;
+  private airbrushCarry = 0;
+  private airbrushLastT = 0;
+  private airbrushAt: { x: number; y: number } | null = null;
+  /** True while a stroke render is queued for the next animation frame. */
+  private strokeRenderScheduled = false;
   private paintTipImage: GnumarusPaintTipImage | null = null;
   private paintDualTip: GnumarusPaintTipImage | null = null;
   private paintDualScale = DEFAULT_PAINT_DUAL_SCALE;
@@ -3786,6 +3828,218 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
+  getTiltSizeAmount(): number {
+    return this.tiltSizeAmount;
+  }
+
+  setTiltSizeAmount(value: number): boolean {
+    const clamped = clampPaintDynamicsAmount(value);
+    if (clamped === this.tiltSizeAmount) {
+      return false;
+    }
+    this.tiltSizeAmount = clamped;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  getSpeedFadeAmount(): number {
+    return this.speedFadeAmount;
+  }
+
+  setSpeedFadeAmount(value: number): boolean {
+    const clamped = clampPaintDynamicsAmount(value);
+    if (clamped === this.speedFadeAmount) {
+      return false;
+    }
+    this.speedFadeAmount = clamped;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  getTipAngleMode(): GnumarusTipAngleMode {
+    return this.tipAngleMode;
+  }
+  setTipAngleMode(mode: GnumarusTipAngleMode): boolean {
+    const parsed = parseTipAngleMode(mode);
+    if (parsed === this.tipAngleMode) {
+      return false;
+    }
+    this.tipAngleMode = parsed;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  getSmudgeRate(): number {
+    return this.smudgeRate;
+  }
+
+  getSmudgeWet(): number {
+    return this.smudgeWet;
+  }
+
+  /** Smudge pickup is an accumulate-path effect; mask strokes ignore it. */
+  setSmudge(rate: number, wet: number): boolean {
+    const clampedRate = clampPaintSmudgeRate(rate);
+    const clampedWet = clampPaintSmudgeWet(wet);
+    if (clampedRate === this.smudgeRate && clampedWet === this.smudgeWet) {
+      return false;
+    }
+    this.smudgeRate = clampedRate;
+    this.smudgeWet = clampedWet;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  getStrokeVelocity(): number {
+    return this.velocityOverride ?? this.strokeVelocity;
+  }
+  /** Test hook: force the stroke velocity reading (null restores measurement). */
+  setStrokeVelocityOverride(value: number | null): void {
+    this.velocityOverride =
+      value === null ? null : Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : null;
+    if (this.velocityOverride !== null) {
+      this.strokeVelocity = this.velocityOverride;
+    }
+    this.emitStats();
+  }
+
+  getSymmetryMode(): GnumarusSymmetryMode {
+    return this.symmetryMode;
+  }
+
+  setSymmetryMode(mode: GnumarusSymmetryMode): boolean {
+    const parsed = parseSymmetryMode(mode);
+    if (parsed === this.symmetryMode) {
+      return false;
+    }
+    this.symmetryMode = parsed;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  getAirbrushRate(): number {
+    return this.airbrushRate;
+  }
+
+  setAirbrushRate(value: number): boolean {
+    const clamped = clampAirbrushRate(value);
+    if (clamped === this.airbrushRate) {
+      return false;
+    }
+    this.airbrushRate = clamped;
+    if (clamped <= 0) {
+      this.stopAirbrush();
+    } else if (this.drawing) {
+      this.startAirbrush();
+    }
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  /** Queue one GPU texture upload for the next animation frame during strokes. */
+  private scheduleStrokeRender(textureId: string): void {
+    this.markTextureViewsDirty(textureId);
+    if (this.strokeRenderScheduled || this.disposed) {
+      return;
+    }
+    this.strokeRenderScheduled = true;
+    requestAnimationFrame(() => {
+      this.strokeRenderScheduled = false;
+      if (this.disposed) {
+        return;
+      }
+      this.render();
+    });
+  }
+
+  /** Render immediately when a stroke ends so no queued upload is lost. */
+  private flushStrokeRender(): void {
+    if (this.strokeRenderScheduled) {
+      this.strokeRenderScheduled = false;
+      this.render();
+    }
+  }
+
+  private startAirbrush(): void {
+    if (this.airbrushTimer !== null || this.airbrushRate <= 0) {
+      return;
+    }
+    this.airbrushCarry = 0;
+    this.airbrushLastT = performance.now();
+    this.airbrushTimer = window.setInterval(() => {
+      this.airbrushTick();
+    }, 50);
+  }
+
+  private stopAirbrush(): void {
+    if (this.airbrushTimer !== null) {
+      window.clearInterval(this.airbrushTimer);
+      this.airbrushTimer = null;
+    }
+    this.airbrushCarry = 0;
+    this.airbrushAt = null;
+  }
+
+  /** Timed dabs while the pointer is held: rate dabs/sec at the last point. */
+  private airbrushTick(): void {
+    if (this.airbrushTimer === null || !this.drawing || this.airbrushRate <= 0) {
+      return;
+    }
+    const at = this.airbrushAt;
+    const layer = this.activeLayer();
+    const tex = this.strokeLayerId === null ? undefined : this.textures.get(this.strokeLayerId);
+    if (at === null || layer === null || tex === undefined) {
+      return;
+    }
+    const now = performance.now();
+    const { count, carryOut } = airbrushDabsDue(now - this.airbrushLastT, this.airbrushRate, this.airbrushCarry);
+    this.airbrushLastT = now;
+    this.airbrushCarry = carryOut;
+    const airbrushAngle = this.tipAngleMode === "direction" ? this.strokeDabAngle : 0;
+    for (let i = 0; i < count; i += 1) {
+      if (this.brushTipKind === "pixel") {
+        drawBrushStamp(
+          tex.buffer, tex.width, tex.height, Math.round(at.x), Math.round(at.y),
+          this.brushSize, this.brushShape, this.pressureBrushColor(), layer.lockedChannels, this.blendMode,
+        );
+        if (this.symmetryMode !== "off") {
+          for (const mirror of mirrorSegmentEnds(
+            Math.round(at.x), Math.round(at.y), Math.round(at.x), Math.round(at.y),
+            tex.width, tex.height, this.symmetryMode,
+          )) {
+            drawBrushStamp(
+              tex.buffer, tex.width, tex.height, mirror.x0, mirror.y0,
+              this.brushSize, this.brushShape, this.pressureBrushColor(), layer.lockedChannels, this.blendMode,
+            );
+          }
+        }
+      } else {
+        this.stampPaintDabAt(tex, layer.lockedChannels, at.x, at.y, airbrushAngle);
+        if (this.symmetryMode !== "off") {
+          if (this.symmetryMode === "mirror-x" || this.symmetryMode === "both") {
+            this.stampPaintDabAt(tex, layer.lockedChannels, tex.width - 1 - at.x, at.y, Math.PI - airbrushAngle);
+          }
+          if (this.symmetryMode === "mirror-y" || this.symmetryMode === "both") {
+            this.stampPaintDabAt(tex, layer.lockedChannels, at.x, tex.height - 1 - at.y, -airbrushAngle);
+          }
+          if (this.symmetryMode === "both") {
+            this.stampPaintDabAt(tex, layer.lockedChannels, tex.width - 1 - at.x, tex.height - 1 - at.y, Math.PI + airbrushAngle);
+          }
+        }
+      }
+    }
+    if (count > 0) {
+      this.scheduleStrokeRender(tex.id);
+      this.onPixelsChanged();
+    }
+  }
+
   getPaintTipImage(): GnumarusPaintTipImage | null {
     return this.paintTipImage;
   }
@@ -3802,6 +4056,33 @@ export class GnumarusCanvasEngine {
     this.strokeDabCarry = 0;
     this.strokeDabIndex = 0;
     this.strokePaintStart = true;
+    this.strokeTiltMag = 0;
+    this.strokeVelocity = 0;
+    this.strokeDabAngle = 0;
+    this.strokeLastMovePos = null;
+    this.strokeLastMoveT = 0;
+  }
+
+  /**
+   * Update tilt magnitude and smoothed stroke velocity from a pointer event
+   * (layer-image position plus the event clock). A test-hook velocity
+   * override replaces the measured value while set.
+   */
+  private trackStrokeMotion(event: PointerEvent, floatPos: { x: number; y: number }): void {
+    this.strokeTiltMag = normalizePointerTilt(event.tiltX ?? 0, event.tiltY ?? 0).magnitude;
+    if (this.velocityOverride !== null) {
+      this.strokeVelocity = this.velocityOverride;
+    } else if (this.strokeLastMovePos !== null) {
+      const dt = event.timeStamp - this.strokeLastMoveT;
+      if (dt > 0) {
+        const dx = floatPos.x - this.strokeLastMovePos.x;
+        const dy = floatPos.y - this.strokeLastMovePos.y;
+        const inst = strokeSpeedNorm(Math.sqrt(dx * dx + dy * dy), dt);
+        this.strokeVelocity = smoothStrokeVelocity(this.strokeVelocity, inst, dt);
+      }
+    }
+    this.strokeLastMoveT = event.timeStamp;
+    this.strokeLastMovePos = { x: floatPos.x, y: floatPos.y };
   }
 
   setPressureResponse(response: GnumarusPressureResponse): boolean {
@@ -3815,11 +4096,11 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
-  /** Pencil size scaled by the current stroke pressure when enabled. */
+  /** Pencil size scaled by the current stroke pressure and tilt when enabled. */
   private pressureBrushSize(): number {
-    const active = this.pressureResponse === "size" || this.pressureResponse === "size+opacity";
-    const gain = active ? evalPressureCurve(this.pressureSizeCurve, this.strokePressure) : 1;
-    return clampBrushSizeFloat(this.brushSize * gain);
+    const pressureActive = this.pressureResponse === "size" || this.pressureResponse === "size+opacity";
+    const pressureGain = pressureActive ? evalPressureCurve(this.pressureSizeCurve, this.strokePressure) : 1;
+    return clampBrushSizeFloat(this.brushSize * pressureGain * paintTiltSizeGain(this.strokeTiltMag, this.tiltSizeAmount));
   }
 
   /** Pencil color with alpha scaled by the current stroke pressure when enabled. */
@@ -3961,10 +4242,18 @@ export class GnumarusCanvasEngine {
     if (this.stabilizerMode === "rope") {
       return stabilizerRopeStep(current, target, this.ropeLength);
     }
+    if (this.stabilizerMode === "string") {
+      return stabilizerStringStep(current, target, this.ropeLength);
+    }
     if (this.stabilizerMode === "follow") {
       return stabilizerFollowStep(current, target, this.followStrength);
     }
     return { x: target.x, y: target.y };
+  }
+
+  /** Follow and string modes converge between events via the catch-up loop. */
+  private stabilizerNeedsLoop(): boolean {
+    return this.stabilizerMode === "follow" || this.stabilizerMode === "string";
   }
 
   getLineWidth(): number {
@@ -4138,6 +4427,55 @@ export class GnumarusCanvasEngine {
   }
 
   /**
+   * Stamp one paint-mode dab at an absolute position with the current stroke
+   * dynamics (fuzzy jitter, flow, speed fade, grain, dual tip, rotation).
+   * Shared by spaced segments and timed airbrush ticks.
+   */
+  private stampPaintDabAt(
+    tex: { buffer: Uint8ClampedArray; width: number; height: number },
+    locked: GnumarusChannelLock,
+    x: number,
+    y: number,
+    angle: number,
+  ): void {
+    const size = this.pressureBrushSize();
+    const color = this.pressureBrushColor();
+    const tipAngle = this.tipAngleMode === "direction" ? angle : 0;
+    const flowGain = paintSpeedFlowGain(this.strokeVelocity, this.speedFadeAmount);
+    const jitter: GnumarusPaintDabJitter = {
+      fuzzy: this.paintFuzzy,
+      seed: this.paintSeed,
+      dabIndex: this.strokeDabIndex,
+      grainStrength: this.paintGrainStrength,
+      grainScale: this.paintGrainScale,
+      grainSeed: this.paintSeed,
+    };
+    const offset = paintDabFuzzyOffset(jitter, size);
+    const dabSize = paintDabFuzzySize(jitter, size);
+    const dabAlpha = this.brushFlow * paintDabFuzzyAlpha(jitter) * flowGain;
+    const dual: GnumarusPaintDualTip | null =
+      this.paintDualTip === null
+        ? null
+        : { tip: this.paintDualTip, scale: this.paintDualScale, strength: this.paintDualStrength };
+    const smudge: GnumarusPaintSmudge | null =
+      this.smudgeRate > 0 ? { rate: this.smudgeRate, wet: this.smudgeWet } : null;
+    if (!this.accumulate && this.strokeBase !== null && this.strokeMask !== null) {
+      stampPaintDabCoverage(
+        this.strokeMask, tex.width, tex.height, x + offset.x, y + offset.y, dabSize,
+        this.brushTipKind, this.brushHardness, this.paintTipImage, dabAlpha, jitter, dual, tipAngle,
+      );
+      this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked, color);
+    } else {
+      paintSoftDab(
+        tex.buffer, tex.width, tex.height, x + offset.x, y + offset.y, dabSize,
+        this.brushTipKind, this.brushHardness, this.paintTipImage, color, dabAlpha,
+        locked, this.blendMode, jitter, dual, tipAngle, smudge,
+      );
+    }
+    this.strokeDabIndex += 1;
+  }
+
+  /**
    * Paint one paint-mode segment (`soft`/`image` tip kinds) with dab spacing.
    * Accumulating strokes stamp each dab onto the texture; non-accumulating
    * strokes build fractional coverage with max-union semantics and repaint
@@ -4152,53 +4490,62 @@ export class GnumarusCanvasEngine {
     y1: number,
   ): void {
     const size = this.pressureBrushSize();
-    const color = this.pressureBrushColor();
+    const firstSegment = this.strokePaintStart;
     const { positions, carryOut } = strokeDabPositions(
       x0, y0, x1, y1, size, this.brushSpacing, this.strokeDabCarry, this.strokePaintStart,
     );
     this.strokeDabCarry = carryOut;
     this.strokePaintStart = false;
-    if (positions.length === 0) {
-      return;
-    }
-    const jitterBase: GnumarusPaintDabJitter = {
-      fuzzy: this.paintFuzzy,
-      seed: this.paintSeed,
-      dabIndex: 0,
-      grainStrength: this.paintGrainStrength,
-      grainScale: this.paintGrainScale,
-      grainSeed: this.paintSeed,
-    };
-    const dual: GnumarusPaintDualTip | null =
-      this.paintDualTip === null
-        ? null
-        : { tip: this.paintDualTip, scale: this.paintDualScale, strength: this.paintDualStrength };
-    if (!this.accumulate && this.strokeBase !== null && this.strokeMask !== null) {
-      for (const dab of positions) {
-        const jitter: GnumarusPaintDabJitter = { ...jitterBase, dabIndex: this.strokeDabIndex };
-        const offset = paintDabFuzzyOffset(jitter, size);
-        const dabSize = paintDabFuzzySize(jitter, size);
-        const dabAlpha = this.brushFlow * paintDabFuzzyAlpha(jitter);
-        stampPaintDabCoverage(
-          this.strokeMask, tex.width, tex.height, dab.x + offset.x, dab.y + offset.y, dabSize,
-          this.brushTipKind, this.brushHardness, this.paintTipImage, dabAlpha, jitter, dual,
-        );
-        this.strokeDabIndex += 1;
+    if (positions.length > 0) {
+      const first = positions[0];
+      const last = positions[positions.length - 1];
+      if (first !== undefined && last !== undefined) {
+        const dx = last.x - first.x;
+        const dy = last.y - first.y;
+        if (dx * dx + dy * dy > 1e-12) {
+          const segAngle = Math.atan2(dy, dx);
+          this.strokeDabAngle = firstSegment ? segAngle : blendDabAngle(this.strokeDabAngle, segAngle, 0.5);
+        }
       }
-      this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked, color);
+    }
+    const baseAngle = this.strokeDabAngle;
+    for (const dab of positions) {
+      this.stampPaintDabAt(tex, locked, dab.x, dab.y, baseAngle);
+      if (this.symmetryMode !== "off") {
+        const w = tex.width;
+        const h = tex.height;
+        if (this.symmetryMode === "mirror-x" || this.symmetryMode === "both") {
+          this.stampPaintDabAt(tex, locked, w - 1 - dab.x, dab.y, Math.PI - baseAngle);
+        }
+        if (this.symmetryMode === "mirror-y" || this.symmetryMode === "both") {
+          this.stampPaintDabAt(tex, locked, dab.x, h - 1 - dab.y, -baseAngle);
+        }
+        if (this.symmetryMode === "both") {
+          this.stampPaintDabAt(tex, locked, w - 1 - dab.x, h - 1 - dab.y, Math.PI + baseAngle);
+        }
+      }
+    }
+  }
+
+  /**
+   * Paint one integer pencil run, mirrored across the symmetry axes when a
+   * symmetry mode is active and pixel perfect is off (the per-stroke
+   * pixel-perfect filter cannot be shared across mirrored runs).
+   */
+  private paintPencilLine(
+    tex: { buffer: Uint8ClampedArray; width: number; height: number },
+    locked: GnumarusChannelLock,
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+  ): void {
+    this.paintPencilLineSingle(tex, locked, x0, y0, x1, y1);
+    if (this.symmetryMode === "off" || this.pencilPixelPerfectActive()) {
       return;
     }
-    for (const dab of positions) {
-      const jitter: GnumarusPaintDabJitter = { ...jitterBase, dabIndex: this.strokeDabIndex };
-      const offset = paintDabFuzzyOffset(jitter, size);
-      const dabSize = paintDabFuzzySize(jitter, size);
-      const dabAlpha = this.brushFlow * paintDabFuzzyAlpha(jitter);
-      paintSoftDab(
-        tex.buffer, tex.width, tex.height, dab.x + offset.x, dab.y + offset.y, dabSize,
-        this.brushTipKind, this.brushHardness, this.paintTipImage, color, dabAlpha,
-        locked, this.blendMode, jitter, dual,
-      );
-      this.strokeDabIndex += 1;
+    for (const mirror of mirrorSegmentEnds(x0, y0, x1, y1, tex.width, tex.height, this.symmetryMode)) {
+      this.paintPencilLineSingle(tex, locked, mirror.x0, mirror.y0, mirror.x1, mirror.y1);
     }
   }
 
@@ -4210,7 +4557,7 @@ export class GnumarusCanvasEngine {
    * or cleared from the union mask) while crossings/revisits always paint.
    * Otherwise uses the standard brush/accumulate paths.
    */
-  private paintPencilLine(
+  private paintPencilLineSingle(
     tex: { buffer: Uint8ClampedArray; width: number; height: number },
     locked: GnumarusChannelLock,
     x0: number,
@@ -5920,39 +6267,55 @@ export class GnumarusCanvasEngine {
       return;
     }
     if (!this.accumulate && this.strokeBase !== null && this.strokeMask !== null) {
-      stampSegmentCoverage(
-        this.strokeMask,
-        tex.width,
-        tex.height,
-        qx0,
-        qy0,
-        qx1,
-        qy1,
-        size,
-        this.brushShape,
-        this.pencilAntialias,
-      );
+      const ends = [
+        { x0: qx0, y0: qy0, x1: qx1, y1: qy1 },
+        ...(this.symmetryMode === "off"
+          ? []
+          : mirrorSegmentEnds(qx0, qy0, qx1, qy1, tex.width, tex.height, this.symmetryMode)),
+      ];
+      for (const end of ends) {
+        stampSegmentCoverage(
+          this.strokeMask,
+          tex.width,
+          tex.height,
+          end.x0,
+          end.y0,
+          end.x1,
+          end.y1,
+          size,
+          this.brushShape,
+          this.pencilAntialias,
+        );
+      }
       this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked, color);
       return;
     }
     // The aliased rasterizer walks integer pixels with Bresenham and only
     // terminates on integer endpoints (see drawCubicBezier).
     // The smoothed path keeps floats.
-    drawLineSegment(
-      tex.buffer,
-      tex.width,
-      tex.height,
-      qx0,
-      qy0,
-      qx1,
-      qy1,
-      size,
-      this.brushShape,
-      this.pencilAntialias,
-      color,
-      locked,
-      this.blendMode,
-    );
+    const lineEnds = [
+      { x0: qx0, y0: qy0, x1: qx1, y1: qy1 },
+      ...(this.symmetryMode === "off"
+        ? []
+        : mirrorSegmentEnds(qx0, qy0, qx1, qy1, tex.width, tex.height, this.symmetryMode)),
+    ];
+    for (const end of lineEnds) {
+      drawLineSegment(
+        tex.buffer,
+        tex.width,
+        tex.height,
+        end.x0,
+        end.y0,
+        end.x1,
+        end.y1,
+        size,
+        this.brushShape,
+        this.pencilAntialias,
+        color,
+        locked,
+        this.blendMode,
+      );
+    }
   }
 
   private stopFollowLoop(): void {
@@ -5963,7 +6326,7 @@ export class GnumarusCanvasEngine {
   }
 
   private ensureFollowLoop(): void {
-    if (this.stabilizerMode !== "follow" || this.followLoopId !== null || this.disposed) {
+    if (!this.stabilizerNeedsLoop() || this.followLoopId !== null || this.disposed) {
       return;
     }
     if (this.stabilizerPos === null || this.stabilizerTarget === null) {
@@ -5979,12 +6342,12 @@ export class GnumarusCanvasEngine {
   }
 
   /**
-   * Catch-up tick for follow mode: the paint focus keeps chasing the last
-   * cursor target even between pointer events, painting while the button
+   * Catch-up tick for follow/string modes: the paint focus keeps chasing the
+   * last cursor target even between pointer events, painting while the button
    * is held and updating only the preview while hovering.
    */
   private followTick(): void {
-    if (this.disposed || this.stabilizerMode !== "follow") {
+    if (this.disposed || !this.stabilizerNeedsLoop()) {
       return;
     }
     const pos = this.stabilizerPos;
@@ -5996,15 +6359,14 @@ export class GnumarusCanvasEngine {
       this.updatePreviews();
       return;
     }
-    const next = stabilizerFollowStep(pos, target, this.followStrength);
+    const next = this.stabilizerStep(pos, target);
     this.stabilizerPos = next;
     if (this.drawing && this.strokeLayerId !== null) {
       const layer = this.activeLayer();
       const tex = this.textures.get(this.strokeLayerId);
       if (layer !== null && tex !== undefined) {
         this.paintStabilizedSegment(tex, layer.lockedChannels, pos, next);
-        this.markTextureViewsDirty(tex.id);
-        this.render();
+        this.scheduleStrokeRender(tex.id);
         this.onPixelsChanged();
       }
     }
@@ -7712,9 +8074,11 @@ export class GnumarusCanvasEngine {
         this.resetPencilPixelPerfect();
         this.resetPaintStroke();
         this.strokePressure = normalizePointerPressure(event.pointerType, event.pressure);
+        this.trackStrokeMotion(event, { x: this.stabilizerPos.x, y: this.stabilizerPos.y });
+        this.airbrushAt = { x: this.stabilizerPos.x, y: this.stabilizerPos.y };
+        this.startAirbrush();
         this.paintStabilizedSegment(tex, layer.lockedChannels, this.stabilizerPos, this.stabilizerPos);
-        this.markTextureViewsDirty(tex.id);
-        this.render();
+        this.scheduleStrokeRender(tex.id);
         this.onPixelsChanged();
         this.onLayersChanged?.();
         this.emitStats();
@@ -7737,9 +8101,11 @@ export class GnumarusCanvasEngine {
       this.resetPencilPixelPerfect();
       this.resetPaintStroke();
       this.strokePressure = normalizePointerPressure(event.pointerType, event.pressure);
+      this.trackStrokeMotion(event, { x: pixel.x, y: pixel.y });
+      this.airbrushAt = { x: pixel.x, y: pixel.y };
+      this.startAirbrush();
       this.paintPencilLine(tex, layer.lockedChannels, pixel.x, pixel.y, pixel.x, pixel.y);
-      this.markTextureViewsDirty(tex.id);
-      this.render();
+      this.scheduleStrokeRender(tex.id);
       this.onPixelsChanged();
       this.onLayersChanged?.();
       this.emitStats();
@@ -7975,12 +8341,13 @@ export class GnumarusCanvasEngine {
               this.stabilizerPos = next;
               if (this.drawing && this.strokeLayerId !== null) {
                 this.strokePressure = normalizePointerPressure(event.pointerType, event.pressure);
+                this.trackStrokeMotion(event, { x: next.x, y: next.y });
+                this.airbrushAt = { x: next.x, y: next.y };
                 const layer = this.activeLayer();
                 const tex = this.strokeLayerId === null ? undefined : this.textures.get(this.strokeLayerId);
                 if (layer !== null && tex !== undefined) {
                   this.paintStabilizedSegment(tex, layer.lockedChannels, prev, next);
-                  this.markTextureViewsDirty(tex.id);
-                  this.render();
+                  this.scheduleStrokeRender(tex.id);
                   this.onPixelsChanged();
                 }
               }
@@ -7989,7 +8356,7 @@ export class GnumarusCanvasEngine {
               this.updatePreviews();
             }
           }
-          if (this.stabilizerMode === "follow") {
+          if (this.stabilizerNeedsLoop()) {
             this.ensureFollowLoop();
           }
         }
@@ -8006,10 +8373,11 @@ export class GnumarusCanvasEngine {
           return;
         }
         this.strokePressure = normalizePointerPressure(event.pointerType, event.pressure);
+        this.trackStrokeMotion(event, { x: pixel.x, y: pixel.y });
+        this.airbrushAt = { x: pixel.x, y: pixel.y };
         this.paintPencilLine(tex, layer.lockedChannels, this.lastPixel.x, this.lastPixel.y, pixel.x, pixel.y);
         this.lastPixel = pixel;
-        this.markTextureViewsDirty(tex.id);
-        this.render();
+        this.scheduleStrokeRender(tex.id);
         this.onPixelsChanged();
       }
       this.emitStats();
@@ -8041,8 +8409,10 @@ export class GnumarusCanvasEngine {
       this.sizeDrag = null;
       this.clearTransformDrags();
       this.resetPencilPixelPerfect();
-      // Keep the stabilizer focus for hover preview; let follow mode converge.
-      if (this.stabilizerMode === "follow") {
+      this.stopAirbrush();
+      this.flushStrokeRender();
+      // Keep the stabilizer focus for hover preview; let follow/string converge.
+      if (this.stabilizerNeedsLoop()) {
         this.ensureFollowLoop();
       }
       this.updatePreviews();

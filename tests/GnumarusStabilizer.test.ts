@@ -3,23 +3,28 @@ import {
   GNUMARUS_DEFAULT_FOLLOW_STRENGTH,
   GNUMARUS_DEFAULT_ROPE_LENGTH,
   GNUMARUS_DEFAULT_STABILIZER_MODE,
+  GNUMARUS_DEFAULT_STRING_PULL,
   clampFollowStrength,
   clampRopeLength,
   parseStabilizerMode,
   stabilizerDistance,
   stabilizerFollowStep,
   stabilizerRopeStep,
+  stabilizerStringStep,
 } from "../src/canvas/GnumarusStabilizer";
 
 describe("parseStabilizerMode", () => {
-  it("accepts none, rope and follow, defaulting to none", () => {
+  it("accepts none, rope, follow and string, defaulting to none", () => {
     expect(parseStabilizerMode("none")).toBe("none");
     expect(parseStabilizerMode("rope")).toBe("rope");
     expect(parseStabilizerMode("follow")).toBe("follow");
+    expect(parseStabilizerMode("string")).toBe("string");
     expect(parseStabilizerMode("ROPE")).toBe("rope");
+    expect(parseStabilizerMode("STRING")).toBe("string");
     expect(parseStabilizerMode("unknown")).toBe("none");
     expect(parseStabilizerMode(undefined)).toBe("none");
     expect(GNUMARUS_DEFAULT_STABILIZER_MODE).toBe("none");
+    expect(GNUMARUS_DEFAULT_STRING_PULL).toBe(0.35);
   });
 });
 
@@ -99,5 +104,20 @@ describe("stabilizerFollowStep", () => {
     }
     expect(pos.x).toBeGreaterThan(99);
     expect(pos.x).toBeLessThanOrEqual(100);
+  });
+});
+
+describe("stabilizerStringStep", () => {
+  it("stays put while the cursor is within the string", () => {
+    expect(stabilizerStringStep({ x: 0, y: 0 }, { x: 5, y: 0 }, 20)).toEqual({ x: 0, y: 0 });
+  });
+
+  it("pulls a fraction of the taut excess (pull 1 matches rope)", () => {
+    const rope = stabilizerRopeStep({ x: 0, y: 0 }, { x: 30, y: 0 }, 20);
+    const string = stabilizerStringStep({ x: 0, y: 0 }, { x: 30, y: 0 }, 20, 1);
+    expect(string.x).toBeCloseTo(rope.x, 10);
+    const soft = stabilizerStringStep({ x: 0, y: 0 }, { x: 30, y: 0 }, 20, 0.5);
+    expect(soft.x).toBeCloseTo(5, 10);
+    expect(soft.x).toBeLessThan(rope.x);
   });
 });

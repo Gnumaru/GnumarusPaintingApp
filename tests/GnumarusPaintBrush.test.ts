@@ -1,36 +1,55 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyPaintDualTip,
+  airbrushDabsDue,
+  blendDabAngle,
+  clampAirbrushRate,
   clampBrushFlow,
   clampBrushHardness,
   clampBrushSpacing,
-  clampPaintFuzzy,
   clampPaintDualScale,
   clampPaintDualStrength,
+  clampPaintDynamicsAmount,
+  clampPaintFuzzy,
   clampPaintGrainScale,
   clampPaintGrainStrength,
   DEFAULT_BRUSH_FLOW,
   DEFAULT_BRUSH_HARDNESS,
   DEFAULT_BRUSH_SPACING,
+  DEFAULT_AIRBRUSH_RATE,
   DEFAULT_PAINT_DUAL_SCALE,
   DEFAULT_PAINT_DUAL_STRENGTH,
   DEFAULT_PAINT_FUZZY,
   DEFAULT_PAINT_GRAIN_SCALE,
   DEFAULT_PAINT_GRAIN_STRENGTH,
-  applyPaintDualTip,
+  DEFAULT_PAINT_SMUDGE_RATE,
+  DEFAULT_PAINT_SMUDGE_WET,
   evalPressureCurve,
   hashDabRandom,
-  parsePressureCurve,
-  paintDabFuzzyAlpha,
-  paintDabFuzzyOffset,
+  normalizePointerTilt,
+  mirrorSegmentEnds,
+  paintDabFuzzyAlpha,  paintDabFuzzyOffset,
   paintDabFuzzySize,
   paintGrainFactor,
   paintGrainValue,
   paintSoftDab,
+  paintSpeedFlowGain,
+  paintTiltSizeGain,
   paintTipImageFromRgba,
   parseBrushTipKind,
+  parsePressureCurve,
+  parseSymmetryMode,
+  parseTipAngleMode,
+  rotateDabUV,
   samplePaintTipAlpha,
+  clampPaintSmudgeRate,
+  clampPaintSmudgeWet,
+  smoothStrokeVelocity,
+  smudgeDabAlpha,
+  smudgeMixColor,
   softTipCoverage,
   strokeDabPositions,
+  strokeSpeedNorm,
   type GnumarusPaintTipImage,
 } from "../src/canvas/GnumarusPaintBrush";
 
@@ -238,5 +257,142 @@ describe("GnumarusPaintBrush", () => {
       undefined, "normal", undefined, { tip: black, scale: 1, strength: 1 },
     );
     expect(Array.from(blocked).every((v) => v === 0)).toBe(true);
+  });
+
+  it("normalizes pointer tilt to magnitude and azimuth", () => {
+    expect(normalizePointerTilt(0, 0)).toEqual({ magnitude: 0, azimuth: 0 });
+    expect(normalizePointerTilt(90, 0).magnitude).toBeCloseTo(1, 9);
+    expect(normalizePointerTilt(45, 0).magnitude).toBeCloseTo(0.5, 9);
+    expect(normalizePointerTilt(200, 0).magnitude).toBe(1);
+    expect(normalizePointerTilt(0, 90).azimuth).toBeCloseTo(Math.PI / 2, 9);
+    expect(normalizePointerTilt(Number.NaN, 0).magnitude).toBe(0);
+    expect(clampPaintDynamicsAmount(0.4)).toBe(0.4);
+    expect(clampPaintDynamicsAmount(3)).toBe(1);
+    expect(clampPaintDynamicsAmount(Number.NaN)).toBe(0);
+  });
+
+  it("tilt grows size and speed fades flow", () => {
+    expect(paintTiltSizeGain(0, 1)).toBe(1);
+    expect(paintTiltSizeGain(1, 1)).toBe(2);
+    expect(paintTiltSizeGain(0.5, 0)).toBe(1);
+    expect(paintSpeedFlowGain(0, 1)).toBe(1);
+    expect(paintSpeedFlowGain(1, 1)).toBe(0);
+    expect(paintSpeedFlowGain(1, 0)).toBe(1);
+    expect(paintSpeedFlowGain(0.5, 0.5)).toBeCloseTo(0.75, 9);
+  });
+
+  it("tracks stroke speed from travel over time", () => {
+    expect(strokeSpeedNorm(0, 10)).toBe(0);
+    expect(strokeSpeedNorm(30, 10)).toBe(1);
+    expect(strokeSpeedNorm(15, 10)).toBeCloseTo(0.5, 9);
+    expect(strokeSpeedNorm(10, 0)).toBe(0);
+    expect(smoothStrokeVelocity(0, 1, 0)).toBe(1);
+    const stepped = smoothStrokeVelocity(0, 1, 120);
+    expect(stepped).toBeGreaterThan(0);
+    expect(stepped).toBeLessThan(1);
+    expect(smoothStrokeVelocity(0.5, 0.5, 50)).toBeCloseTo(0.5, 9);
+  });
+
+  it("rotates tip lookups and blends dab angles on the short arc", () => {
+    expect(parseTipAngleMode("direction")).toBe("direction");
+    expect(parseTipAngleMode("spin")).toBe("none");
+    expect(rotateDabUV(1, 0, 0)).toEqual({ u: 1, v: 0 });
+    const quarter = rotateDabUV(1, 0, Math.PI / 2);
+    expect(quarter.u).toBeCloseTo(0, 9);
+    expect(quarter.v).toBeCloseTo(-1, 9);
+    expect(blendDabAngle(0, Math.PI, 0.5)).toBeCloseTo(Math.PI / 2, 9);
+    // 350° -> 10° blends through 0°, not the long way around.
+    const wrapped = blendDabAngle((350 * Math.PI) / 180, (10 * Math.PI) / 180, 0.5);
+    const normalized = ((wrapped % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    expect(normalized).toBeCloseTo(0, 6);
+  });
+
+  it("tip rotation turns an asymmetric image tip", () => {    const red = { r: 255, g: 0, b: 0, a: 255 };
+    const quadrant = tipOf([0, 255, 0, 0]);
+    const straight = new Uint8ClampedArray(32 * 32 * 4);
+    paintSoftDab(straight, 32, 32, 16, 16, 16, "image", 1, { width: 2, height: 2, alpha: quadrant.alpha }, red, 1);
+    const rotated = new Uint8ClampedArray(32 * 32 * 4);
+    paintSoftDab(
+      rotated, 32, 32, 16, 16, 16, "image", 1, { width: 2, height: 2, alpha: quadrant.alpha },
+      red, 1, undefined, "normal", undefined, undefined, Math.PI / 2,
+    );
+    const straightTop = straight[(12 * 32 + 16) * 4 + 3] ?? 0;
+    const rotatedTop = rotated[(12 * 32 + 16) * 4 + 3] ?? 0;
+    expect(straightTop).toBe(255);
+    expect(rotatedTop).toBe(0);
+  });
+
+  it("airbrush scheduling emits timed dabs with carry", () => {    expect(clampAirbrushRate(10)).toBe(10);
+    expect(clampAirbrushRate(0)).toBe(0);
+    expect(clampAirbrushRate(99)).toBe(20);
+    expect(clampAirbrushRate(-1)).toBe(0);
+    expect(clampAirbrushRate(Number.NaN)).toBe(DEFAULT_AIRBRUSH_RATE);
+    expect(airbrushDabsDue(1000, 10, 0)).toEqual({ count: 10, carryOut: 0 });
+    expect(airbrushDabsDue(0, 10, 0)).toEqual({ count: 0, carryOut: 0 });
+    expect(airbrushDabsDue(1000, 0, 0)).toEqual({ count: 0, carryOut: 0 });
+    const partial = airbrushDabsDue(50, 10, 0);
+    expect(partial.count).toBe(0);
+    expect(partial.carryOut).toBeCloseTo(0.5, 9);
+    const completes = airbrushDabsDue(50, 10, partial.carryOut);
+    expect(completes.count).toBe(1);
+    expect(completes.carryOut).toBeCloseTo(0, 9);
+  });
+
+  it("mirrors segments across texture axes", () => {
+    expect(parseSymmetryMode("mirror-x")).toBe("mirror-x");
+    expect(parseSymmetryMode("mirror-y")).toBe("mirror-y");
+    expect(parseSymmetryMode("both")).toBe("both");
+    expect(parseSymmetryMode("off")).toBe("off");
+    expect(parseSymmetryMode("diagonal")).toBe("off");
+    expect(mirrorSegmentEnds(0, 0, 10, 10, 64, 64, "off")).toEqual([]);
+    expect(mirrorSegmentEnds(16, 32, 16, 32, 64, 64, "mirror-x")).toEqual([
+      { x0: 47, y0: 32, x1: 47, y1: 32 },
+    ]);
+    expect(mirrorSegmentEnds(16, 32, 16, 32, 64, 64, "mirror-y")).toEqual([
+      { x0: 16, y0: 31, x1: 16, y1: 31 },
+    ]);
+    expect(mirrorSegmentEnds(0, 0, 10, 10, 64, 64, "both")).toEqual([
+      { x0: 63, y0: 0, x1: 53, y1: 10 },
+      { x0: 0, y0: 63, x1: 10, y1: 53 },
+      { x0: 63, y0: 63, x1: 53, y1: 53 },
+    ]);
+  });
+
+  it("smudge mixes pickup paint with the brush color", () => {
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    const blue = { r: 0, g: 0, b: 255, a: 255 };
+    expect(smudgeMixColor(red, blue, 0)).toEqual(red);
+    expect(smudgeMixColor(red, blue, 1)).toEqual(blue);
+    expect(smudgeMixColor(red, blue, 0.5)).toEqual({ r: 128, g: 0, b: 128, a: 255 });
+    expect(clampPaintSmudgeRate(2)).toBe(1);
+    expect(clampPaintSmudgeRate(Number.NaN)).toBe(DEFAULT_PAINT_SMUDGE_RATE);
+    expect(clampPaintSmudgeWet(-1)).toBe(0);
+    expect(clampPaintSmudgeWet(Number.NaN)).toBe(DEFAULT_PAINT_SMUDGE_WET);
+    expect(smudgeDabAlpha(0.3, 0)).toBe(0.3);
+    expect(smudgeDabAlpha(0.3, 1)).toBe(1);
+    expect(smudgeDabAlpha(1, 1)).toBe(1);
+  });
+
+  it("dry smudge drags paint instead of laying brush color", () => {
+    const buffer = new Uint8ClampedArray(32 * 32 * 4);
+    buffer[(16 * 32 + 20) * 4] = 255;
+    buffer[(16 * 32 + 20) * 4 + 3] = 255;
+    const blue = { r: 0, g: 0, b: 255, a: 255 };
+    const smeared = new Uint8ClampedArray(buffer);
+    paintSoftDab(
+      smeared, 32, 32, 20, 16, 8, "soft", 1, null, blue, 1,
+      undefined, "normal", undefined, undefined, 0, { rate: 1, wet: 0 },
+    );
+    // Center samples the red texel and paints it instead of blue.
+    const moved = smeared[(16 * 32 + 22) * 4] ?? 0;
+    const movedBlue = smeared[(16 * 32 + 22) * 4 + 2] ?? 0;
+    expect(moved).toBeGreaterThan(movedBlue);
+    // Wet smudge paints mostly brush color.
+    const wet = new Uint8ClampedArray(buffer);
+    paintSoftDab(
+      wet, 32, 32, 16, 16, 8, "soft", 1, null, blue, 1,
+      undefined, "normal", undefined, undefined, 0, { rate: 1, wet: 1 },
+    );
+    expect(wet[(16 * 32 + 16) * 4 + 2]).toBe(255);
   });
 });

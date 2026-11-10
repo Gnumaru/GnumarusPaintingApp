@@ -158,28 +158,48 @@ import {
   type GnumarusStabilizerMode,
 } from "../canvas/GnumarusStabilizer";
 import {
-  DEFAULT_BRUSH_FLOW,
-  DEFAULT_BRUSH_HARDNESS,
+  DEFAULT_AIRBRUSH_RATE,
+  DEFAULT_BRUSH_FLOW,  DEFAULT_BRUSH_HARDNESS,
   DEFAULT_BRUSH_SPACING,
   DEFAULT_PAINT_DUAL_SCALE,
   DEFAULT_PAINT_DUAL_STRENGTH,
+  DEFAULT_PAINT_DYNAMICS_AMOUNT,
   DEFAULT_PAINT_FUZZY,
   DEFAULT_PAINT_GRAIN_SCALE,
   DEFAULT_PAINT_GRAIN_STRENGTH,
+  DEFAULT_PAINT_SMUDGE_RATE,
+  DEFAULT_PAINT_SMUDGE_WET,
+  clampAirbrushRate,
   clampBrushFlow,
   clampBrushHardness,
   clampBrushSpacing,
   clampPaintDualScale,
   clampPaintDualStrength,
+  clampPaintDynamicsAmount,
   clampPaintFuzzy,
   clampPaintGrainScale,
   clampPaintGrainStrength,
+  clampPaintSmudgeRate,
+  clampPaintSmudgeWet,
   paintTipImageFromRgba,
   parseBrushTipKind,
   parsePressureCurve,
+  parseSymmetryMode,
+  parseTipAngleMode,
   type GnumarusBrushTipKind,
   type GnumarusPressureCurve,
+  type GnumarusSymmetryMode,
+  type GnumarusTipAngleMode,
 } from "../canvas/GnumarusPaintBrush";
+import {
+  BRUSH_PRESET_STORAGE_KEY,
+  BUILT_IN_BRUSH_PRESETS,
+  parseBrushPreset,
+  parseBrushPresetList,
+  serializeBrushPreset,
+  serializeBrushPresetList,
+  type GnumarusBrushPreset,
+} from "../canvas/GnumarusBrushPresets";
 import { parseHexToRgbaBytes, rgbaBytesToHex } from "../color/GnumarusColorModels";
 import { type GnumarusTexturePixels } from "../animation/GnumarusAnimationModel";
 import {
@@ -1206,13 +1226,20 @@ export class GnumarusShell extends LitElement {
     renamingFrame: { type: Number },
     brushSize: { type: Number },
     brushShape: { type: String },
+    presetName: { type: String },
     brushTipKind: { type: String },
     brushHardness: { type: Number },
     brushSpacing: { type: Number },
     brushFlow: { type: Number },
-    paintFuzzy: { type: Number },
-    paintGrainStrength: { type: Number },
+    paintFuzzy: { type: Number },    paintGrainStrength: { type: Number },
     paintGrainScale: { type: Number },
+    tiltSizeAmount: { type: Number },
+    speedFadeAmount: { type: Number },
+    tipAngleMode: { type: String },
+    symmetryMode: { type: String },
+    airbrushRate: { type: Number },
+    smudgeRate: { type: Number },
+    smudgeWet: { type: Number },
     paintDualScale: { type: Number },
     paintDualStrength: { type: Number },
     pressureSizeCurve: { type: String },
@@ -1327,6 +1354,8 @@ export class GnumarusShell extends LitElement {
   declare renamingFrame: number | null;
   declare brushSize: number;
   declare brushShape: GnumarusBrushShape;
+  declare presetName: string;
+  declare brushPresets: GnumarusBrushPreset[];
   declare brushTipKind: GnumarusBrushTipKind;
   declare brushHardness: number;
   declare brushSpacing: number;
@@ -1334,6 +1363,13 @@ export class GnumarusShell extends LitElement {
   declare paintFuzzy: number;
   declare paintGrainStrength: number;
   declare paintGrainScale: number;
+  declare tiltSizeAmount: number;
+  declare speedFadeAmount: number;
+  declare tipAngleMode: GnumarusTipAngleMode;
+  declare symmetryMode: GnumarusSymmetryMode;
+  declare airbrushRate: number;
+  declare smudgeRate: number;
+  declare smudgeWet: number;
   declare pressureSizeCurve: GnumarusPressureCurve;
   declare pressureAlphaCurve: GnumarusPressureCurve;
   declare paintDualName: string;
@@ -1457,6 +1493,8 @@ export class GnumarusShell extends LitElement {
     this.renamingFrame = null;
     this.brushSize = 1;
     this.brushShape = "circle";
+    this.presetName = "";
+    this.brushPresets = [];
     this.brushTipKind = "pixel";
     this.brushHardness = DEFAULT_BRUSH_HARDNESS;
     this.brushSpacing = DEFAULT_BRUSH_SPACING;
@@ -1464,6 +1502,13 @@ export class GnumarusShell extends LitElement {
     this.paintFuzzy = DEFAULT_PAINT_FUZZY;
     this.paintGrainStrength = DEFAULT_PAINT_GRAIN_STRENGTH;
     this.paintGrainScale = DEFAULT_PAINT_GRAIN_SCALE;
+    this.tiltSizeAmount = DEFAULT_PAINT_DYNAMICS_AMOUNT;
+    this.speedFadeAmount = DEFAULT_PAINT_DYNAMICS_AMOUNT;
+    this.tipAngleMode = "none";
+    this.symmetryMode = "off";
+    this.airbrushRate = DEFAULT_AIRBRUSH_RATE;
+    this.smudgeRate = DEFAULT_PAINT_SMUDGE_RATE;
+    this.smudgeWet = DEFAULT_PAINT_SMUDGE_WET;
     this.pressureSizeCurve = "linear";
     this.pressureAlphaCurve = "linear";
     this.paintDualName = "";
@@ -3024,13 +3069,14 @@ export class GnumarusShell extends LitElement {
         >
           <option value="none">None</option>
           <option value="rope">Rope</option>
+          <option value="string">String</option>
           <option value="follow">Follow</option>
         </select>
       </label>
-      ${this.stabilizerMode === "rope"
+      ${this.stabilizerMode === "rope" || this.stabilizerMode === "string"
         ? html`
             <label
-              >Rope length
+              >${this.stabilizerMode === "rope" ? "Rope length" : "String length"}
               <input
                 type="number"
                 id="ropeLength"
@@ -3067,6 +3113,31 @@ export class GnumarusShell extends LitElement {
       return html`
         <div class="tool-options" data-testid="tool-options" aria-label="Pencil options" ?hidden=${this.uiHidden}>
           <label
+            >Preset
+            <select id="brushPreset" @change=${(): void => this.applyBrushPresetFromDialog()}>
+              ${[...BUILT_IN_BRUSH_PRESETS, ...this.brushPresets].map(
+                (preset) => html`<option value=${preset.name}>${preset.name}</option>`,
+              )}
+            </select>
+          </label>
+          <label
+            >Preset name
+            <input
+              type="text"
+              id="presetName"
+              maxlength="64"
+              .value=${this.presetName}
+              @input=${(event: Event): void => {
+                this.presetName = (event.target as HTMLInputElement | null)?.value ?? "";
+              }}
+            />
+            <button @click=${(): void => this.saveBrushPresetFromDialog()}>Save</button>
+            <button @click=${(): void => this.deleteBrushPresetFromDialog()}>Delete</button>
+            <button @click=${(): void => this.downloadBrushPreset()}>Export</button>
+            <button @click=${(): void => this.openBrushPresetPicker()}>Import</button>
+            <input type="file" id="brushPresetImport" accept="application/json,.json" hidden @change=${(): void => void this.importBrushPresetFromDialog()} />
+          </label>
+          <label
             >Brush size
             <input
               type="number"
@@ -3083,6 +3154,15 @@ export class GnumarusShell extends LitElement {
             <select id="brushShape" .value=${this.brushShape} @change=${(): void => this.applyBrushShapeFromDialog()}>
               <option value="square">Square</option>
               <option value="circle">Circle</option>
+            </select>
+          </label>
+          <label
+            >Symmetry
+            <select id="symmetryMode" .value=${this.symmetryMode} @change=${(): void => this.applySymmetryModeFromDialog()}>
+              <option value="off">Off</option>
+              <option value="mirror-x">Left-right</option>
+              <option value="mirror-y">Up-down</option>
+              <option value="both">Four-way</option>
             </select>
           </label>
           <label
@@ -3165,6 +3245,73 @@ export class GnumarusShell extends LitElement {
                   step="1"
                   .value=${String(this.paintGrainScale)}
                   @input=${(): void => this.applyPaintGrainFromDialog()}
+                />
+              </label>
+              <label
+                >Tilt size (%)
+                <input
+                  type="number"
+                  id="tiltSizeAmount"
+                  min="0"
+                  max="100"
+                  step="1"
+                  .value=${String(Math.round(this.tiltSizeAmount * 100))}
+                  @input=${(): void => this.applyTiltSizeFromDialog()}
+                />
+              </label>
+              <label
+                >Speed fade (%)
+                <input
+                  type="number"
+                  id="speedFadeAmount"
+                  min="0"
+                  max="100"
+                  step="1"
+                  .value=${String(Math.round(this.speedFadeAmount * 100))}
+                  @input=${(): void => this.applySpeedFadeFromDialog()}
+                />
+              </label>
+              <label
+                >Tip rotation
+                <select id="tipAngleMode" .value=${this.tipAngleMode} @change=${(): void => this.applyTipAngleModeFromDialog()}>
+                  <option value="none">None</option>
+                  <option value="direction">Follow direction</option>
+                </select>
+              </label>
+              <label
+                >Airbrush (dabs/s)
+                <input
+                  type="number"
+                  id="airbrushRate"
+                  min="0"
+                  max="20"
+                  step="1"
+                  .value=${String(this.airbrushRate)}
+                  @input=${(): void => this.applyAirbrushRateFromDialog()}
+                />
+              </label>
+              <label
+                >Smudge (%)
+                <input
+                  type="number"
+                  id="smudgeRate"
+                  min="0"
+                  max="100"
+                  step="1"
+                  .value=${String(Math.round(this.smudgeRate * 100))}
+                  @input=${(): void => this.applySmudgeFromDialog()}
+                />
+              </label>
+              <label
+                >Wetness (%)
+                <input
+                  type="number"
+                  id="smudgeWet"
+                  min="0"
+                  max="100"
+                  step="1"
+                  .value=${String(Math.round(this.smudgeWet * 100))}
+                  @input=${(): void => this.applySmudgeFromDialog()}
                 />
               </label>
               <label
@@ -3668,6 +3815,7 @@ export class GnumarusShell extends LitElement {
     this.storageJpegQuality = storedStorage.jpgQuality;
     const storedExpand = this.loadExpandSettings();
     this.expandStep = storedExpand.step;
+    this.brushPresets = this.loadBrushPresets();
     const host = this.shadowRoot?.getElementById("canvasHost") ?? null;
     if (host === null) {
       this.webglError = "Canvas host is missing.";
@@ -5192,6 +5340,118 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = `Paint seed: ${this.engine?.getPaintSeed() ?? seed}`;
   }
 
+  /** Test hook: set the tilt-size dynamics amount (0..100 percent). */
+  setTiltSizeAmount(percent: number): void {
+    const clamped = clampPaintDynamicsAmount(Number.isFinite(percent) ? percent / 100 : DEFAULT_PAINT_DYNAMICS_AMOUNT);
+    this.tiltSizeAmount = clamped;
+    this.engine?.setTiltSizeAmount(clamped);
+    this.statusMessage = `Tilt size: ${Math.round(clamped * 100)}%`;
+  }
+
+  private applyTiltSizeFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("tiltSizeAmount") as HTMLInputElement | null;
+    const raw = Number(input?.value ?? String(DEFAULT_PAINT_DYNAMICS_AMOUNT * 100));
+    const clamped = clampPaintDynamicsAmount(Number.isFinite(raw) ? raw / 100 : DEFAULT_PAINT_DYNAMICS_AMOUNT);
+    this.tiltSizeAmount = clamped;
+    this.engine?.setTiltSizeAmount(clamped);
+    this.statusMessage = `Tilt size: ${Math.round(clamped * 100)}%`;
+  }
+
+  /** Test hook: set the speed-fade flow loss (0..100 percent). */
+  setSpeedFadeAmount(percent: number): void {
+    const clamped = clampPaintDynamicsAmount(Number.isFinite(percent) ? percent / 100 : DEFAULT_PAINT_DYNAMICS_AMOUNT);
+    this.speedFadeAmount = clamped;
+    this.engine?.setSpeedFadeAmount(clamped);
+    this.statusMessage = `Speed fade: ${Math.round(clamped * 100)}%`;
+  }
+
+  private applySpeedFadeFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("speedFadeAmount") as HTMLInputElement | null;
+    const raw = Number(input?.value ?? String(DEFAULT_PAINT_DYNAMICS_AMOUNT * 100));
+    const clamped = clampPaintDynamicsAmount(Number.isFinite(raw) ? raw / 100 : DEFAULT_PAINT_DYNAMICS_AMOUNT);
+    this.speedFadeAmount = clamped;
+    this.engine?.setSpeedFadeAmount(clamped);
+    this.statusMessage = `Speed fade: ${Math.round(clamped * 100)}%`;
+  }
+
+  /** Test hook: set the tip rotation mode (none/direction). */
+  setTipAngleMode(mode: GnumarusTipAngleMode): void {
+    const parsed = parseTipAngleMode(mode);
+    this.tipAngleMode = parsed;
+    this.engine?.setTipAngleMode(parsed);
+    this.statusMessage = `Tip rotation: ${parsed}`;
+  }
+
+  private applyTipAngleModeFromDialog(): void {
+    const select = this.shadowRoot?.getElementById("tipAngleMode") as HTMLSelectElement | null;
+    const mode = parseTipAngleMode(select?.value ?? "none");
+    this.tipAngleMode = mode;
+    this.engine?.setTipAngleMode(mode);
+    this.statusMessage = `Tip rotation: ${mode}`;
+  }
+
+  /** Test hook: set the symmetry mode (off/mirror-x/mirror-y/both). */
+  setSymmetryMode(mode: GnumarusSymmetryMode): void {
+    const parsed = parseSymmetryMode(mode);
+    this.symmetryMode = parsed;
+    this.engine?.setSymmetryMode(parsed);
+    this.statusMessage = `Symmetry: ${parsed}`;
+  }
+
+  private applySymmetryModeFromDialog(): void {
+    const select = this.shadowRoot?.getElementById("symmetryMode") as HTMLSelectElement | null;
+    const mode = parseSymmetryMode(select?.value ?? "off");
+    this.symmetryMode = mode;
+    this.engine?.setSymmetryMode(mode);
+    this.statusMessage = `Symmetry: ${mode}`;
+  }
+
+  /** Test hook: force the stroke velocity reading (null restores measurement). */
+  setStrokeVelocityOverride(value: number | null): void {
+    this.engine?.setStrokeVelocityOverride(value);
+    this.statusMessage = `Stroke velocity: ${value === null ? "measured" : value}`;
+  }
+
+  /** Test hook: set the airbrush rate in dabs per second (0..20, 0 is off). */
+  setAirbrushRate(rate: number): void {
+    const clamped = clampAirbrushRate(Number.isFinite(rate) ? rate : DEFAULT_AIRBRUSH_RATE);
+    this.airbrushRate = clamped;
+    this.engine?.setAirbrushRate(clamped);
+    this.statusMessage = `Airbrush: ${clamped === 0 ? "off" : `${clamped} dabs/s`}`;
+  }
+
+  private applyAirbrushRateFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("airbrushRate") as HTMLInputElement | null;
+    const raw = Number(input?.value ?? String(DEFAULT_AIRBRUSH_RATE));
+    const clamped = clampAirbrushRate(Number.isFinite(raw) ? raw : DEFAULT_AIRBRUSH_RATE);
+    this.airbrushRate = clamped;
+    this.engine?.setAirbrushRate(clamped);
+    this.statusMessage = `Airbrush: ${clamped === 0 ? "off" : `${clamped} dabs/s`}`;
+  }
+
+  /** Test hook: set smudge pickup rate (0..100 percent) and wetness (0..100). */
+  setSmudge(ratePercent: number, wetPercent: number): void {
+    const rate = clampPaintSmudgeRate(Number.isFinite(ratePercent) ? ratePercent / 100 : DEFAULT_PAINT_SMUDGE_RATE);
+    const wet = clampPaintSmudgeWet(Number.isFinite(wetPercent) ? wetPercent / 100 : DEFAULT_PAINT_SMUDGE_WET);
+    this.smudgeRate = rate;
+    this.smudgeWet = wet;
+    this.engine?.setSmudge(rate, wet);
+    this.statusMessage = `Smudge: ${Math.round(rate * 100)}% / wet ${Math.round(wet * 100)}%`;
+  }
+
+  private applySmudgeFromDialog(): void {
+    const rateInput = this.shadowRoot?.getElementById("smudgeRate") as HTMLInputElement | null;
+    const wetInput = this.shadowRoot?.getElementById("smudgeWet") as HTMLInputElement | null;
+    const rawRate = Number(rateInput?.value ?? String(DEFAULT_PAINT_SMUDGE_RATE * 100));
+    const rawWet = Number(wetInput?.value ?? String(DEFAULT_PAINT_SMUDGE_WET * 100));
+    const rate = clampPaintSmudgeRate(Number.isFinite(rawRate) ? rawRate / 100 : DEFAULT_PAINT_SMUDGE_RATE);
+    const wet = clampPaintSmudgeWet(Number.isFinite(rawWet) ? rawWet / 100 : DEFAULT_PAINT_SMUDGE_WET);
+    this.smudgeRate = rate;
+    this.smudgeWet = wet;
+    this.engine?.setSmudge(rate, wet);
+    this.statusMessage = `Smudge: ${Math.round(rate * 100)}% / wet ${Math.round(wet * 100)}%`;
+  }
+
   /**
    * Test hook: install a dual tip from raw RGBA pixels (row-major).
    * Returns false for invalid dimensions or buffers.
@@ -5224,6 +5484,236 @@ export class GnumarusShell extends LitElement {
     this.engine?.setPaintDualTip(null);
     this.paintDualName = "";
     this.statusMessage = "Dual tip cleared";
+  }
+
+  /** Snapshot the current pencil state as a preset object. */
+  private currentBrushPreset(name: string): GnumarusBrushPreset {
+    return {
+      version: 1,
+      name,
+      brushSize: this.brushSize,
+      brushShape: this.brushShape,
+      brushTipKind: this.brushTipKind,
+      brushHardness: this.brushHardness,
+      brushSpacing: this.brushSpacing,
+      brushFlow: this.brushFlow,
+      pressureResponse: this.pressureResponse,
+      pressureSizeCurve: this.pressureSizeCurve,
+      pressureAlphaCurve: this.pressureAlphaCurve,
+      paintFuzzy: this.paintFuzzy,
+      paintGrainStrength: this.paintGrainStrength,
+      paintGrainScale: this.paintGrainScale,
+      tiltSizeAmount: this.tiltSizeAmount,
+      speedFadeAmount: this.speedFadeAmount,
+      tipAngleMode: this.tipAngleMode,
+      airbrushRate: this.airbrushRate,
+      smudgeRate: this.smudgeRate,
+      smudgeWet: this.smudgeWet,
+      paintDualScale: this.paintDualScale,
+      paintDualStrength: this.paintDualStrength,
+      blendMode: this.blendMode,
+      accumulate: this.accumulate,
+    };
+  }
+
+  /** Apply a preset to the shell fields and the engine. */
+  private applyBrushPreset(preset: GnumarusBrushPreset): void {
+    this.brushSize = preset.brushSize;
+    this.engine?.setBrushSize(preset.brushSize);
+    this.brushShape = preset.brushShape;
+    this.engine?.setBrushShape(preset.brushShape);
+    this.brushTipKind = preset.brushTipKind;
+    this.engine?.setBrushTipKind(preset.brushTipKind);
+    this.brushHardness = preset.brushHardness;
+    this.engine?.setBrushHardness(preset.brushHardness);
+    this.brushSpacing = preset.brushSpacing;
+    this.engine?.setBrushSpacing(preset.brushSpacing);
+    this.brushFlow = preset.brushFlow;
+    this.engine?.setBrushFlow(preset.brushFlow);
+    this.pressureResponse = preset.pressureResponse;
+    this.engine?.setPressureResponse(preset.pressureResponse);
+    this.pressureSizeCurve = preset.pressureSizeCurve;
+    this.engine?.setPressureSizeCurve(preset.pressureSizeCurve);
+    this.pressureAlphaCurve = preset.pressureAlphaCurve;
+    this.engine?.setPressureAlphaCurve(preset.pressureAlphaCurve);
+    this.paintFuzzy = preset.paintFuzzy;
+    this.engine?.setPaintFuzzy(preset.paintFuzzy);
+    this.paintGrainStrength = preset.paintGrainStrength;
+    this.paintGrainScale = preset.paintGrainScale;
+    this.engine?.setPaintGrain(preset.paintGrainStrength, preset.paintGrainScale);
+    this.tiltSizeAmount = preset.tiltSizeAmount;
+    this.engine?.setTiltSizeAmount(preset.tiltSizeAmount);
+    this.speedFadeAmount = preset.speedFadeAmount;
+    this.engine?.setSpeedFadeAmount(preset.speedFadeAmount);
+    this.tipAngleMode = preset.tipAngleMode;
+    this.engine?.setTipAngleMode(preset.tipAngleMode);
+    this.airbrushRate = preset.airbrushRate;
+    this.engine?.setAirbrushRate(preset.airbrushRate);
+    this.smudgeRate = preset.smudgeRate;
+    this.smudgeWet = preset.smudgeWet;
+    this.engine?.setSmudge(preset.smudgeRate, preset.smudgeWet);
+    this.paintDualScale = preset.paintDualScale;
+    this.paintDualStrength = preset.paintDualStrength;
+    this.engine?.setPaintDualTuning(preset.paintDualScale, preset.paintDualStrength);
+    this.blendMode = preset.blendMode;
+    this.engine?.setBlendMode(preset.blendMode);
+    this.accumulate = preset.accumulate;
+    this.engine?.setAccumulate(preset.accumulate);
+    this.statusMessage = `Preset: ${preset.name}`;
+  }
+
+  private allBrushPresets(): GnumarusBrushPreset[] {
+    return [...BUILT_IN_BRUSH_PRESETS, ...this.brushPresets];
+  }
+
+  private applyBrushPresetFromDialog(): void {
+    const select = this.shadowRoot?.getElementById("brushPreset") as HTMLSelectElement | null;
+    const preset = this.allBrushPresets().find((entry) => entry.name === (select?.value ?? ""));
+    if (preset !== undefined) {
+      this.applyBrushPreset(preset);
+    }
+  }
+
+  private loadBrushPresets(): GnumarusBrushPreset[] {
+    try {
+      const stored = window.localStorage.getItem(BRUSH_PRESET_STORAGE_KEY);
+      if (stored !== null) {
+        return parseBrushPresetList(stored);
+      }
+    } catch {
+      // Corrupt or unavailable storage falls back to built-ins only.
+    }
+    return [];
+  }
+
+  private persistBrushPresets(): void {
+    try {
+      window.localStorage.setItem(BRUSH_PRESET_STORAGE_KEY, serializeBrushPresetList(this.brushPresets));
+    } catch {
+      // Storage failures must not break the painting flow.
+    }
+  }
+
+  /** Test hook: list all preset names (built-ins first, then customs). */
+  listBrushPresetNames(): string[] {
+    return this.allBrushPresets().map((preset) => preset.name);
+  }
+
+  /** Save the current pencil state as a custom preset (replaces same-name). */
+  saveBrushPresetAs(name: string): boolean {
+    const trimmed = name.trim().slice(0, 64);
+    if (trimmed.length === 0) {
+      return false;
+    }
+    const preset = this.currentBrushPreset(trimmed);
+    const existing = this.brushPresets.findIndex((entry) => entry.name === trimmed);
+    if (existing >= 0) {
+      this.brushPresets[existing] = preset;
+    } else {
+      this.brushPresets = [...this.brushPresets, preset];
+    }
+    this.persistBrushPresets();
+    this.statusMessage = `Preset saved: ${trimmed}`;
+    return true;
+  }
+
+  /** Delete a custom preset (built-ins are protected). Returns false when missing. */
+  deleteBrushPreset(name: string): boolean {
+    const index = this.brushPresets.findIndex((entry) => entry.name === name);
+    if (index < 0) {
+      return false;
+    }
+    this.brushPresets = this.brushPresets.filter((entry) => entry.name !== name);
+    this.persistBrushPresets();
+    this.statusMessage = `Preset deleted: ${name}`;
+    return true;
+  }
+
+  /** Test hook: import a preset from its JSON text (adds + applies). */
+  importBrushPresetJson(jsonText: string): boolean {
+    try {
+      const preset = parseBrushPreset(jsonText);
+      const existing = this.brushPresets.findIndex((entry) => entry.name === preset.name);
+      if (existing >= 0) {
+        this.brushPresets[existing] = preset;
+      } else {
+        this.brushPresets = [...this.brushPresets, preset];
+      }
+      this.persistBrushPresets();
+      this.applyBrushPreset(preset);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Test hook: export a preset (built-in or custom) as JSON text. */
+  exportBrushPresetJson(name: string): string | null {
+    const preset = this.allBrushPresets().find((entry) => entry.name === name);
+    return preset === undefined ? null : serializeBrushPreset(preset);
+  }
+
+  private saveBrushPresetFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("presetName") as HTMLInputElement | null;
+    const name = input?.value ?? "";
+    if (!this.saveBrushPresetAs(name)) {
+      this.statusMessage = "Preset name must not be empty";
+      return;
+    }
+    const select = this.shadowRoot?.getElementById("brushPreset") as HTMLSelectElement | null;
+    if (select !== null) {
+      select.value = name.trim().slice(0, 64);
+    }
+  }
+
+  private deleteBrushPresetFromDialog(): void {
+    const select = this.shadowRoot?.getElementById("brushPreset") as HTMLSelectElement | null;
+    const name = select?.value ?? "";
+    if (name === "" || !this.deleteBrushPreset(name)) {
+      this.statusMessage = "Only custom presets can be deleted";
+    }
+  }
+
+  private downloadBrushPreset(): void {
+    const select = this.shadowRoot?.getElementById("brushPreset") as HTMLSelectElement | null;
+    const json = this.exportBrushPresetJson(select?.value ?? "");
+    if (json === null) {
+      this.statusMessage = "No preset selected";
+      return;
+    }
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${select?.value ?? "preset"}.gnumarus-brush.json`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    this.statusMessage = "Preset exported";
+  }
+
+  private openBrushPresetPicker(): void {
+    const input = this.shadowRoot?.getElementById("brushPresetImport") as HTMLInputElement | null;
+    input?.click();
+  }
+
+  private async importBrushPresetFromDialog(): Promise<void> {
+    const input = this.shadowRoot?.getElementById("brushPresetImport") as HTMLInputElement | null;
+    const file = input?.files?.[0];
+    if (input !== null) {
+      input.value = "";
+    }
+    if (file === undefined) {
+      return;
+    }
+    try {
+      const text = await file.text();
+      if (!this.importBrushPresetJson(text)) {
+        throw new Error("Invalid brush preset file.");
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.statusMessage = `Preset import failed: ${reason}`;
+    }
   }
 
   private applyPaintDualTuningFromDialog(): void {

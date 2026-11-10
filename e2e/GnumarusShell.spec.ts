@@ -2694,6 +2694,303 @@ test("dual tip masks the primary tip @recent", async ({ page }) => {
   expect(await paintedPixelCount(page)).toBeGreaterThan(0);
 });
 
+async function penTiltDot(
+  page: import("@playwright/test").Page,
+  x: number,
+  y: number,
+  pressure: number,
+  tiltX: number,
+  tiltY: number,
+): Promise<void> {
+  await page.evaluate(
+    ([px, py, p, tx, ty]: number[]) => {
+      const root = document.querySelector("gnumarus-shell")?.shadowRoot ?? null;
+      const target = root?.querySelector("canvas") as HTMLCanvasElement | null;
+      if (target === null) {
+        throw new Error("canvas is missing");
+      }
+      const base = {
+        pointerId: 7,
+        pointerType: "pen",
+        button: 0,
+        clientX: px,
+        clientY: py,
+        tiltX: tx,
+        tiltY: ty,
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+      };
+      target.dispatchEvent(new PointerEvent("pointerdown", { ...base, buttons: 1, pressure: p }));
+      target.dispatchEvent(new PointerEvent("pointerup", { ...base, buttons: 0, pressure: p }));
+    },
+    [x, y, pressure, tiltX, tiltY],
+  );
+}
+
+test("pen tilt broadens dabs with tilt size @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await setPaintTip(page, "soft", 8, 100, 15);
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setTiltSizeAmount(percent: number): void } };
+    };
+    root.__gnumarus?.shell?.setTiltSizeAmount(100);
+  });
+  await stubPenPointerCapture(page);
+  const center = await canvasCenter(page);
+  await penTiltDot(page, center.x, center.y, 1, 0, 0);
+  const straight = await paintedPixelCount(page);
+  await blurActiveElement(page);
+  await page.keyboard.press("Control+z");
+  expect(await paintedPixelCount(page)).toBe(0);
+  await penTiltDot(page, center.x, center.y, 1, 60, 0);
+  const tilted = await paintedPixelCount(page);
+  expect(tilted).toBeGreaterThan(straight);
+});
+
+test("speed fade thins fast-stroke flow @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await setPaintTip(page, "soft", 16, 100, 15);
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        shell?: {
+          setSpeedFadeAmount(percent: number): void;
+          setStrokeVelocityOverride(value: number | null): void;
+        };
+      };
+    };
+    root.__gnumarus?.shell?.setSpeedFadeAmount(100);
+    root.__gnumarus?.shell?.setStrokeVelocityOverride(1);
+  });
+  await stubPenPointerCapture(page);
+  const center = await canvasCenter(page);
+  await penDot(page, center.x, center.y, 1);
+  expect(await paintedPixelCount(page)).toBe(0);
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setStrokeVelocityOverride(value: number | null): void } };
+    };
+    root.__gnumarus?.shell?.setStrokeVelocityOverride(0);
+  });
+  await penDot(page, center.x, center.y, 1);
+  expect(await paintedPixelCount(page)).toBeGreaterThan(0);
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setStrokeVelocityOverride(value: number | null): void } };
+    };
+    root.__gnumarus?.shell?.setStrokeVelocityOverride(null);
+  });
+});
+
+test("dry smudge drags paint instead of laying color @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await setPencil(page, "#0000ff");
+  await setPaintTip(page, "soft", 16, 100, 15);
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setSmudge(ratePercent: number, wetPercent: number): void } };
+    };
+    root.__gnumarus?.shell?.setSmudge(100, 0);
+  });
+  const start = await layerScreenTarget(page, 32, 32);
+  const end = await layerScreenTarget(page, 48, 32);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 8 });
+  await page.mouse.up();
+  const smeared = await readPixel(page, 44, 32);
+  expect(smeared).not.toBeNull();
+  expect(smeared!.r).toBeGreaterThan(150);
+  expect(smeared!.r).toBeGreaterThan(smeared!.b);
+});
+
+test("symmetry mirrors pixel dabs across axes @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setSymmetryMode(mode: string): void } };
+    };
+    root.__gnumarus?.shell?.setSymmetryMode("mirror-x");
+  });
+  const left = await layerScreenTarget(page, 16, 32);
+  await page.mouse.click(left.x, left.y);
+  expect(await readPixel(page, 16, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 47, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setSymmetryMode(mode: string): void } };
+    };
+    root.__gnumarus?.shell?.setSymmetryMode("both");
+  });
+  const corner = await layerScreenTarget(page, 16, 16);
+  await page.mouse.click(corner.x, corner.y);
+  for (const [x, y] of [[16, 16], [47, 16], [16, 47], [47, 47]] as Array<[number, number]>) {
+    expect(await readPixel(page, x, y)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  }
+});
+
+test("brush presets apply, save and persist @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const options = page.locator('gnumarus-shell [aria-label="Pencil options"]');
+  await options.locator("select#brushPreset").selectOption("Chalk");
+  await expect(page.locator("gnumarus-shell")).toContainText("Preset: Chalk");
+  await expect(options.locator("select#brushTipKind")).toHaveValue("soft");
+  await expect(options.locator("input#paintGrainStrength")).toHaveValue("60");
+  await options.locator("input#presetName").fill("E2E Custom");
+  await options.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Preset saved: E2E Custom");
+  await expect(options.locator("select#brushPreset")).toContainText("E2E Custom");
+  await page.reload();
+  await page.waitForSelector("gnumarus-shell canvas");
+  await expect(
+    page.locator('gnumarus-shell [aria-label="Pencil options"] select#brushPreset'),
+  ).toContainText("E2E Custom");
+});
+
+test("brush preset JSON imports and applies @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const imported = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        shell?: {
+          exportBrushPresetJson(name: string): string | null;
+          importBrushPresetJson(json: string): boolean;
+          listBrushPresetNames(): string[];
+        };
+      };
+    };
+    const json = root.__gnumarus?.shell?.exportBrushPresetJson("Chalk") ?? null;
+    if (json === null) {
+      return { ok: false, names: [] as string[] };
+    }
+    const renamed = json.replace('"Chalk"', '"E2E Imported"');
+    const ok = root.__gnumarus?.shell?.importBrushPresetJson(renamed) ?? false;
+    return { ok, names: root.__gnumarus?.shell?.listBrushPresetNames() ?? [] };
+  });
+  expect(imported.ok).toBe(true);
+  expect(imported.names).toContain("E2E Imported");
+  await expect(page.locator("gnumarus-shell")).toContainText("Preset: E2E Imported");
+  const options = page.locator('gnumarus-shell [aria-label="Pencil options"]');
+  await expect(options.locator("input#paintGrainStrength")).toHaveValue("60");
+  expect(await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { importBrushPresetJson(json: string): boolean } };
+    };
+    return root.__gnumarus?.shell?.importBrushPresetJson("definitely not json") ?? true;
+  })).toBe(false);
+});
+
+test("tip rotation follows the stroke direction @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await setPaintTip(page, "image", 16, 100, 15);
+  const installed = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        shell?: {
+          setPaintTipFromPixels(w: number, h: number, rgba: number[]): boolean;
+          setTipAngleMode(mode: string): void;
+        };
+      };
+    };
+    const ok = root.__gnumarus?.shell?.setPaintTipFromPixels(2, 1, [255, 255, 255, 255, 0, 0, 0, 255]) ?? false;
+    root.__gnumarus?.shell?.setTipAngleMode("direction");
+    return ok;
+  });
+  expect(installed).toBe(true);
+  const start = await layerScreenTarget(page, 32, 8);
+  const end = await layerScreenTarget(page, 32, 56);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 8 });
+  await page.mouse.up();
+  expect(await readPixel(page, 32, 26)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("airbrush builds paint up while held @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await setPaintTip(page, "soft", 16, 100, 15);
+  await setPaintDynamics(page, 30, 0, 0, 8);
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setAirbrushRate(rate: number): void } };
+    };
+    root.__gnumarus?.shell?.setAirbrushRate(0);
+  });
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  await page.mouse.move(center.x, center.y);
+  await page.mouse.down();
+  await page.mouse.up();
+  const single = await readPixel(page, 32, 32);
+  expect(single).not.toBeNull();
+  expect(single!.a).toBeGreaterThan(0);
+  expect(single!.a).toBeLessThan(150);
+  await blurActiveElement(page);
+  await page.keyboard.press("Control+z");
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setAirbrushRate(rate: number): void } };
+    };
+    root.__gnumarus?.shell?.setAirbrushRate(20);
+  });
+  await page.mouse.move(center.x, center.y);
+  await page.mouse.down();
+  await page.waitForTimeout(500);
+  await page.mouse.up();
+  const built = await readPixel(page, 32, 32);
+  expect(built).not.toBeNull();
+  expect(built!.a).toBeGreaterThan(150);
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setAirbrushRate(rate: number): void } };
+    };
+    root.__gnumarus?.shell?.setAirbrushRate(0);
+  });
+});
+
+test("string stabilizer paints through its leash @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setStabilizerMode(mode: string): void } };
+    };
+    root.__gnumarus?.shell?.setStabilizerMode("string");
+  });
+  await expect(page.locator("gnumarus-shell select#stabilizerMode")).toHaveValue("string");
+  await expect(page.locator("gnumarus-shell input#ropeLength")).toBeVisible();
+  const start = await layerScreenTarget(page, 8, 32);
+  const end = await layerScreenTarget(page, 56, 32);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 8 });
+  await page.mouse.up();
+  expect(await paintedPixelCount(page)).toBeGreaterThan(0);
+});
+
 test("line tool draws two-click segments with width, shape and aliasing", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

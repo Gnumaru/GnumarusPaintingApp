@@ -251,6 +251,13 @@
 - [x] Phase 3: pressure curves + dual tip (engine/UI/tests)
 - [x] Unit tests (vitest) — 340 passed (previous 326 + 14 paint brush)
 - [x] E2E (@recent only, per policy): 15 passed (previous 7 + soft/feather + spacing gaps + image tip + flow + grain + fuzzy + firm curve + dual); full suite untouched
+- [x] Unit tests (vitest) — 355 passed (previous 340 + presets/dynamics/airbrush/smudge/symmetry/rotation/string)
+- [x] E2E (@recent only, per policy): 24 passed (previous 15 + tilt broaden + speed fade + tip rotation + airbrush buildup + string leash + dry smudge + presets apply/save/persist + preset import + symmetry); full suite untouched
+- [x] Batch A: tilt/velocity dynamics + direction-following tips
+- [x] Batch B: airbrush + pulled-string stabilizer + GPU upload coalescing
+- [x] Batch C: smudge/mixer brush
+- [x] Batch D: brush preset library (shareable JSON)
+- [x] Batch E: symmetry + tip rotation
 - [x] Unit tests (vitest) — 326 passed (previous 324 + clampCropBoxToMin1)
 - [x] E2E (@recent only, per policy): 7 passed (pressure x4 + zoom min + gear + statusbar); shortcuts modal + Meta+z undo/redo + zoom-default-1 assertions green
 - [x] Unit tests (vitest) — 324 passed (previous 319 + zoom settings)

@@ -175,6 +175,8 @@ export function paintSoftDab(  buffer: Uint8ClampedArray,
   blend: GnumarusBlendMode = "normal",
   jitter?: GnumarusPaintDabJitter,
   dual?: GnumarusPaintDualTip | null,
+  tipAngle = 0,
+  smudge?: GnumarusPaintSmudge | null,
 ): void {
   if (!(diameter > 0) || !(alpha > 0)) {
     return;
@@ -184,6 +186,22 @@ export function paintSoftDab(  buffer: Uint8ClampedArray,
   }
   if (tip === "image" && tipImage === null) {
     return;
+  }
+  let dabColor = color;
+  let dabAlpha = alpha;
+  const smudgeRate = smudge === undefined || smudge === null ? 0 : clampPaintSmudgeRate(smudge.rate);
+  if (smudgeRate > 0 && smudge !== undefined && smudge !== null) {
+    const px = Math.min(width - 1, Math.max(0, Math.round(centerX)));
+    const py = Math.min(height - 1, Math.max(0, Math.round(centerY)));
+    const at = (py * width + px) * 4;
+    const pickup: GnumarusRgba = {
+      r: buffer[at] ?? 0,
+      g: buffer[at + 1] ?? 0,
+      b: buffer[at + 2] ?? 0,
+      a: buffer[at + 3] ?? 0,
+    };
+    dabColor = smudgeMixColor(pickup, color, smudge.wet);
+    dabAlpha = smudgeDabAlpha(alpha, smudgeRate);
   }
   const radius = diameter / 2;
   const reach = Math.ceil(radius) + 1;
@@ -199,8 +217,9 @@ export function paintSoftDab(  buffer: Uint8ClampedArray,
       if (coverage <= 0) {
         continue;
       }
+      const lookup = rotateDabUV(u, v, tipAngle);
       if (tip === "image" && tipImage !== null) {
-        coverage *= samplePaintTipAlpha(tipImage, u, v);
+        coverage *= samplePaintTipAlpha(tipImage, lookup.u, lookup.v);
         if (coverage <= 0) {
           continue;
         }
@@ -211,11 +230,11 @@ export function paintSoftDab(  buffer: Uint8ClampedArray,
           continue;
         }
       }
-      coverage = applyPaintDualTip(coverage, dual ?? null, u, v);
+      coverage = applyPaintDualTip(coverage, dual ?? null, lookup.u, lookup.v);
       if (coverage <= 0) {
         continue;
       }
-      blendPixelCoverage(buffer, width, height, x, y, color, coverage * alpha, locked, blend);
+      blendPixelCoverage(buffer, width, height, x, y, dabColor, coverage * dabAlpha, locked, blend);
     }
   }
 }
@@ -239,6 +258,7 @@ export function stampPaintDabCoverage(
   alpha: number,
   jitter?: GnumarusPaintDabJitter,
   dual?: GnumarusPaintDualTip | null,
+  tipAngle = 0,
 ): void {
   if (!(diameter > 0) || !(alpha > 0)) {
     return;
@@ -272,8 +292,9 @@ export function stampPaintDabCoverage(
       if (coverage <= 0) {
         continue;
       }
+      const lookup = rotateDabUV(u, v, tipAngle);
       if (tip === "image" && tipImage !== null) {
-        coverage *= samplePaintTipAlpha(tipImage, u, v);
+        coverage *= samplePaintTipAlpha(tipImage, lookup.u, lookup.v);
         if (coverage <= 0) {
           continue;
         }
@@ -284,7 +305,7 @@ export function stampPaintDabCoverage(
           continue;
         }
       }
-      coverage = applyPaintDualTip(coverage, dual ?? null, u, v);
+      coverage = applyPaintDualTip(coverage, dual ?? null, lookup.u, lookup.v);
       if (coverage <= 0) {
         continue;
       }
@@ -499,4 +520,210 @@ export function applyPaintDualTip(
   const sampled = samplePaintTipAlpha(dual.tip, u / scale, v / scale);
   const strength = clampPaintDualStrength(dual.strength);
   return coverage * (1 - strength * (1 - sampled));
+}
+
+/** Symmetry mode: mirror paint across canvas axes. */
+export type GnumarusSymmetryMode = "off" | "mirror-x" | "mirror-y" | "both";
+
+/** Parse a symmetry mode, defaulting to off. */
+export function parseSymmetryMode(value: unknown): GnumarusSymmetryMode {
+  if (value === "mirror-x" || value === "mirror-y" || value === "both") {
+    return value;
+  }
+  return "off";
+}
+
+/**
+ * Extra endpoint sets for one segment under symmetry: mirror-x flips
+ * left-right, mirror-y flips up-down, both adds all three mirrors.
+ * Coordinates mirror around the texture center (`size - 1 - v`).
+ */
+export function mirrorSegmentEnds(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  width: number,
+  height: number,
+  mode: GnumarusSymmetryMode,
+): Array<{ x0: number; y0: number; x1: number; y1: number }> {
+  const mirrors: Array<{ x0: number; y0: number; x1: number; y1: number }> = [];
+  if (mode === "mirror-x" || mode === "both") {
+    mirrors.push({ x0: width - 1 - x0, y0, x1: width - 1 - x1, y1 });
+  }
+  if (mode === "mirror-y" || mode === "both") {
+    mirrors.push({ x0, y0: height - 1 - y0, x1, y1: height - 1 - y1 });
+  }
+  if (mode === "both") {
+    mirrors.push({
+      x0: width - 1 - x0,
+      y0: height - 1 - y0,
+      x1: width - 1 - x1,
+      y1: height - 1 - y1,
+    });
+  }
+  return mirrors;
+}
+
+/** Airbrush rate in dabs per second (0..20). Default 0 (off). */
+export const DEFAULT_AIRBRUSH_RATE = 0;
+export const GNUMARUS_MAX_AIRBRUSH_RATE = 20;
+
+export function clampAirbrushRate(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_AIRBRUSH_RATE;
+  }
+  return Math.min(GNUMARUS_MAX_AIRBRUSH_RATE, Math.max(0, value));
+}
+
+/**
+ * Timed dabs owed for held-pointer airbrush: rate dabs per second with a
+ * fractional carry so slow rates still emit whole dabs on schedule.
+ */
+export function airbrushDabsDue(
+  elapsedMs: number,
+  ratePerSec: number,
+  carry: number,
+): { count: number; carryOut: number } {
+  const rate = clampAirbrushRate(ratePerSec);
+  if (rate <= 0 || !(elapsedMs > 0)) {
+    return { count: 0, carryOut: Number.isFinite(carry) && carry >= 0 ? carry : 0 };
+  }
+  const total = (elapsedMs / 1000) * rate + (Number.isFinite(carry) && carry >= 0 ? carry : 0);
+  const count = Math.floor(total + 1e-9);
+  return { count, carryOut: total - count };
+}
+
+/** Generic 0..1 dynamics amount (tilt size, speed fade). Default 0 (off). */
+export const DEFAULT_PAINT_DYNAMICS_AMOUNT = 0;
+
+export function clampPaintDynamicsAmount(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_PAINT_DYNAMICS_AMOUNT;
+  }
+  return Math.min(1, Math.max(0, value));
+}
+
+/** Pointer tilt reading: magnitude 0..1 plus azimuth direction. */
+export interface GnumarusPointerTilt {
+  magnitude: number;
+  azimuth: number;
+}
+
+/** Normalize raw tilt degrees (-90..90 per axis) to magnitude/azimuth. */
+export function normalizePointerTilt(tiltX: number, tiltY: number): GnumarusPointerTilt {
+  const x = Number.isFinite(tiltX) ? tiltX : 0;
+  const y = Number.isFinite(tiltY) ? tiltY : 0;
+  return {
+    magnitude: Math.min(1, Math.sqrt(x * x + y * y) / 90),
+    azimuth: Math.atan2(y, x),
+  };
+}
+
+/** Tilt-size gain: dabs grow up to 2x at full tilt with amount 1. */
+export function paintTiltSizeGain(magnitude: number, amount: number): number {
+  const mag = Number.isFinite(magnitude) ? Math.min(1, Math.max(0, magnitude)) : 0;
+  return 1 + clampPaintDynamicsAmount(amount) * mag;
+}
+
+/** Instantaneous stroke speed 0..1 from layer-space travel (saturates at 3 px/ms). */
+export function strokeSpeedNorm(distancePx: number, dtMs: number): number {
+  if (!(distancePx > 0) || !(dtMs > 0)) {
+    return 0;
+  }
+  return Math.min(1, distancePx / dtMs / 3);
+}
+
+/** Smooth a velocity reading with an exponential moving average (tau 120ms). */
+export function smoothStrokeVelocity(previous: number, instantaneous: number, dtMs: number): number {
+  const prev = Number.isFinite(previous) ? Math.min(1, Math.max(0, previous)) : 0;
+  const inst = Number.isFinite(instantaneous) ? Math.min(1, Math.max(0, instantaneous)) : 0;
+  if (!(dtMs > 0)) {
+    return inst;
+  }
+  const alpha = 1 - Math.exp(-dtMs / 120);
+  return prev + (inst - prev) * alpha;
+}
+
+/** Speed-fade flow multiplier: fast strokes lose up to `fade` of flow. */
+export function paintSpeedFlowGain(velocity: number, fade: number): number {
+  const vel = Number.isFinite(velocity) ? Math.min(1, Math.max(0, velocity)) : 0;
+  return 1 - clampPaintDynamicsAmount(fade) * vel;
+}
+
+/** Tip rotation mode: none, or follow the stroke direction. */
+export type GnumarusTipAngleMode = "none" | "direction";
+
+/** Parse a tip rotation mode, defaulting to none. */
+export function parseTipAngleMode(value: unknown): GnumarusTipAngleMode {
+  return value === "direction" ? "direction" : "none";
+}
+
+/** Rotate a normalized tip offset by -angle (dab space into tip space). */
+export function rotateDabUV(u: number, v: number, angle: number): { u: number; v: number } {
+  if (!(Math.abs(angle) > 1e-9)) {
+    return { u, v };
+  }
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  return { u: u * c + v * s, v: v * c - u * s };
+}
+
+/** Blend two angles along the shortest arc (t 0 keeps prev, 1 takes next). */
+export function blendDabAngle(previous: number, next: number, t: number): number {
+  const clamped = Number.isFinite(t) ? Math.min(1, Math.max(0, t)) : 1;
+  let delta = next - previous;
+  while (delta > Math.PI) {
+    delta -= Math.PI * 2;
+  }
+  while (delta < -Math.PI) {
+    delta += Math.PI * 2;
+  }
+  return previous + delta * clamped;
+}
+
+/** Dry/wet smear dynamics: pick up canvas paint into the dab. */
+export interface GnumarusPaintSmudge {
+  /** Smear strength 0..1 (0 disables pickup). */
+  rate: number;
+  /** How much brush color mixes into the picked-up paint (0 = dry). */
+  wet: number;
+}
+
+export const DEFAULT_PAINT_SMUDGE_RATE = 0;
+export const DEFAULT_PAINT_SMUDGE_WET = 0;
+
+export function clampPaintSmudgeRate(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_PAINT_SMUDGE_RATE;
+  }
+  return Math.min(1, Math.max(0, value));
+}
+
+export function clampPaintSmudgeWet(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_PAINT_SMUDGE_WET;
+  }
+  return Math.min(1, Math.max(0, value));
+}
+
+/** Mix picked-up paint with the brush color by wetness (straight alpha). */
+export function smudgeMixColor(pickup: GnumarusRgba, brush: GnumarusRgba, wet: number): GnumarusRgba {
+  const w = clampPaintSmudgeWet(wet);
+  return {
+    r: Math.round(pickup.r + (brush.r - pickup.r) * w),
+    g: Math.round(pickup.g + (brush.g - pickup.g) * w),
+    b: Math.round(pickup.b + (brush.b - pickup.b) * w),
+    a: Math.round(pickup.a + (brush.a - pickup.a) * w),
+  };
+}
+
+/** Effective dab factor with smear: pickup boosts weak flows toward full. */
+export function smudgeDabAlpha(alpha: number, rate: number): number {
+  const r = clampPaintSmudgeRate(rate);
+  if (r <= 0) {
+    return alpha;
+  }
+  const a = Number.isFinite(alpha) ? Math.min(1, Math.max(0, alpha)) : 0;
+  return Math.min(1, a + r * (1 - a));
 }
