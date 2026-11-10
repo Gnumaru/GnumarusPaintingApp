@@ -242,6 +242,11 @@
 - [x] Unit tests (vitest) — 310 passed (previous 307 + reloadBatch undo/redo/skip + buffer equality)
 - [x] E2E test (Playwright): previous 182 + reload unsaved toast + reload restore/skip/undo — 184 passed
 
-- [x] Minimum canvas zoom setting 1..100% (default 25) + matrix gear left of + + matrix yields space first for tiny viewports
+- [x] Minimum canvas zoom setting 1..100% (default 1) + matrix gear left of + + matrix yields space first for tiny viewports
+- [x] Shortcut list audit (Ctrl+E section, Cmd undo/redo, missing mouse gestures + rectselect cancel)
+- [x] Zoom minimum default 1% (settings/engine/tests/e2e/docs)
+- [x] Fit (all) min 1px per dimension clamp + unit tests
+- [x] Unit tests (vitest) — 326 passed (previous 324 + clampCropBoxToMin1)
+- [x] E2E (@recent only, per policy): 7 passed (pressure x4 + zoom min + gear + statusbar); shortcuts modal + Meta+z undo/redo + zoom-default-1 assertions green
 - [x] Unit tests (vitest) — 324 passed (previous 319 + zoom settings)
 - [x] E2E (@recent only, per policy): 3 new tests green (zoom min, gear order, tiny-viewport statusbar) + neighbors green; full suite untouched

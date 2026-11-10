@@ -10,8 +10,8 @@ import {
 } from "../src/settings/GnumarusZoomSettings";
 
 describe("GnumarusZoomSettings", () => {
-  it("defaults the minimum zoom to 25 percent", () => {
-    expect(DEFAULT_ZOOM_SETTINGS).toEqual({ minZoomPercent: 25 });
+  it("defaults the minimum zoom to 1 percent", () => {
+    expect(DEFAULT_ZOOM_SETTINGS).toEqual({ minZoomPercent: 1 });
     expect(GNUMARUS_MIN_ZOOM_PERCENT).toBe(1);
     expect(GNUMARUS_MAX_ZOOM_PERCENT).toBe(100);
   });
@@ -23,8 +23,8 @@ describe("GnumarusZoomSettings", () => {
     expect(clampZoomMinPercent(33.6)).toBe(33);
     expect(clampZoomMinPercent(0)).toBe(1);
     expect(clampZoomMinPercent(101)).toBe(100);
-    expect(clampZoomMinPercent(Number.NaN)).toBe(25);
-    expect(clampZoomMinPercent(Number.POSITIVE_INFINITY)).toBe(25);
+    expect(clampZoomMinPercent(Number.NaN)).toBe(1);
+    expect(clampZoomMinPercent(Number.POSITIVE_INFINITY)).toBe(1);
   });
 
   it("round-trips settings", () => {

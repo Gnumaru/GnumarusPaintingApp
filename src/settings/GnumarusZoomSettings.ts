@@ -4,7 +4,7 @@ export interface GnumarusZoomSettings {
 }
 
 export const DEFAULT_ZOOM_SETTINGS: GnumarusZoomSettings = {
-  minZoomPercent: 25,
+  minZoomPercent: 1,
 };
 
 export const ZOOM_SETTINGS_STORAGE_KEY = "gnumarus.settings.zoom.v1";

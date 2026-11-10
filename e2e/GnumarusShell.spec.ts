@@ -321,13 +321,13 @@ test("minimum zoom is configurable and floors zoom-out @recent", async ({ page }
   await page.getByRole("button", { name: "Edit" }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   const dialog = page.locator("gnumarus-shell dialog#settingsDialog");
-  await expect(dialog.locator("input#zoomMinZoom")).toHaveValue("25");
+  await expect(dialog.locator("input#zoomMinZoom")).toHaveValue("1");
   await dialog.locator("input#zoomMinZoom").fill("10");
   await expect(page.locator("gnumarus-shell")).toContainText("Minimum zoom: 10%");
   const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.zoom.v1"));
   expect(persisted).toContain('"minZoomPercent": 10');
   await dialog.getByRole("button", { name: "Close" }).click();
-  // Ten ×0.8 steps from 100% land near 10.7%: below the old 50% floor.
+  // Ten ×0.8 steps from 100% land near 10.7%: clamped by the 10% setting.
   await page.keyboard.press("1");
   for (let i = 0; i < 10; i += 1) {
     await page.keyboard.press("Control+Alt+-");
@@ -338,7 +338,7 @@ test("minimum zoom is configurable and floors zoom-out @recent", async ({ page }
   await page.getByRole("button", { name: "Edit" }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await page.locator('gnumarus-shell [aria-label="Reset minimum zoom to default"]').click();
-  await expect(dialog.locator("input#zoomMinZoom")).toHaveValue("25");
+  await expect(dialog.locator("input#zoomMinZoom")).toHaveValue("1");
 });
 
 test("matrix corner shows the animation gear left of Add frame @recent", async ({ page }) => {
@@ -481,6 +481,12 @@ test("undo and redo restore image pixels via menu and shortcuts", async ({ page 
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
 
   await page.keyboard.press("Control+y");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+
+  await page.keyboard.press("Meta+z");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+
+  await page.keyboard.press("Meta+Shift+z");
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
 
   await page.getByRole("button", { name: "Edit" }).click();
@@ -4271,8 +4277,15 @@ test("Help menu lists every keyboard shortcut in a modal", async ({ page }) => {
   await expect(dialog).toContainText("Non-destructive cell transform tool");
   await expect(dialog).toContainText("Temporary eyedropper");
   await expect(dialog).toContainText("Merge floating selection into the cell");
+  await expect(dialog).toContainText("Cancel line/curve/rectangular selection in progress");
   await expect(dialog).toContainText("Reset current cell texture to transparent");
   await expect(dialog).toContainText("Resize tool live");
+  await expect(dialog).toContainText("Mouse wheel");
+  await expect(dialog).toContainText("Zoom canvas at cursor");
+  await expect(dialog).toContainText("Alt+middle-click");
+  await expect(dialog).toContainText("Middle-click");
+  await expect(dialog).toContainText("Right-drag");
+  await expect(dialog).toContainText("Cmd+Z");
   await expect(dialog).toContainText("Quick action search");
   await expect(dialog).toContainText("Reset canvas transform (zoom, pan and rotation)");
   await expect(dialog).toContainText("Hide/show all interface chrome");

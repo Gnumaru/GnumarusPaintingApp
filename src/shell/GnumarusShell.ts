@@ -223,19 +223,19 @@ const GNUMARUS_SHORTCUTS: GnumarusShortcutSection[] = [
     title: "File",
     entries: [
       { keys: "Ctrl+S (Cmd+S on macOS)", action: "Save (reuses the chosen folder, otherwise shows the folder picker)" },
-      { keys: "Ctrl+E (Cmd+E on macOS)", action: "Merge active layer down (same as Merge Down)" },
     ],
   },
   {
     title: "History",
     entries: [
-      { keys: "Ctrl+Z", action: "Undo" },
-      { keys: "Ctrl+Y or Shift+Ctrl+Z", action: "Redo" },
+      { keys: "Ctrl+Z (Cmd+Z on macOS)", action: "Undo" },
+      { keys: "Ctrl+Y or Shift+Ctrl+Z (Cmd+Y or Shift+Cmd+Z on macOS)", action: "Redo" },
     ],
   },
   {
     title: "Layers",
     entries: [
+      { keys: "Ctrl+E (Cmd+E on macOS)", action: "Merge active layer down (same as Merge Down)" },
       { keys: "PageUp", action: "Select layer above (wraps around)" },
       { keys: "PageDown", action: "Select layer below (wraps around)" },
       { keys: "ArrowUp", action: "Select layer above (wraps around)" },
@@ -275,7 +275,7 @@ const GNUMARUS_SHORTCUTS: GnumarusShortcutSection[] = [
       { keys: "E", action: "Toggle eraser blend mode" },
       { keys: "Hold Ctrl", action: "Temporary eyedropper (release to restore the previous tool)" },
       { keys: "Enter, Return or Esc", action: "Merge floating selection into the cell" },
-      { keys: "Escape", action: "Cancel line/curve in progress; close menus and rename fields" },
+      { keys: "Escape", action: "Cancel line/curve/rectangular selection in progress; close menus and rename fields" },
     ],
   },
   {
@@ -289,9 +289,13 @@ const GNUMARUS_SHORTCUTS: GnumarusShortcutSection[] = [
       { keys: "5 (main and numpad)", action: "Reset canvas rotation" },
       { keys: "Ctrl+Alt+=", action: "Zoom in (numpad + also works)" },
       { keys: "Ctrl+Alt+-", action: "Zoom out (numpad - also works)" },
-      { keys: "Hold Space and drag", action: "Pan canvas" },
+      { keys: "Hold Space and drag, or middle-drag", action: "Pan canvas" },
+      { keys: "Mouse wheel", action: "Zoom canvas at cursor" },
       { keys: "Hold Ctrl+Space, left-drag up/down", action: "Zoom canvas in/out like the loupe" },
       { keys: "Hold Shift+Space and left-drag", action: "Rotate canvas like the loupe" },
+      { keys: "Alt+middle-click (loupe or cell transform tool)", action: "Reset canvas view or active layer transform" },
+      { keys: "Middle-click (loupe or cell transform tool)", action: "Flip canvas view or active layer (Shift flips vertical)" },
+      { keys: "Right-drag (loupe or cell transform tool)", action: "Rotate canvas view or active layer" },
       { keys: "Shift+Left-drag (pencil, line, curve)", action: "Resize tool live from horizontal movement" },
     ],
   },

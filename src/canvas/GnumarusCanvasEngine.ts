@@ -62,6 +62,7 @@ import {
 import {
   canvasResizeTextureBox,
   canvasVisibleTextureBox,
+  clampCropBoxToMin1,
   GNUMARUS_MAX_LAYER_SKEW,
   IDENTITY_LAYER_TRANSFORM,
   layerImageToProject,
@@ -467,9 +468,9 @@ export interface GnumarusEngineOptions {
 /** Screen pixels of horizontal drag per tool-size unit for shift-drag resizing. */
 export const GNUMARUS_SIZE_DRAG_PX_PER_UNIT = 20;
 
-/** Clamp a view minimum-zoom fraction (0.01..1, default 0.25). */
+/** Clamp a view minimum-zoom fraction (0.01..1, default 0.01). */
 function normalizeViewMinZoom(value: number): number {
-  return Number.isFinite(value) ? Math.min(1, Math.max(0.01, value)) : 0.25;
+  return Number.isFinite(value) ? Math.min(1, Math.max(0.01, value)) : 0.01;
 }
 
 function checkerHexToVec(hex: string): THREE.Vector3 {
@@ -718,7 +719,7 @@ export class GnumarusCanvasEngine {
   private backgroundColor: string;
   private readonly backgroundColorVec: THREE.Vector3;
   private gridMinZoom: number;
-  private viewMinZoom = 0.25;
+  private viewMinZoom = 0.01;
   private gridOpacityPercent: number;
   private readonly gridMaterial: THREE.ShaderMaterial;
   private readonly gridPlane: THREE.Mesh;
@@ -761,7 +762,7 @@ export class GnumarusCanvasEngine {
     this.gridOpacityPercent = clampGridOpacityPercent(
       options.gridOpacityPercent ?? DEFAULT_GRID_SETTINGS.opacityPercent,
     );
-    this.viewMinZoom = normalizeViewMinZoom(options.viewMinZoom ?? 0.25);
+    this.viewMinZoom = normalizeViewMinZoom(options.viewMinZoom ?? 0.01);
     this.imageWidth = 64;
     this.imageHeight = 64;
     this.zoom = 8;
@@ -2741,10 +2742,12 @@ export class GnumarusCanvasEngine {
     }
     this.commitFloatingIfHomeTexture(textureId);
     const limit = Number.isFinite(threshold) ? Math.min(254, Math.max(0, Math.floor(threshold))) : 0;
-    const box = findAlphaBoundingBox(entry.buffer, entry.width, entry.height, limit);
-    if (box === null) {
+    const found = findAlphaBoundingBox(entry.buffer, entry.width, entry.height, limit);
+    if (found === null) {
       return false;
     }
+    // Textures never shrink below 1x1: a degenerate box keeps one row/column.
+    const box = clampCropBoxToMin1(found);
     if (box.left === 0 && box.top === 0 && box.width === entry.width && box.height === entry.height) {
       return false;
     }
@@ -2971,11 +2974,13 @@ export class GnumarusCanvasEngine {
     let unchanged = 0;
     for (const [textureId, entry] of this.textures) {
       this.commitFloatingIfHomeTexture(textureId);
-      const box = findAlphaBoundingBox(entry.buffer, entry.width, entry.height, limit);
-      if (box === null) {
+      const found = findAlphaBoundingBox(entry.buffer, entry.width, entry.height, limit);
+      if (found === null) {
         unchanged += 1;
         continue;
       }
+      // Textures never shrink below 1x1: a degenerate box keeps one row/column.
+      const box = clampCropBoxToMin1(found);
       if (box.left === 0 && box.top === 0 && box.width === entry.width && box.height === entry.height) {
         unchanged += 1;
         continue;
@@ -6405,7 +6410,7 @@ export class GnumarusCanvasEngine {
     return this.bucketFillAt(pixel.x, pixel.y);
   }
 
-  /** Minimum zoom fraction from settings (0.01..1, default 0.25). */
+  /** Minimum zoom fraction from settings (0.01..1, default 0.01). */
   setViewMinZoom(value: number): void {
     this.viewMinZoom = normalizeViewMinZoom(value);
     this.setZoom(this.zoom);
@@ -7959,7 +7964,7 @@ export class GnumarusCanvasEngine {
           return;
         }
       }
-      if (event.ctrlKey && !event.altKey && !event.metaKey && !inField) {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && !inField) {
         const key = event.key.toLowerCase();
         if (key === "z" && !event.shiftKey) {
           event.preventDefault();

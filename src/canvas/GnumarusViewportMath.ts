@@ -324,6 +324,22 @@ export interface GnumarusCropBox {
 }
 
 /**
+ * Clamp a crop box so no dimension drops below 1px: textures are never
+ * smaller than 1x1, so a shrinking action that would compute a 0 width or
+ * height keeps a single row/column instead of failing or emptying the
+ * texture. Position is preserved; callers compare against the entry size
+ * for their own no-op checks.
+ */
+export function clampCropBoxToMin1(box: GnumarusCropBox): GnumarusCropBox {
+  return {
+    left: box.left,
+    top: box.top,
+    width: Math.max(1, Math.floor(box.width)),
+    height: Math.max(1, Math.floor(box.height)),
+  };
+}
+
+/**
  * Float bounds of the canvas area in texture space, by inverse-mapping the
  * four canvas corners. Null when the transform is degenerate.
  */

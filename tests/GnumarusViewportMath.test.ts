@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   canvasResizeTextureBox,
   canvasVisibleTextureBox,
+  clampCropBoxToMin1,
   clampZoom,
   imageToScreenPixel,
   layerImageToProject,
@@ -310,6 +311,27 @@ describe("GnumarusViewportMath", () => {
     expect(canvasResizeTextureBox(64, 64, 32, 32, identity)).toEqual({ left: -16, top: -16, width: 64, height: 64 });
     // Exact cover is returned as-is.
     expect(canvasResizeTextureBox(64, 64, 64, 64, identity)).toEqual({ left: 0, top: 0, width: 64, height: 64 });
+  });
+
+  it("clampCropBoxToMin1 keeps healthy boxes unchanged", () => {
+    expect(clampCropBoxToMin1({ left: 3, top: 2, width: 5, height: 7 })).toEqual({
+      left: 3, top: 2, width: 5, height: 7,
+    });
+    expect(clampCropBoxToMin1({ left: 0, top: 0, width: 1, height: 1 })).toEqual({
+      left: 0, top: 0, width: 1, height: 1,
+    });
+  });
+
+  it("clampCropBoxToMin1 floors degenerate dimensions at 1px", () => {
+    expect(clampCropBoxToMin1({ left: 4, top: 4, width: 0, height: 0 })).toEqual({
+      left: 4, top: 4, width: 1, height: 1,
+    });
+    expect(clampCropBoxToMin1({ left: 2, top: 6, width: 0, height: 9 })).toEqual({
+      left: 2, top: 6, width: 1, height: 9,
+    });
+    expect(clampCropBoxToMin1({ left: 2, top: 6, width: 7, height: 0 })).toEqual({
+      left: 2, top: 6, width: 7, height: 1,
+    });
   });
 
   it("canvasResizeTextureBox returns null outside the canvas or when degenerate", () => {

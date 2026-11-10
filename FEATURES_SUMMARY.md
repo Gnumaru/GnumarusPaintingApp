@@ -12,7 +12,7 @@
 - Non-destructive cell transform: same anchor set over the active layer box (resize scales, skew shears, rotate turns, flip mirrors, center resets to identity); layer transforms carry position, rotation, flips, scale and skew; legacy drags (move/rotate/flip) still work.
 - 3D rotation (`Y`, non-destructive) and destructive 3D rotation (`U`): RGB trackball gizmo (axis rings solid-front/dashed-back, visible axis lines, single-axis handles, center resets only rotations); body drag tilts the sphere in the dragged direction; destructive variant auto-selects, tilts and merges with foreshortening; painting works on tilted layers.
 - Pixel grid over the active layer, following its transform; hidden below 200 percent zoom; minimum zoom configurable 200..6400 percent (default 1000 percent) and opacity 0..100 percent (default 100 percent), in Edit > Settings.
-- Canvas view shortcuts: `4`/`6` (main + numpad) rotate by the configurable step, `5` resets rotation, `1` sets zoom 100%, `2` fits the rotated canvas on screen; rotation step 1..90 degrees, default 15, in Edit > Settings.
+- Canvas view shortcuts: `4`/`6` (main + numpad) rotate by the configurable step, `5` resets rotation, `1` sets zoom 100%, `2` fits the rotated canvas on screen; rotation step 1..90 degrees, default 15, and minimum zoom 1..100 percent, default 1, in Edit > Settings.
 - Shift+Left-drag with pencil/line/curve resizes the tool live from horizontal movement (right bigger, left smaller) with a real-time tip preview; no painting starts.
 - Canvas background: checkerboard (default, configurable) or solid color (configurable) in Edit > Settings.
 - Settings with per-setting reset arrows shown only when non-default.
