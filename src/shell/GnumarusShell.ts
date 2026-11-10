@@ -157,6 +157,29 @@ import {
   parseStabilizerMode,
   type GnumarusStabilizerMode,
 } from "../canvas/GnumarusStabilizer";
+import {
+  DEFAULT_BRUSH_FLOW,
+  DEFAULT_BRUSH_HARDNESS,
+  DEFAULT_BRUSH_SPACING,
+  DEFAULT_PAINT_DUAL_SCALE,
+  DEFAULT_PAINT_DUAL_STRENGTH,
+  DEFAULT_PAINT_FUZZY,
+  DEFAULT_PAINT_GRAIN_SCALE,
+  DEFAULT_PAINT_GRAIN_STRENGTH,
+  clampBrushFlow,
+  clampBrushHardness,
+  clampBrushSpacing,
+  clampPaintDualScale,
+  clampPaintDualStrength,
+  clampPaintFuzzy,
+  clampPaintGrainScale,
+  clampPaintGrainStrength,
+  paintTipImageFromRgba,
+  parseBrushTipKind,
+  parsePressureCurve,
+  type GnumarusBrushTipKind,
+  type GnumarusPressureCurve,
+} from "../canvas/GnumarusPaintBrush";
 import { parseHexToRgbaBytes, rgbaBytesToHex } from "../color/GnumarusColorModels";
 import { type GnumarusTexturePixels } from "../animation/GnumarusAnimationModel";
 import {
@@ -1183,6 +1206,19 @@ export class GnumarusShell extends LitElement {
     renamingFrame: { type: Number },
     brushSize: { type: Number },
     brushShape: { type: String },
+    brushTipKind: { type: String },
+    brushHardness: { type: Number },
+    brushSpacing: { type: Number },
+    brushFlow: { type: Number },
+    paintFuzzy: { type: Number },
+    paintGrainStrength: { type: Number },
+    paintGrainScale: { type: Number },
+    paintDualScale: { type: Number },
+    paintDualStrength: { type: Number },
+    pressureSizeCurve: { type: String },
+    pressureAlphaCurve: { type: String },
+    paintDualName: { type: String },
+    paintTipName: { type: String },
     pressureResponse: { type: String },
     pencilAntialias: { type: Boolean },
     pencilPixelPerfect: { type: Boolean },
@@ -1291,6 +1327,19 @@ export class GnumarusShell extends LitElement {
   declare renamingFrame: number | null;
   declare brushSize: number;
   declare brushShape: GnumarusBrushShape;
+  declare brushTipKind: GnumarusBrushTipKind;
+  declare brushHardness: number;
+  declare brushSpacing: number;
+  declare brushFlow: number;
+  declare paintFuzzy: number;
+  declare paintGrainStrength: number;
+  declare paintGrainScale: number;
+  declare pressureSizeCurve: GnumarusPressureCurve;
+  declare pressureAlphaCurve: GnumarusPressureCurve;
+  declare paintDualName: string;
+  declare paintDualScale: number;
+  declare paintDualStrength: number;
+  declare paintTipName: string;
   declare pressureResponse: GnumarusPressureResponse;
   declare pencilAntialias: boolean;
   declare pencilPixelPerfect: boolean;
@@ -1408,6 +1457,19 @@ export class GnumarusShell extends LitElement {
     this.renamingFrame = null;
     this.brushSize = 1;
     this.brushShape = "circle";
+    this.brushTipKind = "pixel";
+    this.brushHardness = DEFAULT_BRUSH_HARDNESS;
+    this.brushSpacing = DEFAULT_BRUSH_SPACING;
+    this.brushFlow = DEFAULT_BRUSH_FLOW;
+    this.paintFuzzy = DEFAULT_PAINT_FUZZY;
+    this.paintGrainStrength = DEFAULT_PAINT_GRAIN_STRENGTH;
+    this.paintGrainScale = DEFAULT_PAINT_GRAIN_SCALE;
+    this.pressureSizeCurve = "linear";
+    this.pressureAlphaCurve = "linear";
+    this.paintDualName = "";
+    this.paintDualScale = DEFAULT_PAINT_DUAL_SCALE;
+    this.paintDualStrength = DEFAULT_PAINT_DUAL_STRENGTH;
+    this.paintTipName = "";
     this.pressureResponse = "none";
     this.pencilAntialias = false;
     this.pencilPixelPerfect = false;
@@ -3024,6 +3086,132 @@ export class GnumarusShell extends LitElement {
             </select>
           </label>
           <label
+            >Brush tip
+            <select id="brushTipKind" .value=${this.brushTipKind} @change=${(): void => this.applyBrushTipKindFromDialog()}>
+              <option value="pixel">Pixel (hard)</option>
+              <option value="soft">Soft round</option>
+              <option value="image">Image</option>
+            </select>
+          </label>
+          ${this.brushTipKind === "pixel"
+            ? html``
+            : html`<label
+                >Tip softness
+                <input
+                  type="number"
+                  id="brushHardness"
+                  min="0"
+                  max="100"
+                  step="1"
+                  .value=${String(Math.round(this.brushHardness * 100))}
+                  @input=${(): void => this.applyBrushHardnessFromDialog()}
+                />
+              </label>
+              <label
+                >Tip spacing (%)
+                <input
+                  type="number"
+                  id="brushSpacing"
+                  min="5"
+                  max="400"
+                  step="1"
+                  .value=${String(Math.round(this.brushSpacing * 100))}
+                  @input=${(): void => this.applyBrushSpacingFromDialog()}
+                />
+              </label>
+              <label
+                >Flow (%)
+                <input
+                  type="number"
+                  id="brushFlow"
+                  min="1"
+                  max="100"
+                  step="1"
+                  .value=${String(Math.round(this.brushFlow * 100))}
+                  @input=${(): void => this.applyBrushFlowFromDialog()}
+                />
+              </label>
+              <label
+                >Fuzzy (%)
+                <input
+                  type="number"
+                  id="paintFuzzy"
+                  min="0"
+                  max="100"
+                  step="1"
+                  .value=${String(Math.round(this.paintFuzzy * 100))}
+                  @input=${(): void => this.applyPaintFuzzyFromDialog()}
+                />
+              </label>
+              <label
+                >Grain (%)
+                <input
+                  type="number"
+                  id="paintGrainStrength"
+                  min="0"
+                  max="100"
+                  step="1"
+                  .value=${String(Math.round(this.paintGrainStrength * 100))}
+                  @input=${(): void => this.applyPaintGrainFromDialog()}
+                />
+              </label>
+              <label
+                >Grain size (px)
+                <input
+                  type="number"
+                  id="paintGrainScale"
+                  min="2"
+                  max="64"
+                  step="1"
+                  .value=${String(this.paintGrainScale)}
+                  @input=${(): void => this.applyPaintGrainFromDialog()}
+                />
+              </label>
+              <label
+                >Dual tip ${this.paintDualName === "" ? "(none)" : `(${this.paintDualName})`}
+                <input type="file" id="paintDualImport" accept="image/*" hidden @change=${(): void => void this.importPaintDualFromDialog()} />
+                <button @click=${(): void => this.openPaintDualPicker()}>Import dual…</button>
+                ${this.paintDualName === ""
+                  ? html``
+                  : html`<button @click=${(): void => this.clearPaintDual()}>Clear</button>`}
+              </label>
+              ${this.paintDualName === ""
+                ? html``
+                : html`<label
+                    >Dual strength (%)
+                    <input
+                      type="number"
+                      id="paintDualStrength"
+                      min="0"
+                      max="100"
+                      step="1"
+                      .value=${String(Math.round(this.paintDualStrength * 100))}
+                      @input=${(): void => this.applyPaintDualTuningFromDialog()}
+                    />
+                  </label>
+                  <label
+                    >Dual size (%)
+                    <input
+                      type="number"
+                      id="paintDualScale"
+                      min="25"
+                      max="400"
+                      step="1"
+                      .value=${String(Math.round(this.paintDualScale * 100))}
+                      @input=${(): void => this.applyPaintDualTuningFromDialog()}
+                    />
+                  </label>`}`}
+          ${this.brushTipKind === "image"
+            ? html`<label
+                >Image tip ${this.paintTipName === "" ? "(none)" : `(${this.paintTipName})`}
+                <input type="file" id="paintTipImport" accept="image/*" hidden @change=${(): void => void this.importPaintTipFromDialog()} />
+                <button @click=${(): void => this.openPaintTipPicker()}>Import tip…</button>
+                ${this.paintTipName === ""
+                  ? html``
+                  : html`<button @click=${(): void => this.clearPaintTip()}>Clear</button>`}
+              </label>`
+            : html``}
+          <label
             >Pressure response
             <select
               id="pressureResponse"
@@ -3036,6 +3224,32 @@ export class GnumarusShell extends LitElement {
               <option value="size+opacity">Size + opacity</option>
             </select>
           </label>
+          ${this.pressureResponse === "none"
+            ? html``
+            : html`<label
+                >Size curve
+                <select
+                  id="pressureSizeCurve"
+                  .value=${this.pressureSizeCurve}
+                  @change=${(): void => this.applyPressureSizeCurveFromDialog()}
+                >
+                  <option value="linear">Linear</option>
+                  <option value="soft">Soft</option>
+                  <option value="firm">Firm</option>
+                </select>
+              </label>
+              <label
+                >Alpha curve
+                <select
+                  id="pressureAlphaCurve"
+                  .value=${this.pressureAlphaCurve}
+                  @change=${(): void => this.applyPressureAlphaCurveFromDialog()}
+                >
+                  <option value="linear">Linear</option>
+                  <option value="soft">Soft</option>
+                  <option value="firm">Firm</option>
+                </select>
+              </label>`}
           <label
             ><input
               type="checkbox"
@@ -4753,6 +4967,111 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = `Pressure response: ${parsed}`;
   }
 
+  /** Test hook: set the brush tip kind (pixel/soft/image). */
+  setBrushTipKind(kind: GnumarusBrushTipKind): void {
+    const parsed = parseBrushTipKind(kind);
+    this.brushTipKind = parsed;
+    this.engine?.setBrushTipKind(parsed);
+    this.statusMessage = `Brush tip: ${parsed}`;
+  }
+
+  /** Test hook: set the paint tip softness (0..100 percent, clamped). */
+  setBrushHardness(percent: number): void {
+    const clamped = clampBrushHardness(Number.isFinite(percent) ? percent / 100 : DEFAULT_BRUSH_HARDNESS);
+    this.brushHardness = clamped;
+    this.engine?.setBrushHardness(clamped);
+    this.statusMessage = `Tip softness: ${Math.round(clamped * 100)}%`;
+  }
+
+  /** Test hook: set the dab spacing (5..400 percent of the diameter, clamped). */
+  setBrushSpacing(percent: number): void {
+    const clamped = clampBrushSpacing(Number.isFinite(percent) ? percent / 100 : DEFAULT_BRUSH_SPACING);
+    this.brushSpacing = clamped;
+    this.engine?.setBrushSpacing(clamped);
+    this.statusMessage = `Tip spacing: ${Math.round(clamped * 100)}%`;
+  }
+
+  /**
+   * Test hook: install an image tip from raw RGBA pixels (row-major).
+   * Returns false for invalid dimensions or buffers.
+   */
+  setPaintTipFromPixels(width: number, height: number, rgba: number[]): boolean {
+    const tip = paintTipImageFromRgba(new Uint8ClampedArray(rgba), width, height);
+    if (tip === null) {
+      return false;
+    }
+    this.engine?.setPaintTipImage({ width: tip.width, height: tip.height, alpha: tip.alpha });
+    this.paintTipName = `${width}x${height} tip`;
+    this.statusMessage = `Image tip: ${this.paintTipName}`;
+    return true;
+  }
+
+  /** Clear the installed image tip (painting with the image kind then lays nothing). */
+  clearPaintTip(): void {
+    this.engine?.setPaintTipImage(null);
+    this.paintTipName = "";
+    this.statusMessage = "Image tip cleared";
+  }
+
+  private openPaintTipPicker(): void {
+    const input = this.shadowRoot?.getElementById("paintTipImport") as HTMLInputElement | null;
+    input?.click();
+  }
+
+  private async importPaintTipFromDialog(): Promise<void> {
+    const input = this.shadowRoot?.getElementById("paintTipImport") as HTMLInputElement | null;
+    const file = input?.files?.[0];
+    input?.removeAttribute("value");
+    if (input !== null) {
+      input.value = "";
+    }
+    if (file === undefined) {
+      return;
+    }
+    try {
+      const decoded = await decodePngToBuffer(file);
+      const scale = Math.min(1, 128 / Math.max(decoded.width, decoded.height));
+      const targetWidth = Math.max(1, Math.floor(decoded.width * scale)) || 1;
+      const targetHeight = Math.max(1, Math.floor(decoded.height * scale)) || 1;
+      let pixels = decoded.buffer;
+      if (targetWidth !== decoded.width || targetHeight !== decoded.height) {
+        const canvas = document.createElement("canvas");
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        const context = canvas.getContext("2d");
+        if (context === null) {
+          throw new Error("2D canvas is unavailable for tip import.");
+        }
+        const source = document.createElement("canvas");
+        source.width = decoded.width;
+        source.height = decoded.height;
+        const sourceContext = source.getContext("2d");
+        if (sourceContext === null) {
+          throw new Error("2D canvas is unavailable for tip import.");
+        }
+        sourceContext.putImageData(
+          new ImageData(new Uint8ClampedArray(decoded.buffer), decoded.width, decoded.height),
+          0,
+          0,
+        );
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = "high";
+        context.drawImage(source, 0, 0, targetWidth, targetHeight);
+        pixels = context.getImageData(0, 0, targetWidth, targetHeight).data as Uint8ClampedArray;
+      }
+      const tip = paintTipImageFromRgba(new Uint8ClampedArray(pixels), targetWidth, targetHeight);
+      if (tip === null) {
+        throw new Error("Tip image has no pixels.");
+      }
+      this.engine?.setPaintTipImage({ width: tip.width, height: tip.height, alpha: tip.alpha });
+      this.paintTipName = `${file.name} (${tip.width}x${tip.height})`;
+      this.statusMessage = `Image tip: ${this.paintTipName}`;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.statusMessage = `Tip import failed: ${reason}`;
+    }
+  }
+
   private currentDialogBrushSize(): number {
     const input = this.shadowRoot?.getElementById("brushSize") as HTMLInputElement | null;
     const parsed = Number(input?.value ?? "1");
@@ -4778,12 +5097,246 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = `Brush shape: ${shape}`;
   }
 
+  private currentDialogBrushTipKind(): GnumarusBrushTipKind {
+    const select = this.shadowRoot?.getElementById("brushTipKind") as HTMLSelectElement | null;
+    return parseBrushTipKind(select?.value ?? "pixel");
+  }
+
+  private applyBrushTipKindFromDialog(): void {
+    const kind = this.currentDialogBrushTipKind();
+    this.brushTipKind = kind;
+    this.engine?.setBrushTipKind(kind);
+    this.statusMessage = `Brush tip: ${kind}`;
+  }
+
+  private applyBrushHardnessFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("brushHardness") as HTMLInputElement | null;
+    const raw = Number(input?.value ?? String(DEFAULT_BRUSH_HARDNESS * 100));
+    const clamped = clampBrushHardness(Number.isFinite(raw) ? raw / 100 : DEFAULT_BRUSH_HARDNESS);
+    this.brushHardness = clamped;
+    this.engine?.setBrushHardness(clamped);
+    this.statusMessage = `Tip softness: ${Math.round(clamped * 100)}%`;
+  }
+
+  private applyBrushSpacingFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("brushSpacing") as HTMLInputElement | null;
+    const raw = Number(input?.value ?? String(DEFAULT_BRUSH_SPACING * 100));
+    const clamped = clampBrushSpacing(Number.isFinite(raw) ? raw / 100 : DEFAULT_BRUSH_SPACING);
+    this.brushSpacing = clamped;
+    this.engine?.setBrushSpacing(clamped);
+    this.statusMessage = `Tip spacing: ${Math.round(clamped * 100)}%`;
+  }
+
+  /** Test hook: set the per-dab flow (1..100 percent, clamped). */
+  setBrushFlow(percent: number): void {
+    const clamped = clampBrushFlow(Number.isFinite(percent) ? percent / 100 : DEFAULT_BRUSH_FLOW);
+    this.brushFlow = clamped;
+    this.engine?.setBrushFlow(clamped);
+    this.statusMessage = `Flow: ${Math.round(clamped * 100)}%`;
+  }
+
+  private applyBrushFlowFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("brushFlow") as HTMLInputElement | null;
+    const raw = Number(input?.value ?? String(DEFAULT_BRUSH_FLOW * 100));
+    const clamped = clampBrushFlow(Number.isFinite(raw) ? raw / 100 : DEFAULT_BRUSH_FLOW);
+    this.brushFlow = clamped;
+    this.engine?.setBrushFlow(clamped);
+    this.statusMessage = `Flow: ${Math.round(clamped * 100)}%`;
+  }
+
+  /** Test hook: set the fuzzy jitter amount (0..100 percent, clamped). */
+  setPaintFuzzy(percent: number): void {
+    const clamped = clampPaintFuzzy(Number.isFinite(percent) ? percent / 100 : DEFAULT_PAINT_FUZZY);
+    this.paintFuzzy = clamped;
+    this.engine?.setPaintFuzzy(clamped);
+    this.statusMessage = `Fuzzy: ${Math.round(clamped * 100)}%`;
+  }
+
+  private applyPaintFuzzyFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("paintFuzzy") as HTMLInputElement | null;
+    const raw = Number(input?.value ?? String(DEFAULT_PAINT_FUZZY * 100));
+    const clamped = clampPaintFuzzy(Number.isFinite(raw) ? raw / 100 : DEFAULT_PAINT_FUZZY);
+    this.paintFuzzy = clamped;
+    this.engine?.setPaintFuzzy(clamped);
+    this.statusMessage = `Fuzzy: ${Math.round(clamped * 100)}%`;
+  }
+
+  /** Test hook: set the paper grain strength (0..100 percent) and cell size. */
+  setPaintGrain(strengthPercent: number, scalePx: number): void {
+    const strength = clampPaintGrainStrength(
+      Number.isFinite(strengthPercent) ? strengthPercent / 100 : DEFAULT_PAINT_GRAIN_STRENGTH,
+    );
+    const scale = clampPaintGrainScale(scalePx);
+    this.paintGrainStrength = strength;
+    this.paintGrainScale = scale;
+    this.engine?.setPaintGrain(strength, scale);
+    this.statusMessage = `Grain: ${Math.round(strength * 100)}% / ${scale}px`;
+  }
+
+  private applyPaintGrainFromDialog(): void {
+    const strengthInput = this.shadowRoot?.getElementById("paintGrainStrength") as HTMLInputElement | null;
+    const scaleInput = this.shadowRoot?.getElementById("paintGrainScale") as HTMLInputElement | null;
+    const rawStrength = Number(strengthInput?.value ?? String(DEFAULT_PAINT_GRAIN_STRENGTH * 100));
+    const rawScale = Number(scaleInput?.value ?? String(DEFAULT_PAINT_GRAIN_SCALE));
+    const strength = clampPaintGrainStrength(Number.isFinite(rawStrength) ? rawStrength / 100 : DEFAULT_PAINT_GRAIN_STRENGTH);
+    const scale = clampPaintGrainScale(Number.isFinite(rawScale) ? rawScale : DEFAULT_PAINT_GRAIN_SCALE);
+    this.paintGrainStrength = strength;
+    this.paintGrainScale = scale;
+    this.engine?.setPaintGrain(strength, scale);
+    this.statusMessage = `Grain: ${Math.round(strength * 100)}% / ${scale}px`;
+  }
+
+  /** Test hook: set the deterministic paint seed (fuzzy + grain). */
+  setPaintSeed(seed: number): void {
+    this.engine?.setPaintSeed(seed);
+    this.statusMessage = `Paint seed: ${this.engine?.getPaintSeed() ?? seed}`;
+  }
+
+  /**
+   * Test hook: install a dual tip from raw RGBA pixels (row-major).
+   * Returns false for invalid dimensions or buffers.
+   */
+  setPaintDualTipFromPixels(width: number, height: number, rgba: number[]): boolean {
+    const tip = paintTipImageFromRgba(new Uint8ClampedArray(rgba), width, height);
+    if (tip === null) {
+      return false;
+    }
+    this.engine?.setPaintDualTip({ width: tip.width, height: tip.height, alpha: tip.alpha });
+    this.paintDualName = `${width}x${height} dual`;
+    this.statusMessage = `Dual tip: ${this.paintDualName}`;
+    return true;
+  }
+
+  /** Test hook: tune the dual tip size (25..400 percent) and strength (0..100). */
+  setPaintDualTuning(scalePercent: number, strengthPercent: number): void {
+    const scale = clampPaintDualScale(Number.isFinite(scalePercent) ? scalePercent / 100 : DEFAULT_PAINT_DUAL_SCALE);
+    const strength = clampPaintDualStrength(
+      Number.isFinite(strengthPercent) ? strengthPercent / 100 : DEFAULT_PAINT_DUAL_STRENGTH,
+    );
+    this.paintDualScale = scale;
+    this.paintDualStrength = strength;
+    this.engine?.setPaintDualTuning(scale, strength);
+    this.statusMessage = `Dual tip: ${Math.round(strength * 100)}% / ${Math.round(scale * 100)}%`;
+  }
+
+  /** Clear the installed dual tip. */
+  clearPaintDual(): void {
+    this.engine?.setPaintDualTip(null);
+    this.paintDualName = "";
+    this.statusMessage = "Dual tip cleared";
+  }
+
+  private applyPaintDualTuningFromDialog(): void {
+    const strengthInput = this.shadowRoot?.getElementById("paintDualStrength") as HTMLInputElement | null;
+    const scaleInput = this.shadowRoot?.getElementById("paintDualScale") as HTMLInputElement | null;
+    const rawStrength = Number(strengthInput?.value ?? String(DEFAULT_PAINT_DUAL_STRENGTH * 100));
+    const rawScale = Number(scaleInput?.value ?? String(DEFAULT_PAINT_DUAL_SCALE * 100));
+    const scale = clampPaintDualScale(Number.isFinite(rawScale) ? rawScale / 100 : DEFAULT_PAINT_DUAL_SCALE);
+    const strength = clampPaintDualStrength(
+      Number.isFinite(rawStrength) ? rawStrength / 100 : DEFAULT_PAINT_DUAL_STRENGTH,
+    );
+    this.paintDualScale = scale;
+    this.paintDualStrength = strength;
+    this.engine?.setPaintDualTuning(scale, strength);
+    this.statusMessage = `Dual tip: ${Math.round(strength * 100)}% / ${Math.round(scale * 100)}%`;
+  }
+
+  private openPaintDualPicker(): void {
+    const input = this.shadowRoot?.getElementById("paintDualImport") as HTMLInputElement | null;
+    input?.click();
+  }
+
+  private async importPaintDualFromDialog(): Promise<void> {
+    const input = this.shadowRoot?.getElementById("paintDualImport") as HTMLInputElement | null;
+    const file = input?.files?.[0];
+    if (input !== null) {
+      input.value = "";
+    }
+    if (file === undefined) {
+      return;
+    }
+    try {
+      const decoded = await decodePngToBuffer(file);
+      const scale = Math.min(1, 128 / Math.max(decoded.width, decoded.height));
+      const targetWidth = Math.max(1, Math.floor(decoded.width * scale)) || 1;
+      const targetHeight = Math.max(1, Math.floor(decoded.height * scale)) || 1;
+      let pixels = decoded.buffer;
+      if (targetWidth !== decoded.width || targetHeight !== decoded.height) {
+        const canvas = document.createElement("canvas");
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        const context = canvas.getContext("2d");
+        if (context === null) {
+          throw new Error("2D canvas is unavailable for dual import.");
+        }
+        const source = document.createElement("canvas");
+        source.width = decoded.width;
+        source.height = decoded.height;
+        const sourceContext = source.getContext("2d");
+        if (sourceContext === null) {
+          throw new Error("2D canvas is unavailable for dual import.");
+        }
+        sourceContext.putImageData(
+          new ImageData(new Uint8ClampedArray(decoded.buffer), decoded.width, decoded.height),
+          0,
+          0,
+        );
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = "high";
+        context.drawImage(source, 0, 0, targetWidth, targetHeight);
+        pixels = context.getImageData(0, 0, targetWidth, targetHeight).data as Uint8ClampedArray;
+      }
+      const tip = paintTipImageFromRgba(new Uint8ClampedArray(pixels), targetWidth, targetHeight);
+      if (tip === null) {
+        throw new Error("Dual image has no pixels.");
+      }
+      this.engine?.setPaintDualTip({ width: tip.width, height: tip.height, alpha: tip.alpha });
+      this.paintDualName = `${file.name} (${tip.width}x${tip.height})`;
+      this.statusMessage = `Dual tip: ${this.paintDualName}`;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.statusMessage = `Dual import failed: ${reason}`;
+    }
+  }
+
   private applyPressureResponseFromDialog(): void {
     const select = this.shadowRoot?.getElementById("pressureResponse") as HTMLSelectElement | null;
     const response = parsePressureResponse(select?.value ?? "none");
     this.pressureResponse = response;
     this.engine?.setPressureResponse(response);
     this.statusMessage = `Pressure response: ${response}`;
+  }
+
+  /** Test hook: set the pressure curve mapping pressure to size gain. */
+  setPressureSizeCurve(curve: GnumarusPressureCurve): void {
+    const parsed = parsePressureCurve(curve);
+    this.pressureSizeCurve = parsed;
+    this.engine?.setPressureSizeCurve(parsed);
+    this.statusMessage = `Size curve: ${parsed}`;
+  }
+
+  private applyPressureSizeCurveFromDialog(): void {
+    const select = this.shadowRoot?.getElementById("pressureSizeCurve") as HTMLSelectElement | null;
+    const curve = parsePressureCurve(select?.value ?? "linear");
+    this.pressureSizeCurve = curve;
+    this.engine?.setPressureSizeCurve(curve);
+    this.statusMessage = `Size curve: ${curve}`;
+  }
+
+  /** Test hook: set the pressure curve mapping pressure to alpha gain. */
+  setPressureAlphaCurve(curve: GnumarusPressureCurve): void {
+    const parsed = parsePressureCurve(curve);
+    this.pressureAlphaCurve = parsed;
+    this.engine?.setPressureAlphaCurve(parsed);
+    this.statusMessage = `Alpha curve: ${parsed}`;
+  }
+
+  private applyPressureAlphaCurveFromDialog(): void {
+    const select = this.shadowRoot?.getElementById("pressureAlphaCurve") as HTMLSelectElement | null;
+    const curve = parsePressureCurve(select?.value ?? "linear");
+    this.pressureAlphaCurve = curve;
+    this.engine?.setPressureAlphaCurve(curve);
+    this.statusMessage = `Alpha curve: ${curve}`;
   }
 
   /** Test hook: enable or disable pencil anti-aliasing. */

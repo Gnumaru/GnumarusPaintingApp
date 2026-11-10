@@ -2434,6 +2434,266 @@ test("brush shape defaults to circle for pencil, line and curve", async ({ page 
   await expect(page.locator("gnumarus-shell select#curveShape")).toHaveValue("circle");
 });
 
+async function setPaintTip(
+  page: import("@playwright/test").Page,
+  kind: string,
+  size: number,
+  hardness: number,
+  spacing: number,
+): Promise<void> {
+  await page.evaluate(
+    ([which, brushSize, softness, gap]: [string, number, number, number]) => {
+      const root = window as unknown as {
+        __gnumarus?: {
+          shell?: {
+            setBrushTipKind(kind: string): void;
+            setBrushSize(size: number): void;
+            setBrushHardness(percent: number): void;
+            setBrushSpacing(percent: number): void;
+          };
+        };
+      };
+      root.__gnumarus?.shell?.setBrushTipKind(which);
+      root.__gnumarus?.shell?.setBrushSize(brushSize);
+      root.__gnumarus?.shell?.setBrushHardness(softness);
+      root.__gnumarus?.shell?.setBrushSpacing(gap);
+    },
+    [kind, size, hardness, spacing] as [string, number, number, number],
+  );
+}
+
+test("soft brush tip paints with feathered edges @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await setPaintTip(page, "soft", 16, 50, 15);
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  const feather = await readPixel(page, 38, 32);
+  expect(feather).not.toBeNull();
+  expect(feather!.a).toBeGreaterThan(0);
+  expect(feather!.a).toBeLessThan(255);
+});
+
+test("wide tip spacing leaves gaps between dabs @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await setPaintTip(page, "soft", 8, 100, 15);
+  const dense = async (): Promise<number> => {
+    const start = await layerScreenTarget(page, 8, 32);
+    const end = await layerScreenTarget(page, 56, 32);
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(end.x, end.y, { steps: 8 });
+    await page.mouse.up();
+    return paintedPixelCount(page);
+  };
+  const denseCount = await dense();
+  await blurActiveElement(page);
+  await page.keyboard.press("Control+z");
+  expect(await paintedPixelCount(page)).toBe(0);
+  await setPaintTip(page, "soft", 8, 100, 400);
+  const sparseCount = await dense();
+  expect(sparseCount).toBeGreaterThan(0);
+  expect(sparseCount).toBeLessThan(denseCount / 4);
+});
+
+test("image tip masks paint by its luminance @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await setPaintTip(page, "image", 16, 100, 15);
+  const installed = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setPaintTipFromPixels(w: number, h: number, rgba: number[]): boolean } };
+    };
+    return root.__gnumarus?.shell?.setPaintTipFromPixels(2, 1, [255, 255, 255, 255, 0, 0, 0, 255]) ?? false;
+  });
+  expect(installed).toBe(true);
+  await paintCenter(page);
+  const left = await readPixel(page, 26, 32);
+  const right = await readPixel(page, 38, 32);
+  expect(left).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(right).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+});
+
+async function setPaintDynamics(
+  page: import("@playwright/test").Page,
+  flow: number,
+  fuzzy: number,
+  grain: number,
+  grainScale: number,
+): Promise<void> {
+  await page.evaluate(
+    ([flowPct, fuzzyPct, grainPct, scale]: [number, number, number, number]) => {
+      const root = window as unknown as {
+        __gnumarus?: {
+          shell?: {
+            setBrushFlow(percent: number): void;
+            setPaintFuzzy(percent: number): void;
+            setPaintGrain(strengthPercent: number, scalePx: number): void;
+          };
+        };
+      };
+      root.__gnumarus?.shell?.setBrushFlow(flowPct);
+      root.__gnumarus?.shell?.setPaintFuzzy(fuzzyPct);
+      root.__gnumarus?.shell?.setPaintGrain(grainPct, scale);
+    },
+    [flow, fuzzy, grain, grainScale] as [number, number, number, number],
+  );
+}
+
+test("low flow paints translucent dabs @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await setPaintTip(page, "soft", 16, 100, 15);
+  await setPaintDynamics(page, 30, 0, 0, 8);
+  await paintCenter(page);
+  const center = await readPixel(page, 32, 32);
+  expect(center).not.toBeNull();
+  expect(center!.a).toBeGreaterThan(0);
+  expect(center!.a).toBeLessThan(255);
+});
+
+test("paper grain varies dab alpha across pixels @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await setPaintTip(page, "image", 16, 100, 15);
+  const installed = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setPaintTipFromPixels(w: number, h: number, rgba: number[]): boolean } };
+    };
+    const rgba: number[] = [];
+    for (let i = 0; i < 16; i += 1) {
+      rgba.push(255, 255, 255, 255);
+    }
+    return root.__gnumarus?.shell?.setPaintTipFromPixels(4, 4, rgba) ?? false;
+  });
+  expect(installed).toBe(true);
+  await setPaintDynamics(page, 100, 0, 100, 2);
+  await paintCenter(page);
+  const alphas: number[] = [];
+  for (const x of [31, 32, 33]) {
+    const pixel = await readPixel(page, x, 32);
+    expect(pixel).not.toBeNull();
+    alphas.push(pixel!.a);
+  }
+  expect(new Set(alphas).size).toBeGreaterThan(1);
+});
+
+test("fuzzy jitter changes the footprint deterministically @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await setPaintTip(page, "soft", 8, 100, 100);
+  await setPaintDynamics(page, 100, 0, 0, 8);
+  const stroke = async (): Promise<number> => {
+    const start = await layerScreenTarget(page, 8, 32);
+    const end = await layerScreenTarget(page, 56, 32);
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(end.x, end.y, { steps: 8 });
+    await page.mouse.up();
+    return paintedPixelCount(page);
+  };
+  const plain = await stroke();
+  await blurActiveElement(page);
+  await page.keyboard.press("Control+z");
+  expect(await paintedPixelCount(page)).toBe(0);
+  await setPaintDynamics(page, 100, 100, 0, 8);
+  const fuzzyOnce = await stroke();
+  await blurActiveElement(page);
+  await page.keyboard.press("Control+z");
+  expect(await paintedPixelCount(page)).toBe(0);
+  const fuzzyTwice = await stroke();
+  expect(fuzzyTwice).toBe(fuzzyOnce);
+  expect(fuzzyTwice).not.toBe(plain);
+});
+
+test("firm pressure curve paints smaller than linear @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        shell?: {
+          setBrushSize(size: number): void;
+          setPressureResponse(response: string): void;
+          setPressureSizeCurve(curve: string): void;
+        };
+      };
+    };
+    root.__gnumarus?.shell?.setBrushSize(10);
+    root.__gnumarus?.shell?.setPressureResponse("size");
+    root.__gnumarus?.shell?.setPressureSizeCurve("linear");
+  });
+  await stubPenPointerCapture(page);
+  const center = await canvasCenter(page);
+  await penDot(page, center.x, center.y, 0.5);
+  const linearCount = await paintedPixelCount(page);
+  await blurActiveElement(page);
+  await page.keyboard.press("Control+z");
+  expect(await paintedPixelCount(page)).toBe(0);
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setPressureSizeCurve(curve: string): void } };
+    };
+    root.__gnumarus?.shell?.setPressureSizeCurve("firm");
+  });
+  await penDot(page, center.x, center.y, 0.5);
+  const firmCount = await paintedPixelCount(page);
+  expect(firmCount).toBeGreaterThan(0);
+  expect(firmCount).toBeLessThan(linearCount);
+});
+
+test("dual tip masks the primary tip @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await setPaintTip(page, "soft", 16, 100, 15);
+  await setPaintDynamics(page, 100, 0, 0, 8);
+  const installed = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        shell?: {
+          setPaintTipFromPixels(w: number, h: number, rgba: number[]): boolean;
+          setPaintDualTipFromPixels(w: number, h: number, rgba: number[]): boolean;
+        };
+      };
+    };
+    const white: number[] = [];
+    const black: number[] = [];
+    for (let i = 0; i < 16; i += 1) {
+      white.push(255, 255, 255, 255);
+      black.push(0, 0, 0, 255);
+    }
+    const primary = root.__gnumarus?.shell?.setPaintTipFromPixels(4, 4, white) ?? false;
+    const dual = root.__gnumarus?.shell?.setPaintDualTipFromPixels(4, 4, black) ?? false;
+    return primary && dual;
+  });
+  expect(installed).toBe(true);
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setBrushTipKind(kind: string): void } };
+    };
+    root.__gnumarus?.shell?.setBrushTipKind("image");
+  });
+  await paintCenter(page);
+  expect(await paintedPixelCount(page)).toBe(0);
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { clearPaintDual(): void } };
+    };
+    root.__gnumarus?.shell?.clearPaintDual();
+  });
+  await paintCenter(page);
+  expect(await paintedPixelCount(page)).toBeGreaterThan(0);
+});
+
 test("line tool draws two-click segments with width, shape and aliasing", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

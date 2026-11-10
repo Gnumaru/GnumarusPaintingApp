@@ -18,8 +18,6 @@ import {
   normalizePointerPressure,
   parseBrushShape,
   parsePressureResponse,
-  pressureAlphaMultiplier,
-  pressureSizeMultiplier,
   parseBlendMode,
   parseChannelLock,
   parseHexColor,
@@ -37,6 +35,38 @@ import {
   walkBresenhamLinePixels,
   walkCubicBezierPixels,
 } from "./GnumarusPixelPerfect";
+import {
+  clampBrushFlow,
+  clampBrushHardness,
+  clampBrushSpacing,
+  clampPaintDualScale,
+  clampPaintDualStrength,
+  clampPaintFuzzy,
+  clampPaintGrainScale,
+  clampPaintGrainStrength,
+  DEFAULT_BRUSH_FLOW,
+  DEFAULT_BRUSH_HARDNESS,
+  DEFAULT_BRUSH_SPACING,
+  DEFAULT_PAINT_DUAL_SCALE,
+  DEFAULT_PAINT_DUAL_STRENGTH,
+  DEFAULT_PAINT_FUZZY,
+  DEFAULT_PAINT_GRAIN_SCALE,
+  DEFAULT_PAINT_GRAIN_STRENGTH,
+  evalPressureCurve,
+  paintDabFuzzyAlpha,
+  paintDabFuzzyOffset,
+  paintDabFuzzySize,
+  paintSoftDab,
+  parseBrushTipKind,
+  parsePressureCurve,
+  stampPaintDabCoverage,
+  strokeDabPositions,
+  type GnumarusBrushTipKind,
+  type GnumarusPaintDabJitter,
+  type GnumarusPaintDualTip,
+  type GnumarusPaintTipImage,
+  type GnumarusPressureCurve,
+} from "./GnumarusPaintBrush";
 import {
   GNUMARUS_MAX_SELECTION_SKEW,
   forwardSelectionPoint,
@@ -542,6 +572,26 @@ export class GnumarusCanvasEngine {
   private accumulate = true;
   private brushSize = 1;
   private brushShape: GnumarusBrushShape = "circle";
+  private brushTipKind: GnumarusBrushTipKind = "pixel";
+  private brushHardness = DEFAULT_BRUSH_HARDNESS;
+  private brushSpacing = DEFAULT_BRUSH_SPACING;
+  private brushFlow = DEFAULT_BRUSH_FLOW;
+  private pressureSizeCurve: GnumarusPressureCurve = "linear";
+  private pressureAlphaCurve: GnumarusPressureCurve = "linear";
+  private paintFuzzy = DEFAULT_PAINT_FUZZY;
+  private paintGrainStrength = DEFAULT_PAINT_GRAIN_STRENGTH;
+  private paintGrainScale = DEFAULT_PAINT_GRAIN_SCALE;
+  private paintSeed = 1;
+  private paintTipImage: GnumarusPaintTipImage | null = null;
+  private paintDualTip: GnumarusPaintTipImage | null = null;
+  private paintDualScale = DEFAULT_PAINT_DUAL_SCALE;
+  private paintDualStrength = DEFAULT_PAINT_DUAL_STRENGTH;
+  /** Fractional spacing leftover since the previous paint dab. */
+  private strokeDabCarry = 0;
+  /** Paint dab counter within the current stroke (for deterministic jitter). */
+  private strokeDabIndex = 0;
+  /** First segment of the stroke stamps the origin dab. */
+  private strokePaintStart = true;
   private pressureResponse: GnumarusPressureResponse = "none";
   private strokePressure = 1;
   private pencilAntialias = false;
@@ -3569,6 +3619,191 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
+  getBrushTipKind(): GnumarusBrushTipKind {
+    return this.brushTipKind;
+  }
+
+  setBrushTipKind(kind: GnumarusBrushTipKind): boolean {
+    const parsed = parseBrushTipKind(kind);
+    if (parsed === this.brushTipKind) {
+      return false;
+    }
+    this.brushTipKind = parsed;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  getBrushHardness(): number {
+    return this.brushHardness;
+  }
+
+  setBrushHardness(value: number): boolean {
+    const clamped = clampBrushHardness(value);
+    if (clamped === this.brushHardness) {
+      return false;
+    }
+    this.brushHardness = clamped;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  getBrushSpacing(): number {
+    return this.brushSpacing;
+  }
+
+  setBrushSpacing(value: number): boolean {
+    const clamped = clampBrushSpacing(value);
+    if (clamped === this.brushSpacing) {
+      return false;
+    }
+    this.brushSpacing = clamped;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  getBrushFlow(): number {
+    return this.brushFlow;
+  }
+
+  setBrushFlow(value: number): boolean {
+    const clamped = clampBrushFlow(value);
+    if (clamped === this.brushFlow) {
+      return false;
+    }
+    this.brushFlow = clamped;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  getPaintFuzzy(): number {
+    return this.paintFuzzy;
+  }
+
+  setPaintFuzzy(value: number): boolean {
+    const clamped = clampPaintFuzzy(value);
+    if (clamped === this.paintFuzzy) {
+      return false;
+    }
+    this.paintFuzzy = clamped;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  getPaintGrainStrength(): number {
+    return this.paintGrainStrength;
+  }
+
+  getPaintGrainScale(): number {
+    return this.paintGrainScale;
+  }
+
+  setPaintGrain(strength: number, scale: number): boolean {
+    const clampedStrength = clampPaintGrainStrength(strength);
+    const clampedScale = clampPaintGrainScale(scale);
+    if (clampedStrength === this.paintGrainStrength && clampedScale === this.paintGrainScale) {
+      return false;
+    }
+    this.paintGrainStrength = clampedStrength;
+    this.paintGrainScale = clampedScale;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  getPaintSeed(): number {
+    return this.paintSeed;
+  }
+
+  setPaintSeed(seed: number): void {
+    this.paintSeed = Number.isFinite(seed) ? Math.floor(seed) : 1;
+    this.emitStats();
+    this.updatePreviews();
+  }
+
+  getPressureSizeCurve(): GnumarusPressureCurve {
+    return this.pressureSizeCurve;
+  }
+
+  setPressureSizeCurve(curve: GnumarusPressureCurve): boolean {
+    const parsed = parsePressureCurve(curve);
+    if (parsed === this.pressureSizeCurve) {
+      return false;
+    }
+    this.pressureSizeCurve = parsed;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  getPressureAlphaCurve(): GnumarusPressureCurve {
+    return this.pressureAlphaCurve;
+  }
+
+  setPressureAlphaCurve(curve: GnumarusPressureCurve): boolean {
+    const parsed = parsePressureCurve(curve);
+    if (parsed === this.pressureAlphaCurve) {
+      return false;
+    }
+    this.pressureAlphaCurve = parsed;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  getPaintDualTip(): GnumarusPaintDualTip | null {
+    if (this.paintDualTip === null) {
+      return null;
+    }
+    return {
+      tip: this.paintDualTip,
+      scale: this.paintDualScale,
+      strength: this.paintDualStrength,
+    };
+  }
+
+  setPaintDualTip(tip: GnumarusPaintTipImage | null): boolean {
+    this.paintDualTip = tip;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  setPaintDualTuning(scale: number, strength: number): boolean {
+    const clampedScale = clampPaintDualScale(scale);
+    const clampedStrength = clampPaintDualStrength(strength);
+    if (clampedScale === this.paintDualScale && clampedStrength === this.paintDualStrength) {
+      return false;
+    }
+    this.paintDualScale = clampedScale;
+    this.paintDualStrength = clampedStrength;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  getPaintTipImage(): GnumarusPaintTipImage | null {
+    return this.paintTipImage;
+  }
+
+  setPaintTipImage(tip: GnumarusPaintTipImage | null): boolean {
+    this.paintTipImage = tip;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  /** Reset per-stroke paint state (dab index + spacing carry) at stroke start. */
+  private resetPaintStroke(): void {
+    this.strokeDabCarry = 0;
+    this.strokeDabIndex = 0;
+    this.strokePaintStart = true;
+  }
+
   setPressureResponse(response: GnumarusPressureResponse): boolean {
     const parsed = parsePressureResponse(response);
     if (parsed === this.pressureResponse) {
@@ -3582,14 +3817,18 @@ export class GnumarusCanvasEngine {
 
   /** Pencil size scaled by the current stroke pressure when enabled. */
   private pressureBrushSize(): number {
-    return clampBrushSizeFloat(this.brushSize * pressureSizeMultiplier(this.pressureResponse, this.strokePressure));
+    const active = this.pressureResponse === "size" || this.pressureResponse === "size+opacity";
+    const gain = active ? evalPressureCurve(this.pressureSizeCurve, this.strokePressure) : 1;
+    return clampBrushSizeFloat(this.brushSize * gain);
   }
 
   /** Pencil color with alpha scaled by the current stroke pressure when enabled. */
   private pressureBrushColor(): GnumarusRgba {
+    const active = this.pressureResponse === "opacity" || this.pressureResponse === "size+opacity";
+    const gain = active ? evalPressureCurve(this.pressureAlphaCurve, this.strokePressure) : 1;
     return {
       ...this.color,
-      a: Math.round(this.color.a * pressureAlphaMultiplier(this.pressureResponse, this.strokePressure)),
+      a: Math.round(this.color.a * gain),
     };
   }
 
@@ -3638,9 +3877,14 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
-  /** Pixel perfect only applies at exactly 1px without anti-aliasing. */
+  /** Pixel perfect only applies to pixel tips at exactly 1px without anti-aliasing. */
   private pencilPixelPerfectActive(): boolean {
-    return this.pencilPixelPerfect && this.brushSize === 1 && !this.pencilAntialias;
+    return (
+      this.pencilPixelPerfect &&
+      this.brushTipKind === "pixel" &&
+      this.brushSize === 1 &&
+      !this.pencilAntialias
+    );
   }
 
   private curvePixelPerfectActive(): boolean {
@@ -3894,6 +4138,71 @@ export class GnumarusCanvasEngine {
   }
 
   /**
+   * Paint one paint-mode segment (`soft`/`image` tip kinds) with dab spacing.
+   * Accumulating strokes stamp each dab onto the texture; non-accumulating
+   * strokes build fractional coverage with max-union semantics and repaint
+   * once at the stroke opacity ceiling. Pixel tips never reach here.
+   */
+  private paintPaintSegment(
+    tex: { buffer: Uint8ClampedArray; width: number; height: number },
+    locked: GnumarusChannelLock,
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+  ): void {
+    const size = this.pressureBrushSize();
+    const color = this.pressureBrushColor();
+    const { positions, carryOut } = strokeDabPositions(
+      x0, y0, x1, y1, size, this.brushSpacing, this.strokeDabCarry, this.strokePaintStart,
+    );
+    this.strokeDabCarry = carryOut;
+    this.strokePaintStart = false;
+    if (positions.length === 0) {
+      return;
+    }
+    const jitterBase: GnumarusPaintDabJitter = {
+      fuzzy: this.paintFuzzy,
+      seed: this.paintSeed,
+      dabIndex: 0,
+      grainStrength: this.paintGrainStrength,
+      grainScale: this.paintGrainScale,
+      grainSeed: this.paintSeed,
+    };
+    const dual: GnumarusPaintDualTip | null =
+      this.paintDualTip === null
+        ? null
+        : { tip: this.paintDualTip, scale: this.paintDualScale, strength: this.paintDualStrength };
+    if (!this.accumulate && this.strokeBase !== null && this.strokeMask !== null) {
+      for (const dab of positions) {
+        const jitter: GnumarusPaintDabJitter = { ...jitterBase, dabIndex: this.strokeDabIndex };
+        const offset = paintDabFuzzyOffset(jitter, size);
+        const dabSize = paintDabFuzzySize(jitter, size);
+        const dabAlpha = this.brushFlow * paintDabFuzzyAlpha(jitter);
+        stampPaintDabCoverage(
+          this.strokeMask, tex.width, tex.height, dab.x + offset.x, dab.y + offset.y, dabSize,
+          this.brushTipKind, this.brushHardness, this.paintTipImage, dabAlpha, jitter, dual,
+        );
+        this.strokeDabIndex += 1;
+      }
+      this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked, color);
+      return;
+    }
+    for (const dab of positions) {
+      const jitter: GnumarusPaintDabJitter = { ...jitterBase, dabIndex: this.strokeDabIndex };
+      const offset = paintDabFuzzyOffset(jitter, size);
+      const dabSize = paintDabFuzzySize(jitter, size);
+      const dabAlpha = this.brushFlow * paintDabFuzzyAlpha(jitter);
+      paintSoftDab(
+        tex.buffer, tex.width, tex.height, dab.x + offset.x, dab.y + offset.y, dabSize,
+        this.brushTipKind, this.brushHardness, this.paintTipImage, color, dabAlpha,
+        locked, this.blendMode, jitter, dual,
+      );
+      this.strokeDabIndex += 1;
+    }
+  }
+
+  /**
    * Paint one integer pencil run `from -> to` (endpoints already quantized).
    * With pixel perfect active (exactly 1px, no AA) each Bresenham candidate
    * passes through the per-stroke filter so the line stays 1px thick:
@@ -3951,6 +4260,10 @@ export class GnumarusCanvasEngine {
         });
         return;
       }
+    }
+    if (this.brushTipKind !== "pixel") {
+      this.paintPaintSegment(tex, locked, x0, y0, x1, y1);
+      return;
     }
     if (!this.accumulate && this.strokeBase !== null && this.strokeMask !== null) {
       stampSegmentCoverage(
@@ -5600,6 +5913,10 @@ export class GnumarusCanvasEngine {
     const color = this.pressureBrushColor();
     if (this.pencilPixelPerfectActive()) {
       this.paintPencilLine(tex, locked, qx0, qy0, qx1, qy1);
+      return;
+    }
+    if (this.brushTipKind !== "pixel") {
+      this.paintPaintSegment(tex, locked, from.x, from.y, to.x, to.y);
       return;
     }
     if (!this.accumulate && this.strokeBase !== null && this.strokeMask !== null) {
@@ -7393,6 +7710,7 @@ export class GnumarusCanvasEngine {
           this.strokeMask = new Uint8Array(tex.width * tex.height);
         }
         this.resetPencilPixelPerfect();
+        this.resetPaintStroke();
         this.strokePressure = normalizePointerPressure(event.pointerType, event.pressure);
         this.paintStabilizedSegment(tex, layer.lockedChannels, this.stabilizerPos, this.stabilizerPos);
         this.markTextureViewsDirty(tex.id);
@@ -7417,6 +7735,7 @@ export class GnumarusCanvasEngine {
         this.strokeMask = new Uint8Array(tex.width * tex.height);
       }
       this.resetPencilPixelPerfect();
+      this.resetPaintStroke();
       this.strokePressure = normalizePointerPressure(event.pointerType, event.pressure);
       this.paintPencilLine(tex, layer.lockedChannels, pixel.x, pixel.y, pixel.x, pixel.y);
       this.markTextureViewsDirty(tex.id);

@@ -619,7 +619,7 @@ export function drawBrushLine(
 }
 
 /** Blend one pixel toward `color` by `coverage` (0..1), honoring channel locks. */
-function blendPixelCoverage(
+export function blendPixelCoverage(
   buffer: Uint8ClampedArray,
   width: number,
   height: number,

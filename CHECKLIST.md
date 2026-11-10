@@ -246,6 +246,11 @@
 - [x] Shortcut list audit (Ctrl+E section, Cmd undo/redo, missing mouse gestures + rectselect cancel)
 - [x] Zoom minimum default 1% (settings/engine/tests/e2e/docs)
 - [x] Fit (all) min 1px per dimension clamp + unit tests
+- [x] Phase 1: soft tip + spacing walker + image tip (pure module + engine/UI/tests)
+- [x] Phase 2: grain + flow/opacity + fuzzy jitter (engine/UI/tests)
+- [x] Phase 3: pressure curves + dual tip (engine/UI/tests)
+- [x] Unit tests (vitest) — 340 passed (previous 326 + 14 paint brush)
+- [x] E2E (@recent only, per policy): 15 passed (previous 7 + soft/feather + spacing gaps + image tip + flow + grain + fuzzy + firm curve + dual); full suite untouched
 - [x] Unit tests (vitest) — 326 passed (previous 324 + clampCropBoxToMin1)
 - [x] E2E (@recent only, per policy): 7 passed (pressure x4 + zoom min + gear + statusbar); shortcuts modal + Meta+z undo/redo + zoom-default-1 assertions green
 - [x] Unit tests (vitest) — 324 passed (previous 319 + zoom settings)
