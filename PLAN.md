@@ -456,3 +456,7 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Bug: guides drawn at the index-space axis (`31.5` on a fresh 64x64) instead of the geometric mirror (`32` in corner coords) — vertical line half a canvas pixel left, horizontal half a pixel up vs the mirrored paint and the axis overlay, plus a container-offset shift (rect.left/top subtracted twice: projectToScreen with a zero-based local rect already returns container-local coords).
 - Fix keeps paint byte-identical (axis value stays index-space for `2*axis - v`): project guides at `axis + 0.5`, drag stores `pointer - 0.5` so the line tracks the cursor.
 - E2E @recent: default guides pass through the canvas center (vertical x, horizontal y within 1px).
+
+## 84. Four-way intersection handle (implemented)
+- Fifth `sym-center` handle at the guide crossing, only in `both` mode: highly transparent (fill-opacity 0.25, stroke-opacity 0.7, `move` cursor), drags both axes at once; Shift+click resets like the others.
+- `GnumarusSymmetryHandleId` alias replaces the repeated 4-id unions; E2E @recent (5 handles in both mode, 2 in single-axis; center drag moves x+y, Shift+click resets).

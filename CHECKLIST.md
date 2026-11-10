@@ -286,3 +286,5 @@
 - [x] E2E @recent for M / Shift+M (43 passed); unit 371 + build clean; docs updated
 - [x] Symmetry guide +0.5 projection / drag -0.5 (paint untouched) + container-local fix (double rect.left subtraction)
 - [x] E2E @recent guide-through-center (44 passed); unit 371 + build clean; docs updated
+- [x] sym-center intersection handle (both mode only, transparent, drags both axes)
+- [x] E2E @recent for center handle (45 passed); unit 371 + build clean; docs updated

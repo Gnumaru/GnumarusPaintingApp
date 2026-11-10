@@ -295,6 +295,9 @@ export type GnumarusSelectionHandleId =
   | "rot3d-z"
   | "center";
 
+/** Draggable symmetry guide handles: line ends plus the four-way intersection. */
+export type GnumarusSymmetryHandleId = "sym-x-min" | "sym-x-max" | "sym-y-min" | "sym-y-max" | "sym-center";
+
 export interface GnumarusLayerInfo {
   id: string;
   name: string;
@@ -630,10 +633,10 @@ export class GnumarusCanvasEngine {
   /** Symmetry guide lines (vertical/horizontal mirror axes). */
   private readonly symmetryLines: THREE.LineSegments[] = [];
   /** Draggable symmetry axis handles (SVG overlay, container coords). */
-  private readonly symmetryHandles: Array<{ id: "sym-x-min" | "sym-x-max" | "sym-y-min" | "sym-y-max"; circle: SVGCircleElement }> = [];
+  private readonly symmetryHandles: Array<{ id: GnumarusSymmetryHandleId; circle: SVGCircleElement }> = [];
   private readonly symmetrySvg: SVGSVGElement;
   /** Active symmetry handle drag, or null. */
-  private symmetryDrag: { id: "sym-x-min" | "sym-x-max" | "sym-y-min" | "sym-y-max" } | null = null;
+  private symmetryDrag: { id: GnumarusSymmetryHandleId } | null = null;
   /** Whether the symmetry overlay was visible the last time it synced. */
   private symmetryOverlayVisible = false;
   private wrapMode: GnumarusWrapMode = "off";
@@ -1126,17 +1129,23 @@ export class GnumarusCanvasEngine {
     this.symmetrySvg.style.zIndex = "7";
     this.symmetrySvg.style.overflow = "visible";
     container.appendChild(this.symmetrySvg);
-    (["sym-x-min", "sym-x-max", "sym-y-min", "sym-y-max"] as const).forEach((id) => {
+    (["sym-x-min", "sym-x-max", "sym-y-min", "sym-y-max", "sym-center"] as const).forEach((id) => {
       const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle") as SVGCircleElement;
       circle.setAttribute("data-testid", "symmetry-handle");
       circle.setAttribute("data-handle", id);
-      circle.setAttribute("r", "7");
+      const isCenter = id === "sym-center";
+      // The intersection handle stays highly transparent so it never hides
+      // the crossing guides; it drags both axes at once.
+      circle.setAttribute("r", isCenter ? "8" : "7");
       circle.setAttribute("fill", "#ffffff");
+      circle.setAttribute("fill-opacity", isCenter ? "0.25" : "1");
       circle.setAttribute("stroke", "#00ccff");
+      circle.setAttribute("stroke-opacity", isCenter ? "0.7" : "1");
       circle.setAttribute("stroke-width", "2");
       circle.style.display = "none";
       circle.style.pointerEvents = "auto";
-      circle.style.cursor = id === "sym-x-min" || id === "sym-x-max" ? "ew-resize" : "ns-resize";
+      circle.style.cursor =
+        id === "sym-center" ? "move" : id === "sym-x-min" || id === "sym-x-max" ? "ew-resize" : "ns-resize";
       circle.addEventListener("pointerdown", (event: PointerEvent) => {
         this.beginSymmetryDrag(event, id);
       });
@@ -7982,7 +7991,7 @@ export class GnumarusCanvasEngine {
     this.symmetryOverlayVisible = visible;
   }
 
-  private beginSymmetryDrag(event: PointerEvent, id: "sym-x-min" | "sym-x-max" | "sym-y-min" | "sym-y-max"): void {
+  private beginSymmetryDrag(event: PointerEvent, id: GnumarusSymmetryHandleId): void {
     event.preventDefault();
     event.stopPropagation();
     if (event.shiftKey) {
@@ -8017,13 +8026,14 @@ export class GnumarusCanvasEngine {
     if (floatPos === null) {
       return;
     }
-    const horizontal = drag.id === "sym-x-min" || drag.id === "sym-x-max";
+    const moveX = drag.id === "sym-center" || drag.id === "sym-x-min" || drag.id === "sym-x-max";
+    const moveY = drag.id === "sym-center" || drag.id === "sym-y-min" || drag.id === "sym-y-max";
     // The stored axis lives in pixel-index space (paint mirrors at
     // `2*axis - v`) while the pointer reports corner coords, so shift by
     // half a pixel: the drawn guide (axis + 0.5) tracks the cursor.
     const next = {
-      x: horizontal ? floatPos.x - 0.5 : this.symmetryCenter.x,
-      y: horizontal ? this.symmetryCenter.y : floatPos.y - 0.5,
+      x: moveX ? floatPos.x - 0.5 : this.symmetryCenter.x,
+      y: moveY ? floatPos.y - 0.5 : this.symmetryCenter.y,
     };
     this.setSymmetryCenter(next.x, next.y);
   }
@@ -8037,7 +8047,7 @@ export class GnumarusCanvasEngine {
   private symmetryOverlaySegments(): {
     vertical: { ax: number; ay: number; bx: number; by: number } | null;
     horizontal: { ax: number; ay: number; bx: number; by: number } | null;
-    handles: Array<{ id: "sym-x-min" | "sym-x-max" | "sym-y-min" | "sym-y-max"; x: number; y: number }>;
+    handles: Array<{ id: GnumarusSymmetryHandleId; x: number; y: number }>;
   } | null {
     const layer = this.activeLayer();
     if (
@@ -8074,10 +8084,16 @@ export class GnumarusCanvasEngine {
     const canvasMaxX = this.imageWidth / 2;
     const canvasMinY = -this.imageHeight / 2;
     const canvasMaxY = this.imageHeight / 2;
-    const handles: Array<{ id: "sym-x-min" | "sym-x-max" | "sym-y-min" | "sym-y-max"; x: number; y: number }> = [];
+    const handles: Array<{ id: GnumarusSymmetryHandleId; x: number; y: number }> = [];
+    const margin = 14;
+    const toContainer = (projectX: number, projectY: number): { x: number; y: number } => {
+      // `local` is zero-based, so the client point is already container-local.
+      const client = projectToScreen(projectX, projectY, local, view);
+      return { x: client.x, y: client.y };
+    };
     const placeHandles = (
-      idMin: "sym-x-min" | "sym-x-max" | "sym-y-min" | "sym-y-max",
-      idMax: "sym-x-min" | "sym-x-max" | "sym-y-min" | "sym-y-max",
+      idMin: GnumarusSymmetryHandleId,
+      idMax: GnumarusSymmetryHandleId,
       throughX: number,
       throughY: number,
       dirX: number,
@@ -8102,11 +8118,8 @@ export class GnumarusCanvasEngine {
       if (clipped === null) {
         return null;
       }
-      const toLocal = (projectX: number, projectY: number): { x: number; y: number } => {
-        // `local` is zero-based, so the client point is already container-local.
-        const client = projectToScreen(projectX, projectY, local, view);
-        return { x: client.x, y: client.y };
-      };
+      const toLocal = (projectX: number, projectY: number): { x: number; y: number } =>
+        toContainer(projectX, projectY);
       const a = toLocal(clipped.ax, clipped.ay);
       const b = toLocal(clipped.bx, clipped.by);
       // Handles sit on the exits of the project area, pushed outward.
@@ -8121,12 +8134,11 @@ export class GnumarusCanvasEngine {
         canvasMaxY,
       );
       const pushOut = 16;
-      const margin = 14;
       const place = (
         projectX: number,
         projectY: number,
         sign: number,
-        id: "sym-x-min" | "sym-x-max" | "sym-y-min" | "sym-y-max",
+        id: GnumarusSymmetryHandleId,
       ): void => {
         const base = toLocal(projectX, projectY);
         const alongX = b.x - a.x;
@@ -8183,6 +8195,23 @@ export class GnumarusCanvasEngine {
     }
     if (vertical === null && horizontal === null) {
       return null;
+    }
+    if (vertical !== null && horizontal !== null) {
+      // Four-way mode: a fifth, highly transparent handle at the guide
+      // intersection drags both axes at once.
+      const center = layerImageToProject(
+        this.symmetryCenter.x + 0.5,
+        this.symmetryCenter.y + 0.5,
+        layer.width,
+        layer.height,
+        layer.transform,
+      );
+      const at = toContainer(center.x, center.y);
+      handles.push({
+        id: "sym-center",
+        x: Math.min(width - margin, Math.max(margin, at.x)),
+        y: Math.min(height - margin, Math.max(margin, at.y)),
+      });
     }
     return { vertical, horizontal, handles };
   }

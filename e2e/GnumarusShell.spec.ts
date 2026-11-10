@@ -2912,6 +2912,59 @@ test("symmetry guides pass through the canvas center @recent", async ({ page }) 
   expect(Math.abs(overlay.horizontal.ay - box.height / 2)).toBeLessThan(1.5);
 });
 
+test("four-way symmetry shows an intersection handle that drags both axes @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const visibleHandles = (): Promise<number> =>
+    page.evaluate(() => {
+      const root = document.querySelector("gnumarus-shell")?.shadowRoot;
+      const circles = root?.querySelectorAll('[data-testid="symmetry-handle"]') ?? [];
+      return Array.from(circles).filter(
+        (circle) => (circle as SVGCircleElement).style.display !== "none",
+      ).length;
+    });
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setSymmetryMode(mode: string): void } };
+    };
+    root.__gnumarus?.shell?.setSymmetryMode("mirror-x");
+  });
+  expect(await visibleHandles()).toBe(2);
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setSymmetryMode(mode: string): void } };
+    };
+    root.__gnumarus?.shell?.setSymmetryMode("both");
+  });
+  expect(await visibleHandles()).toBe(5);
+  const center = page.locator('gnumarus-shell [data-testid="symmetry-handle"][data-handle="sym-center"]');
+  await expect(center).toBeVisible();
+  await expect(center).toHaveAttribute("fill-opacity", "0.25");
+  const centerOf = (): Promise<{ x: number; y: number }> =>
+    page.evaluate(() => {
+      const root = window as unknown as {
+        __gnumarus?: { engine?: { getSymmetryCenter(): { x: number; y: number } } };
+      };
+      return root.__gnumarus?.engine?.getSymmetryCenter() ?? { x: -1, y: -1 };
+    });
+  expect(await centerOf()).toEqual({ x: 31.5, y: 31.5 });
+  const handleBox = await center.boundingBox();
+  if (handleBox === null) {
+    throw new Error("symmetry center handle has no bounding box");
+  }
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x + handleBox.width / 2 - 30, handleBox.y + handleBox.height / 2 + 24, { steps: 5 });
+  await page.mouse.up();
+  const moved = await centerOf();
+  expect(moved.x).toBeLessThan(31.5);
+  expect(moved.y).toBeGreaterThan(31.5);
+  await page.keyboard.down("Shift");
+  await center.click();
+  await page.keyboard.up("Shift");
+  expect(await centerOf()).toEqual({ x: 31.5, y: 31.5 });
+});
+
 test("symmetry axis drag moves the mirror and resets with Shift+click @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
