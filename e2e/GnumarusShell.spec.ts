@@ -5942,9 +5942,9 @@ const DRAWER_FOR_TOOL: Record<string, string> = {
   "Freehand lasso": "selection",
   "Color selection": "selection",
   "Destructive selection transform": "destructive",
-  "Destructive 3D rotation": "destructive",
+  "Destructive selection 3D rotation": "destructive",
   "Non-destructive cell transform": "transform",
-  "3D rotation": "transform",
+  "Non-destructive cell 3D rotation": "transform",
 };
 
 /** Click a toolbar tool, opening its drawer flyout when it is not the front. */
@@ -6002,14 +6002,14 @@ test("destructive and transform drawers swap their front tools @recent", async (
   await destructive.getByRole("button", { name: "Destructive selection transform" }).click({ button: "right" });
   await page
     .locator('gnumarus-shell [data-testid="destructive-flyout"]')
-    .getByRole("button", { name: "Destructive 3D rotation" })
+    .getByRole("button", { name: "Destructive selection 3D rotation" })
     .click();
-  await expect(destructive.getByRole("button", { name: "Destructive 3D rotation" })).toBeVisible();
+  await expect(destructive.getByRole("button", { name: "Destructive selection 3D rotation" })).toBeVisible();
   const transform = page.locator('gnumarus-shell [data-testid="transform-drawer"]');
   await transform.getByRole("button", { name: "Non-destructive cell transform" }).click({ button: "right" });
-  await page.locator('gnumarus-shell [data-testid="transform-flyout"]').getByRole("button", { name: "3D rotation" }).click();
-  await expect(transform.getByRole("button", { name: "3D rotation" })).toBeVisible();
-  await expect(page.locator("gnumarus-shell")).toContainText("3D rotation tool");
+  await page.locator('gnumarus-shell [data-testid="transform-flyout"]').getByRole("button", { name: "Non-destructive cell 3D rotation" }).click();
+  await expect(transform.getByRole("button", { name: "Non-destructive cell 3D rotation" })).toBeVisible();
+  await expect(page.locator("gnumarus-shell")).toContainText("Non-destructive cell 3D rotation tool");
 });
 
 test("elliptical selection cuts an ellipse @recent", async ({ page }) => {
@@ -6402,8 +6402,8 @@ test("tool tooltips start with the selection shortcut", async ({ page }) => {
     { label: "Rectangular selection", title: expect.stringMatching(/^R: Rectangular selection \(/) },
     { label: "Destructive selection transform", title: expect.stringMatching(/^V: Destructive selection transform \(/) },
     { label: "Non-destructive cell transform", title: expect.stringMatching(/^T: Non-destructive cell transform \(/) },
-    { label: "3D rotation", title: expect.stringMatching(/^Y: 3D rotation \(/) },
-    { label: "Destructive 3D rotation", title: expect.stringMatching(/^U: Destructive 3D rotation \(/) },
+    { label: "Non-destructive cell 3D rotation", title: expect.stringMatching(/^Y: Non-destructive cell 3D rotation \(/) },
+    { label: "Destructive selection 3D rotation", title: expect.stringMatching(/^U: Destructive selection 3D rotation \(/) },
   ]);
 });
 
@@ -7198,19 +7198,19 @@ async function rot3DHandle(
   return { x: box.x + position.x, y: box.y + position.y };
 }
 
-test("Y and U select the 3d rotation tools", async ({ page }) => {
+test("Y and U select the cell/selection 3d rotation tools", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.keyboard.press("y");
   await expect(page.locator("gnumarus-shell")).toContainText("3d rotation");
   await page.keyboard.press("u");
-  await expect(page.locator("gnumarus-shell")).toContainText("destructive 3d rotation");
+  await expect(page.locator("gnumarus-shell")).toContainText("destructive selection 3d rotation");
   await expect(page.getByRole("button", { name: "Commit selection" })).toBeVisible();
   await page.keyboard.press("Y");
   await expect(page.locator("gnumarus-shell")).toContainText("3d rotation");
 });
 
-test("3d rotation trackball tilts the layer in the dragged direction", async ({ page }) => {
+test("cell 3d rotation trackball tilts the layer in the dragged direction", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.keyboard.press("y");
@@ -7233,7 +7233,7 @@ test("3d rotation trackball tilts the layer in the dragged direction", async ({ 
   expect((await getLayerTransform(page)).rotationX).toBeCloseTo(40 / 128, 4);
 });
 
-test("3d rotation axis handles turn a single axis", async ({ page }) => {
+test("cell 3d rotation axis handles turn a single axis", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.keyboard.press("y");
@@ -7269,7 +7269,7 @@ test("3d rotation axis handles turn a single axis", async ({ page }) => {
   expect(spun.rotationY).toBeCloseTo(0, 6);
 });
 
-test("3d rotation center resets only the rotations", async ({ page }) => {
+test("cell 3d rotation center resets only the rotations", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   // Displace the layer first with the 2d tool so the reset scope is visible.
@@ -7307,7 +7307,7 @@ test("3d rotation center resets only the rotations", async ({ page }) => {
   expect((await getLayerTransform(page)).x).not.toBeCloseTo(0, 6);
 });
 
-test("destructive 3d rotation auto-selects, tilts and merges", async ({ page }) => {
+test("destructive selection 3d rotation auto-selects, tilts and merges", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");

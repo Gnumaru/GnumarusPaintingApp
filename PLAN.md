@@ -523,3 +523,6 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Generic drawer mechanism (def list + front-per-drawer + single open flyout): paint drawer (pencil/line/curve), selection drawer (existing 4), destructive drawer (destransform/destransform3d), transform drawer (transform/transform3d). Left-click activates front, right-click opens, pick swaps front and closes; front tracks the active tool via onToolChanged; R/O/L/W/B/N/C/V/U/T/Y keep working.
 - Toolbar keeps 8 buttons; icon-size e2e updated to the drawer fronts.
 - E2E @recent (drawer swap in each group, front persistence, shortcuts still select).
+
+## 97. Renamed 3D rotation tools (implemented)
+- `transform3d`: "3D rotation" -> "Non-destructive cell 3D rotation"; `destransform3d`: "Destructive 3D rotation" -> "Destructive selection 3D rotation" (tool names, hints, shortcuts entries, display names; en + pt-BR). Ids, shortcuts (`Y`/`U`) and behavior unchanged; e2e names/regexps updated.

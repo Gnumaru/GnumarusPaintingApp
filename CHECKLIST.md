@@ -324,4 +324,5 @@
 - [x] E2E @recent (7 new: drawer/ellipse/lasso/color x3/cross-combine); build clean, unit 404, recent 20/20; docs updated
 - [x] Generic drawer mechanism + 4 drawers (paint/selection/destructive/transform) in toolbar
 - [x] Front tracking via onToolChanged, shortcuts rows (incl. drawer row), hints (en + pt-BR)
-- [x] E2E @recent (3 drawer swaps + icon map + full selection set); build clean, unit 404, recent 15/15; docs updated
+- [x] E2E @recent (3 drawer swaps + icon map + full selection set); build clean, unit 404, recent 22/22; docs updated
+- [x] 3D tool renames (i18n + e2e names/regexps + docs); build + unit + e2e green

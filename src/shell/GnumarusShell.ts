@@ -3407,7 +3407,7 @@ export class GnumarusShell extends LitElement {
                 (name) => html`<button
                   class=${front === name ? "active" : ""}
                   title=${this.drawerToolHint(name)}
-                  aria-label=${this.drawerToolName(name)}
+                  aria-label=${this.drawerToolLabel(name)}
                   @click=${(): void => this.selectDrawerTool(id, name, true)}
                 >
                   <span class="tool-icon">${this.drawerToolGlyph(name)}</span>
@@ -3438,12 +3438,52 @@ export class GnumarusShell extends LitElement {
     return def?.tools[0] ?? "pencil";
   }
 
-  private drawerToolName(tool: GnumarusCanvasTool): string {
-    return this.toolDisplayName(tool);
+  /** Front-button and flyout accessible name: the tool label, unchanged. */
+  private drawerToolLabel(tool: GnumarusCanvasTool): string {
+    if (tool === "ellipse") {
+      return tr("tool.ellipse");
+    }
+    if (tool === "lasso") {
+      return tr("tool.lasso");
+    }
+    if (tool === "colorselect") {
+      return tr("tool.colorselect");
+    }
+    if (tool === "line") {
+      return tr("tool.line");
+    }
+    if (tool === "curve") {
+      return tr("tool.curve");
+    }
+    if (tool === "destransform") {
+      return tr("tool.destransform");
+    }
+    if (tool === "destransform3d") {
+      return tr("tool.destransform3d");
+    }
+    if (tool === "transform") {
+      return tr("tool.transform");
+    }
+    if (tool === "transform3d") {
+      return tr("tool.transform3d");
+    }
+    if (tool === "rectselect") {
+      return tr("tool.rectselect");
+    }
+    if (tool === "bucket") {
+      return tr("tool.bucket");
+    }
+    if (tool === "eyedropper") {
+      return tr("tool.eyedropper");
+    }
+    if (tool === "loupe") {
+      return tr("tool.loupe");
+    }
+    return tr("tool.pencil");
   }
 
   private drawerFrontName(id: string): string {
-    return this.drawerToolName(this.drawerFrontTool(id));
+    return this.drawerToolLabel(this.drawerFrontTool(id));
   }
 
   private drawerToolHint(tool: GnumarusCanvasTool): string {
