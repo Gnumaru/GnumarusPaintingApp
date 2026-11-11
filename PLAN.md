@@ -556,3 +556,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - SVG storage setting (`raw`/`compressed`/`embedded`, default `compressed`): `svgs/*.svg`, single-file `svgs/*.zip`, or inline strings; format mirrors text refs; stale cleanup via generic pass; Settings row + shared storage reset + persist; i18n en+pt-BR.
 - Text `project` storage value renamed to `embedded` (legacy stored value migrates; i18n key renamed).
 - Verified: `npm run build` clean, 436 unit tests green, 268/268 full-suite e2e green (Chromium; 8 new svg tests), single suite (all 37 `@recent` tags removed; `test:e2e` now runs everything).
+
+## 102. Fix text raster clipping to the shared measure canvas (implemented)
+- `rasterizeLaidOutText` drew onto the shared measure canvas (300x150 default) without resizing it, so any text wider than 300 raster px or taller than 150 raster px was cut (e.g. 3 lines of "012345678" lost the end of each line and the whole third line).
+- The rasterizer now resizes `context.canvas` to the laid-out raster size (clamped to the 4096 max dimension) before drawing and re-asserts baseline/alignment after the state reset; measuring is unaffected.
+- Verified with an e2e regression test asserting painted extents exceed the old 300x150 clip box (fails pre-fix with maxX 296, passes post-fix); build + 436 unit + targeted e2e green.

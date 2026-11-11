@@ -2,7 +2,11 @@
  * Rasterize laid-out rich text onto a 2D canvas at the requested scale.
  * Browser-only (needs a real canvas); layout itself stays canvas-free.
  */
-import { GNUMARUS_TEXT_RASTER_SCALE, type GnumarusTextEntry } from "./GnumarusText";
+import {
+  GNUMARUS_TEXT_MAX_RASTER_DIMENSION,
+  GNUMARUS_TEXT_RASTER_SCALE,
+  type GnumarusTextEntry,
+} from "./GnumarusText";
 import { layoutTextDocument, parseTextDocument, textRunFont, type GnumarusLaidOutText } from "./GnumarusTextLayout";
 
 export interface GnumarusRasterizedText {
@@ -22,20 +26,31 @@ export function measureTextDocument(
 
 /**
  * Rasterize laid-out text. Returns null for empty layouts or invalid
- * contexts; dimensions are layout pixels times the raster scale.
+ * contexts; dimensions are layout pixels times the raster scale. The
+ * canvas is resized to fit (it doubles as the shared measure canvas, so
+ * it must never be assumed large enough), clamped to the max dimension.
  */
 export function rasterizeLaidOutText(
   context: CanvasRenderingContext2D,
   laidOut: GnumarusLaidOutText,
   scale = GNUMARUS_TEXT_RASTER_SCALE,
 ): GnumarusRasterizedText | null {
-  const width = Math.max(1, Math.round(laidOut.width * scale));
-  const height = Math.max(1, Math.round(laidOut.height * scale));
+  const width = Math.min(
+    GNUMARUS_TEXT_MAX_RASTER_DIMENSION,
+    Math.max(1, Math.round(laidOut.width * scale)),
+  );
+  const height = Math.min(
+    GNUMARUS_TEXT_MAX_RASTER_DIMENSION,
+    Math.max(1, Math.round(laidOut.height * scale)),
+  );
   if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) {
     return null;
   }
-  context.clearRect(0, 0, width, height);
+  // Resizing clears the canvas and resets context state: re-assert everything.
+  context.canvas.width = width;
+  context.canvas.height = height;
   context.textBaseline = "alphabetic";
+  context.textAlign = "left";
   for (const line of laidOut.lines) {
     for (const run of line.runs) {
       if (run.text === "") {

@@ -10515,3 +10515,50 @@ test("vector storage raw and embedded round-trip with stale cleanup", async ({ p
   await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject");
   expect(await cellSvgId(page, "layer0", 0)).toBe(svgId);
 });
+
+test("text raster fits multi-line content without clipping", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.locator('gnumarus-shell [data-testid="tool-text"]').click();
+  await paintCenter(page);
+  const area = page.locator('gnumarus-shell [data-testid="text-editor-area"]');
+  await area.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("012345678");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("012345678");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("012345678");
+  await page.locator('gnumarus-shell [data-testid="text-ok"]').click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Text updated");
+  // Painted extents must exceed the old 300x150 measure-canvas clip box.
+  const extents = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { readPixel(x: number, y: number): { a: number } | null } };
+    };
+    const engine = root.__gnumarus?.engine;
+    if (engine === undefined) {
+      return null;
+    }
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = -1;
+    let maxY = -1;
+    for (let y = 0; y < 1024; y += 4) {
+      for (let x = 0; x < 1024; x += 4) {
+        if ((engine.readPixel(x, y)?.a ?? 0) > 0) {
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x > maxX) maxX = x;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    return maxX < 0 ? null : { minX, minY, maxX, maxY };
+  });
+  expect(extents).not.toBeNull();
+  expect(extents?.minX ?? 999).toBeLessThanOrEqual(8);
+  expect(extents?.minY ?? 999).toBeLessThanOrEqual(40);
+  expect(extents?.maxX ?? 0).toBeGreaterThan(300);
+  expect(extents?.maxY ?? 0).toBeGreaterThan(180);
+});
