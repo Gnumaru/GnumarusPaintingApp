@@ -311,3 +311,7 @@
 - [x] i18n core (catalog en/pt-BR, resolution system/browser, interpolation) + locale setting + Settings row + plumbing
 - [x] Migrated all shell/picker UI texts + status/toast/console messages to the catalog
 - [x] Unit (parity/interpolation/resolution/locale-settings/axis-labels) + @recent e2e (locale switch pt-BR/en) green; neighbors green (4 brush-status + 1 cleanup-status + 1 anim-delete expectations updated to display labels; remaining failures match the pre-existing import/export/3d set); build + deploy + docs
+- [x] Selection boolean pure helpers + unit tests (5 passed)
+- [x] Engine floating mask + merge gating + combine ops + pointer wiring + eyedropper guard + test hook
+- [x] UI hints (toolbar title, shortcuts entry, rectselect options label, en + pt-BR)
+- [x] E2E @recent (5 boolean tests green); build + unit (396) clean; docs updated

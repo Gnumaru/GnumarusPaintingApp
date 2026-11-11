@@ -369,6 +369,7 @@ function gnumarusShortcuts(): GnumarusShortcutSection[] {
         { keys: "T", action: tr("sc.toolTransform") },
         { keys: "Y", action: tr("sc.toolRot3d") },
         { keys: "R", action: tr("sc.toolRectselect") },
+        { keys: "Shift / Ctrl+Shift / Alt+Shift + drag", action: tr("sc.rectselectModifiers") },
         { keys: "V", action: tr("sc.toolDestransform") },
         { keys: "U", action: tr("sc.toolDestransform3d") },
         { keys: "E", action: tr("sc.toggleEraser") },
@@ -3893,9 +3894,11 @@ export class GnumarusShell extends LitElement {
     }
     return html`
       <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
-        <span class="tool-options-empty"
-          >${tr("options.empty", { tool: this.toolDisplayName(this.tool) })}</span
-        >
+        ${this.tool === "rectselect"
+          ? html`<span class="tool-options-empty">${tr("opt.rectselectModifiers")}</span>`
+          : html`<span class="tool-options-empty"
+              >${tr("options.empty", { tool: this.toolDisplayName(this.tool) })}</span
+            >`}
       </div>
     `;
   }

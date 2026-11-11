@@ -99,6 +99,15 @@ import {
   type GnumarusWrapMode,
 } from "./GnumarusViewportMath";
 import {
+  clampSelectionRect,
+  countSelectionMask,
+  intersectSelectionRects,
+  isEmptySelectionRect,
+  normalizeSelectionRect,
+  unionSelectionBox,
+  type GnumarusSelectionRect,
+} from "./GnumarusSelectionBoolean";
+import {
   GNUMARUS_MAX_SELECTION_SKEW,
   forwardSelectionPoint,
   inverseSelectionPoint,
@@ -234,6 +243,12 @@ export interface GnumarusFloatingSelection {
   buffer: Uint8ClampedArray;
   width: number;
   height: number;
+  /**
+   * Selected pixels (`255`) within the buffer box; boolean ops clear bits
+   * instead of shrinking the box, so holes survive. Merge copies only set
+   * bits back into the layer.
+   */
+  mask: Uint8Array;
   /** Center in home texture pixels (floats, unbounded). */
   cx: number;
   cy: number;
@@ -5075,6 +5090,24 @@ export class GnumarusCanvasEngine {
     return { x, y, width: Math.ceil(box.maxX) - x, height: Math.ceil(box.maxY) - y };
   }
 
+  /**
+   * Floating selection content for tests: layer-space box plus the number
+   * of selected (masked) pixels. Null when no selection is active.
+   */
+  getFloatingSelection(): { x: number; y: number; width: number; height: number; selected: number } | null {
+    const floating = this.floating;
+    if (floating === null || !floating.active) {
+      return null;
+    }
+    return {
+      x: Math.floor(floating.cx - floating.width / 2),
+      y: Math.floor(floating.cy - floating.height / 2),
+      width: floating.width,
+      height: floating.height,
+      selected: countSelectionMask(floating.mask),
+    };
+  }
+
   /** Floating transform params, or null when no selection is active. */
   getFloatingTransform(): {
     cx: number;
@@ -6293,6 +6326,9 @@ export class GnumarusCanvasEngine {
         if (sx < 0 || sy < 0 || sx >= floating.width || sy >= floating.height) {
           continue;
         }
+        if ((floating.mask[sy * floating.width + sx] ?? 0) === 0) {
+          continue;
+        }
         const source = (sy * floating.width + sx) * 4;
         const dest = (dy * tex.width + dx) * 4;
         tex.buffer[dest] = floating.buffer[source]!;
@@ -6367,6 +6403,321 @@ export class GnumarusCanvasEngine {
       buffer: cut,
       width,
       height,
+      mask: new Uint8Array(width * height).fill(255),
+      cx: minX + width / 2,
+      cy: minY + height / 2,
+      rotation: 0,
+      scaleX: 1,
+      scaleY: 1,
+      skewX: 0,
+      skewY: 0,
+      rotationX: 0,
+      rotationY: 0,
+      flipX: false,
+      flipY: false,
+      initial: {
+        cx: minX + width / 2,
+        cy: minY + height / 2,
+        rotation: 0,
+        scaleX: 1,
+        scaleY: 1,
+        skewX: 0,
+        skewY: 0,
+        rotationX: 0,
+        rotationY: 0,
+        flipX: false,
+        flipY: false,
+      },
+      layerId: layer.id,
+      frame: this.currentFrame,
+      textureId: tex.id,
+      cutDepth: this.history.undoDepth(),
+      active: true,
+    };
+    this.markTextureViewsDirty(tex.id);
+    this.syncAllLayerRenders();
+    this.syncFloatingPlane();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  /**
+   * Combine a freshly dragged rect with the active floating selection at
+   * the pixel level, keeping a single layer-aligned floating selection:
+   * - union: selected = old pixels plus the new rect (cut out of the layer);
+   * - intersect: selected = overlap only, the rest is restored to the layer
+   *   (empty overlap clears the selection, i.e. merges everything back);
+   * - subtract: the new rect is restored to the layer and removed from the
+   *   selection (no overlap leaves everything untouched).
+   * Nearest sampling matches the merge mapping, so untransformed floatings
+   * combine bit-exactly. One history entry covers layer changes. Returns
+   * false when there is nothing to combine with.
+   */
+  private combineRectWithFloating(
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    mode: "union" | "intersect" | "subtract",
+  ): boolean {
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return false;
+    }
+    const ensured = this.ensureCellContent(layer.id, this.currentFrame);
+    if (ensured === null) {
+      return false;
+    }
+    this.syncLayerRender(layer);
+    this.refreshLayerStacking();
+    const tex = ensured.texture;
+    const floating = this.floating;
+    if (
+      floating === null ||
+      !floating.active ||
+      floating.layerId !== layer.id ||
+      floating.frame !== this.currentFrame ||
+      floating.textureId !== tex.id ||
+      floating.buffer.length !== floating.width * floating.height * 4 ||
+      floating.mask.length !== floating.width * floating.height
+    ) {
+      return false;
+    }
+    const next = clampSelectionRect(normalizeSelectionRect(x0, y0, x1, y1), tex.width, tex.height);
+    if (mode === "union" && next === null) {
+      return true;
+    }
+    if (mode === "subtract" && next === null) {
+      return true;
+    }
+    if (mode === "intersect" && next === null) {
+      this.commitFloating();
+      return true;
+    }
+    const added = next as GnumarusSelectionRect;
+    const placement = this.floatingPlacement(floating);
+    // Membership of a layer pixel in the old selection, nearest-mapped
+    // exactly like the merge loop below.
+    const epsilon = 1e-6;
+    const inOld = (x: number, y: number): { sx: number; sy: number } | null => {
+      const local = inverseSelectionPoint(placement, x + 0.5, y + 0.5);
+      if (local === null) {
+        return null;
+      }
+      const sx = Math.floor(local.x + epsilon);
+      const sy = Math.floor(local.y + epsilon);
+      if (sx < 0 || sy < 0 || sx >= floating.width || sy >= floating.height) {
+        return null;
+      }
+      if ((floating.mask[sy * floating.width + sx] ?? 0) === 0) {
+        return null;
+      }
+      return { sx, sy };
+    };
+    const inNew = (x: number, y: number): boolean =>
+      x >= added.minX && x < added.maxX && y >= added.minY && y < added.maxY;
+    if (mode === "intersect") {
+      const overlap = intersectSelectionRects(
+        {
+          minX: Math.max(0, Math.floor(selectionCornerBox(placement).minX)),
+          minY: Math.max(0, Math.floor(selectionCornerBox(placement).minY)),
+          maxX: Math.min(tex.width, Math.ceil(selectionCornerBox(placement).maxX)),
+          maxY: Math.min(tex.height, Math.ceil(selectionCornerBox(placement).maxY)),
+        },
+        added,
+      );
+      if (overlap === null) {
+        this.commitFloating();
+        return true;
+      }
+      // Tighten to pixels that are actually selected, so rotated floatings
+      // keep only their true overlap.
+      let tight: GnumarusSelectionRect | null = null;
+      for (let y = overlap.minY; y < overlap.maxY; y += 1) {
+        for (let x = overlap.minX; x < overlap.maxX; x += 1) {
+          if (inOld(x, y) !== null) {
+            tight =
+              tight === null
+                ? { minX: x, minY: y, maxX: x + 1, maxY: y + 1 }
+                : {
+                    minX: Math.min(tight.minX, x),
+                    minY: Math.min(tight.minY, y),
+                    maxX: Math.max(tight.maxX, x + 1),
+                    maxY: Math.max(tight.maxY, y + 1),
+                  };
+          }
+        }
+      }
+      if (tight === null) {
+        this.commitFloating();
+        return true;
+      }
+      const base = tex.buffer.slice();
+      const width = tight.maxX - tight.minX;
+      const height = tight.maxY - tight.minY;
+      const cut = new Uint8ClampedArray(width * height * 4);
+      const mask = new Uint8Array(width * height).fill(255);
+      for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+          const hit = inOld(tight.minX + x, tight.minY + y);
+          if (hit === null) {
+            mask[y * width + x] = 0;
+            continue;
+          }
+          const source = (hit.sy * floating.width + hit.sx) * 4;
+          cut.set(floating.buffer.subarray(source, source + 4), (y * width + x) * 4);
+        }
+      }
+      // Restore the non-overlapping old pixels to the layer.
+      for (let y = 0; y < floating.height; y += 1) {
+        for (let x = 0; x < floating.width; x += 1) {
+          if ((floating.mask[y * floating.width + x] ?? 0) === 0) {
+            continue;
+          }
+          const home = forwardSelectionPoint(placement, x + 0.5, y + 0.5);
+          const dx = Math.floor(home.x);
+          const dy = Math.floor(home.y);
+          if (dx < tight.minX || dx >= tight.maxX || dy < tight.minY || dy >= tight.maxY) {
+            if (dx >= 0 && dy >= 0 && dx < tex.width && dy < tex.height) {
+              const source = (y * floating.width + x) * 4;
+              const dest = (dy * tex.width + dx) * 4;
+              tex.buffer[dest] = floating.buffer[source]!;
+              tex.buffer[dest + 1] = floating.buffer[source + 1]!;
+              tex.buffer[dest + 2] = floating.buffer[source + 2]!;
+              tex.buffer[dest + 3] = floating.buffer[source + 3]!;
+            }
+          }
+        }
+      }
+      return this.replaceFloating(tex, base, cut, tight.minX, tight.minY, width, height, mask);
+    }
+    if (mode === "subtract") {
+      // No selected pixel inside the new rect: nothing changes.
+      let touches = false;
+      for (let y = added.minY; y < added.maxY && !touches; y += 1) {
+        for (let x = added.minX; x < added.maxX; x += 1) {
+          if (inOld(x, y) !== null) {
+            touches = true;
+            break;
+          }
+        }
+      }
+      if (!touches) {
+        return true;
+      }
+      const base = tex.buffer.slice();
+      const oldBox = {
+        minX: Math.max(0, Math.floor(selectionCornerBox(placement).minX)),
+        minY: Math.max(0, Math.floor(selectionCornerBox(placement).minY)),
+        maxX: Math.min(tex.width, Math.ceil(selectionCornerBox(placement).maxX)),
+        maxY: Math.min(tex.height, Math.ceil(selectionCornerBox(placement).maxY)),
+      };
+      const width = Math.max(1, oldBox.maxX - oldBox.minX);
+      const height = Math.max(1, oldBox.maxY - oldBox.minY);
+      const cut = new Uint8ClampedArray(width * height * 4);
+      const mask = new Uint8Array(width * height);
+      for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+          const hit = inOld(oldBox.minX + x, oldBox.minY + y);
+          if (hit === null || inNew(oldBox.minX + x, oldBox.minY + y)) {
+            continue;
+          }
+          const source = (hit.sy * floating.width + hit.sx) * 4;
+          cut.set(floating.buffer.subarray(source, source + 4), (y * width + x) * 4);
+          mask[y * width + x] = 255;
+        }
+      }
+      // Restore the subtracted pixels to the layer from the floating buffer.
+      for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+          const gx = oldBox.minX + x;
+          const gy = oldBox.minY + y;
+          if (!inNew(gx, gy)) {
+            continue;
+          }
+          const hit = inOld(gx, gy);
+          if (hit === null) {
+            continue;
+          }
+          const source = (hit.sy * floating.width + hit.sx) * 4;
+          const dest = (gy * tex.width + gx) * 4;
+          tex.buffer[dest] = floating.buffer[source]!;
+          tex.buffer[dest + 1] = floating.buffer[source + 1]!;
+          tex.buffer[dest + 2] = floating.buffer[source + 2]!;
+          tex.buffer[dest + 3] = floating.buffer[source + 3]!;
+        }
+      }
+      return this.replaceFloating(tex, base, cut, oldBox.minX, oldBox.minY, width, height, mask);
+    }
+    // Union: bounding box of both, old pixels plus the new rect cut out.
+    const oldBox = {
+      minX: Math.max(0, Math.floor(selectionCornerBox(placement).minX)),
+      minY: Math.max(0, Math.floor(selectionCornerBox(placement).minY)),
+      maxX: Math.min(tex.width, Math.ceil(selectionCornerBox(placement).maxX)),
+      maxY: Math.min(tex.height, Math.ceil(selectionCornerBox(placement).maxY)),
+    };
+    const box = isEmptySelectionRect(oldBox) ? added : unionSelectionBox(oldBox, added);
+    const base = tex.buffer.slice();
+    const width = Math.max(1, box.maxX - box.minX);
+    const height = Math.max(1, box.maxY - box.minY);
+    const cut = new Uint8ClampedArray(width * height * 4);
+    const mask = new Uint8Array(width * height);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const gx = box.minX + x;
+        const gy = box.minY + y;
+        const hit = inOld(gx, gy);
+        if (hit !== null) {
+          const source = (hit.sy * floating.width + hit.sx) * 4;
+          cut.set(floating.buffer.subarray(source, source + 4), (y * width + x) * 4);
+          mask[y * width + x] = 255;
+        } else if (inNew(gx, gy)) {
+          const source = (gy * tex.width + gx) * 4;
+          cut.set(tex.buffer.subarray(source, source + 4), (y * width + x) * 4);
+          mask[y * width + x] = 255;
+          tex.buffer[source] = 0;
+          tex.buffer[source + 1] = 0;
+          tex.buffer[source + 2] = 0;
+          tex.buffer[source + 3] = 0;
+        }
+      }
+    }
+    return this.replaceFloating(tex, base, cut, box.minX, box.minY, width, height, mask);
+  }
+
+  /**
+   * Swap the active floating selection for a freshly assembled layer-aligned
+   * one (identity placement at its box), pushing a single history entry for
+   * the layer changes. Used by the boolean selection ops.
+   */
+  private replaceFloating(
+    tex: { id: string; buffer: Uint8ClampedArray; width: number; height: number },
+    base: Uint8ClampedArray,
+    cut: Uint8ClampedArray,
+    minX: number,
+    minY: number,
+    width: number,
+    height: number,
+    mask: Uint8Array,
+  ): boolean {
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return false;
+    }
+    const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
+    if (diff !== null) {
+      this.pushHistory({ type: "stroke", layerId: tex.id, diff });
+    }
+    this.floating = {
+      buffer: cut,
+      width,
+      height,
+      mask,
       cx: minX + width / 2,
       cy: minY + height / 2,
       rotation: 0,
@@ -9104,7 +9455,25 @@ export class GnumarusCanvasEngine {
       if (this.rectDrag !== null && event.button === 0) {
         const drag = this.rectDrag;
         this.rectDrag = null;
-        this.cutRectToFloating(drag.x0, drag.y0, drag.x1, drag.y1);
+        // Modifier release routing: plain replaces; Shift adds, Ctrl+Shift
+        // (Cmd+Shift) intersects, Alt+Shift subtracts. With several held,
+        // intersect wins, then subtract.
+        let mode: "union" | "intersect" | "subtract" | null = null;
+        if (event.shiftKey) {
+          if (event.ctrlKey || event.metaKey) {
+            mode = "intersect";
+          } else if (event.altKey) {
+            mode = "subtract";
+          } else {
+            mode = "union";
+          }
+        }
+        if (
+          mode === null ||
+          !this.combineRectWithFloating(drag.x0, drag.y0, drag.x1, drag.y1, mode)
+        ) {
+          this.cutRectToFloating(drag.x0, drag.y0, drag.x1, drag.y1);
+        }
         return;
       }
       if (this.tool !== "curve" || this.curvePhase !== "dragging" || event.button !== 0) {
@@ -9190,7 +9559,11 @@ export class GnumarusCanvasEngine {
         );
       })();
       if (event.key === "Control" && !event.repeat && !event.altKey && !event.metaKey && !inField) {
-        this.beginTempEyedropper();
+        // The Ctrl selection modifiers belong to the rectangular selection
+        // tool; summoning the eyedropper there would steal its drags.
+        if (this.tool !== "rectselect") {
+          this.beginTempEyedropper();
+        }
         return;
       }
       if (!event.ctrlKey && !event.altKey && !event.metaKey && !inField) {

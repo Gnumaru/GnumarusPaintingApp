@@ -500,3 +500,10 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - New locale setting (`system` default) in `src/settings/GnumarusLocaleSettings.ts` following the standard settings pattern; Settings dialog row with reset arrow; test hook; `document.documentElement.lang` follows the active locale.
 - All shell/picker UI texts, status/toast/console messages go through the catalog; shortcuts unchanged. Status messages now show translated display names for enum values (shape, blend, pressure, stabilizer, wrap, cleanup, ...); reset-button labels keep their legacy strings. Parser-technical error details (byte offsets, syntax specifics) stay English; their wrappers are translated.
 - Unit (resolution, parity, interpolation, locale settings, axis-label coverage) + e2e (locale switch to pt-BR and back) coverage.
+
+## 93. Rectangular selection boolean ops (implemented)
+- Modifiers on rectselect left-drag release: plain = replace (status quo), Shift = union (add), Ctrl+Shift (or Cmd+Shift) = intersect (keep overlap; empty clears the selection), Alt+Shift = subtract (no overlap = no-op).
+- Floating selections gain a `mask` (bbox bytes, 0/255); merge copies only masked pixels; boolean ops rebuild one layer-aligned floating via nearest sampling (same quality as merge), single history entry; intersect-empty restores pixels via commit; disjoint subtract is a no-op.
+- Ops combine with the active floating on the same cell/texture (any placement, nearest-mapped); otherwise fall back to plain cut. Ctrl no longer summons the temporary eyedropper while rectselect is active.
+- Rubber band still shows the drag rect; ants show the result bbox. Shortcuts modal + toolbar hint + rectselect options hint document the modifiers (en + pt-BR).
+- Pure rect/mask helpers in `GnumarusSelectionBoolean.ts` + unit tests; e2e @recent (union/intersect/subtract/empty-clear/no-op) via layer pixels + floating hook.

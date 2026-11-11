@@ -5877,6 +5877,136 @@ async function layerScreenTarget(
   );
 }
 
+interface GnumarusFloatingSelectionInfo {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  selected: number;
+}
+
+async function getFloatingSelection(page: import("@playwright/test").Page): Promise<GnumarusFloatingSelectionInfo | null> {
+  return page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getFloatingSelection(): GnumarusFloatingSelectionInfo | null } };
+    };
+    return root.__gnumarus?.engine?.getFloatingSelection() ?? null;
+  });
+}
+
+async function dragRect(
+  page: import("@playwright/test").Page,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+): Promise<void> {
+  const from = await layerScreenTarget(page, x0, y0);
+  const to = await layerScreenTarget(page, x1, y1);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 5 });
+  await page.mouse.up();
+}
+
+test("rectangular selection shift-drag adds to the selection @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  const center = await layerScreenTarget(page, 32, 32);
+  await page.mouse.click(center.x, center.y);
+  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  await dragRect(page, 10, 10, 12, 12);
+  expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 3, height: 3, selected: 9 });
+  expect(await readPixel(page, 11, 11)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  await page.keyboard.down("Shift");
+  await dragRect(page, 20, 20, 22, 22);
+  await page.keyboard.up("Shift");
+  expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 13, height: 13, selected: 18 });
+  expect(await readPixel(page, 21, 21)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 15, 15)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("rectangular selection ctrl-shift-drag intersects the selection @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  const center = await layerScreenTarget(page, 32, 32);
+  await page.mouse.click(center.x, center.y);
+  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  await dragRect(page, 10, 10, 20, 20);
+  expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 11, height: 11, selected: 121 });
+  await page.keyboard.down("Control");
+  await page.keyboard.down("Shift");
+  await dragRect(page, 15, 15, 25, 25);
+  await page.keyboard.up("Shift");
+  await page.keyboard.up("Control");
+  expect(await getFloatingSelection(page)).toEqual({ x: 15, y: 15, width: 6, height: 6, selected: 36 });
+  expect(await readPixel(page, 12, 12)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 17, 17)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 30, 30)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("rectangular selection ctrl-shift-drag with no overlap clears the selection @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  const center = await layerScreenTarget(page, 32, 32);
+  await page.mouse.click(center.x, center.y);
+  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  await dragRect(page, 10, 10, 12, 12);
+  expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 3, height: 3, selected: 9 });
+  await page.keyboard.down("Control");
+  await page.keyboard.down("Shift");
+  await dragRect(page, 40, 40, 42, 42);
+  await page.keyboard.up("Shift");
+  await page.keyboard.up("Control");
+  expect(await getFloatingSelection(page)).toBeNull();
+  expect(await readPixel(page, 11, 11)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("rectangular selection alt-shift-drag subtracts from the selection @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  const center = await layerScreenTarget(page, 32, 32);
+  await page.mouse.click(center.x, center.y);
+  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  await dragRect(page, 10, 10, 20, 20);
+  await page.keyboard.down("Alt");
+  await page.keyboard.down("Shift");
+  await dragRect(page, 15, 15, 25, 25);
+  await page.keyboard.up("Shift");
+  await page.keyboard.up("Alt");
+  expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 11, height: 11, selected: 85 });
+  expect(await readPixel(page, 12, 12)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 17, 17)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 30, 30)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("rectangular selection alt-shift-drag with no overlap changes nothing @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  const center = await layerScreenTarget(page, 32, 32);
+  await page.mouse.click(center.x, center.y);
+  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  await dragRect(page, 10, 10, 12, 12);
+  await page.keyboard.down("Alt");
+  await page.keyboard.down("Shift");
+  await dragRect(page, 40, 40, 42, 42);
+  await page.keyboard.up("Shift");
+  await page.keyboard.up("Alt");
+  expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 3, height: 3, selected: 9 });
+  expect(await readPixel(page, 11, 11)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 41, 41)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
 test("rectangular selection cuts to floating and destructive transform moves and merges", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
