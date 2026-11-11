@@ -32,6 +32,7 @@ describe("GnumarusProjectFormat", () => {
         id: "content1",
         name: "C1",
         textureId: "layer0",
+        textId: null,
         transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
       },
     ]);
@@ -89,6 +90,7 @@ describe("GnumarusProjectFormat", () => {
     expect(parsed.animation.textures[0]).toMatchObject({ id: "layer0", width: 32, height: 16 });
     expect(parsed.animation.contents[0]).toMatchObject({
       textureId: "layer0",
+      textId: null,
       transform: { x: 1, y: 2, rotation: 0.5, flipX: true, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
     });
     expect(parsed.layers[0]).toMatchObject({ opacity: 0.5, lockedChannels: { r: true, g: false, b: false, a: false } });
@@ -102,6 +104,7 @@ describe("GnumarusProjectFormat", () => {
       id: "content2",
       name: "Content 2",
       textureId: null,
+      textId: null,
       transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
     });
     project.animation.cells.push(
@@ -248,7 +251,7 @@ describe("GnumarusProjectFormat", () => {
       { name: "walk", loop: "forward", frames: [{ frame: 0, duration: 400 }] },
     ];
     const parsed = parseProject(JSON.stringify(raw));
-    expect(parsed.version).toBe(2);
+    expect(parsed.version).toBe(3);
     expect(parsed.animation.defaultFrameDuration).toBe(0.25);
     expect(parsed.animation.frameDurations).toEqual([{ frame: 1, duration: 0.5 }]);
     expect(parsed.animation.namedAnimations).toEqual([
@@ -385,5 +388,84 @@ describe("GnumarusProjectFormat", () => {
       ).sort(),
     ).toEqual(["textures/t1.alpha.jpg", "textures/t1.jxl"].sort());
     expect(findStaleProjectPaths([], new Set(["project.gpa"]))).toEqual([]);
+  });
+
+  it("round-trips text entries shared across contents", () => {
+    const project = createDefaultProject(8, 8);
+    project.animation.frames = 2;
+    project.animation.frameNames = ["F1", "F2"];
+    project.animation.texts.push({ id: "text1", name: "T1", document: { html: "<div>Hello <b>bold</b></div>" } });
+    project.animation.contents.push({
+      id: "content2",
+      name: "C2",
+      textureId: null,
+      textId: "text1",
+      transform: { x: 5, y: 5, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
+    });
+    project.animation.cells.push({ layer: "layer0", frame: 1, content: "content2" });
+    const parsed = parseProject(serializeProject(project));
+    expect(parsed.animation.texts).toEqual([
+      { id: "text1", name: "T1", document: { html: "<div>Hello <b>bold</b></div>" } },
+    ]);
+    expect(parsed.animation.contents[1]).toMatchObject({ textureId: null, textId: "text1" });
+  });
+
+  it("migrates v2 projects without texts", () => {
+    const project = createDefaultProject(8, 8);
+    const downgraded = JSON.parse(serializeProject(project)) as Record<string, unknown>;
+    downgraded["version"] = 2;
+    const animation = downgraded["animation"] as Record<string, unknown>;
+    delete animation["texts"];
+    delete (animation["contents"] as Array<Record<string, unknown>>)[0]?.["textId"];
+    const parsed = parseProject(JSON.stringify(downgraded));
+    expect(parsed.version).toBe(3);
+    expect(parsed.animation.texts).toEqual([]);
+    expect(parsed.animation.contents[0]).toMatchObject({ textureId: "layer0", textId: null });
+  });
+
+  it("rejects unknown text references and dual texture+text contents", () => {
+    const ok = createDefaultProject(8, 8);
+    expect(() =>
+      parseProject(
+        serializeProject({
+          ...ok,
+          animation: {
+            ...ok.animation,
+            contents: [{ ...ok.animation.contents[0], textId: "missing" }],
+          },
+        }),
+      ),
+    ).toThrow(GnumarusProjectError);
+    expect(() =>
+      parseProject(
+        serializeProject({
+          ...ok,
+          animation: {
+            ...ok.animation,
+            texts: [{ id: "text1", name: "T1", document: { html: "<div>Hi</div>" } }],
+            contents: [{ ...ok.animation.contents[0], textId: "text1" }],
+          },
+        }),
+      ),
+    ).toThrow(GnumarusProjectError);
+    expect(() =>
+      parseProject(
+        serializeProject({
+          ...ok,
+          animation: { ...ok.animation, texts: [{ id: "t", name: 7 as unknown as string, document: { html: "<div>x</div>" } }] },
+        }),
+      ),
+    ).toThrow(GnumarusProjectError);
+  });
+
+  it("sanitizes text html on load", () => {
+    const project = createDefaultProject(8, 8);
+    project.animation.texts.push({
+      id: "text1",
+      name: "T1",
+      document: { html: '<div onclick="evil()">x<script>bad()</script></div>' },
+    });
+    const parsed = parseProject(serializeProject(project));
+    expect(parsed.animation.texts).toEqual([{ id: "text1", name: "T1", document: { html: "<div>x</div>" } }]);
   });
 });

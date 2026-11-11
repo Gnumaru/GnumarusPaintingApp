@@ -531,3 +531,13 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Plain wheel alone zooms; any modifier disables canvas zoom. Ctrl+wheel (no Alt/Shift) resizes the pencil brush in whole units with options-bar/status sync.
 - New `polylasso` tool (`P`, selection drawer): left-click appends polygon vertices, Enter/Return or right-click commits (needs 3+ distinct points), Escape/tool-switch/pointercancel cancels; live polyline preview; boolean ops at commit via the shared modifiers.
 - All selection tools (rect/ellipse/lasso/polylasso/color) share modifier routing; e2e @recent covers wheel gating, Ctrl+wheel sizing, polygonal commit paths + a polygonal boolean op.
+
+## 99. Rich text cell contents (implemented)
+- New `texts` pool beside `textures`: `GnumarusTextEntry { id, name, document: { html } }`; contents gain `textId` (mutually exclusive with `textureId`); project format v2 -> v3 with migration; texts inline in project.json.
+- Sanitized HTML subset storage (b/i/u/span/div/p/br + allowlisted inline style, px clamp, hex colors); contenteditable dialog editor with formatting toolbar (execCommand + manual spans), paste sanitization, live preview, OK/Cancel + single history entry; Cancel/Esc restores.
+- Rasterizer (canvas 2D, 2x supersample) to a derived-raster cache injected at resolveFrameAt (render/transform/3D/export/thumbs free); derived ids never saved/listed/reloaded.
+- Text tool (`X`, toolbar button + hint + shortcuts row): click empty cell creates + opens editor; click text content reopens.
+- Paint/bucket/line/curve/Delete blocked on text cells with toast; explicit "Rasterize text" cell-menu action creates a texture content for that cell only.
+- Select-content modal: New text + kind badges; matrix thumbnails via raster.
+- i18n en+pt-BR; unit (sanitizer idempotence, html->runs, layout with stub metrics, format/migration) + e2e @recent (create/edit/share/undo/reopen/export/paint-block/rasterize).
+- Verified: `npm run build` clean, 425 unit tests green, 33/33 `@recent` e2e green (Chromium), full suite untouched per policy.

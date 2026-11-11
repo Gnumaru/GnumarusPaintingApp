@@ -1534,7 +1534,7 @@ interface GnumarusTestMatrix {
     layerId: string;
     cells: Array<{ layerId: string; frame: number; contentId: string | null; contentName: string | null }>;
   }>;
-  contents: Array<{ id: string; name: string; textureId: string | null }>;
+  contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null }>;
 }
 
 async function getMatrix(page: import("@playwright/test").Page): Promise<GnumarusTestMatrix> {
@@ -9967,4 +9967,250 @@ test("rectangular selection chains three unions @recent", async ({ page }) => {
   expect(await getFloatingSelection(page)).toEqual({ x: 5, y: 5, width: 38, height: 38, selected: 27 });
   expect(await selectionMaskDisplay(page)).toBe("block");
   expect(await selectionMaskMoves(page)).toBe(12);
+});
+
+async function cellTextId(page: import("@playwright/test").Page, layerId: string, frame: number): Promise<string | null> {
+  return page.evaluate(([layer, targetFrame]: [string, number]) => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getCellTextId(layerId: string, frame: number): string | null } };
+    };
+    return root.__gnumarus?.engine?.getCellTextId(layer, targetFrame) ?? null;
+  }, [layerId, frame] as [string, number]);
+}
+
+async function cellTextureId(page: import("@playwright/test").Page, layerId: string, frame: number): Promise<string | null> {
+  return page.evaluate(([layer, targetFrame]: [string, number]) => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getCellTextureId(layerId: string, frame: number): string | null } };
+    };
+    return root.__gnumarus?.engine?.getCellTextureId(layer, targetFrame) ?? null;
+  }, [layerId, frame] as [string, number]);
+}
+
+async function textHtml(page: import("@playwright/test").Page, textId: string): Promise<string | null> {
+  return page.evaluate((id: string) => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getTextDocument(textId: string): { html: string } | null } };
+    };
+    return root.__gnumarus?.engine?.getTextDocument(id)?.html ?? null;
+  }, textId);
+}
+
+async function textPaintedPixels(page: import("@playwright/test").Page): Promise<number> {
+  return page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { readPixel(x: number, y: number): { a: number } | null } };
+    };
+    const engine = root.__gnumarus?.engine;
+    if (engine === undefined) {
+      return -1;
+    }
+    let count = 0;
+    for (let y = 0; y < 64; y += 4) {
+      for (let x = 0; x < 64; x += 4) {
+        if ((engine.readPixel(x, y)?.a ?? 0) > 0) {
+          count += 1;
+        }
+      }
+    }
+    return count;
+  });
+}
+
+async function createDefaultText(page: import("@playwright/test").Page): Promise<string> {
+  await page.locator('gnumarus-shell [data-testid="tool-text"]').click();
+  await paintCenter(page);
+  const dialog = page.locator('gnumarus-shell [data-testid="text-editor-dialog"]');
+  await expect(dialog).toBeVisible();
+  await page.locator('gnumarus-shell [data-testid="text-ok"]').click();
+  await expect(page.locator('gnumarus-shell [data-testid="text-editor-dialog"]')).toBeHidden();
+  const textId = await cellTextId(page, "layer0", 0);
+  expect(typeof textId).toBe("string");
+  return textId as string;
+}
+
+test("text tool creates a text cell and renders it @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.locator('gnumarus-shell [data-testid="tool-text"]').click();
+  await paintCenter(page);
+  const dialog = page.locator('gnumarus-shell [data-testid="text-editor-dialog"]');
+  await expect(dialog).toBeVisible();
+  const area = page.locator('gnumarus-shell [data-testid="text-editor-area"]');
+  await expect(area).toContainText("Text");
+  await area.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("Hello");
+  await page.locator('gnumarus-shell [data-testid="text-ok"]').click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Text updated");
+  const textId = await cellTextId(page, "layer0", 0);
+  expect(typeof textId).toBe("string");
+  expect(await textHtml(page, textId as string)).toContain("Hello");
+  expect(await textPaintedPixels(page)).toBeGreaterThan(0);
+});
+
+test("text edit undo and redo restore the document @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const textId = await createDefaultText(page);
+  await page.locator('gnumarus-shell [data-testid="tool-text"]').click();
+  await paintCenter(page);
+  const area = page.locator('gnumarus-shell [data-testid="text-editor-area"]');
+  await area.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("Abc");
+  await page.locator('gnumarus-shell [data-testid="text-ok"]').click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Text updated");
+  expect(await textHtml(page, textId)).toContain("Abc");
+  await page.keyboard.press("Control+z");
+  expect(await textHtml(page, textId)).toBe("<div>Text</div>");
+  await page.keyboard.press("Control+y");
+  expect(await textHtml(page, textId)).toContain("Abc");
+});
+
+test("text entries can be shared across cells @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const textId = await createDefaultText(page);
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  const cell = matrix.locator('[data-testid="anim-cell"][data-matrix-frame="1"]');
+  await cell.click({ button: "right" });
+  await page.getByRole("button", { name: "Select text" }).click();
+  const grid = page.locator('gnumarus-shell [data-testid="text-picker-grid"]');
+  await expect(grid).toBeVisible();
+  await page.locator(`gnumarus-shell [data-testid="text-picker-item"][data-text-id="${textId}"]`).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Text associated");
+  expect(await cellTextId(page, "layer0", 1)).toBe(textId);
+});
+
+test("painting a text cell toasts that rasterizing is needed @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await createDefaultText(page);
+  const before = await textPaintedPixels(page);
+  expect(before).toBeGreaterThan(0);
+  await page.keyboard.press("b");
+  await paintCenter(page);
+  await expect(page.locator("gnumarus-shell")).toContainText("rasterize the text first");
+  expect(await textPaintedPixels(page)).toBe(before);
+});
+
+test("rasterize text bakes a paintable texture content @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await createDefaultText(page);
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  const cell = matrix.locator('[data-testid="anim-cell"][data-matrix-frame="0"]');
+  await cell.click({ button: "right" });
+  await page.getByRole("button", { name: "Rasterize text", exact: true }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Text rasterized");
+  expect(await cellTextId(page, "layer0", 0)).toBeNull();
+  expect(await cellTextureId(page, "layer0", 0)).not.toBeNull();
+  await setPencil(page, "#ff0000");
+  await page.keyboard.press("b");
+  await paintCenter(page);
+  const redCount = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { readPixel(x: number, y: number): { r: number; g: number; b: number; a: number } | null } };
+    };
+    const engine = root.__gnumarus?.engine;
+    if (engine === undefined) {
+      return -1;
+    }
+    let count = 0;
+    for (let y = 0; y < 256; y += 2) {
+      for (let x = 0; x < 256; x += 2) {
+        const pixel = engine.readPixel(x, y);
+        if (pixel !== null && pixel.r === 255 && pixel.g === 0 && pixel.b === 0 && pixel.a === 255) {
+          count += 1;
+        }
+      }
+    }
+    return count;
+  });
+  expect(redCount).toBeGreaterThan(0);
+});
+
+test("text survives save and reopen @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.locator('gnumarus-shell [data-testid="tool-text"]').click();
+  await paintCenter(page);
+  const area = page.locator('gnumarus-shell [data-testid="text-editor-area"]');
+  await area.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("Hello");
+  await page.locator('gnumarus-shell [data-testid="text-ok"]').click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Text updated");
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  const saved = await project.writtenProject();
+  expect(saved).toContain('"texts"');
+  expect(saved).toContain("Hello");
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject");
+  const textId = await cellTextId(page, "layer0", 0);
+  expect(typeof textId).toBe("string");
+  expect(await textHtml(page, textId as string)).toContain("Hello");
+  expect(await textPaintedPixels(page)).toBeGreaterThan(0);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
+  const exportDialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(exportDialog).toBeVisible();
+  await exportDialog.locator("#exportOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported");
+  const painted = await page.evaluate(async () => {
+    const root = window as unknown as {
+      __gnumarusExportTest?: { fileName: string | null; blob: Blob | null };
+    };
+    const blob = root.__gnumarusExportTest?.blob;
+    if (blob === null || blob === undefined) {
+      return -1;
+    }
+    const bitmap = await createImageBitmap(blob);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    if (context === null) {
+      bitmap.close();
+      return -1;
+    }
+    context.drawImage(bitmap, 0, 0);
+    const data = context.getImageData(0, 0, bitmap.width, bitmap.height).data;
+    let count = 0;
+    for (let index = 3; index < data.length; index += 16) {
+      if ((data[index] ?? 0) > 0) {
+        count += 1;
+      }
+    }
+    bitmap.close();
+    return count;
+  });
+  expect(painted).toBeGreaterThan(0);
+});
+
+test("content picker offers new text with kind badges @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  const cell = matrix.locator('[data-testid="anim-cell"][data-matrix-frame="1"]');
+  await cell.click({ button: "right" });
+  await page.getByRole("button", { name: "Select content" }).click();
+  await page.locator('gnumarus-shell [data-testid="content-picker-new-text"]').click();
+  await expect(page.locator('gnumarus-shell [data-testid="text-editor-dialog"]')).toBeVisible();
+  await page.locator('gnumarus-shell [data-testid="text-cancel"]').click();
+  const textId = await cellTextId(page, "layer0", 1);
+  expect(typeof textId).toBe("string");
+  await cell.click({ button: "right" });
+  await page.getByRole("button", { name: "Select content" }).click();
+  const kinds = await page.locator('gnumarus-shell [data-testid="content-picker-kind"]').allTextContents();
+  expect(kinds).toContain("Text");
+  expect(kinds).toContain("Texture");
 });

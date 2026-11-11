@@ -1,4 +1,6 @@
 import { unzipSync, zipSync } from "fflate";
+import { sanitizeTextHtml } from "../text/GnumarusTextSanitize";
+import type { GnumarusTextDocument } from "../text/GnumarusText";
 import type { GnumarusLayerTransform } from "../canvas/GnumarusViewportMath";
 import { IDENTITY_LAYER_TRANSFORM } from "../canvas/GnumarusViewportMath";
 import type { GnumarusAnimationLoop } from "../animation/GnumarusNamedAnimations";
@@ -24,11 +26,19 @@ export interface GnumarusTextureMeta {
   file: string;
 }
 
+export interface GnumarusTextMeta {
+  id: string;
+  name: string;
+  document: GnumarusTextDocument;
+}
+
 export interface GnumarusContentMeta {
   id: string;
   name: string;
   /** Null means the content carries only settings and renders nothing. */
   textureId: string | null;
+  /** Rich text shown instead of a texture; mutually exclusive with textureId. */
+  textId: string | null;
   transform: GnumarusLayerTransform;
 }
 
@@ -70,6 +80,7 @@ export interface GnumarusAnimationMeta {
   /** Selected named animation, or null for the full timeline. */
   activeAnimation: string | null;
   textures: GnumarusTextureMeta[];
+  texts: GnumarusTextMeta[];
   contents: GnumarusContentMeta[];
   cells: GnumarusMatrixCellRef[];
 }
@@ -89,7 +100,7 @@ export interface GnumarusLayerMeta {
 
 export interface GnumarusProjectMeta {
   app: string;
-  version: 2;
+  version: 3;
   width: number;
   height: number;
   layers: GnumarusLayerMeta[];
@@ -119,7 +130,7 @@ export function textureFilePath(textureId: string, ext = "png"): string {
 export function createDefaultProject(width: number, height: number): GnumarusProjectMeta {
   return {
     app: GNUMARUS_APP_ID,
-    version: 2,
+    version: 3,
     width,
     height,
     layers: [
@@ -140,11 +151,13 @@ export function createDefaultProject(width: number, height: number): GnumarusPro
       namedAnimations: [],
       activeAnimation: null,
       textures: [{ id: "layer0", name: "t1", width, height, file: textureFilePath("layer0") }],
+      texts: [],
       contents: [
         {
           id: "content1",
           name: "C1",
           textureId: "layer0",
+          textId: null,
           transform: { ...IDENTITY_LAYER_TRANSFORM },
         },
       ],
@@ -293,7 +306,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
   if (!isRecord(value)) {
     throw new GnumarusProjectError("project.json has an invalid animation section");
   }
-  const { frames, currentFrame, defaultFrameDuration, frameDurations, frameNames, namedAnimations, activeAnimation, textures, contents, cells } = value;
+  const { frames, currentFrame, defaultFrameDuration, frameDurations, frameNames, namedAnimations, activeAnimation, textures, texts, contents, cells } = value;
   if (!Number.isInteger(frames) || (frames as number) < 1) {
     throw new GnumarusProjectError("project.json has an invalid frame count");
   }
@@ -335,6 +348,8 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
     }
     checkedTextures.push({ id, name: checkedName(name, "texture"), width, height, file });
   }
+  const checkedTexts = parseTextMetas(texts);
+  const textIds = new Set(checkedTexts.map((entry) => entry.id));
   if (!Array.isArray(contents)) {
     throw new GnumarusProjectError("project.json has invalid contents");
   }
@@ -349,7 +364,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
       throw new GnumarusProjectError("project.json has duplicate content ids");
     }
     contentIds.add(id);
-    const { name, textureId, transform } = entry;
+    const { name, textureId, textId, transform } = entry;
     if (textureId !== null && textureId !== undefined && typeof textureId !== "string") {
       throw new GnumarusProjectError("project.json has a content with an invalid texture reference");
     }
@@ -357,10 +372,21 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
     if (resolvedTexture !== null && !textureIds.has(resolvedTexture)) {
       throw new GnumarusProjectError("project.json has a content with an unknown texture");
     }
+    if (textId !== null && textId !== undefined && typeof textId !== "string") {
+      throw new GnumarusProjectError("project.json has a content with an invalid text reference");
+    }
+    const resolvedText = textId === undefined ? null : (textId as string | null);
+    if (resolvedText !== null && !textIds.has(resolvedText)) {
+      throw new GnumarusProjectError("project.json has a content with an unknown text");
+    }
+    if (resolvedTexture !== null && resolvedText !== null) {
+      throw new GnumarusProjectError("project.json has a content with both a texture and a text");
+    }
     checkedContents.push({
       id,
       name: checkedName(name, "content"),
       textureId: resolvedTexture,
+      textId: resolvedText,
       transform: parseLayerTransform(transform),
     });
   }
@@ -447,9 +473,38 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
     namedAnimations: checkedAnimations,
     activeAnimation: parseActiveAnimationName(activeAnimation, checkedAnimations),
     textures: checkedTextures,
+    texts: checkedTexts,
     contents: checkedContents,
     cells: checkedCells,
   };
+}
+
+/** Strict text list (absent in legacy files means none). Sanitized on load. */
+function parseTextMetas(value: unknown): GnumarusTextMeta[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new GnumarusProjectError("project.json has invalid texts");
+  }
+  const checked: GnumarusTextMeta[] = [];
+  const seenIds = new Set<string>();
+  for (const entry of value) {
+    if (!isRecord(entry)) {
+      throw new GnumarusProjectError("project.json has an invalid text");
+    }
+    const id = checkedId(entry.id, "text");
+    if (seenIds.has(id)) {
+      throw new GnumarusProjectError("project.json has duplicate text ids");
+    }
+    seenIds.add(id);
+    const { name, document } = entry;
+    if (!isRecord(document) || typeof document.html !== "string") {
+      throw new GnumarusProjectError("project.json has a text with an invalid document");
+    }
+    checked.push({ id, name: checkedName(name, "text"), document: { html: sanitizeTextHtml(document.html) } });
+  }
+  return checked;
 }
 
 /** Strict named-animation list (absent in legacy files means none). */
@@ -541,6 +596,7 @@ function migrateLegacyLayersToAnimation(
       id: contentId,
       name: `C${index + 1}`,
       textureId: layer.id,
+      textId: null,
       transform: layer.transform !== undefined ? { ...layer.transform } : { ...IDENTITY_LAYER_TRANSFORM },
     });
     cells.push({ layer: layer.id, frame: 0, content: contentId });
@@ -554,6 +610,7 @@ function migrateLegacyLayersToAnimation(
     namedAnimations: [],
     activeAnimation: null,
     textures,
+    texts: [],
     contents,
     cells,
   };
@@ -573,7 +630,7 @@ export function parseProject(jsonText: string): GnumarusProjectMeta {
   if (app !== GNUMARUS_APP_ID) {
     throw new GnumarusProjectError("project.json app id mismatch");
   }
-  if (version !== 1 && version !== 2) {
+  if (version !== 1 && version !== 2 && version !== 3) {
     throw new GnumarusProjectError("unsupported project version");
   }
   // Version 1 stored frame durations in milliseconds; version 2 uses seconds.
@@ -641,7 +698,7 @@ export function parseProject(jsonText: string): GnumarusProjectMeta {
       : parseAnimationMeta(animation, layerIds, durationsInMs);
   return {
     app: GNUMARUS_APP_ID,
-    version: 2,
+    version: 3,
     width: Math.floor(width),
     height: Math.floor(height),
     layers: checkedLayers,

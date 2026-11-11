@@ -329,3 +329,8 @@
 - [x] Wheel gating (zoom only unmodified) + Ctrl+wheel brush ±1
 - [x] Polygonal lasso tool (`P`, click points + Enter/right-click, Esc cancels, live preview, boolean combine)
 - [x] Drawer/i18n/options for polylasso; e2e @recent (4 new); build clean, unit 404, recent 26/26; docs updated
+- [x] Text model + sanitizer + layout/rasterizer + unit tests (17 passed)
+- [x] Project format v3 (types/validation/migration/serialize) + unit tests (22 passed)
+- [x] Engine text pool + derived rasters + render integration + guards + history
+- [x] Text tool + editor dialog + select modal + rasterize action + i18n (en + pt-BR)
+- [x] E2E @recent (7 new: create/render, edit/undo/redo, share, paint-block, rasterize, save/reopen/export, picker badges); build + unit (425) + recent (33/33) green; docs updated

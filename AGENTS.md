@@ -3,7 +3,7 @@
 - If you need me to install anything using apt, provide the `apt install` command for me to execute
 - If you need me to execute any command as root, provide the command for me to execute
 - If you have any questions or doubts, ask before proceeding
-- Write everything exclusively in American English. Talk to me using american english
+- Write everything exclusively in American English. Talk to me using brasilian portuguese
 - Never use the root `/tmp` directory. Instead, if you need to create temporary files or directories, use the local `./tmp` directory
 - Always document your plan in a `PLAN.md` file and create a task list in `CHECKLIST.md`. Keep both files continuously updated as you work. update them before and after implementing things
 - Always keep the `FEATURES_SUMMARY.md` file, containing a summarized list of all implemented features, and the `FEATURES_DETAIL.md` file, containing detailed explanations of all implemented features, up to date. update them before and after implementing things

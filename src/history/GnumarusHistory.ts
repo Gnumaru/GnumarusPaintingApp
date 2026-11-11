@@ -1,5 +1,6 @@
 import type { GnumarusChannelLock } from "../canvas/GnumarusPixelBuffer";
 import type { GnumarusLayerTransform } from "../canvas/GnumarusViewportMath";
+import type { GnumarusTextDocument } from "../text/GnumarusText";
 
 export interface GnumarusImageDiff {
   x: number;
@@ -144,13 +145,20 @@ export interface GnumarusReloadRecord {
   afterBuffer: Uint8ClampedArray;
 }
 
+export interface GnumarusTextRecord {
+  textId: string;
+  before: GnumarusTextDocument;
+  after: GnumarusTextDocument;
+}
+
 export type GnumarusHistoryEntry =
   | { type: "stroke"; layerId: string; diff: GnumarusImageDiff }
   | { type: "merge"; merge: GnumarusMergeRecord }
   | { type: "resize"; resize: GnumarusResizeRecord }
   | { type: "fit"; fit: GnumarusFitRecord }
   | { type: "fitBatch"; fits: GnumarusFitRecord[] }
-  | { type: "reloadBatch"; reloads: GnumarusReloadRecord[] };
+  | { type: "reloadBatch"; reloads: GnumarusReloadRecord[] }
+  | { type: "text"; text: GnumarusTextRecord };
 
 export interface GnumarusHistoryLayer {
   buffer: Uint8ClampedArray;
@@ -209,6 +217,7 @@ export class GnumarusHistory {
     associateCell?: (layerId: string, frame: number, contentId: string) => boolean,
     dissociateCell?: (layerId: string, frame: number) => boolean,
     setContentTexture?: (contentId: string, textureId: string | null) => boolean,
+    applyText?: (textId: string, document: GnumarusTextDocument) => boolean,
   ): boolean {
     for (;;) {
       const entry = this.undoStack.pop();
@@ -304,6 +313,13 @@ export class GnumarusHistory {
         this.redoStack.push(entry);
         return true;
       }
+      if (entry.type === "text") {
+        if (applyText === undefined || !applyText(entry.text.textId, entry.text.before)) {
+          continue;
+        }
+        this.redoStack.push(entry);
+        return true;
+      }
       const needsAssociate = !entry.merge.removedLayer;
       if (needsAssociate && associateCell === undefined) {
         continue;
@@ -362,6 +378,7 @@ export class GnumarusHistory {
     dissociateCell?: (layerId: string, frame: number) => boolean,
     associateCell?: (layerId: string, frame: number, contentId: string) => boolean,
     setContentTexture?: (contentId: string, textureId: string | null) => boolean,
+    applyText?: (textId: string, document: GnumarusTextDocument) => boolean,
   ): boolean {
     for (;;) {
       const entry = this.redoStack.pop();
@@ -444,6 +461,13 @@ export class GnumarusHistory {
           }
         }
         if (!applied) {
+          continue;
+        }
+        this.undoStack.push(entry);
+        return true;
+      }
+      if (entry.type === "text") {
+        if (applyText === undefined || !applyText(entry.text.textId, entry.text.after)) {
           continue;
         }
         this.undoStack.push(entry);

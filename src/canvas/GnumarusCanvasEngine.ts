@@ -1,6 +1,15 @@
 import * as THREE from "three";
 import { compositeLayersAt } from "../preview/GnumarusFinalRender";
 import {
+  GNUMARUS_TEXT_MAX_RASTER_DIMENSION,
+  GNUMARUS_TEXT_RASTER_SCALE,
+  type GnumarusTextDocument,
+  type GnumarusTextEntry,
+} from "../text/GnumarusText";
+import { sanitizeTextHtml } from "../text/GnumarusTextSanitize";
+import { layoutTextDocument, parseTextDocument } from "../text/GnumarusTextLayout";
+import { rasterizeLaidOutText } from "../text/GnumarusTextRaster";
+import {
   applyCoverageMask,
   clearPixelBuffer,
   clampBrushSizeFloat,
@@ -246,6 +255,7 @@ export type GnumarusCanvasTool =
   | "lasso"
   | "polylasso"
   | "colorselect"
+  | "text"
   | "destransform"
   | "destransform3d";
 
@@ -371,11 +381,13 @@ interface GnumarusTextureEntry {
   buffer: Uint8ClampedArray;
 }
 
-/** Shareable cell content: optional texture plus per-cell transform settings. */
+/** Shareable cell content: optional texture or rich text plus per-cell transform settings. */
 interface GnumarusCellContent {
   id: string;
   name: string;
   textureId: string | null;
+  /** Rich-text entry shown instead of a texture; mutually exclusive with textureId. */
+  textId: string | null;
   transform: GnumarusLayerTransform;
 }
 
@@ -403,6 +415,7 @@ export interface GnumarusAnimationMatrixView {
     id: string;
     name: string;
     textureId: string | null;
+    textId: string | null;
     width: number;
     height: number;
     transform: GnumarusLayerTransform;
@@ -419,7 +432,8 @@ export interface GnumarusAnimationProjectData {
     lockedChannels: GnumarusChannelLock;
   }>;
   textures: GnumarusTexturePixels[];
-  contents: Array<{ id: string; name: string; textureId: string | null; transform: GnumarusLayerTransform }>;
+  texts?: Array<{ id: string; name: string; document: GnumarusTextDocument }>;
+  contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null; transform: GnumarusLayerTransform }>;
   cells: Array<{ layer: string; frame: number; content: string }>;
   frames: number;
   currentFrame: number;
@@ -559,6 +573,10 @@ export interface GnumarusEngineOptions {
   onEyedropperPick?: (hex: string) => void;
   /** Fired when a cell content transform changes (move/rotate/flip/reset). */
   onTransformChanged?: () => void;
+  /** Fired when the text tool requests the text editor for a cell. */
+  onTextEditRequested?: (info: { layerId: string; frame: number; contentId: string; textId: string }) => void;
+  /** Fired for user-facing notices that need a toast (e.g. blocked paint on text). */
+  onNotice?: (kind: "text-paint-blocked") => void;
   checker?: GnumarusCheckerSettings;
   gridMinZoom?: number;
   gridOpacityPercent?: number;
@@ -605,6 +623,12 @@ export class GnumarusCanvasEngine {
   private textures = new Map<string, GnumarusTextureEntry>();
   private contents = new Map<string, GnumarusCellContent>();
   private cells = new Map<string, string>();
+  /** Rich-text entries by id (inline in project.json, never files). */
+  private texts = new Map<string, { id: string; name: string; document: GnumarusTextDocument }>();
+  /** Raster cache by text id: rendered at 2x layout pixels, invalidated on edit. */
+  private textRasters = new Map<string, { buffer: Uint8ClampedArray; width: number; height: number; html: string }>();
+  private textCounter = 1;
+  private textNameCounter = 1;
   private frameCount = 1;
   private currentFrame = 0;
   private frameDurations = new Map<number, number>();
@@ -909,6 +933,10 @@ export class GnumarusCanvasEngine {
   private readonly onToolSizeChanged: ((kind: GnumarusToolSizeKind, size: number) => void) | undefined;
   private readonly onEyedropperPick: ((hex: string) => void) | undefined;
   private readonly onTransformChanged: (() => void) | undefined;
+  private readonly onTextEditRequested:
+    | ((info: { layerId: string; frame: number; contentId: string; textId: string }) => void)
+    | undefined;
+  private readonly onNotice: ((kind: "text-paint-blocked") => void) | undefined;
 
   constructor(container: HTMLElement, options: GnumarusEngineOptions) {
     this.container = container;
@@ -919,6 +947,8 @@ export class GnumarusCanvasEngine {
     this.onToolSizeChanged = options.onToolSizeChanged;
     this.onEyedropperPick = options.onEyedropperPick;
     this.onTransformChanged = options.onTransformChanged;
+    this.onTextEditRequested = options.onTextEditRequested;
+    this.onNotice = options.onNotice;
     const initialChecker = options.checker ?? DEFAULT_CHECKER_SETTINGS;
     this.checkerMode = initialChecker.mode;
     this.checkerSizeX = clampCheckerSize(initialChecker.sizeX);
@@ -1349,6 +1379,7 @@ export class GnumarusCanvasEngine {
       id: "content1",
       name: "C1",
       textureId: "layer0",
+      textId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(animationCellKey("layer0", 0), "content1");
@@ -1358,6 +1389,10 @@ export class GnumarusCanvasEngine {
     this.frameNameCounter = 2;
     this.contentCounter = 2;
     this.textureCounter = 1;
+    this.textCounter = 1;
+    this.textNameCounter = 1;
+    this.texts.clear();
+    this.textRasters.clear();
     this.resetSymmetryCenter();
     this.syncAllLayerRenders();
 
@@ -1476,7 +1511,18 @@ export class GnumarusCanvasEngine {
     }
     const contents = new Map<string, { textureId: string | null; transform: GnumarusLayerTransform }>();
     for (const [id, content] of this.contents) {
-      contents.set(id, { textureId: content.textureId, transform: content.transform });
+      let textureId = content.textureId;
+      if (content.textId !== null) {
+        const raster = this.rasterizeText(content.textId);
+        if (raster === null) {
+          textureId = null;
+        } else {
+          const derivedId = `text:${content.textId}`;
+          textures.set(derivedId, { width: raster.width, height: raster.height, buffer: raster.buffer });
+          textureId = derivedId;
+        }
+      }
+      contents.set(id, { textureId, transform: content.transform });
     }
     return resolveAnimationFrame(
       this.layers.map((layer) => layer.id),
@@ -1588,6 +1634,13 @@ export class GnumarusCanvasEngine {
   }
 
   private contentDisplaySize(content: GnumarusCellContent): { width: number; height: number } {
+    if (content.textId !== null) {
+      const size = this.textRasterSize(content.textId);
+      if (size === null) {
+        return { width: 0, height: 0 };
+      }
+      return size;
+    }
     if (content.textureId === null) {
       return { width: 0, height: 0 };
     }
@@ -1975,6 +2028,41 @@ export class GnumarusCanvasEngine {
     return this.textures.has(content.textureId) ? content.textureId : null;
   }
 
+  /** Text id of a cell's content, or null (read-only: never creates anything). */
+  getCellTextId(layerId: string, frame: number): string | null {
+    const contentId = this.cells.get(animationCellKey(layerId, frame));
+    if (contentId === undefined) {
+      return null;
+    }
+    const content = this.contents.get(contentId);
+    if (content === undefined || content.textId === null) {
+      return null;
+    }
+    return this.texts.has(content.textId) ? content.textId : null;
+  }
+
+  /** True when the active cell at the current frame shows a text content. */
+  private activeCellHasText(): boolean {
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return false;
+    }
+    return this.getCellTextId(layer.id, this.currentFrame) !== null;
+  }
+
+  /**
+   * Paint-guard for text cells: pixel tools cannot paint rasterized text
+   * (the raster is derived and re-generated on edit). Notifies the shell
+   * once per blocked gesture so it can toast + suggest rasterizing.
+   */
+  private denyPaintOnText(): boolean {
+    if (!this.activeCellHasText()) {
+      return false;
+    }
+    this.onNotice?.("text-paint-blocked");
+    return true;
+  }
+
   getAnimationMatrix(): GnumarusAnimationMatrixView {
     const rows: GnumarusMatrixRowView[] = [...this.layers].reverse().map((layer) => ({
       layerId: layer.id,
@@ -2003,6 +2091,7 @@ export class GnumarusCanvasEngine {
           id: content.id,
           name: content.name,
           textureId: content.textureId,
+          textId: content.textId,
           width: size.width,
           height: size.height,
           transform: { ...content.transform },
@@ -2038,6 +2127,7 @@ export class GnumarusCanvasEngine {
       id: contentId,
       name: `C${this.contentCounter - 1}`,
       textureId,
+      textId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(animationCellKey(layerId, frame), contentId);
@@ -2063,6 +2153,7 @@ export class GnumarusCanvasEngine {
       id: contentId,
       name: `C${this.contentCounter - 1}`,
       textureId: null,
+      textId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(animationCellKey(layerId, frame), contentId);
@@ -2153,6 +2244,12 @@ export class GnumarusCanvasEngine {
     if (content.textureId === textureId) {
       return false;
     }
+    if (content.textId !== null) {
+      return false;
+    }
+    if (content.textId !== null) {
+      return false;
+    }
     content.textureId = textureId;
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
@@ -2163,11 +2260,350 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
+  private nextTextId(): string {
+    return `text${this.textCounter++}`;
+  }
+
+  private nextTextName(): string {
+    return `T${this.textNameCounter++}`;
+  }
+
+  /** All text entries (for pickers and matrix views), sorted by name. */
+  getTextEntries(): GnumarusTextEntry[] {
+    return [...this.texts.values()]
+      .map((entry) => ({ id: entry.id, name: entry.name, document: entry.document }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  /** Current sanitized document of a text entry, or null. */
+  getTextDocument(textId: string): GnumarusTextDocument | null {
+    const entry = this.texts.get(textId);
+    return entry === undefined ? null : { ...entry.document };
+  }
+
+  /** Create a text entry with the default document (no history; structural). */
+  createTextEntry(html?: string): string {
+    const id = this.nextTextId();
+    this.texts.set(id, {
+      id,
+      name: this.nextTextName(),
+      document: { html: sanitizeTextHtml(html ?? "<div>Text</div>") },
+    });
+    return id;
+  }
+
+  /**
+   * Point a textureless content at a text entry (mirrors texture assignment).
+   * Refuses textured contents: text and texture are mutually exclusive.
+   */
+  associateContentText(contentId: string, textId: string | null): boolean {
+    const content = this.contents.get(contentId);
+    if (content === undefined || (textId !== null && !this.texts.has(textId))) {
+      return false;
+    }
+    if (content.textId === textId) {
+      return false;
+    }
+    if (content.textureId !== null) {
+      return false;
+    }
+    content.textId = textId;
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    return true;
+  }
+
+  /**
+   * Create a fresh text entry plus a new content showing it, and point the
+   * cell at it. Used by the text picker ("new text") flow.
+   */
+  createTextContent(layerId: string, frame: number, html?: string): { contentId: string; textId: string } | null {
+    if (this.findLayer(layerId) === null) {
+      return null;
+    }
+    if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
+      return null;
+    }
+    const textId = this.createTextEntry(html);
+    const contentId = this.nextContentId();
+    this.contents.set(contentId, {
+      id: contentId,
+      name: `C${this.contentCounter - 1}`,
+      textureId: null,
+      textId,
+      transform: { ...IDENTITY_LAYER_TRANSFORM },
+    });
+    this.cells.set(animationCellKey(layerId, frame), contentId);
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return { contentId, textId };
+  }
+
+  /**
+   * Create a new content showing an existing text entry and point the cell
+   * at it (shares the entry across cells/contents, like textures).
+   */
+  createCellContentWithText(layerId: string, frame: number, textId: string): string | null {
+    if (this.findLayer(layerId) === null || !this.texts.has(textId)) {
+      return null;
+    }
+    if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
+      return null;
+    }
+    const contentId = this.nextContentId();
+    this.contents.set(contentId, {
+      id: contentId,
+      name: `C${this.contentCounter - 1}`,
+      textureId: null,
+      textId,
+      transform: { ...IDENTITY_LAYER_TRANSFORM },
+    });
+    this.cells.set(animationCellKey(layerId, frame), contentId);
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return contentId;
+  }
+
+  /**
+   * Resolve a cell for the text tool: reuse the cell's text content, or
+   * create a fresh text content (repointing textured cells, mirroring
+   * "New content"). Returns the content and text ids for the editor.
+   */
+  ensureTextContent(layerId: string, frame: number): { contentId: string; textId: string } | null {
+    if (this.findLayer(layerId) === null) {
+      return null;
+    }
+    if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
+      return null;
+    }
+    const key = animationCellKey(layerId, frame);
+    const contentId = this.cells.get(key);
+    const content = contentId === undefined ? undefined : this.contents.get(contentId);
+    if (content !== undefined && content.textId !== null && this.texts.has(content.textId)) {
+      return { contentId: content.id, textId: content.textId };
+    }
+    if (content !== undefined && content.textureId === null) {
+      const textId = this.createTextEntry();
+      content.textId = textId;
+      this.syncAllLayerRenders();
+      this.refreshLayerStacking();
+      this.render();
+      this.onPixelsChanged();
+      this.onLayersChanged?.();
+      return { contentId: content.id, textId };
+    }
+    return this.createTextContent(layerId, frame);
+  }
+
+  /**
+   * Live text editing (no history): sanitize, store, invalidate the raster
+   * and refresh the canvas. Returns false when nothing changed.
+   */
+  previewTextEdit(textId: string, html: string): boolean {
+    const entry = this.texts.get(textId);
+    if (entry === undefined) {
+      return false;
+    }
+    const clean = sanitizeTextHtml(html);
+    if (clean === entry.document.html) {
+      return false;
+    }
+    entry.document = { html: clean };
+    this.textRasters.delete(textId);
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    return true;
+  }
+
+  /**
+   * Commit a text edit, pushing a single undoable history entry covering
+   * the change since the given pre-edit document. The live preview already
+   * applied the new text; this only records history.
+   */
+  commitTextEdit(textId: string, beforeHtml: string): boolean {
+    const entry = this.texts.get(textId);
+    if (entry === undefined) {
+      return false;
+    }
+    const before = sanitizeTextHtml(beforeHtml);
+    if (before === entry.document.html) {
+      return false;
+    }
+    this.history.push({ type: "text", text: { textId, before: { html: before }, after: { html: entry.document.html } } });
+    this.emitStats();
+    return true;
+  }
+
+  /** Undo/redo target: replace a text document and refresh its rasters. */
+  private applyTextForHistory(textId: string, document: GnumarusTextDocument): boolean {
+    const entry = this.texts.get(textId);
+    if (entry === undefined) {
+      return false;
+    }
+    entry.document = { ...document };
+    this.textRasters.delete(textId);
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    return true;
+  }
+
+  /**
+   * Bake the active cell's text into a texture content and repoint the cell
+   * (the text entry itself is kept, still reusable elsewhere).
+   */
+  rasterizeTextContent(layerId: string, frame: number): boolean {
+    if (this.findLayer(layerId) === null) {
+      return false;
+    }
+    if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
+      return false;
+    }
+    const key = animationCellKey(layerId, frame);
+    const contentId = this.cells.get(key);
+    const content = contentId === undefined ? undefined : this.contents.get(contentId);
+    if (content === undefined || content.textId === null || !this.texts.has(content.textId)) {
+      return false;
+    }
+    const raster = this.rasterizeText(content.textId);
+    if (raster === null) {
+      return false;
+    }
+    const textureId = this.nextTextureId();
+    this.textures.set(textureId, {
+      id: textureId,
+      name: this.nextTextureName(),
+      width: raster.width,
+      height: raster.height,
+      buffer: new Uint8ClampedArray(raster.buffer),
+    });
+    const bakedId = this.nextContentId();
+    this.contents.set(bakedId, {
+      id: bakedId,
+      name: `C${this.contentCounter - 1}`,
+      textureId,
+      textId: null,
+      transform: { ...content.transform },
+    });
+    this.cells.set(key, bakedId);
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return true;
+  }
+
+  /** Shared 2D context for text measurement and rasterization (lazy). */
+  private textCanvas: HTMLCanvasElement | null = null;
+
+  private textMeasureContext(): CanvasRenderingContext2D | null {
+    if (this.textCanvas === null) {
+      this.textCanvas = document.createElement("canvas");
+    }
+    return this.textCanvas.getContext("2d");
+  }
+
+  /**
+   * Rasterize a text entry at 2x layout pixels, cached by exact HTML.
+   * Returns null for missing entries or empty layouts.
+   */
+  rasterizeText(textId: string): { buffer: Uint8ClampedArray; width: number; height: number } | null {
+    const entry = this.texts.get(textId);
+    if (entry === undefined) {
+      return null;
+    }
+    const cached = this.textRasters.get(textId);
+    if (cached !== undefined && cached.html === entry.document.html) {
+      return { buffer: cached.buffer, width: cached.width, height: cached.height };
+    }
+    const context = this.textMeasureContext();
+    if (context === null) {
+      return null;
+    }
+    const laidOut = layoutTextDocument(
+      parseTextDocument(entry.document.html),
+      (text, font) => {
+        context.font = font;
+        return context.measureText(text).width;
+      },
+      GNUMARUS_TEXT_MAX_RASTER_DIMENSION / GNUMARUS_TEXT_RASTER_SCALE,
+    );
+    const raster = rasterizeLaidOutText(context, laidOut, GNUMARUS_TEXT_RASTER_SCALE);
+    if (raster === null) {
+      return null;
+    }
+    this.textRasters.set(textId, {
+      buffer: raster.buffer,
+      width: raster.width,
+      height: raster.height,
+      html: entry.document.html,
+    });
+    return { buffer: raster.buffer, width: raster.width, height: raster.height };
+  }
+
+  /** Layout-space size of a text raster (for matrix views and transforms). */
+  textRasterSize(textId: string): { width: number; height: number } | null {
+    const raster = this.rasterizeText(textId);
+    if (raster === null) {
+      return null;
+    }
+    return {
+      width: Math.max(1, Math.round(raster.width / GNUMARUS_TEXT_RASTER_SCALE)),
+      height: Math.max(1, Math.round(raster.height / GNUMARUS_TEXT_RASTER_SCALE)),
+    };
+  }
+
   /**
    * Ensure the cell has content backed by a texture, creating both as needed.
    * Painting and transforming an empty cell materialize it so the canvas
    * stays directly editable on any frame.
    */
+  /**
+   * Ensure the cell has content, creating a textureless one as needed.
+   * Unlike ensureCellContent this never materializes a texture, so it is
+   * safe for text contents (non-destructive transforms apply to any kind).
+   */
+  private ensureCellContentOnly(layerId: string, frame: number): GnumarusCellContent | null {
+    if (this.findLayer(layerId) === null) {
+      return null;
+    }
+    const key = animationCellKey(layerId, frame);
+    const contentId = this.cells.get(key);
+    const content = contentId === undefined ? undefined : this.contents.get(contentId);
+    if (content !== undefined) {
+      return content;
+    }
+    const createdId = this.nextContentId();
+    const created: GnumarusCellContent = {
+      id: createdId,
+      name: `C${this.contentCounter - 1}`,
+      textureId: null,
+      textId: null,
+      transform: { ...IDENTITY_LAYER_TRANSFORM },
+    };
+    this.contents.set(createdId, created);
+    this.cells.set(key, createdId);
+    return created;
+  }
+
   private ensureCellContent(layerId: string, frame: number): { content: GnumarusCellContent; texture: GnumarusTextureEntry } | null {
     if (this.findLayer(layerId) === null) {
       return null;
@@ -2181,11 +2617,17 @@ export class GnumarusCanvasEngine {
         id: createdId,
         name: `C${this.contentCounter - 1}`,
         textureId: null,
+        textId: null,
         transform: { ...IDENTITY_LAYER_TRANSFORM },
       };
       this.contents.set(createdId, content);
       this.cells.set(key, createdId);
       contentId = createdId;
+    }
+    if (content.textId !== null) {
+      // Text contents have no paintable texture (derived raster instead);
+      // callers needing only the content/transform must use ensureCellContentOnly.
+      return null;
     }
     let texture = content.textureId === null ? null : (this.textures.get(content.textureId) ?? null);
     if (texture === null) {
@@ -2228,10 +2670,16 @@ export class GnumarusCanvasEngine {
         height: texture.height,
         buffer: texture.buffer,
       })),
+      texts: [...this.texts.values()].map((text) => ({
+        id: text.id,
+        name: text.name,
+        document: { ...text.document },
+      })),
       contents: [...this.contents.values()].map((content) => ({
         id: content.id,
         name: content.name,
         textureId: content.textureId,
+        textId: content.textId,
         transform: { ...content.transform },
       })),
       cells: [...this.cells.entries()].map(([key, content]) => {
@@ -2876,32 +3324,32 @@ export class GnumarusCanvasEngine {
     ) {
       this.commitFloating();
     }
-    const ensured = this.ensureCellContent(id, this.currentFrame);
+    const ensured = this.ensureCellContentOnly(id, this.currentFrame);
     if (ensured === null) {
       return false;
     }
     if (transform.x !== undefined) {
-      ensured.content.transform.x = transform.x;
+      ensured.transform.x = transform.x;
     }
     if (transform.y !== undefined) {
-      ensured.content.transform.y = transform.y;
+      ensured.transform.y = transform.y;
     }
     if (transform.rotation !== undefined) {
-      ensured.content.transform.rotation = normalizeRotation(transform.rotation);
+      ensured.transform.rotation = normalizeRotation(transform.rotation);
     }
     if (transform.rotationX !== undefined) {
       const raw = Number.isFinite(transform.rotationX) ? (transform.rotationX as number) : 0;
-      ensured.content.transform.rotationX = normalizeRotation(raw);
+      ensured.transform.rotationX = normalizeRotation(raw);
     }
     if (transform.rotationY !== undefined) {
       const raw = Number.isFinite(transform.rotationY) ? (transform.rotationY as number) : 0;
-      ensured.content.transform.rotationY = normalizeRotation(raw);
+      ensured.transform.rotationY = normalizeRotation(raw);
     }
     if (transform.flipX !== undefined) {
-      ensured.content.transform.flipX = transform.flipX;
+      ensured.transform.flipX = transform.flipX;
     }
     if (transform.flipY !== undefined) {
-      ensured.content.transform.flipY = transform.flipY;
+      ensured.transform.flipY = transform.flipY;
     }
     if (transform.scaleX !== undefined || transform.scaleY !== undefined) {
       // Keep at least 1px (and at most 1024px) of effective dimension per
@@ -2911,23 +3359,23 @@ export class GnumarusCanvasEngine {
       const height = layer === null ? 64 : Math.max(1, layer.height);
       if (transform.scaleX !== undefined) {
         const raw = Number.isFinite(transform.scaleX) ? (transform.scaleX as number) : 0;
-        ensured.content.transform.scaleX = Math.min(1024 / width, Math.max(1 / width, raw));
+        ensured.transform.scaleX = Math.min(1024 / width, Math.max(1 / width, raw));
       }
       if (transform.scaleY !== undefined) {
         const raw = Number.isFinite(transform.scaleY) ? (transform.scaleY as number) : 0;
-        ensured.content.transform.scaleY = Math.min(1024 / height, Math.max(1 / height, raw));
+        ensured.transform.scaleY = Math.min(1024 / height, Math.max(1 / height, raw));
       }
     }
     if (transform.skewX !== undefined) {
       const raw = Number.isFinite(transform.skewX) ? (transform.skewX as number) : 0;
-      ensured.content.transform.skewX = Math.min(
+      ensured.transform.skewX = Math.min(
         GNUMARUS_MAX_LAYER_SKEW,
         Math.max(-GNUMARUS_MAX_LAYER_SKEW, raw),
       );
     }
     if (transform.skewY !== undefined) {
       const raw = Number.isFinite(transform.skewY) ? (transform.skewY as number) : 0;
-      ensured.content.transform.skewY = Math.min(
+      ensured.transform.skewY = Math.min(
         GNUMARUS_MAX_LAYER_SKEW,
         Math.max(-GNUMARUS_MAX_LAYER_SKEW, raw),
       );
@@ -2949,11 +3397,11 @@ export class GnumarusCanvasEngine {
     ) {
       this.commitFloating();
     }
-    const ensured = this.ensureCellContent(id, this.currentFrame);
+    const ensured = this.ensureCellContentOnly(id, this.currentFrame);
     if (ensured === null) {
       return false;
     }
-    ensured.content.transform = { ...IDENTITY_LAYER_TRANSFORM };
+    ensured.transform = { ...IDENTITY_LAYER_TRANSFORM };
     this.syncAllLayerRenders();
     this.layoutSceneTransforms();
     this.render();
@@ -3506,6 +3954,7 @@ export class GnumarusCanvasEngine {
         id: contentId,
         name: `C${this.contentCounter - 1}`,
         textureId: input.id,
+        textId: null,
         transform: {
           ...input.transform,
           rotation: normalizeRotation(input.transform.rotation),
@@ -3551,7 +4000,8 @@ export class GnumarusCanvasEngine {
         lockedChannels: GnumarusChannelLock;
       }>;
       textures: GnumarusTexturePixels[];
-      contents: Array<{ id: string; name: string; textureId: string | null; transform: GnumarusLayerTransform }>;
+      texts?: Array<{ id: string; name: string; document: GnumarusTextDocument }>;
+      contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null; transform: GnumarusLayerTransform }>;
       cells: Array<{ layer: string; frame: number; content: string }>;
       frames: number;
       currentFrame: number;
@@ -3621,11 +4071,40 @@ export class GnumarusCanvasEngine {
         buffer: new Uint8ClampedArray(texture.buffer),
       });
     }
+    this.texts.clear();
+    this.textRasters.clear();
+    const textIds = new Set<string>();
+    for (const text of data.texts ?? []) {
+      if (typeof text.id !== "string" || text.id === "" || typeof text.name !== "string" || text.name === "") {
+        throw new Error("Project has an invalid text entry.");
+      }
+      if (textIds.has(text.id)) {
+        throw new Error(`Project has a duplicate text id: ${text.id}.`);
+      }
+      if (typeof text.document?.html !== "string") {
+        throw new Error(`Text ${text.id} has an invalid document.`);
+      }
+      textIds.add(text.id);
+      this.texts.set(text.id, {
+        id: text.id,
+        name: text.name,
+        document: { html: sanitizeTextHtml(text.document.html) },
+      });
+    }
+    for (const content of data.contents) {
+      if (content.textId !== null && content.textId !== undefined && !textIds.has(content.textId)) {
+        throw new Error(`Content references a missing text: ${content.id}`);
+      }
+      if (content.textId != null && content.textureId != null) {
+        throw new Error(`Content has both a texture and a text: ${content.id}`);
+      }
+    }
     for (const content of data.contents) {
       this.contents.set(content.id, {
         id: content.id,
         name: content.name,
         textureId: content.textureId,
+        textId: content.textId ?? null,
         transform: { ...content.transform, rotation: normalizeRotation(content.transform.rotation) },
       });
     }
@@ -3694,10 +4173,24 @@ export class GnumarusCanvasEngine {
         maxTextureName = Math.max(maxTextureName, Number.parseInt(match[1], 10) + 1);
       }
     }
+    let maxText = 0;
+    let maxTextName = 0;
+    for (const text of data.texts ?? []) {
+      const idMatch = /^text(\d+)$/.exec(text.id);
+      if (idMatch?.[1] !== undefined) {
+        maxText = Math.max(maxText, Number.parseInt(idMatch[1], 10) + 1);
+      }
+      const nameMatch = /^T(\d+)$/.exec(text.name);
+      if (nameMatch?.[1] !== undefined) {
+        maxTextName = Math.max(maxTextName, Number.parseInt(nameMatch[1], 10) + 1);
+      }
+    }
     this.layerCounter = Math.max(maxLayer, data.layers.length);
     this.contentCounter = Math.max(maxContent, data.contents.length + 1, 1);
     this.textureCounter = Math.max(maxTexture, 1);
     this.textureNameCounter = Math.max(maxTextureName, data.textures.length + 1, 1);
+    this.textCounter = Math.max(maxText, (data.texts ?? []).length + 1, 1);
+    this.textNameCounter = Math.max(maxTextName, (data.texts ?? []).length + 1, 1);
     const top = this.layers[this.layers.length - 1];
     if (top !== undefined) {
       this.activeLayerId = top.id;
@@ -3777,6 +4270,7 @@ export class GnumarusCanvasEngine {
       id: "content1",
       name: "C1",
       textureId: "layer0",
+      textId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(animationCellKey("layer0", 0), "content1");
@@ -3784,6 +4278,10 @@ export class GnumarusCanvasEngine {
     this.layerCounter = 1;
     this.contentCounter = 2;
     this.textureCounter = 1;
+    this.textCounter = 1;
+    this.textNameCounter = 1;
+    this.texts.clear();
+    this.textRasters.clear();
     this.frameCount = 1;
     this.currentFrame = 0;
     this.frameNames = [defaultFrameName(0)];
@@ -8141,6 +8639,9 @@ export class GnumarusCanvasEngine {
     if (layer === null) {
       return false;
     }
+    if (this.denyPaintOnText()) {
+      return false;
+    }
     const ensured = this.ensureCellContent(layer.id, this.currentFrame);
     if (ensured === null) {
       return false;
@@ -8425,6 +8926,7 @@ export class GnumarusCanvasEngine {
       (layerId, frame, contentId) => this.associateCellForHistory(layerId, frame, contentId),
       (layerId, frame) => this.dissociateCellForHistory(layerId, frame),
       (contentId, textureId) => this.setContentTextureForHistory(contentId, textureId),
+      (textId, document) => this.applyTextForHistory(textId, document),
     );
     if (!applied) {
       return false;
@@ -8451,6 +8953,7 @@ export class GnumarusCanvasEngine {
       (layerId, frame) => this.dissociateCellForHistory(layerId, frame),
       (layerId, frame, contentId) => this.associateCellForHistory(layerId, frame, contentId),
       (contentId, textureId) => this.setContentTextureForHistory(contentId, textureId),
+      (textId, document) => this.applyTextForHistory(textId, document),
     );
     if (!applied) {
       return false;
@@ -9298,6 +9801,10 @@ export class GnumarusCanvasEngine {
         if (layer === null) {
           return;
         }
+        if (this.denyPaintOnText()) {
+          return;
+        }
+
         const ensured = this.ensureCellContent(layer.id, this.currentFrame);
         if (ensured === null) {
           return;
@@ -9322,6 +9829,9 @@ export class GnumarusCanvasEngine {
         if (layer === null) {
           return;
         }
+        if (this.denyPaintOnText()) {
+          return;
+        }
         const pixel = this.toImagePixel(event.clientX, event.clientY);
         if (pixel === null) {
           return;
@@ -9338,6 +9848,9 @@ export class GnumarusCanvasEngine {
         if (layer === null) {
           return;
         }
+        if (this.denyPaintOnText()) {
+          return;
+        }
         const pixel = this.toImagePixel(event.clientX, event.clientY);
         if (pixel === null) {
           return;
@@ -9352,6 +9865,9 @@ export class GnumarusCanvasEngine {
         // Freehand path; releasing closes and fills it as a floating texture.
         const layer = this.activeLayer();
         if (layer === null) {
+          return;
+        }
+        if (this.denyPaintOnText()) {
           return;
         }
         const start = this.clientToLayerImageFloat(event.clientX, event.clientY);
@@ -9371,6 +9887,9 @@ export class GnumarusCanvasEngine {
         }
         const layer = this.activeLayer();
         if (layer === null) {
+          return;
+        }
+        if (this.denyPaintOnText()) {
           return;
         }
         const point = this.clientToLayerImageFloat(event.clientX, event.clientY);
@@ -9396,12 +9915,37 @@ export class GnumarusCanvasEngine {
         }
         return;
       }
+      if (this.tool === "text") {
+        if (event.button !== 0) {
+          return;
+        }
+        const layer = this.activeLayer();
+        if (layer === null) {
+          return;
+        }
+        const created = this.ensureTextContent(layer.id, this.currentFrame);
+        this.lastMouseClient = { x: event.clientX, y: event.clientY };
+        if (created !== null) {
+          this.onTextEditRequested?.({
+            layerId: layer.id,
+            frame: this.currentFrame,
+            contentId: created.contentId,
+            textId: created.textId,
+          });
+        }
+        this.updatePreviews();
+        return;
+      }
       if (this.tool === "line") {
         // Two clicks define a segment: first arms the start, second draws.
         const layer = this.activeLayer();
         if (layer === null) {
           return;
         }
+        if (this.denyPaintOnText()) {
+          return;
+        }
+
         const ensured = this.ensureCellContent(layer.id, this.currentFrame);
         if (ensured === null) {
           return;
@@ -9453,6 +9997,9 @@ export class GnumarusCanvasEngine {
           return;
         }
         if (this.curvePhase === "idle") {
+          if (this.denyPaintOnText()) {
+            return;
+          }
           const ensured = this.ensureCellContent(layer.id, this.currentFrame);
           if (ensured === null) {
             return;
@@ -9514,6 +10061,9 @@ export class GnumarusCanvasEngine {
         if (layer === null) {
           return;
         }
+        if (this.denyPaintOnText()) {
+          return;
+        }
         const cursor = this.clientToLayerImageFloat(event.clientX, event.clientY);
         if (cursor === null) {
           return;
@@ -9537,6 +10087,9 @@ export class GnumarusCanvasEngine {
       }
       const layer = this.activeLayer();
       if (layer === null) {
+        return;
+      }
+      if (this.denyPaintOnText()) {
         return;
       }
       const ensured = this.ensureCellContent(layer.id, this.currentFrame);
@@ -10273,6 +10826,10 @@ export class GnumarusCanvasEngine {
           this.setTool("polylasso");
           return;
         }
+        if (event.key === "x" || event.key === "X") {
+          this.setTool("text");
+          return;
+        }
         if (event.key === "m" || event.key === "M") {
           // M flips the canvas view horizontally, Shift+M vertically —
           // the same setFlip toggles the loupe middle-click gestures use.
@@ -10328,6 +10885,9 @@ export class GnumarusCanvasEngine {
         }
         if (event.key === "Delete") {
           event.preventDefault();
+          if (this.denyPaintOnText()) {
+            return;
+          }
           this.clearCurrentCellTexture();
           return;
         }

@@ -5,6 +5,7 @@ import {
   type GnumarusCanvasTool,
   type GnumarusLayerInfo,
 } from "../canvas/GnumarusCanvasEngine";
+import { sanitizeTextHtml } from "../text/GnumarusTextSanitize";
 import {
   downloadBlob,
   isFilePickerSupported,
@@ -373,6 +374,7 @@ function gnumarusShortcuts(): GnumarusShortcutSection[] {
         { keys: "L", action: tr("sc.toolLasso") },
         { keys: "P", action: tr("sc.toolPolylasso") },
         { keys: "W", action: tr("sc.toolColorselect") },
+        { keys: "X", action: tr("sc.toolText") },
         { keys: "Shift / Ctrl+Shift / Alt+Shift + drag", action: tr("sc.rectselectModifiers") },
         { keys: "Right-click a drawer button", action: tr("sc.drawerFlyout") },
         { keys: "V", action: tr("sc.toolDestransform") },
@@ -1268,6 +1270,72 @@ export class GnumarusShell extends LitElement {
       font-size: 20px;
       color: #9a9a9a;
     }
+    .picker-kind {
+      font-size: 10px;
+      color: #9a9a9a;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .picker-empty-note {
+      grid-column: 1 / -1;
+      color: #9a9a9a;
+      font-size: 12px;
+      text-align: center;
+      padding: 12px 0;
+    }
+    .tool-text-glyph {
+      font-family: Georgia, "Times New Roman", serif;
+      font-weight: bold;
+      font-size: 15px;
+      line-height: 1;
+    }
+    .text-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin: 8px 0;
+      font-size: 12px;
+    }
+    .text-toolbar button {
+      min-width: 30px;
+    }
+    .text-toolbar label {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .text-toolbar select,
+    .text-toolbar input[type="number"] {
+      max-width: 130px;
+    }
+    .text-toolbar input[type="number"] {
+      width: 56px;
+    }
+    .text-color-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .text-editor-area {
+      min-width: min(480px, 80vw);
+      min-height: 120px;
+      max-height: 320px;
+      overflow-y: auto;
+      background: #ffffff;
+      color: #000000;
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 8px;
+      font-size: 16px;
+    }
+    .text-editor-area:focus {
+      outline: 2px solid #0e639c;
+    }
+    .text-editor-empty {
+      color: #ffb3b3;
+      font-size: 12px;
+    }
     .error {
       color: #ffb3b3;
     }
@@ -1327,6 +1395,9 @@ export class GnumarusShell extends LitElement {
     matrixMenu: { type: Object },
     contentPickerTarget: { type: Object },
     texturePickerContentId: { type: String },
+    textPickerTarget: { type: Object },
+    textEditor: { type: Object },
+    textEditorColor: { type: String },
     fitTextureTarget: { type: Object },
     fitThreshold: { type: Number },
     checkerColorA: { type: String },
@@ -1479,6 +1550,15 @@ export class GnumarusShell extends LitElement {
     | null;
   declare contentPickerTarget: { layerId: string; frame: number } | null;
   declare texturePickerContentId: string | null;
+  declare textPickerTarget: { layerId: string; frame: number } | null;
+  declare textEditor: {
+    layerId: string;
+    frame: number;
+    contentId: string;
+    textId: string;
+    beforeHtml: string;
+  } | null;
+  declare textEditorColor: string;
   declare fitTextureTarget: { kind: "single"; textureId: string } | { kind: "all" } | null;
   declare fitThreshold: number;
   declare checkerColorA: string;
@@ -1642,6 +1722,9 @@ export class GnumarusShell extends LitElement {
     this.matrixMenu = null;
     this.contentPickerTarget = null;
     this.texturePickerContentId = null;
+    this.textPickerTarget = null;
+    this.textEditor = null;
+    this.textEditorColor = "#000000";
     this.fitTextureTarget = null;
     this.fitThreshold = 0;
     this.checkerColorA = DEFAULT_CHECKER_SETTINGS.colorA;
@@ -1867,6 +1950,19 @@ export class GnumarusShell extends LitElement {
             </span>
           </button>
 
+
+          <button
+            class=${this.tool === "text" ? "active" : ""}
+            title=${tr("tool.textHint")}
+            aria-label=${tr("tool.text")}
+            data-testid="tool-text"
+            @click=${(): void => {
+              this.tool = "text";
+              this.engine?.setTool("text");
+            }}
+          >
+            <span class="tool-icon tool-text-glyph" aria-hidden="true">T</span>
+          </button>
 
           ${this.renderToolDrawer("selection")}
           ${this.renderToolDrawer("destructive")}
@@ -3310,6 +3406,8 @@ export class GnumarusShell extends LitElement {
       </dialog>
       ${this.contentPickerTarget !== null ? this.renderContentPickerDialog() : html``}
       ${this.texturePickerContentId !== null ? this.renderTexturePickerDialog() : html``}
+      ${this.textPickerTarget !== null ? this.renderTextPickerDialog() : html``}
+      ${this.textEditor !== null ? this.renderTextEditorDialog() : html``}
     `;
   }
 
@@ -3363,6 +3461,9 @@ export class GnumarusShell extends LitElement {
     }
     if (tool === "colorselect") {
       return tr("toolname.colorselect");
+    }
+    if (tool === "text") {
+      return tr("toolname.text");
     }
     if (tool === "pencil") {
       return tr("toolname.pencil");
@@ -4089,6 +4190,13 @@ export class GnumarusShell extends LitElement {
         </div>
       `;
     }
+    if (this.tool === "text") {
+      return html`
+        <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
+          <span class="tool-options-empty">${tr("opt.textHint")}</span>
+        </div>
+      `;
+    }
     if (
       this.tool === "rectselect" ||
       this.tool === "ellipse" ||
@@ -4364,6 +4472,8 @@ export class GnumarusShell extends LitElement {
     const menu = this.matrixMenu;
     const cellTextureId =
       menu.kind === "cell" ? this.engine.getCellTextureId(menu.layerId, menu.frame) : null;
+    const cellTextId =
+      menu.kind === "cell" ? this.engine.getCellTextId(menu.layerId, menu.frame) : null;
     return html`
       <div class="context-blocker" @click=${(): void => this.closeMatrixMenu()} @contextmenu=${(event: Event): void => {
         event.preventDefault();
@@ -4371,6 +4481,13 @@ export class GnumarusShell extends LitElement {
       }}></div>
       <div class="context-menu" style="left: ${menu.x}px; top: ${menu.y}px;">
         <button @click=${(): void => void this.onOpenContentPicker()}>${tr("matrix.selectContent")}</button>
+        <button @click=${(): void => void this.onOpenTextPicker()}>${tr("matrix.selectText")}</button>
+        <button ?disabled=${cellTextId === null} @click=${(): void => this.onEditTextFromCell()}>
+          ${tr("matrix.editText")}
+        </button>
+        <button ?disabled=${cellTextId === null} @click=${(): void => this.onRasterizeTextFromCell()}>
+          ${tr("matrix.rasterizeText")}
+        </button>
         <button ?disabled=${cellTextureId === null} @click=${(): void => this.onOpenFitTextureFromCell()}>
           ${tr("ctx.fitTexture")}
         </button>
@@ -4512,6 +4629,14 @@ export class GnumarusShell extends LitElement {
         },
         onTransformChanged: (): void => {
           void this.refreshPreview();
+        },
+        onTextEditRequested: (info): void => {
+          this.openTextEditor(info.layerId, info.frame, info.contentId, info.textId);
+        },
+        onNotice: (kind): void => {
+          if (kind === "text-paint-blocked") {
+            this.statusMessage = tr("status.textPaintBlocked");
+          }
         },
         onToolSizeChanged: (kind, size): void => {
           if (kind === "brush") {
@@ -7726,6 +7851,7 @@ export class GnumarusShell extends LitElement {
     id: string;
     name: string;
     textureId: string | null;
+    textId: string | null;
     width: number;
     height: number;
   }> {
@@ -7770,6 +7896,45 @@ export class GnumarusShell extends LitElement {
     }
   }
 
+  private textThumbnailDataUrl(textId: string): string | null {
+    if (this.engine === null) {
+      return null;
+    }
+    const raster = this.engine.rasterizeText(textId);
+    if (raster === null || raster.width < 1 || raster.height < 1) {
+      return null;
+    }
+    try {
+      // Downscale large rasters for the picker thumbnails.
+      const maxSide = 128;
+      const scale = Math.min(1, maxSide / Math.max(raster.width, raster.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(raster.width * scale));
+      canvas.height = Math.max(1, Math.round(raster.height * scale));
+      const ctx = canvas.getContext("2d");
+      if (ctx === null) {
+        return null;
+      }
+      const image = new ImageData(new Uint8ClampedArray(raster.buffer), raster.width, raster.height);
+      if (scale >= 1) {
+        ctx.putImageData(image, 0, 0);
+      } else {
+        const full = document.createElement("canvas");
+        full.width = raster.width;
+        full.height = raster.height;
+        const fullCtx = full.getContext("2d");
+        if (fullCtx === null) {
+          return null;
+        }
+        fullCtx.putImageData(image, 0, 0);
+        ctx.drawImage(full, 0, 0, canvas.width, canvas.height);
+      }
+      return canvas.toDataURL();
+    } catch {
+      return null;
+    }
+  }
+
   private renderContentPickerDialog() {
     const contents = this.sortedContents();
     return html`
@@ -7792,8 +7957,27 @@ export class GnumarusShell extends LitElement {
             <span class="picker-empty" aria-hidden="true">+</span>
             <span class="picker-name">${tr("dialog.newContent")}</span>
           </button>
+          <button
+            class="picker-item"
+            data-testid="content-picker-new-text"
+            @click=${(): void => this.onContentPickerSelect("new-text")}
+          >
+            <span class="picker-empty" aria-hidden="true">T</span>
+            <span class="picker-name">${tr("dialog.newText")}</span>
+          </button>
           ${contents.map((content) => {
-            const url = content.textureId === null ? null : this.thumbnailDataUrl(content.textureId);
+            const url =
+              content.textId !== null
+                ? this.textThumbnailDataUrl(content.textId)
+                : content.textureId === null
+                  ? null
+                  : this.thumbnailDataUrl(content.textureId);
+            const kind =
+              content.textId !== null
+                ? tr("dialog.kindText")
+                : content.textureId !== null
+                  ? tr("dialog.kindTexture")
+                  : tr("dialog.kindEmpty");
             return html`
               <button
                 class="picker-item"
@@ -7806,6 +7990,7 @@ export class GnumarusShell extends LitElement {
                   ? html`<img class="picker-thumb" src=${url} alt="" data-texture-id=${content.textureId ?? ""} />`
                   : html`<span class="picker-empty" aria-hidden="true">∅</span>`}
                 <span class="picker-name">${content.name}</span>
+                <span class="picker-kind" data-testid="content-picker-kind">${kind}</span>
               </button>
             `;
           })}
@@ -7917,6 +8102,20 @@ export class GnumarusShell extends LitElement {
       void this.openTexturePicker(created);
       return;
     }
+    if (contentId === "new-text") {
+      const created = this.engine.createTextContent(target.layerId, target.frame);
+      if (created === null) {
+        this.statusMessage = tr("status.contentCreateFailed");
+        this.closeContentPicker();
+        return;
+      }
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = tr("status.textCreated");
+      this.closeContentPicker();
+      void this.openTextEditor(target.layerId, target.frame, created.contentId, created.textId);
+      return;
+    }
     if (this.engine.associateCellContent(target.layerId, target.frame, contentId)) {
       this.refreshLayers();
       this.dirty = true;
@@ -7979,6 +8178,425 @@ export class GnumarusShell extends LitElement {
       this.statusMessage = tr("status.textureSame");
     }
     this.closeTexturePicker();
+  }
+
+  /** Text picker: assign an existing text entry to a cell (shared, like textures). */
+  private renderTextPickerDialog() {
+    const texts = this.engine?.getTextEntries() ?? [];
+    return html`
+      <dialog id="textPickerDialog" data-testid="text-picker-dialog" @close=${(): void => this.onTextPickerClosed()}>
+        <h3>${tr("dialog.selectText")}</h3>
+        <div class="picker-grid" data-testid="text-picker-grid">
+          <button
+            class="picker-item"
+            data-testid="text-picker-new"
+            @click=${(): void => this.onTextPickerSelect("new")}
+          >
+            <span class="picker-empty" aria-hidden="true">+</span>
+            <span class="picker-name">${tr("dialog.newText")}</span>
+          </button>
+          ${texts.length === 0
+            ? html`<span class="picker-empty-note">${tr("status.noTexts")}</span>`
+            : texts.map((entry) => {
+                const url = this.textThumbnailDataUrl(entry.id);
+                return html`
+                  <button
+                    class="picker-item"
+                    data-testid="text-picker-item"
+                    data-text-id=${entry.id}
+                    title=${entry.name}
+                    @click=${(): void => this.onTextPickerSelect(entry.id)}
+                  >
+                    ${url !== null
+                      ? html`<img class="picker-thumb" src=${url} alt="" />`
+                      : html`<span class="picker-empty" aria-hidden="true">T</span>`}
+                    <span class="picker-name">${entry.name}</span>
+                  </button>
+                `;
+              })}
+        </div>
+        <div class="dialog-actions">
+          <button @click=${(): void => this.closeTextPicker()}>${tr("btn.cancel")}</button>
+        </div>
+      </dialog>
+    `;
+  }
+
+  private async onOpenTextPicker(): Promise<void> {
+    const target = this.matrixCellTarget();
+    this.closeMatrixMenu();
+    if (target === null || this.engine === null) {
+      return;
+    }
+    this.textPickerTarget = { ...target };
+    await this.updateComplete;
+    const dialog = this.shadowRoot?.getElementById("textPickerDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+  }
+
+  private onTextPickerClosed(): void {
+    this.textPickerTarget = null;
+  }
+
+  private closeTextPicker(): void {
+    const dialog = this.shadowRoot?.getElementById("textPickerDialog") as HTMLDialogElement | null;
+    dialog?.close();
+    this.textPickerTarget = null;
+  }
+
+  private onTextPickerSelect(textId: string): void {
+    const target = this.textPickerTarget;
+    if (target === null || this.engine === null) {
+      this.closeTextPicker();
+      return;
+    }
+    if (textId === "new") {
+      const created = this.engine.createTextContent(target.layerId, target.frame);
+      if (created === null) {
+        this.statusMessage = tr("status.contentCreateFailed");
+        this.closeTextPicker();
+        return;
+      }
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = tr("status.textCreated");
+      this.closeTextPicker();
+      void this.openTextEditor(target.layerId, target.frame, created.contentId, created.textId);
+      return;
+    }
+    if (this.engine.getCellTextId(target.layerId, target.frame) === textId) {
+      this.statusMessage = tr("status.textSame");
+      this.closeTextPicker();
+      return;
+    }
+    const assigned = this.engine.createCellContentWithText(target.layerId, target.frame, textId);
+    if (assigned === null) {
+      this.statusMessage = tr("status.contentCreateFailed");
+    } else {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = tr("status.textAssociated");
+    }
+    this.closeTextPicker();
+  }
+
+  /** Cell menu: reopen the editor for the cell's text. */
+  private onEditTextFromCell(): void {
+    const target = this.matrixCellTarget();
+    this.closeMatrixMenu();
+    if (target === null || this.engine === null) {
+      return;
+    }
+    const contentId = this.engine.getCellContentId(target.layerId, target.frame);
+    const textId = this.engine.getCellTextId(target.layerId, target.frame);
+    if (contentId === null || textId === null) {
+      return;
+    }
+    void this.openTextEditor(target.layerId, target.frame, contentId, textId);
+  }
+
+  /** Cell menu: bake the cell's text into a texture content (explicit rasterize). */
+  private onRasterizeTextFromCell(): void {
+    const target = this.matrixCellTarget();
+    this.closeMatrixMenu();
+    if (target === null || this.engine === null) {
+      return;
+    }
+    if (this.engine.rasterizeTextContent(target.layerId, target.frame)) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = tr("status.textRasterized");
+    } else {
+      this.statusMessage = tr("status.textRasterFailed");
+    }
+  }
+
+  /** System font families offered by the text editor (matches the sanitizer allowlist). */
+  private textFontFamilies(): string[] {
+    return [
+      "sans-serif",
+      "serif",
+      "monospace",
+      "Arial",
+      "Helvetica",
+      "Verdana",
+      "Tahoma",
+      "Trebuchet MS",
+      "Georgia",
+      "Times New Roman",
+      "Courier New",
+      "Impact",
+      "Comic Sans MS",
+      "Segoe UI",
+      "system-ui",
+      "cursive",
+      "fantasy",
+    ];
+  }
+
+  /** Open the rich text editor for a cell's text entry (live preview, single history entry on OK). */
+  private async openTextEditor(layerId: string, frame: number, contentId: string, textId: string): Promise<void> {
+    if (this.engine === null) {
+      return;
+    }
+    const document = this.engine.getTextDocument(textId);
+    if (document === null) {
+      return;
+    }
+    this.closeMatrixMenu();
+    this.textEditor = { layerId, frame, contentId, textId, beforeHtml: document.html };
+    this.textEditorColor = "#000000";
+    await this.updateComplete;
+    const area = this.shadowRoot?.getElementById("textEditorArea");
+    if (area !== null && area !== undefined) {
+      area.innerHTML = document.html;
+      (area as HTMLElement).focus();
+    }
+    const dialog = this.shadowRoot?.getElementById("textEditorDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+  }
+
+  private renderTextEditorDialog() {
+    const editor = this.textEditor;
+    if (editor === null || this.engine === null) {
+      return html``;
+    }
+    const document = this.engine.getTextDocument(editor.textId);
+    return html`
+      <dialog id="textEditorDialog" data-testid="text-editor-dialog" @close=${(): void => this.onTextEditorClosed()}>
+        <h3>${tr("dialog.editText")}</h3>
+        <div class="text-toolbar" role="toolbar" aria-label=${tr("dialog.editText")}>
+          <button data-testid="text-bold" title=${tr("dialog.textBold")} @click=${(): void => this.applyTextCommand("bold")}>
+            <b>B</b>
+          </button>
+          <button data-testid="text-italic" title=${tr("dialog.textItalic")} @click=${(): void => this.applyTextCommand("italic")}>
+            <i>I</i>
+          </button>
+          <button data-testid="text-underline" title=${tr("dialog.textUnderline")} @click=${(): void => this.applyTextCommand("underline")}>
+            <u>U</u>
+          </button>
+          <label title=${tr("dialog.textFont")}>${tr("dialog.textFont")}
+            <select
+              id="textEditorFont"
+              data-testid="text-font"
+              @change=${(): void => this.applyTextFontFromDialog()}
+            >
+              ${this.textFontFamilies().map((family) => html`<option value=${family}>${family}</option>`)}
+            </select>
+          </label>
+          <label title=${tr("dialog.textSize")}>${tr("dialog.textSize")}
+            <input
+              type="number"
+              id="textEditorSize"
+              data-testid="text-size"
+              min="6"
+              max="500"
+              step="1"
+              value="32"
+            />
+          </label>
+          <span class="text-color-row" title=${tr("dialog.textColor")}>
+            <span>${tr("dialog.textColor")}</span>
+            <gnumarus-color-picker
+              id="textEditorColor"
+              .value=${this.textEditorColor}
+              model="hsl"
+              @gnumarus-color-change=${(event: Event): void => {
+                const detail = (event as CustomEvent<{ value?: unknown }>).detail;
+                if (typeof detail?.value === "string") {
+                  this.textEditorColor = detail.value;
+                  this.applyTextCommand("foreColor", detail.value);
+                }
+              }}
+            ></gnumarus-color-picker>
+          </span>
+          <button data-testid="text-apply-size" title=${tr("dialog.textSize")} @click=${(): void => this.applyTextSizeFromDialog()}>
+            ${tr("btn.set")}
+          </button>
+        </div>
+        <div
+          id="textEditorArea"
+          class="text-editor-area"
+          data-testid="text-editor-area"
+          contenteditable="true"
+          @input=${(): void => this.onTextEditorInput()}
+          @paste=${(event: ClipboardEvent): void => this.onTextEditorPaste(event)}
+        ></div>
+        ${document === null
+          ? html`<p class="text-editor-empty">${tr("status.contentCreateFailed")}</p>`
+          : html``}
+        <div class="dialog-actions">
+          <button data-testid="text-cancel" @click=${(): void => this.cancelTextEditor()}>${tr("btn.cancel")}</button>
+          <button data-testid="text-ok" @click=${(): void => this.confirmTextEditor()}>${tr("btn.ok")}</button>
+        </div>
+      </dialog>
+    `;
+  }
+
+  /** Run a formatting command inside the editor, then push a live preview. */
+  private applyTextCommand(command: "bold" | "italic" | "underline" | "foreColor", value?: string): void {
+    const area = this.shadowRoot?.getElementById("textEditorArea");
+    if (!(area instanceof HTMLElement)) {
+      return;
+    }
+    area.focus();
+    try {
+      document.execCommand(command, false, value ?? undefined);
+    } catch {
+      // Unsupported command: leave the DOM untouched.
+    }
+    this.onTextEditorInput();
+  }
+
+  private applyTextFontFromDialog(): void {
+    const select = this.shadowRoot?.getElementById("textEditorFont") as HTMLSelectElement | null;
+    const family = select?.value ?? "";
+    if (family === "") {
+      return;
+    }
+    this.wrapTextSelection(`font-family:${family.includes(" ") ? `"${family}"` : family}`);
+  }
+
+  private applyTextSizeFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("textEditorSize") as HTMLInputElement | null;
+    const size = Math.min(500, Math.max(6, Math.round(Number.parseFloat(input?.value ?? "") || 0)));
+    if (!Number.isFinite(size) || size < 6) {
+      return;
+    }
+    this.wrapTextSelection(`font-size:${size}px`);
+  }
+
+  /**
+   * Wrap the editor selection in a styled span (or insert a styled
+   * placeholder when collapsed), then push a live preview.
+   */
+  private wrapTextSelection(style: string): void {
+    const area = this.shadowRoot?.getElementById("textEditorArea");
+    if (!(area instanceof HTMLElement)) {
+      return;
+    }
+    area.focus();
+    const selection = document.getSelection();
+    const span = document.createElement("span");
+    span.setAttribute("style", style);
+    if (selection !== null && !selection.isCollapsed && area.contains(selection.anchorNode)) {
+      try {
+        const range = selection.getRangeAt(0);
+        range.surroundContents(span);
+        selection.removeAllRanges();
+      } catch {
+        try {
+          const range = selection.getRangeAt(0);
+          span.appendChild(range.extractContents());
+          range.insertNode(span);
+          selection.removeAllRanges();
+        } catch {
+          // Leave the DOM untouched when the range cannot be wrapped.
+          return;
+        }
+      }
+    } else {
+      span.innerHTML = "&#8203;";
+      try {
+        if (selection !== null && selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0).cloneRange();
+          range.collapse(true);
+          range.insertNode(span);
+          range.setStart(span.firstChild as Node, 1);
+          range.collapse(true);
+          selection.removeAllRanges();
+          selection.addRange(range);
+        } else {
+          area.appendChild(span);
+        }
+      } catch {
+        return;
+      }
+    }
+    this.onTextEditorInput();
+  }
+
+  /** Live preview: sanitize into the engine and refresh the canvas (no history). */
+  private onTextEditorInput(): void {
+    const editor = this.textEditor;
+    const area = this.shadowRoot?.getElementById("textEditorArea");
+    if (editor === null || this.engine === null || !(area instanceof HTMLElement)) {
+      return;
+    }
+    if (this.engine.previewTextEdit(editor.textId, area.innerHTML)) {
+      this.refreshLayers();
+      this.dirty = true;
+    }
+  }
+
+  /** Paste sanitized rich text (canonical subset); plain-text fallback. */
+  private onTextEditorPaste(event: ClipboardEvent): void {
+    const editor = this.textEditor;
+    const area = this.shadowRoot?.getElementById("textEditorArea");
+    if (editor === null || !(area instanceof HTMLElement)) {
+      return;
+    }
+    event.preventDefault();
+    area.focus();
+    const html = event.clipboardData?.getData("text/html") ?? "";
+    const plain = event.clipboardData?.getData("text/plain") ?? "";
+    try {
+      if (html !== "") {
+        document.execCommand("insertHTML", false, sanitizeTextHtml(html));
+      } else if (plain !== "") {
+        document.execCommand("insertText", false, plain);
+      }
+    } catch {
+      // Clipboard insertion unsupported: leave the DOM untouched.
+    }
+    this.onTextEditorInput();
+  }
+
+  private confirmTextEditor(): void {
+    const editor = this.textEditor;
+    if (editor === null || this.engine === null) {
+      return;
+    }
+    // Read the final DOM first: OK commits exactly what the user sees.
+    const area = this.shadowRoot?.getElementById("textEditorArea");
+    if (area instanceof HTMLElement) {
+      this.engine.previewTextEdit(editor.textId, area.innerHTML);
+    }
+    // Clear state before closing so @close does not restore (cancel path).
+    const beforeHtml = editor.beforeHtml;
+    const textId = editor.textId;
+    this.textEditor = null;
+    const dialog = this.shadowRoot?.getElementById("textEditorDialog") as HTMLDialogElement | null;
+    dialog?.close();
+    if (this.engine.commitTextEdit(textId, beforeHtml)) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = tr("status.textEdited");
+    } else {
+      this.refreshLayers();
+    }
+  }
+
+  private cancelTextEditor(): void {
+    const editor = this.textEditor;
+    // Clear state before closing so @close does not restore twice.
+    this.textEditor = null;
+    const dialog = this.shadowRoot?.getElementById("textEditorDialog") as HTMLDialogElement | null;
+    dialog?.close();
+    if (editor !== null && this.engine !== null) {
+      this.engine.previewTextEdit(editor.textId, editor.beforeHtml);
+      this.refreshLayers();
+    }
+  }
+
+  /** Native dialog close (Esc/X): restore the pre-edit document (cancel path). */
+  private onTextEditorClosed(): void {
+    const editor = this.textEditor;
+    this.textEditor = null;
+    if (editor !== null && this.engine !== null) {
+      this.engine.previewTextEdit(editor.textId, editor.beforeHtml);
+      this.refreshLayers();
+    }
   }
 
   private applyDefaultFrameDurationFromDialog(): void {
@@ -9653,10 +10271,16 @@ export class GnumarusShell extends LitElement {
           lockedChannels: { ...layer.lockedChannels },
         })),
         textures,
+        texts: project.animation.texts.map((text) => ({
+          id: text.id,
+          name: text.name,
+          document: { ...text.document },
+        })),
         contents: project.animation.contents.map((content) => ({
           id: content.id,
           name: content.name,
           textureId: content.textureId,
+          textId: content.textId,
           transform: { ...content.transform },
         })),
         cells: project.animation.cells.map((cell) => ({ ...cell })),
@@ -10077,11 +10701,12 @@ export class GnumarusShell extends LitElement {
         id: content.id,
         name: content.name,
         textureId: content.textureId,
+        textId: content.textId ?? null,
         transform: { ...content.transform },
       }));
       const meta: GnumarusProjectMeta = {
         app: GNUMARUS_APP_ID,
-        version: 2,
+        version: 3,
         width: size.width,
         height: size.height,
         layers: exported.layers.map((layer) => ({
@@ -10104,6 +10729,11 @@ export class GnumarusShell extends LitElement {
           })),
           activeAnimation: exported.activeAnimation,
           textures: texturesMeta,
+          texts: (exported.texts ?? []).map((text) => ({
+            id: text.id,
+            name: text.name,
+            document: { ...text.document },
+          })),
           contents: contentsMeta,
           cells: exported.cells.map((cell) => ({ ...cell })),
         },
