@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { zipSync } from "fflate";
+import { unzipSync, zipSync } from "fflate";
 import { imageToScreenPixel, layerPixelToScreen } from "../src/canvas/GnumarusViewportMath";
 
 interface GnumarusPixel {
@@ -84,7 +84,7 @@ test("File > New creates a canvas with the requested size", async ({ page }) => 
   await expect(page.locator("gnumarus-shell")).toContainText("64 x 64");
 });
 
-test("File > New preset fills dimensions and WebP lossless storage @recent", async ({ page }) => {
+test("File > New preset fills dimensions and WebP lossless storage", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell");
   await page.getByRole("button", { name: "File" }).click();
@@ -107,10 +107,10 @@ test("File > New preset fills dimensions and WebP lossless storage @recent", asy
   await page.getByRole("button", { name: "Save Project" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   const files = await project.writtenBlobs();
-  expect(Object.keys(files).sort()).toEqual(["project.json", "textures/t1.webp"]);
+  expect(Object.keys(files).sort()).toEqual(["project.gpa", "textures/t1.webp"]);
 });
 
-test("File > New Notes XLQ preset uses JXL lossy quality 0 @recent", async ({ page }) => {
+test("File > New Notes XLQ preset uses JXL lossy quality 0", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell");
   await page.getByRole("button", { name: "File" }).click();
@@ -131,7 +131,7 @@ test("File > New Notes XLQ preset uses JXL lossy quality 0 @recent", async ({ pa
   expect(persisted).toContain('"quality": 0');
 });
 
-test("File > New PNG storage forces lossless and hides quality @recent", async ({ page }) => {
+test("File > New PNG storage forces lossless and hides quality", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell");
   await page.getByRole("button", { name: "File" }).click();
@@ -324,7 +324,7 @@ test("loupe rotation pivots on the viewport center", async ({ page }) => {
   expect((await getViewState(page)).rotation).toBeCloseTo(Math.PI / 2, 1);
 });
 
-test("M flips the canvas view horizontally and Shift+M vertically @recent", async ({ page }) => {
+test("M flips the canvas view horizontally and Shift+M vertically", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   expect(await getViewState(page)).toMatchObject({ flipX: false, flipY: false });
@@ -338,7 +338,7 @@ test("M flips the canvas view horizontally and Shift+M vertically @recent", asyn
   expect(await getViewState(page)).toMatchObject({ flipX: false, flipY: false });
 });
 
-test("pencil stroke can start outside the texture and paint on entry @recent", async ({ page }) => {
+test("pencil stroke can start outside the texture and paint on entry", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -417,7 +417,7 @@ test("Shift+Space drag rotates like the loupe", async ({ page }) => {
   expect(Math.abs((await getViewState(page)).rotation - before)).toBeGreaterThan(Math.PI / 4);
 });
 
-test("minimum zoom is configurable and floors zoom-out @recent", async ({ page }) => {
+test("minimum zoom is configurable and floors zoom-out", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.getByRole("button", { name: "Edit" }).click();
@@ -443,7 +443,7 @@ test("minimum zoom is configurable and floors zoom-out @recent", async ({ page }
   await expect(dialog.locator("input#zoomMinZoom")).toHaveValue("1");
 });
 
-test("matrix corner shows the animation gear left of Add frame @recent", async ({ page }) => {
+test("matrix corner shows the animation gear left of Add frame", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
@@ -455,7 +455,7 @@ test("matrix corner shows the animation gear left of Add frame @recent", async (
   expect(gear.x + gear.width).toBeLessThanOrEqual(plus.x);
 });
 
-test("status bar stays visible at tiny viewport heights @recent", async ({ page }) => {
+test("status bar stays visible at tiny viewport heights", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 200 });
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas", { state: "attached" });
@@ -2258,6 +2258,7 @@ test("Control+S saves to the chosen folder without prompting again", async ({ pa
       name: string;
       getFileHandle(fileName: string): Promise<MockFileHandle>;
       getDirectoryHandle(dirName: string): Promise<MockDirHandle>;
+      removeEntry(fileName: string): Promise<void>;
     }
     function makeFileHandle(path: string): MockFileHandle {
       return {
@@ -2286,6 +2287,7 @@ test("Control+S saves to the chosen folder without prompting again", async ({ pa
           Promise.resolve(makeFileHandle(prefix + fileName)),
         getDirectoryHandle: (dirName: string): Promise<MockDirHandle> =>
           Promise.resolve(makeDir(dirName, `${prefix}${dirName}/`)),
+        removeEntry: (): Promise<void> => Promise.resolve(),
       };
     }
     w.showDirectoryPicker = (): Promise<MockDirHandle> => {
@@ -2306,7 +2308,7 @@ test("Control+S saves to the chosen folder without prompting again", async ({ pa
   await page.keyboard.press("Control+s");
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockDir");
   expect(await pickCalls()).toBe(1);
-  expect(await writtenFiles()).toContain("project.json");
+  expect(await writtenFiles()).toContain("project.gpa");
   await page.keyboard.press("Control+s");
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockDir");
   expect(await pickCalls()).toBe(1);
@@ -2564,7 +2566,7 @@ async function setPaintTip(
   );
 }
 
-test("soft brush tip paints with feathered edges @recent", async ({ page }) => {
+test("soft brush tip paints with feathered edges", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -2577,7 +2579,7 @@ test("soft brush tip paints with feathered edges @recent", async ({ page }) => {
   expect(feather!.a).toBeLessThan(255);
 });
 
-test("wide tip spacing leaves gaps between dabs @recent", async ({ page }) => {
+test("wide tip spacing leaves gaps between dabs", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -2601,7 +2603,7 @@ test("wide tip spacing leaves gaps between dabs @recent", async ({ page }) => {
   expect(sparseCount).toBeLessThan(denseCount / 4);
 });
 
-test("image tip masks paint by its luminance @recent", async ({ page }) => {
+test("image tip masks paint by its luminance", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -2646,7 +2648,7 @@ async function setPaintDynamics(
   );
 }
 
-test("low flow paints translucent dabs @recent", async ({ page }) => {
+test("low flow paints translucent dabs", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -2659,7 +2661,7 @@ test("low flow paints translucent dabs @recent", async ({ page }) => {
   expect(center!.a).toBeLessThan(255);
 });
 
-test("paper grain varies dab alpha across pixels @recent", async ({ page }) => {
+test("paper grain varies dab alpha across pixels", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -2686,7 +2688,7 @@ test("paper grain varies dab alpha across pixels @recent", async ({ page }) => {
   expect(new Set(alphas).size).toBeGreaterThan(1);
 });
 
-test("fuzzy jitter changes the footprint deterministically @recent", async ({ page }) => {
+test("fuzzy jitter changes the footprint deterministically", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -2715,7 +2717,7 @@ test("fuzzy jitter changes the footprint deterministically @recent", async ({ pa
   expect(fuzzyTwice).not.toBe(plain);
 });
 
-test("firm pressure curve paints smaller than linear @recent", async ({ page }) => {
+test("firm pressure curve paints smaller than linear", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -2752,7 +2754,7 @@ test("firm pressure curve paints smaller than linear @recent", async ({ page }) 
   expect(firmCount).toBeLessThan(linearCount);
 });
 
-test("dual tip masks the primary tip @recent", async ({ page }) => {
+test("dual tip masks the primary tip", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -2830,7 +2832,7 @@ async function penTiltDot(
   );
 }
 
-test("pen tilt broadens dabs with tilt size @recent", async ({ page }) => {
+test("pen tilt broadens dabs with tilt size", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -2853,7 +2855,7 @@ test("pen tilt broadens dabs with tilt size @recent", async ({ page }) => {
   expect(tilted).toBeGreaterThan(straight);
 });
 
-test("speed fade thins fast-stroke flow @recent", async ({ page }) => {
+test("speed fade thins fast-stroke flow", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -2890,7 +2892,7 @@ test("speed fade thins fast-stroke flow @recent", async ({ page }) => {
   });
 });
 
-test("dry smudge drags paint instead of laying color @recent", async ({ page }) => {
+test("dry smudge drags paint instead of laying color", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -2916,7 +2918,7 @@ test("dry smudge drags paint instead of laying color @recent", async ({ page }) 
   expect(smeared!.r).toBeGreaterThan(smeared!.b);
 });
 
-test("symmetry mirrors pixel dabs across axes @recent", async ({ page }) => {
+test("symmetry mirrors pixel dabs across axes", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -2943,7 +2945,7 @@ test("symmetry mirrors pixel dabs across axes @recent", async ({ page }) => {
   }
 });
 
-test("symmetry lives in the editor bar and shows axis lines @recent", async ({ page }) => {
+test("symmetry lives in the editor bar and shows axis lines", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const editor = page.locator('gnumarus-shell [data-testid="editor-options"]');
@@ -2961,7 +2963,7 @@ test("symmetry lives in the editor bar and shows axis lines @recent", async ({ p
   expect(overlay).toMatchObject({ visible: true });
 });
 
-test("symmetry guides pass through the canvas center @recent", async ({ page }) => {
+test("symmetry guides pass through the canvas center", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const canvas = page.locator("gnumarus-shell canvas");
@@ -3000,7 +3002,7 @@ test("symmetry guides pass through the canvas center @recent", async ({ page }) 
   expect(Math.abs(overlay.horizontal.ay - box.height / 2)).toBeLessThan(1.5);
 });
 
-test("four-way symmetry shows an intersection handle that drags both axes @recent", async ({ page }) => {
+test("four-way symmetry shows an intersection handle that drags both axes", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const visibleHandles = (): Promise<number> =>
@@ -3053,7 +3055,7 @@ test("four-way symmetry shows an intersection handle that drags both axes @recen
   expect(await centerOf()).toEqual({ x: 31.5, y: 31.5 });
 });
 
-test("symmetry axis drag moves the mirror and resets with Shift+click @recent", async ({ page }) => {
+test("symmetry axis drag moves the mirror and resets with Shift+click", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -3141,7 +3143,7 @@ async function canvasScreenPixel(
   return { r: r ?? 0, g: g ?? 0, b: b ?? 0, a: a ?? 0 };
 }
 
-test("editor bar stays visible across tools and holds wrap @recent", async ({ page }) => {
+test("editor bar stays visible across tools and holds wrap", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const editor = page.locator('gnumarus-shell [data-testid="editor-options"]');
@@ -3156,7 +3158,7 @@ test("editor bar stays visible across tools and holds wrap @recent", async ({ pa
   await expect(editor.locator("select#wrapMode")).toHaveValue("x");
 });
 
-test("background grows with wrap tiles @recent", async ({ page }) => {
+test("background grows with wrap tiles", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   expect(await backgroundPlaneSize(page)).toEqual({ width: 64, height: 64 });
@@ -3176,7 +3178,7 @@ test("background grows with wrap tiles @recent", async ({ page }) => {
   expect(await backgroundPlaneSize(page)).toEqual({ width: 64, height: 64 });
 });
 
-test("changing wrap mode repaints immediately @recent", async ({ page }) => {
+test("changing wrap mode repaints immediately", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.getByRole("button", { name: "Bucket fill" }).click();
@@ -3216,7 +3218,7 @@ async function outsideLayerTarget(page: import("@playwright/test").Page, x: numb
   return layerScreenTarget(page, x, y);
 }
 
-test("painting outside the texture does nothing with wrap off @recent", async ({ page }) => {
+test("painting outside the texture does nothing with wrap off", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -3225,7 +3227,7 @@ test("painting outside the texture does nothing with wrap off @recent", async ({
   expect(await paintedPixelCount(page)).toBe(0);
 });
 
-test("wrap-x paints outside pixels back into the texture @recent", async ({ page }) => {
+test("wrap-x paints outside pixels back into the texture", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -3241,7 +3243,7 @@ test("wrap-x paints outside pixels back into the texture @recent", async ({ page
   expect(await paintedPixelCount(page)).toBeGreaterThan(0);
 });
 
-test("wrap tiles show only for the active layer @recent", async ({ page }) => {
+test("wrap tiles show only for the active layer", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const tilesOf = (): Promise<number> =>
@@ -3268,7 +3270,7 @@ test("wrap tiles show only for the active layer @recent", async ({ page }) => {
   await expect.poll(tilesOf).toBe(0);
 });
 
-test("scrollbars match the dark app theme @recent", async ({ page }) => {
+test("scrollbars match the dark app theme", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const colors = await page.evaluate(() => {
@@ -3300,7 +3302,7 @@ async function setImportCleanup(page: import("@playwright/test").Page, mode: str
   }, mode);
 }
 
-test("import cleanup setting is configurable and persists @recent", async ({ page }) => {
+test("import cleanup setting is configurable and persists", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.getByRole("button", { name: "Edit" }).click();
@@ -3315,7 +3317,7 @@ test("import cleanup setting is configurable and persists @recent", async ({ pag
   await expect(dialog.locator("select#importCleanup")).toHaveValue("crop+fit");
 });
 
-test("import cleanup fit trims transparent borders on open @recent", async ({ page }) => {
+test("import cleanup fit trims transparent borders on open", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -3332,7 +3334,7 @@ test("import cleanup fit trims transparent borders on open @recent", async ({ pa
   expect(await paintedPixelCount(page)).toBe(1);
 });
 
-test("import cleanup none imports textures as-is @recent", async ({ page }) => {
+test("import cleanup none imports textures as-is", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -3367,7 +3369,7 @@ async function redPngBytes(page: import("@playwright/test").Page, size: number):
   }, size);
 }
 
-test("import cleanup crop trims textures to the canvas @recent", async ({ page }) => {
+test("import cleanup crop trims textures to the canvas", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -3388,7 +3390,10 @@ test("import cleanup crop trims textures to the canvas @recent", async ({ page }
   texture.width = 128;
   texture.height = 128;
   texture.file = "textures/big.png";
-  await project.seedFile("project.json", Array.from(new TextEncoder().encode(JSON.stringify(meta))));
+  await project.seedFile(
+    "project.gpa",
+    Array.from(zipSync({ "project.json": new TextEncoder().encode(JSON.stringify(meta)) }, { level: 9 })),
+  );
   await project.seedFile("textures/big.png", await redPngBytes(page, 128));
   await setImportCleanup(page, "crop");
   await page.getByRole("button", { name: "File" }).click();
@@ -3398,7 +3403,7 @@ test("import cleanup crop trims textures to the canvas @recent", async ({ page }
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
-test("brush quality setting persists and tips archive as JXL @recent", async ({ page }) => {
+test("brush quality setting persists and tips archive as JXL", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.getByRole("button", { name: "Edit" }).click();
@@ -3451,7 +3456,7 @@ test("brush quality setting persists and tips archive as JXL @recent", async ({ 
   }
 });
 
-test("brush presets apply, save and persist @recent", async ({ page }) => {
+test("brush presets apply, save and persist", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const options = page.locator('gnumarus-shell [aria-label="Pencil options"]');
@@ -3470,7 +3475,7 @@ test("brush presets apply, save and persist @recent", async ({ page }) => {
   ).toContainText("E2E Custom");
 });
 
-test("brush preset JSON imports and applies @recent", async ({ page }) => {
+test("brush preset JSON imports and applies", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const imported = await page.evaluate(() => {
@@ -3504,7 +3509,7 @@ test("brush preset JSON imports and applies @recent", async ({ page }) => {
   })).toBe(false);
 });
 
-test("tip rotation follows the stroke direction @recent", async ({ page }) => {
+test("tip rotation follows the stroke direction", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -3532,7 +3537,7 @@ test("tip rotation follows the stroke direction @recent", async ({ page }) => {
   expect(await readPixel(page, 32, 26)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
-test("airbrush builds paint up while held @recent", async ({ page }) => {
+test("airbrush builds paint up while held", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -4755,7 +4760,7 @@ async function canvasCenter(page: import("@playwright/test").Page): Promise<{ x:
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
-test("pencil pressure size scales the stroke @recent", async ({ page }) => {
+test("pencil pressure size scales the stroke", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await stubPenPointerCapture(page);
@@ -4775,7 +4780,7 @@ test("pencil pressure size scales the stroke @recent", async ({ page }) => {
   expect(full).toBeGreaterThan(2 * half);
 });
 
-test("pencil pressure opacity scales the alpha @recent", async ({ page }) => {
+test("pencil pressure opacity scales the alpha", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await stubPenPointerCapture(page);
@@ -4791,7 +4796,7 @@ test("pencil pressure opacity scales the alpha @recent", async ({ page }) => {
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 64 });
 });
 
-test("pencil pressure none ignores pen pressure @recent", async ({ page }) => {
+test("pencil pressure none ignores pen pressure", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await stubPenPointerCapture(page);
@@ -4809,7 +4814,7 @@ test("pencil pressure none ignores pen pressure @recent", async ({ page }) => {
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 128 });
 });
 
-test("pencil pressure size+opacity applies both @recent", async ({ page }) => {
+test("pencil pressure size+opacity applies both", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await stubPenPointerCapture(page);
@@ -5636,6 +5641,13 @@ async function stubDirectoryWithFileStore(page: import("@playwright/test").Page)
     function makeDir(prefix: string): unknown {
       return {
         name: prefix === "" ? "MockDir" : prefix,
+        removeEntry: (fileName: string): Promise<void> => {
+          if (state.files[prefix + fileName] === undefined) {
+            return Promise.reject(new DOMException("File not found", "NotFoundError"));
+          }
+          delete state.files[prefix + fileName];
+          return Promise.resolve();
+        },
         getFileHandle: (fileName: string, options?: { create?: boolean }): Promise<MockFileHandle> => {
           const path = prefix + fileName;
           if (state.files[path] === undefined && options?.create !== true) {
@@ -8289,38 +8301,60 @@ async function stubProjectDirectory(
     root.__gnumarusProjectTest = state;
     root.showDirectoryPicker = async () => ({
       name: "MockProject",
-      getFileHandle: async (name: string) => ({
-        getFile: async (): Promise<Blob> => {
-          const found = state.files[name];
-          if (found === undefined) {
-            throw new Error(`missing file ${name}`);
-          }
-          return found;
-        },
-        createWritable: async () => ({
-          write: async (data: string | Blob): Promise<void> => {
-            state.files[name] = data instanceof Blob ? data : new Blob([data]);
-          },
-          close: async (): Promise<void> => {},
-        }),
-      }),
-      getDirectoryHandle: async (name: string) => ({
-        name,
-        getFileHandle: async (child: string) => ({
+      removeEntry: async (name: string): Promise<void> => {
+        if (state.files[name] === undefined) {
+          throw new DOMException("File not found", "NotFoundError");
+        }
+        delete state.files[name];
+      },
+      getFileHandle: async (name: string, options?: { create?: boolean }) => {
+        if (state.files[name] === undefined && options?.create !== true) {
+          throw new DOMException("File not found", "NotFoundError");
+        }
+        return {
           getFile: async (): Promise<Blob> => {
-            const found = state.files[`${name}/${child}`];
+            const found = state.files[name];
             if (found === undefined) {
-              throw new Error(`missing file ${name}/${child}`);
+              throw new DOMException("File not found", "NotFoundError");
             }
             return found;
           },
           createWritable: async () => ({
             write: async (data: string | Blob): Promise<void> => {
-              state.files[`${name}/${child}`] = data instanceof Blob ? data : new Blob([data]);
+              state.files[name] = data instanceof Blob ? data : new Blob([data]);
             },
             close: async (): Promise<void> => {},
           }),
-        }),
+        };
+      },
+      getDirectoryHandle: async (name: string) => ({
+        name,
+        removeEntry: async (child: string): Promise<void> => {
+          if (state.files[`${name}/${child}`] === undefined) {
+            throw new DOMException("File not found", "NotFoundError");
+          }
+          delete state.files[`${name}/${child}`];
+        },
+        getFileHandle: async (child: string, options?: { create?: boolean }) => {
+          if (state.files[`${name}/${child}`] === undefined && options?.create !== true) {
+            throw new DOMException("File not found", "NotFoundError");
+          }
+          return {
+            getFile: async (): Promise<Blob> => {
+              const found = state.files[`${name}/${child}`];
+              if (found === undefined) {
+                throw new DOMException("File not found", "NotFoundError");
+              }
+              return found;
+            },
+            createWritable: async () => ({
+              write: async (data: string | Blob): Promise<void> => {
+                state.files[`${name}/${child}`] = data instanceof Blob ? data : new Blob([data]);
+              },
+              close: async (): Promise<void> => {},
+            }),
+          };
+        },
         getDirectoryHandle: async (): Promise<never> => {
           throw new Error("no nested directories in project test");
         },
@@ -8340,13 +8374,33 @@ async function stubProjectDirectory(
         return out;
       }),
     writtenProject: (): Promise<string | null> =>
-      page.evaluate(async () => {
-        const root = window as unknown as {
-          __gnumarusProjectTest?: { files: Record<string, Blob> };
-        };
-        const blob = root.__gnumarusProjectTest?.files["project.json"];
-        return blob === undefined ? null : blob.text();
-      }),
+      page
+        .evaluate(async () => {
+          const root = window as unknown as {
+            __gnumarusProjectTest?: { files: Record<string, Blob> };
+          };
+          const files = root.__gnumarusProjectTest?.files ?? {};
+          const archived = files["project.gpa"];
+          if (archived !== undefined) {
+            return JSON.stringify(Array.from(new Uint8Array(await archived.arrayBuffer())));
+          }
+          const plain = files["project.json"];
+          return plain === undefined ? null : plain.text();
+        })
+        .then((raw) => {
+          if (raw === null) {
+            return null;
+          }
+          if (raw.startsWith("[")) {
+            const entries = unzipSync(new Uint8Array(JSON.parse(raw) as number[]));
+            const inner = entries["project.json"];
+            if (inner === undefined) {
+              throw new Error("project.gpa has no project.json inside");
+            }
+            return new TextDecoder().decode(inner);
+          }
+          return raw;
+        }),
     seedFile: (path: string, bytes: number[]): Promise<void> =>
       page.evaluate(
         ({ name, data }: { name: string; data: number[] }) => {
@@ -8365,6 +8419,10 @@ async function stubProjectDirectory(
 test("project textures save as lossless JXL named tN and reopen", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { setImportCleanup(mode: string): void } } };
+    root.__gnumarus?.shell?.setImportCleanup("none");
+  });
   await setPencil(page, "#ff0000");
   await paintCenter(page);
   const project = await stubProjectDirectory(page);
@@ -8375,7 +8433,7 @@ test("project textures save as lossless JXL named tN and reopen", async ({ page 
   expect(meta).toContain('"textures/t1.jxl"');
   expect(meta).toContain('"name": "t1"');
   const files = await project.writtenBlobs();
-  expect(Object.keys(files).sort()).toEqual(["project.json", "textures/t1.jxl"]);
+  expect(Object.keys(files).sort()).toEqual(["project.gpa", "textures/t1.jxl"]);
   expect(files["textures/t1.jxl"]?.slice(0, 2)).toEqual([0xff, 0x0a]);
   const decoded = await decodeJxlInPage(page, files["textures/t1.jxl"] ?? []);
   expect(decoded?.width).toBe(64);
@@ -8451,6 +8509,10 @@ async function readJpegSamples(
 test("project textures save as PNG with a compression level and reopen", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { setImportCleanup(mode: string): void } } };
+    root.__gnumarus?.shell?.setImportCleanup("none");
+  });
   await setPencil(page, "#ff0000");
   await paintCenter(page);
   await page.getByRole("button", { name: "Edit" }).click();
@@ -8472,7 +8534,7 @@ test("project textures save as PNG with a compression level and reopen", async (
   const meta = await project.writtenProject();
   expect(meta).toContain('"textures/t1.png"');
   const files = await project.writtenBlobs();
-  expect(Object.keys(files).sort()).toEqual(["project.json", "textures/t1.png"]);
+  expect(Object.keys(files).sort()).toEqual(["project.gpa", "textures/t1.png"]);
   expect(files["textures/t1.png"]?.slice(0, 4)).toEqual([137, 80, 78, 71]);
   await page.getByRole("button", { name: "File" }).click();
   await page.getByRole("button", { name: "Open Project" }).click();
@@ -8504,7 +8566,7 @@ test("project textures save as JPEG with a grayscale alpha companion", async ({ 
   expect(meta).toContain('"textures/t1.jpg"');
   expect(meta).not.toContain(".alpha.jpg");
   const files = await project.writtenBlobs();
-  expect(Object.keys(files).sort()).toEqual(["project.json", "textures/t1.alpha.jpg", "textures/t1.jpg"]);
+  expect(Object.keys(files).sort()).toEqual(["project.gpa", "textures/t1.alpha.jpg", "textures/t1.jpg"]);
   expect(files["textures/t1.jpg"]?.slice(0, 2)).toEqual([255, 216]);
   const color = await readJpegSamples(page, files["textures/t1.jpg"] ?? []);
   expect(color?.center[0] ?? 0).toBeGreaterThan(200);
@@ -8524,6 +8586,81 @@ test("project textures save as JPEG with a grayscale alpha companion", async ({ 
   expect(restored?.g ?? 255).toBeLessThan(80);
   expect(restored?.b ?? 255).toBeLessThan(80);
   expect(restored?.a ?? 0).toBeGreaterThan(200);
+});
+
+test("project meta saves zipped by default and reopens @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { setImportCleanup(mode: string): void } } };
+    root.__gnumarus?.shell?.setImportCleanup("none");
+  });
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  const files = await project.writtenBlobs();
+  expect(Object.keys(files).sort()).toEqual(["project.gpa", "textures/t1.jxl"]);
+  expect(files["project.gpa"]?.slice(0, 2)).toEqual([0x50, 0x4b]);
+  const meta = await project.writtenProject();
+  expect(meta).toContain('"textures/t1.jxl"');
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("project meta plain mode writes project.json and removes project.gpa @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { setImportCleanup(mode: string): void } } };
+    root.__gnumarus?.shell?.setImportCleanup("none");
+  });
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  expect(Object.keys(await project.writtenBlobs()).sort()).toEqual(["project.gpa", "textures/t1.jxl"]);
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#settingsDialog");
+  await expect(dialog.locator("select#storageProjectFile")).toHaveValue("gpa");
+  await dialog.locator("select#storageProjectFile").selectOption("json");
+  await dialog.getByRole("button", { name: "Close" }).click();
+  const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.storage.v1"));
+  expect(persisted).toContain('"projectFile": "json"');
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  expect(Object.keys(await project.writtenBlobs()).sort()).toEqual(["project.json", "textures/t1.jxl"]);
+  expect(await project.writtenProject()).toContain('"textures/t1.jxl"');
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.locator("gnumarus-shell dialog#settingsDialog select#storageProjectFile").selectOption("gpa");
+  await page.locator("gnumarus-shell dialog#settingsDialog").getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  expect(Object.keys(await project.writtenBlobs()).sort()).toEqual(["project.gpa", "textures/t1.jxl"]);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("corrupt project.gpa fails to open with a clear error @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell");
+  const project = await stubProjectDirectory(page);
+  await project.seedFile("project.gpa", [1, 2, 3, 4]);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Open failed: project.gpa is not a valid zip archive");
 });
 
 test("File > Export saves the current frame as lossless JXL", async ({ page }) => {
@@ -8594,7 +8731,7 @@ test("File > Export saves all frames as a single-file JXL animation", async ({ p
   expect(decoded?.width).toBe(64);
 });
 
-test("project textures save as lossless WebP and reopen @recent", async ({ page }) => {
+test("project textures save as lossless WebP and reopen", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -8619,7 +8756,7 @@ test("project textures save as lossless WebP and reopen @recent", async ({ page 
   const meta = await project.writtenProject();
   expect(meta).toContain('"textures/t1.webp"');
   const files = await project.writtenBlobs();
-  expect(Object.keys(files).sort()).toEqual(["project.json", "textures/t1.webp"]);
+  expect(Object.keys(files).sort()).toEqual(["project.gpa", "textures/t1.webp"]);
   expect(files["textures/t1.webp"]?.slice(0, 4)).toEqual([0x52, 0x49, 0x46, 0x46]);
   expect(files["textures/t1.webp"]?.slice(8, 12)).toEqual([0x57, 0x45, 0x42, 0x50]);
   const decoded = await decodeWebpInPage(page, files["textures/t1.webp"] ?? []);
@@ -8632,7 +8769,7 @@ test("project textures save as lossless WebP and reopen @recent", async ({ page 
   expect(await readPixel(page, 0, 0)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
-test("File > Export saves the current frame as lossless WebP @recent", async ({ page }) => {
+test("File > Export saves the current frame as lossless WebP", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await paintCenter(page);
@@ -8657,7 +8794,7 @@ test("File > Export saves the current frame as lossless WebP @recent", async ({ 
   expect(decoded?.center).toEqual([0, 0, 0, 255]);
 });
 
-test("File > Export saves lossy WebP when lossless is off @recent", async ({ page }) => {
+test("File > Export saves lossy WebP when lossless is off", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await paintCenter(page);
@@ -8679,7 +8816,7 @@ test("File > Export saves lossy WebP when lossless is off @recent", async ({ pag
   expect(decoded?.center?.[3]).toBe(255);
 });
 
-test("File > Export saves all frames as a single-file WebP animation @recent", async ({ page }) => {
+test("File > Export saves all frames as a single-file WebP animation", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await addFrames(page, 1);
@@ -8701,7 +8838,7 @@ test("File > Export saves all frames as a single-file WebP animation @recent", a
   expect(decoded?.width).toBe(64);
 });
 
-test("File > Export saves an animation as a WebP spritesheet @recent", async ({ page }) => {
+test("File > Export saves an animation as a WebP spritesheet", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await addFrames(page, 1);

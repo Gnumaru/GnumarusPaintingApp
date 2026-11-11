@@ -1,3 +1,4 @@
+import { unzipSync, zipSync } from "fflate";
 import type { GnumarusLayerTransform } from "../canvas/GnumarusViewportMath";
 import { IDENTITY_LAYER_TRANSFORM } from "../canvas/GnumarusViewportMath";
 import type { GnumarusAnimationLoop } from "../animation/GnumarusNamedAnimations";
@@ -97,6 +98,8 @@ export interface GnumarusProjectMeta {
 
 export const GNUMARUS_APP_ID = "GnumarusPaintingAndAnimationApp";
 export const GNUMARUS_PROJECT_FILE = "project.json";
+/** Zipped project archive holding a single `project.json` entry. */
+export const GNUMARUS_PROJECT_ARCHIVE_FILE = "project.gpa";
 
 export class GnumarusProjectError extends Error {
   constructor(message: string) {
@@ -152,6 +155,31 @@ export function createDefaultProject(width: number, height: number): GnumarusPro
 
 export function serializeProject(project: GnumarusProjectMeta): string {
   return JSON.stringify(project, null, 2);
+}
+
+/**
+ * Pack serialized project JSON as a ZIP archive at maximum compression,
+ * with a single `project.json` entry identical to the plain bytes.
+ */
+export function encodeProjectArchive(jsonText: string): Uint8Array {
+  return zipSync({ [GNUMARUS_PROJECT_FILE]: new TextEncoder().encode(jsonText) }, { level: 9 });
+}
+
+/** Unpack a project archive back to its serialized JSON text. */
+export function decodeProjectArchive(bytes: Uint8Array): string {
+  let entries: Record<string, Uint8Array>;
+  try {
+    entries = unzipSync(bytes);
+  } catch (error) {
+    throw new GnumarusProjectError(
+      `project.gpa is not a valid zip archive (${error instanceof Error ? error.message : String(error)})`,
+    );
+  }
+  const inner = entries[GNUMARUS_PROJECT_FILE];
+  if (inner === undefined) {
+    throw new GnumarusProjectError("project.gpa has no project.json inside");
+  }
+  return new TextDecoder().decode(inner);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

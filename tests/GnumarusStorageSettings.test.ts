@@ -10,13 +10,14 @@ import {
   GNUMARUS_MIN_STORAGE_PNG_LEVEL,
   GNUMARUS_MIN_STORAGE_QUALITY,
   parseStorageFormat,
+  parseProjectFileFormat,
   parseStorageSettings,
   serializeStorageSettings,
   GnumarusStorageSettingsError,
 } from "../src/settings/GnumarusStorageSettings";
 
 describe("GnumarusStorageSettings", () => {
-  it("defaults to JXL lossless with PNG level 9, JPEG quality 95 and brush JXL quality 90", () => {
+  it("defaults to JXL lossless with PNG level 9, JPEG quality 95, brush JXL quality 90 and zipped project file", () => {
     expect(DEFAULT_STORAGE_SETTINGS).toEqual({
       format: "jxl",
       lossless: true,
@@ -24,6 +25,7 @@ describe("GnumarusStorageSettings", () => {
       pngLevel: 9,
       jpgQuality: 95,
       brushQuality: 90,
+      projectFile: "gpa",
     });
     expect(GNUMARUS_MIN_STORAGE_QUALITY).toBe(0);
     expect(GNUMARUS_MAX_STORAGE_QUALITY).toBe(100);
@@ -53,10 +55,33 @@ describe("GnumarusStorageSettings", () => {
       pngLevel: 9,
       jpgQuality: 95,
       brushQuality: 90,
+      projectFile: "gpa",
+    });
+    expect(
+      parseStorageSettings(JSON.stringify({ lossless: false, quality: 75, projectFile: "json" })),
+    ).toEqual({
+      format: "jxl",
+      lossless: false,
+      quality: 75,
+      pngLevel: 9,
+      jpgQuality: 95,
+      brushQuality: 90,
+      projectFile: "json",
+    });
+    expect(
+      parseStorageSettings(JSON.stringify({ lossless: false, quality: 75, projectFile: "rar" })),
+    ).toEqual({
+      format: "jxl",
+      lossless: false,
+      quality: 75,
+      pngLevel: 9,
+      jpgQuality: 95,
+      brushQuality: 90,
+      projectFile: "gpa",
     });
     expect(
       parseStorageSettings(JSON.stringify({ format: "png", lossless: true, quality: 50, pngLevel: 3, jpgQuality: 80 })),
-    ).toEqual({ format: "png", lossless: true, quality: 50, pngLevel: 3, jpgQuality: 80, brushQuality: 90 });
+    ).toEqual({ format: "png", lossless: true, quality: 50, pngLevel: 3, jpgQuality: 80, brushQuality: 90, projectFile: "gpa" });
   });
 
   it("parses formats with a JXL fallback and clamps levels", () => {
@@ -66,6 +91,10 @@ describe("GnumarusStorageSettings", () => {
     expect(parseStorageFormat("webp")).toBe("webp");
     expect(parseStorageFormat("avif")).toBe("jxl");
     expect(parseStorageFormat(undefined)).toBe("jxl");
+    expect(parseProjectFileFormat("gpa")).toBe("gpa");
+    expect(parseProjectFileFormat("json")).toBe("json");
+    expect(parseProjectFileFormat("zip")).toBe("gpa");
+    expect(parseProjectFileFormat(undefined)).toBe("gpa");
     expect(clampStoragePngLevel(4)).toBe(4);
     expect(clampStoragePngLevel(4.9)).toBe(4);
     expect(clampStoragePngLevel(-1)).toBe(0);
@@ -84,6 +113,7 @@ describe("GnumarusStorageSettings", () => {
       pngLevel: 9,
       jpgQuality: 95,
       brushQuality: 90,
+      projectFile: "gpa",
     });
     expect(parseStorageSettings(JSON.stringify({ lossless: false, quality: -1 }))).toEqual({
       format: "jxl",
@@ -92,6 +122,7 @@ describe("GnumarusStorageSettings", () => {
       pngLevel: 9,
       jpgQuality: 95,
       brushQuality: 90,
+      projectFile: "gpa",
     });
     expect(parseStorageSettings(JSON.stringify({ lossless: true, quality: 50, brushQuality: 250 }))).toEqual({
       format: "jxl",
@@ -100,6 +131,7 @@ describe("GnumarusStorageSettings", () => {
       pngLevel: 9,
       jpgQuality: 95,
       brushQuality: 100,
+      projectFile: "gpa",
     });
   });
 

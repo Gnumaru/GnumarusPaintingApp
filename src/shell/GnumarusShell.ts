@@ -16,13 +16,18 @@ import {
   readFileBytes,
   readProjectFiles,
   readProjectMeta,
+  removeProjectFile,
   writeBlobToDirectory,
   writeBlobToFile,
   writeProjectFiles,
   type GnumarusDirectoryHandle,
 } from "../project/GnumarusFileSystem";
 import {
+  encodeProjectArchive,
   GNUMARUS_APP_ID,
+  GNUMARUS_PROJECT_ARCHIVE_FILE,
+  GNUMARUS_PROJECT_FILE,
+  serializeProject,
   textureFilePath,
   type GnumarusContentMeta,
   type GnumarusProjectMeta,
@@ -96,9 +101,11 @@ import {
   clampStorageJpgQuality,
   clampStoragePngLevel,
   clampStorageQuality,
+  parseProjectFileFormat,
   parseStorageFormat,
   parseStorageSettings,
   serializeStorageSettings,
+  type GnumarusProjectFileFormat,
   type GnumarusStorageFormat,
   type GnumarusStorageSettings,
 } from "../settings/GnumarusStorageSettings";
@@ -1279,6 +1286,7 @@ export class GnumarusShell extends LitElement {
     storageFormat: { type: String },
     storagePngLevel: { type: Number },
     storageJpegQuality: { type: Number },
+    storageProjectFile: { type: String },
     brushQuality: { type: Number },
     importCleanup: { type: String },
     expandStep: { type: Number },
@@ -1418,6 +1426,7 @@ export class GnumarusShell extends LitElement {
   declare storageFormat: GnumarusStorageFormat;
   declare storagePngLevel: number;
   declare storageJpegQuality: number;
+  declare storageProjectFile: GnumarusProjectFileFormat;
   declare brushQuality: number;
   declare importCleanup: GnumarusImportCleanup;
   declare expandStep: number;
@@ -1567,6 +1576,7 @@ export class GnumarusShell extends LitElement {
     this.storageFormat = DEFAULT_STORAGE_SETTINGS.format;
     this.storagePngLevel = DEFAULT_STORAGE_SETTINGS.pngLevel;
     this.storageJpegQuality = DEFAULT_STORAGE_SETTINGS.jpgQuality;
+    this.storageProjectFile = DEFAULT_STORAGE_SETTINGS.projectFile;
     this.brushQuality = DEFAULT_STORAGE_SETTINGS.brushQuality;
     this.importCleanup = DEFAULT_IMPORT_CLEANUP;
     this.expandStep = DEFAULT_EXPAND_SETTINGS.step;
@@ -2687,6 +2697,18 @@ export class GnumarusShell extends LitElement {
                 ↻
               </button>`
             : html``}
+        </div>
+        <div class="setting-row">
+          <label>Project data file
+            <select
+              id="storageProjectFile"
+              .value=${this.storageProjectFile}
+              @change=${(): void => this.applyStorageFromDialog()}
+            >
+              <option value="gpa">Zipped JSON (.gpa)</option>
+              <option value="json">Plain JSON (.json)</option>
+            </select>
+          </label>
         </div>
         <div class="setting-row">
           <label>Project texture format
@@ -4047,6 +4069,7 @@ export class GnumarusShell extends LitElement {
     const storedStorage = this.loadStorageSettings();
     this.storageLossless = storedStorage.lossless;
     this.storageQuality = storedStorage.quality;
+    this.storageProjectFile = storedStorage.projectFile;
     this.storageFormat = storedStorage.format;
     this.storagePngLevel = storedStorage.pngLevel;
     this.storageJpegQuality = storedStorage.jpgQuality;
@@ -5055,6 +5078,7 @@ export class GnumarusShell extends LitElement {
           pngLevel: this.storagePngLevel,
           jpgQuality: this.storageJpegQuality,
           brushQuality: this.brushQuality,
+          projectFile: this.storageProjectFile,
         }),
       );
     } catch {
@@ -5069,8 +5093,14 @@ export class GnumarusShell extends LitElement {
       this.storageQuality === DEFAULT_STORAGE_SETTINGS.quality &&
       this.storagePngLevel === DEFAULT_STORAGE_SETTINGS.pngLevel &&
       this.storageJpegQuality === DEFAULT_STORAGE_SETTINGS.jpgQuality &&
-      this.brushQuality === DEFAULT_STORAGE_SETTINGS.brushQuality
+      this.brushQuality === DEFAULT_STORAGE_SETTINGS.brushQuality &&
+      this.storageProjectFile === DEFAULT_STORAGE_SETTINGS.projectFile
     );
+  }
+
+  private currentDialogProjectFile(): GnumarusProjectFileFormat {
+    const input = this.shadowRoot?.getElementById("storageProjectFile") as HTMLSelectElement | null;
+    return parseProjectFileFormat(input?.value ?? this.storageProjectFile);
   }
 
   private currentDialogStorageFormat(): GnumarusStorageFormat {
@@ -5140,6 +5170,7 @@ export class GnumarusShell extends LitElement {
   }
 
   private applyStorageFromDialog(): void {
+    this.storageProjectFile = this.currentDialogProjectFile();
     this.storageFormat = this.currentDialogStorageFormat();
     this.storageLossless = this.currentDialogStorageLossless();
     this.storageQuality = this.currentDialogStorageQuality();
@@ -5156,6 +5187,7 @@ export class GnumarusShell extends LitElement {
     this.storageFormat = DEFAULT_STORAGE_SETTINGS.format;
     this.storagePngLevel = DEFAULT_STORAGE_SETTINGS.pngLevel;
     this.storageJpegQuality = DEFAULT_STORAGE_SETTINGS.jpgQuality;
+    this.storageProjectFile = DEFAULT_STORAGE_SETTINGS.projectFile;
     this.brushQuality = DEFAULT_STORAGE_SETTINGS.brushQuality;
     this.persistStorage();
     this.statusMessage = "Project texture storage reset to default";
@@ -5169,7 +5201,9 @@ export class GnumarusShell extends LitElement {
     pngLevel = DEFAULT_STORAGE_SETTINGS.pngLevel,
     jpgQuality = DEFAULT_STORAGE_SETTINGS.jpgQuality,
     brushQuality = DEFAULT_STORAGE_SETTINGS.brushQuality,
+    projectFile: GnumarusProjectFileFormat = DEFAULT_STORAGE_SETTINGS.projectFile,
   ): void {
+    this.storageProjectFile = parseProjectFileFormat(projectFile);
     this.storageFormat = parseStorageFormat(format);
     this.storageLossless = lossless;
     this.storageQuality = clampStorageQuality(quality);
@@ -9329,7 +9363,20 @@ export class GnumarusShell extends LitElement {
           cells: exported.cells.map((cell) => ({ ...cell })),
         },
       };
-      await writeProjectFiles(dir, meta, blobs);
+      const jsonText = serializeProject(meta);
+      if (this.storageProjectFile === "json") {
+        blobs.set(GNUMARUS_PROJECT_FILE, new Blob([jsonText], { type: "application/json" }));
+      } else {
+        blobs.set(
+          GNUMARUS_PROJECT_ARCHIVE_FILE,
+          new Blob([encodeProjectArchive(jsonText) as Uint8Array<ArrayBuffer>], { type: "application/zip" }),
+        );
+      }
+      await writeProjectFiles(dir, blobs);
+      await removeProjectFile(
+        dir,
+        this.storageProjectFile === "json" ? GNUMARUS_PROJECT_ARCHIVE_FILE : GNUMARUS_PROJECT_FILE,
+      );
       this.directoryHandle = dir;
       this.projectName = dir.name;
       this.dirty = false;

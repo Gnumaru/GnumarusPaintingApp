@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
+import { unzipSync, zipSync } from "fflate";
 import {
   cellFilePath,
   createDefaultProject,
+  decodeProjectArchive,
+  encodeProjectArchive,
   parseProject,
   serializeProject,
   textureFilePath,
   GNUMARUS_APP_ID,
+  GNUMARUS_PROJECT_ARCHIVE_FILE,
   GnumarusProjectError,
 } from "../src/project/GnumarusProjectFormat";
 
@@ -302,5 +306,35 @@ describe("GnumarusProjectFormat", () => {
     expect(parseProject(JSON.stringify(raw)).animation.activeAnimation).toBeNull();
     animation["activeAnimation"] = 42;
     expect(() => parseProject(JSON.stringify(raw))).toThrow(GnumarusProjectError);
+  });
+
+  it("packs the project JSON as a max-compression zip with identical bytes", () => {
+    expect(GNUMARUS_PROJECT_ARCHIVE_FILE).toBe("project.gpa");
+    const project = createDefaultProject(64, 64);
+    project.animation.textures.push(
+      ...Array.from({ length: 24 }, (_, index) => ({
+        id: `layer${index + 1}`,
+        name: `t${index + 1}`,
+        width: 64,
+        height: 64,
+        file: `textures/t${index + 1}.jxl`,
+      })),
+    );
+    const jsonText = serializeProject(project);
+    const archived = encodeProjectArchive(jsonText);
+    expect(Array.from(archived.slice(0, 2))).toEqual([0x50, 0x4b]);
+    expect(archived.length).toBeLessThan(jsonText.length);
+    const entries = unzipSync(archived);
+    expect(Object.keys(entries).sort()).toEqual(["project.json"]);
+    expect(new TextDecoder().decode(entries["project.json"] as Uint8Array)).toBe(jsonText);
+    expect(parseProject(decodeProjectArchive(archived))).toEqual(project);
+  });
+
+  it("rejects corrupt archives with clear errors", () => {
+    expect(() => decodeProjectArchive(new Uint8Array([1, 2, 3, 4]))).toThrow(/not a valid zip archive/);
+    expect(() => decodeProjectArchive(new Uint8Array(0))).toThrow(/not a valid zip archive/);
+    expect(() => decodeProjectArchive(zipSync({ "other.txt": new Uint8Array([1]) }))).toThrow(
+      /no project\.json inside/,
+    );
   });
 });

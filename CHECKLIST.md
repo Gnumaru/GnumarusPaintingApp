@@ -294,3 +294,9 @@
 - [x] Pencil stroke OOB start anchor (plain + stabilized paths)
 - [x] E2E @recent outside-press/drag-in (49 passed, fails pre-fix); unit 375 + build clean; docs updated
 - [x] Deterministic dist names (no content hash); two builds byte-identical listing; unit 375 green
+- [x] Project data file setting (`gpa` zipped default / `json` plain): settings row + reset + persist + hook
+- [x] Zipped save (`project.gpa`, fflate zip level 9, single identical `project.json`) + plain save + stale counterpart removal
+- [x] Open/reload prefer `.gpa`, fall back to `.json`; corrupt archive clear error
+- [x] E2E mock fidelity (NotFoundError, create flag) + crop test seeds zip + corrupt test asserts status
+- [x] Unit tests (vitest) — 377 passed (previous 375 + archive pack/unpack/reject + projectFile parse)
+- [x] E2E (@recent only, per policy): 3 new tests green (zipped default save/reopen, plain mode + stale removal both ways, corrupt archive error) + 13 save/open neighbors green; full suite untouched

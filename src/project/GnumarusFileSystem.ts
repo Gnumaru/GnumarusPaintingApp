@@ -1,7 +1,8 @@
 import {
+  decodeProjectArchive,
+  GNUMARUS_PROJECT_ARCHIVE_FILE,
   GNUMARUS_PROJECT_FILE,
   parseProject,
-  serializeProject,
   type GnumarusProjectMeta,
 } from "./GnumarusProjectFormat";
 
@@ -25,6 +26,7 @@ interface GnumarusDirectoryHandle {
   readonly name: string;
   getFileHandle(name: string, options?: { create?: boolean }): Promise<GnumarusFileHandle>;
   getDirectoryHandle(name: string, options?: { create?: boolean }): Promise<GnumarusDirectoryHandle>;
+  removeEntry(name: string, options?: { recursive?: boolean }): Promise<void>;
 }
 
 interface GnumarusOpenFilePickerOptions {
@@ -157,13 +159,50 @@ export async function readFileBytes(
   }
 }
 
-/** Read and parse project.json, throwing a clear error when it is missing or corrupt. */
+/**
+ * Read and parse the project data file, preferring the zipped archive and
+ * falling back to plain JSON, throwing a clear error when missing or corrupt.
+ */
 export async function readProjectMeta(root: GnumarusDirectoryHandle): Promise<GnumarusProjectMeta> {
-  const bytes = await readFileBytes(root, GNUMARUS_PROJECT_FILE);
-  if (bytes === null) {
-    throw new Error(`${GNUMARUS_PROJECT_FILE} is missing from this folder`);
+  const archived = await readFileBytes(root, GNUMARUS_PROJECT_ARCHIVE_FILE);
+  if (archived !== null) {
+    return parseProject(decodeProjectArchive(archived));
   }
-  return parseProject(new TextDecoder().decode(bytes));
+  const plain = await readFileBytes(root, GNUMARUS_PROJECT_FILE);
+  if (plain === null) {
+    throw new Error(`${GNUMARUS_PROJECT_ARCHIVE_FILE} or ${GNUMARUS_PROJECT_FILE} is missing from this folder`);
+  }
+  return parseProject(new TextDecoder().decode(plain));
+}
+
+/**
+ * Delete one file, silently ignoring a missing file. Other errors throw.
+ */
+export async function removeProjectFile(root: GnumarusDirectoryHandle, path: string): Promise<void> {
+  const parts = path.split("/").filter((part) => part.length > 0);
+  const fileName = parts.pop();
+  if (fileName === undefined) {
+    throw new Error(`Invalid project path: ${path}`);
+  }
+  let dir = root;
+  try {
+    for (const part of parts) {
+      dir = await dir.getDirectoryHandle(part, { create: false });
+    }
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "NotFoundError") {
+      return;
+    }
+    throw error;
+  }
+  try {
+    await dir.removeEntry(fileName, { recursive: false });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "NotFoundError") {
+      return;
+    }
+    throw error;
+  }
 }
 
 /** Plain object-URL download fallback when the File System Access API is missing. */
@@ -202,9 +241,7 @@ export async function readProjectFiles(root: GnumarusDirectoryHandle): Promise<{
   project: GnumarusProjectMeta;
   fileBlobs: Map<string, Blob>;
 }> {
-  const metaHandle = await resolveFile(root, GNUMARUS_PROJECT_FILE, false);
-  const metaText = await (await metaHandle.getFile()).text();
-  const project = parseProject(metaText);
+  const project = await readProjectMeta(root);
   const fileBlobs = new Map<string, Blob>();
   for (const texture of project.animation.textures) {
     if (fileBlobs.has(texture.file)) {
@@ -229,17 +266,9 @@ export async function readProjectFiles(root: GnumarusDirectoryHandle): Promise<{
 
 export async function writeProjectFiles(
   root: GnumarusDirectoryHandle,
-  project: GnumarusProjectMeta,
-  cellBlobs: Map<string, Blob>,
+  files: Map<string, Blob>,
 ): Promise<void> {
-  const metaHandle = await resolveFile(root, GNUMARUS_PROJECT_FILE, true);
-  const metaWritable = await metaHandle.createWritable();
-  try {
-    await metaWritable.write(serializeProject(project));
-  } finally {
-    await metaWritable.close();
-  }
-  for (const [path, blob] of cellBlobs) {
+  for (const [path, blob] of files) {
     const handle = await resolveFile(root, path, true);
     const writable = await handle.createWritable();
     try {

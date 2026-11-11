@@ -473,3 +473,9 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 
 ## 87. Deterministic dist file names (implemented)
 - Removed the `[hash]` from `rollupOptions.output` (`entryFileNames`/`chunkFileNames`/`assetFileNames`): every build emits the same names (`assets/index.js`, `assets/GnumarusKra.js`, `assets/jxl_shim.wasm`, `assets/webp_shim.wasm`, ...). No cache-busting, by request; E2E runs against the dev server and is unaffected.
+
+## 88. Project data file: zipped JSON default, plain JSON option (implemented)
+- Storage settings gain `projectFile` (`gpa`/`json`, default `gpa`); Settings Storage section gets a data-file row (reset arrow covers it).
+- Zipped saves write `project.gpa`: fflate `zipSync` level 9 with proper headers, single inner `project.json` identical to the plain bytes; plain saves write `project.json`; each save deletes the stale counterpart (`removeFile`, NotFound ignored).
+- Open/reload prefer `project.gpa`, fall back to `project.json`; corrupt archives fail with clear errors.
+- E2E mocks fixed for File System Access fidelity (`getFileHandle` honors `create:false` with `NotFoundError`, `getFile` throws `NotFoundError`); crop-on-open test seeds `project.gpa` (zip) instead of stale `project.json`; corrupt-archive test asserts the `Open failed` status text (open failures report via status, not toast).
