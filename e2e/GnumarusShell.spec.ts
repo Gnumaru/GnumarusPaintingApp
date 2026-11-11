@@ -1812,6 +1812,41 @@ test("frames can be removed but never the last one", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Remove frame" })).toBeDisabled();
 });
 
+test("Shift+click selects a frame range with bulk delete @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  expect((await getMatrix(page)).frameCount).toBe(4);
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="2"]').click({ modifiers: ["Shift"] });
+  await expect(page.locator("gnumarus-shell")).toContainText("Frames 1-3 selected (3)");
+  await expect(matrix.locator(".anim-frame-header.in-range")).toHaveCount(3);
+  await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click({ button: "right" });
+  await expect(page.getByRole("button", { name: "Delete frames (3)" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Remove frame", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Delete frames (3)" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#deleteFramesDialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("Delete 3 frames (1-3)?");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toBeHidden();
+  expect((await getMatrix(page)).frameCount).toBe(4);
+  await matrix.locator('[data-testid="anim-frame"][data-frame="3"]').click({ button: "right" });
+  await expect(page.getByRole("button", { name: "Remove frame", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Delete frames/ })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="2"]').click({ modifiers: ["Shift"] });
+  await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Delete frames (3)" }).click();
+  await page.locator("gnumarus-shell dialog#deleteFramesDialog").getByRole("button", { name: "OK" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Deleted 3 frames");
+  expect(await getMatrix(page)).toMatchObject({ frameCount: 1, currentFrame: 0 });
+});
+
 test("cell transform is stored per content and follows the frame", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
@@ -5442,6 +5477,20 @@ test("Help menu lists every keyboard shortcut in a modal", async ({ page }) => {
   await expect(dialog).toContainText("Hide/show all interface chrome");
   await dialog.getByRole("button", { name: "Close" }).click();
   await expect(dialog).toBeHidden();
+});
+
+test("Help menu Source code opens the GitHub project page @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Help" }).click();
+  const item = page.getByRole("button", { name: "Source code", exact: true });
+  await expect(item).toBeVisible();
+  const [popup] = await Promise.all([
+    page.waitForEvent("popup"),
+    item.click(),
+  ]);
+  expect(popup.url()).toContain("github.com/Gnumaru/GnumarusPaintingApp");
+  await popup.close();
 });
 
 test("quick action palette filters and runs actions", async ({ page }) => {

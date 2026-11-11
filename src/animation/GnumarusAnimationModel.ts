@@ -176,6 +176,105 @@ export function swapFrameNames(names: readonly string[], first: number, second: 
 }
 
 /**
+ * Normalize a frame set for bulk removal: unique integers inside
+ * `[0, count)`, sorted ascending.
+ */
+export function normalizeFrameSet(frames: readonly number[], count: number): number[] {
+  if (!Number.isInteger(count) || count < 0) {
+    return [];
+  }
+  return [...new Set(frames)]
+    .filter((frame) => Number.isInteger(frame) && frame >= 0 && frame < count)
+    .sort((first, second) => first - second);
+}
+
+/**
+ * New index of a surviving frame after deleting `deleted` (sorted unique
+ * indices from `normalizeFrameSet`).
+ */
+export function frameIndexAfterRemoval(frame: number, deleted: readonly number[]): number {
+  let shift = 0;
+  for (const gone of deleted) {
+    if (gone < frame) {
+      shift += 1;
+    } else {
+      break;
+    }
+  }
+  return frame - shift;
+}
+
+/** Drop every cell on a removed frame, shifting later cells down. */
+export function removeFramesCells(
+  cells: ReadonlyMap<string, string>,
+  deleted: readonly number[],
+): Map<string, string> {
+  const removed = new Set(deleted);
+  const kept = new Map<string, string>();
+  for (const [key, contentId] of cells) {
+    const { layerId, frame } = parseAnimationCellKey(key);
+    if (removed.has(frame)) {
+      continue;
+    }
+    kept.set(animationCellKey(layerId, frameIndexAfterRemoval(frame, deleted)), contentId);
+  }
+  return kept;
+}
+
+/** Drop every explicit duration on a removed frame, shifting later ones down. */
+export function removeFramesDurations(
+  durations: ReadonlyMap<number, number>,
+  deleted: readonly number[],
+): Map<number, number> {
+  const removed = new Set(deleted);
+  const kept = new Map<number, number>();
+  for (const [frame, duration] of durations) {
+    if (removed.has(frame)) {
+      continue;
+    }
+    kept.set(frameIndexAfterRemoval(frame, deleted), duration);
+  }
+  return kept;
+}
+
+/** Drop the names of removed frames, keeping the survivors in order. */
+export function removeFramesNames(names: readonly string[], removed: ReadonlySet<number>): string[] {
+  return names.filter((_name, frame) => !removed.has(frame));
+}
+
+/**
+ * Collapse 0-based frame indices into a 1-based range list for display
+ * (e.g. `[1,2,3,5,6,9,12,13,14]` becomes `"2-4, 6-7, 10, 13-15"`).
+ */
+export function formatFrameRanges(frames: readonly number[]): string {
+  const sorted = [...new Set(frames)]
+    .filter((frame) => Number.isInteger(frame) && frame >= 0)
+    .sort((first, second) => first - second);
+  const parts: string[] = [];
+  let start = -1;
+  let prev = -1;
+  const flush = (): void => {
+    if (start >= 0) {
+      parts.push(start === prev ? `${start + 1}` : `${start + 1}-${prev + 1}`);
+    }
+  };
+  for (const frame of sorted) {
+    if (start < 0) {
+      start = frame;
+      prev = frame;
+    } else if (frame === prev + 1) {
+      prev = frame;
+    } else {
+      flush();
+      start = frame;
+      prev = frame;
+    }
+  }
+  flush();
+  return parts.join(", ");
+}
+
+/**
  * Resolve every layer to the pixels and transform it shows on one frame.
  * Buffers are shared references into the texture pool (no copies), so
  * painting through a resolved buffer edits the shared texture and every

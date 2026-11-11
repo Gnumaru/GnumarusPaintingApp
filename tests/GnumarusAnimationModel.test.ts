@@ -6,10 +6,16 @@ import {
   effectiveFrameDurationSec,
   frameDurationTimeoutMs,
   ensureFrameNames,
+  formatFrameRanges,
+  frameIndexAfterRemoval,
   insertFrameCells,
   insertFrameDurations,
   insertFrameNames,
   normalizeFrameName,
+  normalizeFrameSet,
+  removeFramesCells,
+  removeFramesDurations,
+  removeFramesNames,
   resolveAnimationFrame,
   swapFrameCells,
   swapFrameDurations,
@@ -186,5 +192,46 @@ describe("GnumarusAnimationModel", () => {
     expect(insertFrameNames(["Frame 1"], 0, "Frame 2")).toEqual(["Frame 2", "Frame 1"]);
     expect(swapFrameNames(["A", "B", "C"], 0, 2)).toEqual(["C", "B", "A"]);
     expect(swapFrameNames(["A", "B"], 1, 1)).toEqual(["A", "B"]);
+  });
+
+  it("collapses frame indices into 1-based range lists", () => {
+    expect(formatFrameRanges([])).toBe("");
+    expect(formatFrameRanges([0])).toBe("1");
+    expect(formatFrameRanges([1, 2, 3, 4, 5, 6, 9, 12, 13, 14, 15, 16])).toBe("2-7, 10, 13-17");
+    expect(formatFrameRanges([5, 3, 4, 3, 9])).toBe("4-6, 10");
+    expect(formatFrameRanges([0, 2])).toBe("1, 3");
+    expect(formatFrameRanges([-1, 1.5, 2])).toBe("3");
+  });
+
+  it("normalizes bulk-removal frame sets", () => {
+    expect(normalizeFrameSet([3, 1, 1, 2], 5)).toEqual([1, 2, 3]);
+    expect(normalizeFrameSet([-1, 0, 9, 2.5], 3)).toEqual([0]);
+    expect(normalizeFrameSet([0], 0)).toEqual([]);
+    expect(frameIndexAfterRemoval(5, [1, 2, 4])).toBe(2);
+    expect(frameIndexAfterRemoval(0, [1, 2])).toBe(0);
+    expect(frameIndexAfterRemoval(3, [1, 2])).toBe(1);
+  });
+
+  it("drops removed frames from cells, durations and names", () => {
+    const cells = new Map([
+      ["layer0\n0", "a"],
+      ["layer0\n1", "b"],
+      ["layer0\n2", "c"],
+      ["layer0\n3", "d"],
+    ]);
+    expect([...removeFramesCells(cells, [1, 2]).entries()]).toEqual([
+      ["layer0\n0", "a"],
+      ["layer0\n1", "d"],
+    ]);
+    const durations = new Map([
+      [0, 0.5],
+      [1, 0.25],
+      [3, 1],
+    ]);
+    expect([...removeFramesDurations(durations, [1, 2]).entries()]).toEqual([
+      [0, 0.5],
+      [1, 1],
+    ]);
+    expect(removeFramesNames(["A", "B", "C", "D"], new Set([1, 2]))).toEqual(["A", "D"]);
   });
 });

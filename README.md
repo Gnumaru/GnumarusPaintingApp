@@ -1,5 +1,9 @@
 # Gnumaru's Painting and Animation App
 
+Live demo (GitHub Pages): https://gnumaru.github.io/GnumarusPaintingApp/
+
+Source code: https://github.com/Gnumaru/GnumarusPaintingApp
+
 Frontend-only single page web application for digital painting, pixel art, vector art and frame-by-frame animation, accelerated with WebGL2.
 
 ## Intended use
@@ -21,7 +25,7 @@ Classic desktop-like painting app (top menu bar, central canvas, bottom status b
 - Canvas background: checkerboard (default) or solid color in Edit > Settings; every setting has a per-setting reset arrow when non-default.
 - Final preview window (floating, resizable) with internal zoom/pan (drag with left, right or middle button) of the flattened image as a single PNG export would look, painted over the same canvas background (solid color or matching checkerboard); updates live while painting and while transforming layers.
 - Custom color picker: RGB/CMYK/HSV/HSL (default)/OKHSL/OKHSV/ARD with per-axis gradient bars and editable inputs; alpha axis on every model; always-visible HSV triangle (click/drag sets S/V, hue kept) inside a hue ring (click/drag sets only hue); no browser color picker is used anywhere.
-- Animation matrix above the status bar: rows are layers, columns are frames (each frame has an editable name like layers, via double-click or Rename frame menu); each cell holds zero or one shareable cell content (texture plus transform). New frames and new layers start empty (painting/transforming materializes content, or assign via `Select content`); cell menu has a single `Select content` item opening a modal grid (No content, New content, alphabetically sorted contents with thumbnails); New content opens a second modal to choose a texture (No texture, New texture, alphabetically sorted textures with thumbnails). ArrowLeft/Right select frames, Shift+Left/Right moves them.
+- Animation matrix above the status bar: rows are layers, columns are frames (each frame has an editable name like layers, via double-click or Rename frame menu); each cell holds zero or one shareable cell content (texture plus transform). New frames and new layers start empty (painting/transforming materializes content, or assign via `Select content`); cell menu has a single `Select content` item opening a modal grid (No content, New content, alphabetically sorted contents with thumbnails); New content opens a second modal to choose a texture (No texture, New texture, alphabetically sorted textures with thumbnails). ArrowLeft/Right select frames, Shift+Left/Right moves them. Shift+click on a second frame header selects the inclusive range; right-clicking inside a multi-frame range offers Delete frames (confirm dialog with count and ranges).
 - Frame durations and playback: each frame may carry an explicit duration in fractional seconds via its header menu (Set/Clear, 0.001..60 s); frames without one use the project default (0.25 s, configurable in Edit > Settings Animation section with reset arrow, stored in `project.json`); play/stop transport in the matrix corner plays from the current frame, looping until stopped.
 - Named animations: define `name,loop,frames` strings in the matrix-corner manage dialog (loop `none`/`forward`/`ping-pong`, 1-based frames, `A-B` ranges, `:ms` duration overrides); the corner dropdown highlights member columns and scopes playback to them; stored in `project.json`; Aseprite frame tags import as named animations.
 - Layer resize: per-layer width/height 1..1024 via Resize button; expand fills transparent right and below, shrink crops right and below; undoable.

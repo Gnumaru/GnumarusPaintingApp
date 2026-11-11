@@ -166,11 +166,16 @@ import {
   defaultFrameName,
   effectiveFrameDurationSec,
   ensureFrameNames,
+  frameIndexAfterRemoval,
   GNUMARUS_DEFAULT_FRAME_DURATION_SEC,
   insertFrameCells,
   insertFrameDurations,
   insertFrameNames,
   normalizeFrameName,
+  normalizeFrameSet,
+  removeFramesCells,
+  removeFramesDurations,
+  removeFramesNames,
   resolveAnimationFrame,
   swapFrameCells,
   swapFrameDurations,
@@ -1665,6 +1670,48 @@ export class GnumarusCanvasEngine {
     this.updateSelectionOverlay();
     this.onLayersChanged?.();
     return true;
+  }
+
+  /**
+   * Remove several frames in one pass. Duplicate and out-of-range entries are
+   * ignored. Returns the number of frames removed, or 0 when the set is empty
+   * or would remove every frame (at least one frame always survives).
+   */
+  removeFrames(frames: readonly number[]): number {
+    const unique = normalizeFrameSet(frames, this.frameCount);
+    if (unique.length === 0 || unique.length >= this.frameCount) {
+      return 0;
+    }
+    const removed = new Set(unique);
+    this.cells = removeFramesCells(this.cells, unique);
+    this.frameDurations = removeFramesDurations(this.frameDurations, unique);
+    this.frameNames = removeFramesNames(this.frameNames, removed);
+    this.namedAnimations = mapNamedAnimationFrames(this.namedAnimations, (entry) =>
+      removed.has(entry) ? null : frameIndexAfterRemoval(entry, unique),
+    );
+    this.frameCount -= unique.length;
+    if (this.floating !== null) {
+      if (removed.has(this.floating.frame)) {
+        this.dropFloating();
+      } else {
+        this.floating.frame = frameIndexAfterRemoval(this.floating.frame, unique);
+      }
+    }
+    this.currentFrame = Math.min(
+      frameIndexAfterRemoval(this.currentFrame, unique),
+      this.frameCount - 1,
+    );
+    this.stabilizerPos = null;
+    this.stabilizerTarget = null;
+    this.stopFollowLoop();
+    this.resetPencilPixelPerfect();
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.emitStats();
+    this.updateSelectionOverlay();
+    this.onLayersChanged?.();
+    return unique.length;
   }
 
   /** Display name for a frame index, falling back to the default when out of range. */

@@ -484,3 +484,13 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - On save, after writing the new blobs, delete orphaned files: old texture paths (from previously saved `project.gpa`/`project.json`, union of both, plus `.alpha.jpg` companions and legacy cell paths) not in the new set, same-stem candidates with other extensions even if the old meta is unreadable, and the stale data-file counterpart.
 - Best-effort old-meta read never blocks the save; deletions ignore `NotFoundError` via `removeProjectFile`.
 - Unit tests for the pure orphan helpers (`textureAlphaCompanion`, `collectProjectFileReferences`, `staleTextureCandidates`, `findStaleProjectPaths`) + e2e `changing texture storage removes stale texture files` (jxl->png->jpg->jxl chain asserting exact file lists plus reopen pixels).
+
+## 90. Help > Source code link (implemented)
+- Help menu gains a `Source code` item opening https://github.com/Gnumaru/GnumarusPaintingApp in a new tab (`GNUMARUS_SOURCE_URL`, `window.open` with `noopener`).
+- E2E `Help menu Source code opens the GitHub project page` (popup URL assertion).
+
+## 91. Frame range selection + bulk delete (implemented)
+- Click a frame name, then Shift+click another to select the inclusive range (anchor + `selectedFrames` shell state; plain click/cell/arrow keys reset to a single frame; painting still follows `currentFrame`).
+- Right-click on a frame inside a multi-frame range opens a range menu whose only action is `Delete frames`; right-click elsewhere keeps the existing single-frame menu.
+- `Delete frames` opens a confirm dialog with the frame count and collapsed 1-based ranges (e.g. `2-7, 10, 13-17`); OK deletes via a single engine `removeFrames()` pass (cells/durations/names/named animations/floating remapped once), Cancel/close does nothing. Refuses to remove every frame.
+- Pure `formatFrameRanges()`/`normalizeFrameSet()`/`frameIndexAfterRemoval()`/`removeFramesCells()`/`removeFramesDurations()`/`removeFramesNames()` helpers + unit tests; e2e shift+click/dialog/OK/Cancel coverage.

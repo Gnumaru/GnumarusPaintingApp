@@ -303,3 +303,8 @@
 - [x] Stale texture/data cleanup on storage format change: orphan helpers + save wiring
 - [x] Unit tests for orphan helpers green (381 passed)
 - [x] E2E format-switch saves (jxl->png->jpg->jxl chain + data gpa<->json neighbors) assert exact file lists green; build + deploy + docs
+- [x] Help > Source code menu item opening the GitHub project page + e2e; build + deploy + docs
+- [x] Frame range selection (click + Shift+click, anchor + selectedFrames, single reset on plain/cell/arrow/add/remove/load paths)
+- [x] Range context menu (Delete frames only) + confirm dialog (count + collapsed ranges, OK/Cancel, refuses every-frame removal)
+- [x] Engine removeFrames() bulk pass + formatFrameRanges()/normalizeFrameSet()/removal pure helpers
+- [x] Unit tests (vitest) — 384 passed; E2E @recent (Shift+click range + bulk delete incl. Cancel path) green + frame-area neighbors green (3 Import failures are pre-existing duplicate-button strict violations); build + deploy + docs

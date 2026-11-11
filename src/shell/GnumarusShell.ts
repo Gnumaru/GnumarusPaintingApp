@@ -255,6 +255,7 @@ import {
 } from "../actions/GnumarusActions";
 import {
   clampFrameDurationSec,
+  formatFrameRanges,
   frameDurationTimeoutMs,
   GNUMARUS_DEFAULT_FRAME_DURATION_SEC as DEFAULT_ANIMATION_FRAME_DURATION,
 } from "../animation/GnumarusAnimationModel";
@@ -296,6 +297,9 @@ function isGimpFile(bytes: Uint8Array): boolean {
     bytes[8] === 0x20
   );
 }
+
+/** Public source repository opened by Help > Source code. */
+export const GNUMARUS_SOURCE_URL = "https://github.com/Gnumaru/GnumarusPaintingApp";
 
 const GNUMARUS_SHORTCUTS: GnumarusShortcutSection[] = [
   {
@@ -798,6 +802,9 @@ export class GnumarusShell extends LitElement {
       border-color: #0e639c;
       box-shadow: inset 0 0 0 1px #2da886;
     }
+    .anim-frame-header.in-range button {
+      box-shadow: inset 0 0 0 2px #ffd23f;
+    }
     .anim-frame-header button:hover {
       background: #3a3a3a;
     }
@@ -1294,6 +1301,8 @@ export class GnumarusShell extends LitElement {
     importCleanup: { type: String },
     expandStep: { type: Number },
     renamingFrame: { type: Number },
+    selectedFrames: { type: Array },
+    deleteFramesTarget: { type: Array },
     brushSize: { type: Number },
     brushShape: { type: String },
     presetName: { type: String },
@@ -1388,6 +1397,7 @@ export class GnumarusShell extends LitElement {
   declare matrixMenu:
     | { kind: "cell"; layerId: string; frame: number; x: number; y: number }
     | { kind: "frame"; frame: number; x: number; y: number }
+    | { kind: "frames"; frames: number[]; x: number; y: number }
     | { kind: "layer"; layerId: string; x: number; y: number }
     | null;
   declare contentPickerTarget: { layerId: string; frame: number } | null;
@@ -1434,6 +1444,10 @@ export class GnumarusShell extends LitElement {
   declare importCleanup: GnumarusImportCleanup;
   declare expandStep: number;
   declare renamingFrame: number | null;
+  declare selectedFrames: number[];
+  declare deleteFramesTarget: number[] | null;
+  /** Anchor frame for Shift+click range selection (not reactive by itself). */
+  private frameAnchor: number | null = null;
   declare brushSize: number;
   declare brushShape: GnumarusBrushShape;
   declare presetName: string;
@@ -1584,6 +1598,9 @@ export class GnumarusShell extends LitElement {
     this.importCleanup = DEFAULT_IMPORT_CLEANUP;
     this.expandStep = DEFAULT_EXPAND_SETTINGS.step;
     this.renamingFrame = null;
+    this.selectedFrames = [];
+    this.deleteFramesTarget = null;
+    this.frameAnchor = null;
     this.brushSize = 1;
     this.brushShape = "circle";
     this.presetName = "";
@@ -1686,6 +1703,7 @@ export class GnumarusShell extends LitElement {
             ? html`
                 <div class="dropdown">
                   <button @click=${(): void => this.openShortcutsDialog()}>Shortcuts</button>
+                  <button @click=${(): void => this.openSourceCode()}>Source code</button>
                 </div>
               `
             : html``}
@@ -2980,6 +2998,18 @@ export class GnumarusShell extends LitElement {
           <button id="animationDeleteYes" @click=${(): void => this.confirmDeleteAnimation()}>Yes</button>
         </div>
       </dialog>
+      <dialog id="deleteFramesDialog" @close=${(): void => this.cancelDeleteFrames()}>
+        <h3>Delete frames</h3>
+        <p>
+          Delete ${this.deleteFramesTarget?.length ?? 0}
+          frame${(this.deleteFramesTarget?.length ?? 0) === 1 ? "" : "s"}
+          (${this.deleteFramesTarget === null ? "" : formatFrameRanges(this.deleteFramesTarget)})?
+        </p>
+        <div class="dialog-actions">
+          <button id="deleteFramesNo" @click=${(): void => this.cancelDeleteFrames()}>Cancel</button>
+          <button id="deleteFramesYes" @click=${(): void => this.confirmDeleteFrames()}>OK</button>
+        </div>
+      </dialog>
       <dialog id="exportDialog">
         <h3>Export frame</h3>
         <label
@@ -3852,12 +3882,13 @@ export class GnumarusShell extends LitElement {
               const frameName = matrix.frameNames[frame] ?? `F${frame + 1}`;
               const isRenaming = this.renamingFrame === frame;
               const animationCount = animationFrameCounts.get(frame) ?? 0;
+              const inRange = this.selectedFrameSet().has(frame);
               const animationPhrase =
                 animationCount === 0
                   ? "in no animations"
                   : `in ${animationCount} animation${animationCount === 1 ? "" : "s"}`;
               return html`
-                <div class="anim-frame-header ${current ? "current" : ""} ${inAnimation ? "in-animation" : ""}">
+                <div class="anim-frame-header ${current ? "current" : ""} ${inAnimation ? "in-animation" : ""} ${inRange ? "in-range" : ""}">
                   ${isRenaming
                     ? html`<input
                         data-testid="anim-frame-rename"
@@ -3881,7 +3912,7 @@ export class GnumarusShell extends LitElement {
                         data-frame=${frame}
                         aria-label="Frame ${frame + 1}${current ? ", current" : ""}: ${frameName}, ${duration} seconds, ${animationPhrase}"
                         title="Frame ${frame + 1}${current ? " (current)" : ""}: ${frameName} — ${duration} s, ${animationPhrase}"
-                        @click=${(): void => this.onSelectFrame(frame)}
+                        @click=${(event: MouseEvent): void => this.onSelectFrameClick(frame, event.shiftKey)}
                         @dblclick=${(): void => this.onFrameRenameStart(frame)}
                         @contextmenu=${(event: MouseEvent): void => {
                           event.preventDefault();
@@ -3968,6 +3999,20 @@ export class GnumarusShell extends LitElement {
           <button @click=${(): void => this.onOpenFrameDuration()}>Set frame duration…</button>
           <button @click=${(): void => this.onRenameFrameFromMenu()}>Rename frame…</button>
           <button ?disabled=${count <= 1} @click=${(): void => this.onRemoveFrame(frame)}>Remove frame</button>
+        </div>
+      `;
+    }
+    if (this.matrixMenu.kind === "frames") {
+      const frames = this.matrixMenu.frames;
+      return html`
+        <div class="context-blocker" @click=${(): void => this.closeMatrixMenu()} @contextmenu=${(event: Event): void => {
+          event.preventDefault();
+          this.closeMatrixMenu();
+        }}></div>
+        <div class="context-menu" style="left: ${this.matrixMenu.x}px; top: ${this.matrixMenu.y}px;">
+          <button @click=${(): void => this.onDeleteFrames([...frames])}>
+            Delete frames (${frames.length})
+          </button>
         </div>
       `;
     }
@@ -4454,6 +4499,7 @@ export class GnumarusShell extends LitElement {
     }
     const next = (this.engine.getCurrentFrame() + direction + count) % count;
     if (this.engine.setCurrentFrame(next)) {
+      this.selectSingleFrame(next);
       this.refreshLayers();
       this.showToast(this.frameToastFor(next, count));
     }
@@ -4466,6 +4512,7 @@ export class GnumarusShell extends LitElement {
     }
     const from = this.engine.getCurrentFrame();
     if (this.engine.moveFrame(from, direction)) {
+      this.selectSingleFrame(this.engine.getCurrentFrame());
       this.refreshLayers();
       this.dirty = true;
       this.statusMessage = `Frame moved ${direction === 1 ? "right" : "left"}`;
@@ -6973,6 +7020,7 @@ export class GnumarusShell extends LitElement {
     }
     if (frameChanged) {
       this.engine.setCurrentFrame(frame);
+      this.selectSingleFrame(frame);
     }
     this.refreshLayers();
     const activeIndex = this.layers.findIndex((layer) => layer.id === this.engine?.getActiveLayerId());
@@ -6992,6 +7040,7 @@ export class GnumarusShell extends LitElement {
       return;
     }
     if (this.engine.setCurrentFrame(frame)) {
+      this.selectSingleFrame(frame);
       this.refreshLayers();
       this.dirty = true;
       this.statusMessage = `Frame ${frame + 1} selected`;
@@ -6999,11 +7048,59 @@ export class GnumarusShell extends LitElement {
     }
   }
 
+  /** Collapse the pending selection onto one frame (plain click paths). */
+  private selectSingleFrame(frame: number): void {
+    this.frameAnchor = frame;
+    this.selectedFrames = [frame];
+  }
+
+  /** Valid selected frames for the current project, defaulting to the current frame. */
+  private selectedFrameSet(): Set<number> {
+    const count = this.engine?.getFrameCount() ?? 0;
+    const current = this.engine?.getCurrentFrame() ?? 0;
+    const valid = this.selectedFrames.filter(
+      (frame) => Number.isInteger(frame) && frame >= 0 && frame < count,
+    );
+    return new Set(valid.length > 0 ? valid : count > 0 ? [Math.min(current, count - 1)] : []);
+  }
+
+  private onSelectFrameClick(frame: number, shiftKey: boolean): void {
+    if (this.engine === null) {
+      return;
+    }
+    if (!shiftKey) {
+      this.onSelectFrame(frame);
+      return;
+    }
+    const count = this.engine.getFrameCount();
+    const anchor = this.frameAnchor ?? this.engine.getCurrentFrame();
+    const clampedAnchor = Math.min(Math.max(0, anchor), count - 1);
+    const low = Math.min(clampedAnchor, frame);
+    const high = Math.max(clampedAnchor, frame);
+    const range: number[] = [];
+    for (let at = low; at <= high; at += 1) {
+      range.push(at);
+    }
+    this.selectedFrames = range;
+    if (this.engine.setCurrentFrame(frame)) {
+      this.refreshLayers();
+    } else {
+      this.requestUpdate();
+    }
+    this.dirty = true;
+    this.statusMessage =
+      range.length === 1
+        ? `Frame ${frame + 1} selected`
+        : `Frames ${low + 1}-${high + 1} selected (${range.length})`;
+    this.showToast(this.frameToastFor(frame, count));
+  }
+
   private onAddFrame(): void {
     if (this.engine === null) {
       return;
     }
     const frame = this.engine.addFrame();
+    this.selectSingleFrame(frame);
     this.refreshLayers();
     this.dirty = true;
     this.statusMessage = `Frame ${frame + 1} added`;
@@ -7016,6 +7113,7 @@ export class GnumarusShell extends LitElement {
     }
     const added = this.engine.insertFrame(frame);
     if (added >= 0) {
+      this.selectSingleFrame(added);
       this.refreshLayers();
       this.dirty = true;
       this.statusMessage = `Frame ${added + 1} added`;
@@ -7029,6 +7127,7 @@ export class GnumarusShell extends LitElement {
     }
     const added = this.engine.insertFrame(frame + 1);
     if (added >= 0) {
+      this.selectSingleFrame(added);
       this.refreshLayers();
       this.dirty = true;
       this.statusMessage = `Frame ${added + 1} added`;
@@ -7041,6 +7140,7 @@ export class GnumarusShell extends LitElement {
       return;
     }
     if (this.engine.removeFrame(frame)) {
+      this.selectSingleFrame(this.engine.getCurrentFrame());
       this.refreshLayers();
       this.dirty = true;
       this.statusMessage = "Frame removed";
@@ -7061,6 +7161,15 @@ export class GnumarusShell extends LitElement {
 
   private openMatrixFrameMenu(frame: number, clientX: number, clientY: number): void {
     this.closeLayerMenu();
+    const selected = this.selectedFrameSet();
+    if (selected.size > 1 && selected.has(frame)) {
+      this.matrixMenu = { kind: "frames", frames: [...selected].sort((a, b) => a - b), x: clientX, y: clientY };
+      return;
+    }
+    if (!selected.has(frame) || selected.size !== 1) {
+      this.frameAnchor = frame;
+      this.selectedFrames = [frame];
+    }
     this.matrixMenu = { kind: "frame", frame, x: clientX, y: clientY };
   }
 
@@ -7475,6 +7584,46 @@ export class GnumarusShell extends LitElement {
       dialog.close();
     }
     this.animationDeleteTarget = null;
+  }
+
+  private onDeleteFrames(frames: number[]): void {
+    this.closeMatrixMenu();
+    if (this.engine === null || frames.length === 0) {
+      return;
+    }
+    this.deleteFramesTarget = [...frames].sort((first, second) => first - second);
+    const dialog = this.shadowRoot?.getElementById("deleteFramesDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+    const cancel = this.shadowRoot?.getElementById("deleteFramesNo") as HTMLButtonElement | null;
+    cancel?.focus();
+  }
+
+  private confirmDeleteFrames(): void {
+    const target = this.deleteFramesTarget === null ? [] : [...this.deleteFramesTarget];
+    const dialog = this.shadowRoot?.getElementById("deleteFramesDialog") as HTMLDialogElement | null;
+    dialog?.close();
+    this.deleteFramesTarget = null;
+    if (this.engine === null || target.length === 0) {
+      return;
+    }
+    const deleted = this.engine.removeFrames(target);
+    if (deleted > 0) {
+      this.selectSingleFrame(this.engine.getCurrentFrame());
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = `Deleted ${deleted} frame${deleted === 1 ? "" : "s"}`;
+      this.showToast(`Deleted ${deleted} frame${deleted === 1 ? "" : "s"}`);
+    } else {
+      this.statusMessage = "Cannot remove every frame";
+    }
+  }
+
+  private cancelDeleteFrames(): void {
+    const dialog = this.shadowRoot?.getElementById("deleteFramesDialog") as HTMLDialogElement | null;
+    if (dialog?.open === true) {
+      dialog.close();
+    }
+    this.deleteFramesTarget = null;
   }
 
   private onSelectAnimation(event: Event): void {
@@ -8825,6 +8974,11 @@ export class GnumarusShell extends LitElement {
     dialog?.close();
   }
 
+  private openSourceCode(): void {
+    this.helpMenuOpen = false;
+    window.open(GNUMARUS_SOURCE_URL, "_blank", "noopener");
+  }
+
   private onRenameCommit(id: string): void {
     if (this.renamingId !== id) {
       return;
@@ -8857,6 +9011,7 @@ export class GnumarusShell extends LitElement {
     this.persistStorage();
     this.engine?.newProject(this.newWidth, this.newHeight);
     this.refreshLayers();
+    this.selectSingleFrame(0);
     this.directoryHandle = null;
     this.projectName = "Untitled";
     this.dirty = true;
@@ -8968,6 +9123,7 @@ export class GnumarusShell extends LitElement {
       this.directoryHandle = dir;
       this.projectName = dir.name;
       this.dirty = false;
+      this.selectSingleFrame(this.engine?.getCurrentFrame() ?? 0);
       const openedCleanup = this.applyImportCleanup();
       if (openedCleanup !== "") {
         this.dirty = true;
@@ -9056,6 +9212,7 @@ export class GnumarusShell extends LitElement {
         activeAnimation: null,
       });
       this.refreshLayers();
+      this.selectSingleFrame(this.engine?.getCurrentFrame() ?? 0);
       this.directoryHandle = null;
       this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
       this.dirty = true;
@@ -9109,6 +9266,7 @@ export class GnumarusShell extends LitElement {
       activeAnimation: null,
     });
     this.refreshLayers();
+    this.selectSingleFrame(this.engine?.getCurrentFrame() ?? 0);
     this.directoryHandle = null;
     this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
     this.dirty = true;
@@ -9150,6 +9308,7 @@ export class GnumarusShell extends LitElement {
       activeAnimation: null,
     });
     this.refreshLayers();
+    this.selectSingleFrame(this.engine?.getCurrentFrame() ?? 0);
     this.directoryHandle = null;
     this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
     this.dirty = true;
@@ -9192,6 +9351,7 @@ export class GnumarusShell extends LitElement {
       activeAnimation: null,
     });
     this.refreshLayers();
+    this.selectSingleFrame(this.engine?.getCurrentFrame() ?? 0);
     this.directoryHandle = null;
     this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
     this.dirty = true;
