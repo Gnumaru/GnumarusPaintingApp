@@ -60,6 +60,36 @@ describe("layoutTextDocument", () => {
     const laidOut = layoutTextDocument(parseTextDocument(""), measure);
     expect(laidOut).toEqual({ width: 0, height: 0, lines: [] });
   });
+
+  it("places the baseline at the measured ascent with room for descenders", () => {
+    const metrics = (_text: string, _font: string): { ascent: number; descent: number } => ({
+      ascent: 29,
+      descent: 8,
+    });
+    const laidOut = layoutTextDocument(parseTextDocument("<div>çqpga</div>"), measure, 4096, 4096, metrics);
+    expect(laidOut.lines).toHaveLength(1);
+    // 29 + 8 = 37 < 32 * 1.2 = 38.4, so the default line height wins.
+    expect(laidOut.lines[0]?.height).toBeCloseTo(38.4, 5);
+    expect(laidOut.lines[0]?.ascent).toBe(29);
+    // Baseline (29) plus descent (8) fits inside the box.
+    expect((laidOut.lines[0]?.ascent ?? 0) + 8).toBeLessThanOrEqual(laidOut.lines[0]?.height ?? 0);
+  });
+
+  it("grows the line box for descenders deeper than the default height", () => {
+    const metrics = (_text: string, _font: string): { ascent: number; descent: number } => ({
+      ascent: 30,
+      descent: 20,
+    });
+    const laidOut = layoutTextDocument(parseTextDocument("<div>g</div>"), measure, 4096, 4096, metrics);
+    expect(laidOut.lines[0]?.height).toBe(50);
+    expect(laidOut.lines[0]?.ascent).toBe(30);
+  });
+
+  it("falls back to font-size ratios without measured metrics", () => {
+    const laidOut = layoutTextDocument(parseTextDocument("<div>x</div>"), measure);
+    expect(laidOut.lines[0]?.ascent).toBeCloseTo(32 * 0.85, 5);
+    expect(laidOut.lines[0]?.height).toBeCloseTo(32 * 1.2, 5);
+  });
 });
 
 describe("text run helpers", () => {

@@ -10562,3 +10562,84 @@ test("text raster fits multi-line content without clipping", async ({ page }) =>
   expect(extents?.maxX ?? 0).toBeGreaterThan(300);
   expect(extents?.maxY ?? 0).toBeGreaterThan(180);
 });
+
+test("text raster keeps descenders below the baseline", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.locator('gnumarus-shell [data-testid="tool-text"]').click();
+  await paintCenter(page);
+  const area = page.locator('gnumarus-shell [data-testid="text-editor-area"]');
+  await area.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("çqpga");
+  await page.locator('gnumarus-shell [data-testid="text-ok"]').click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Text updated");
+  const result = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { readPixel(x: number, y: number): { a: number } | null } };
+    };
+    const engine = root.__gnumarus?.engine;
+    if (engine === undefined) {
+      return null;
+    }
+    // Same font the engine rasterizes by default (64px = 2x supersample);
+    // the engine baseline sits at the typographic ascent, so descenders
+    // live strictly below it.
+    const probe = document.createElement("canvas").getContext("2d");
+    if (probe === null) {
+      return null;
+    }
+    probe.font = "64px sans-serif";
+    const sample = probe.measureText("çqpga");
+    const ascent = sample.fontBoundingBoxAscent ?? sample.actualBoundingBoxAscent;
+    const descent = sample.fontBoundingBoxDescent ?? sample.actualBoundingBoxDescent;
+    if (!(ascent > 0) || !(descent > 0)) {
+      return null;
+    }
+    const refCanvas = document.createElement("canvas");
+    refCanvas.width = Math.ceil(sample.width) + 8;
+    refCanvas.height = Math.ceil(ascent + descent) + 8;
+    const refCtx = refCanvas.getContext("2d");
+    if (refCtx === null) {
+      return null;
+    }
+    refCtx.font = "64px sans-serif";
+    refCtx.textBaseline = "alphabetic";
+    const refBaseline = 4 + ascent;
+    refCtx.fillText("çqpga", 4, refBaseline);
+    const refData = refCtx.getImageData(0, 0, refCanvas.width, refCanvas.height).data;
+    let refBelow = 0;
+    let refTotal = 0;
+    for (let y = 0; y < refCanvas.height; y += 1) {
+      for (let x = 0; x < refCanvas.width; x += 1) {
+        if ((refData[(y * refCanvas.width + x) * 4 + 3] ?? 0) > 0) {
+          refTotal += 1;
+          if (y > refBaseline) {
+            refBelow += 1;
+          }
+        }
+      }
+    }
+    const engineBaseline = ascent;
+    let engBelow = 0;
+    let engTotal = 0;
+    for (let y = 0; y < 512; y += 2) {
+      for (let x = 0; x < 1024; x += 2) {
+        if ((engine.readPixel(x, y)?.a ?? 0) > 0) {
+          engTotal += 1;
+          if (y > engineBaseline) {
+            engBelow += 1;
+          }
+        }
+      }
+    }
+    return { refBelow, refTotal, engBelow: engBelow * 4, engTotal: engTotal * 4 };
+  });
+  expect(result).not.toBeNull();
+  // Tails must exist at all, track the reference count, and match the total.
+  expect(result?.engBelow ?? 0).toBeGreaterThan(50);
+  expect(result?.engBelow ?? 0).toBeGreaterThan((result?.refBelow ?? 0) * 0.8);
+  const ratio = (result?.engTotal ?? 0) / Math.max(1, result?.refTotal ?? 1);
+  expect(ratio).toBeGreaterThan(0.9);
+  expect(ratio).toBeLessThan(1.1);
+});

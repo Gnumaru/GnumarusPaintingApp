@@ -7,7 +7,13 @@ import {
   GNUMARUS_TEXT_RASTER_SCALE,
   type GnumarusTextEntry,
 } from "./GnumarusText";
-import { layoutTextDocument, parseTextDocument, textRunFont, type GnumarusLaidOutText } from "./GnumarusTextLayout";
+import {
+  layoutTextDocument,
+  parseTextDocument,
+  textRunFont,
+  type GnumarusLaidOutText,
+  type GnumarusTextRunMetrics,
+} from "./GnumarusTextLayout";
 
 export interface GnumarusRasterizedText {
   width: number;
@@ -20,8 +26,9 @@ export function measureTextDocument(
   entry: GnumarusTextEntry,
   measure: (text: string, font: string) => number,
   maxWidth = 4096,
+  metrics?: (text: string, font: string) => GnumarusTextRunMetrics,
 ): GnumarusLaidOutText {
-  return layoutTextDocument(parseTextDocument(entry.document.html), measure, maxWidth);
+  return layoutTextDocument(parseTextDocument(entry.document.html), measure, maxWidth, maxWidth, metrics);
 }
 
 /**
@@ -60,8 +67,8 @@ export function rasterizeLaidOutText(
       context.font = textRunFont({ ...run, fontSize });
       context.fillStyle = run.color;
       const x = run.x * scale;
-      // Baseline sits one full line height below the line top.
-      const y = (line.y + line.height) * scale;
+      // Baseline sits at the line ascent (not the box bottom) so descenders fit below it.
+      const y = (line.y + line.ascent) * scale;
       context.fillText(run.text, x, y);
       if (run.underline) {
         const underlineY = Math.round(y + Math.max(1, fontSize / 12));

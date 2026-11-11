@@ -343,3 +343,4 @@
 - [x] Engine svg pool + async `<img>` derived rasters + guards + picker/menu/action/import + save/open + Settings UI + i18n (en + pt-BR)
 - [x] E2E full suite incl. 8 new svg tests (import/render, occupied-cell, filter warning, invalid doc, svgz decode, invalid archive, compressed/raw/embedded round-trips + stale); build + unit (436) + e2e (268/268) green; docs updated
 - [x] Text raster canvas resize fix + e2e clipping regression test; build + unit (436) + e2e green; docs updated
+- [x] Text descender clipping fix (measured ascent baseline, box fits ascent+descent) + unit (3) + e2e reference-comparison test; build + unit (439) + e2e green; docs updated

@@ -561,3 +561,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - `rasterizeLaidOutText` drew onto the shared measure canvas (300x150 default) without resizing it, so any text wider than 300 raster px or taller than 150 raster px was cut (e.g. 3 lines of "012345678" lost the end of each line and the whole third line).
 - The rasterizer now resizes `context.canvas` to the laid-out raster size (clamped to the 4096 max dimension) before drawing and re-asserts baseline/alignment after the state reset; measuring is unaffected.
 - Verified with an e2e regression test asserting painted extents exceed the old 300x150 clip box (fails pre-fix with maxX 296, passes post-fix); build + 436 unit + targeted e2e green.
+
+## 103. Fix text descenders clipped at the baseline (implemented)
+- The line baseline sat at the very bottom of the 1.2em line box, leaving no room below it: descenders (ç cedilla, p/q legs, g tail) were cut, with the render limit exactly at the base of "a".
+- Layout now measures per-run ascent/descent from the canvas (`fontBoundingBox*` with actual-bounds and size-ratio fallbacks), sizes each line box to ascent + descent (minimum one line height), and stores the baseline at the ascent; the rasterizer draws at `line.ascent` instead of the box bottom. Multi-line rhythm follows the typographic ascent; blank lines unchanged.
+- Verified: 3 new layout unit tests, e2e regression test rendering "çqpga" against an in-page canvas reference (below-baseline pixel count + total ratio; fails pre-fix at 0.857 total ratio, passes post-fix); build + 439 unit + targeted e2e green.

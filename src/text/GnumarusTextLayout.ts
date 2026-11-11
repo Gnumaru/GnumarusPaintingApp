@@ -37,6 +37,8 @@ export interface GnumarusLaidOutLine {
   /** Y offset of the line top, in layout px. */
   y: number;
   height: number;
+  /** Baseline offset below the line top, in layout px (room for descenders below it). */
+  ascent: number;
   runs: GnumarusLaidOutRun[];
 }
 
@@ -185,39 +187,77 @@ export function textRunFont(run: { bold: boolean; italic: boolean; fontFamily: s
   return `${run.italic ? "italic " : ""}${run.bold ? "bold " : ""}${run.fontSize}px ${family}`;
 }
 
+/** Vertical run metrics in layout px: distance above/below the baseline. */
+export interface GnumarusTextRunMetrics {
+  ascent: number;
+  descent: number;
+}
+
+/** Fallback ascent/descent ratios (of the run font size) when no metrics are measured. */
+export const GNUMARUS_TEXT_FALLBACK_ASCENT_RATIO = 0.85;
+export const GNUMARUS_TEXT_FALLBACK_DESCENT_RATIO = 0.25;
+
 /**
  * Lay out paragraphs into lines. `measure(text, font)` returns the advance
- * width in layout px. No wrapping: each paragraph is one line (clamped to
- * `maxWidth`, default 4096).
+ * width in layout px. `metrics(text, font)` optionally returns the run
+ * ascent/descent (same units); without it, fallback ratios of the run font
+ * size apply. No wrapping: each paragraph is one line (clamped to
+ * `maxWidth`, default 4096). Line boxes fit the tallest run ascent plus the
+ * deepest descent (at least one default line height), with the baseline at
+ * the ascent so descenders are never clipped.
  */
 export function layoutTextDocument(
   paragraphs: GnumarusTextParagraph[],
   measure: (text: string, font: string) => number,
   maxWidth = 4096,
   maxHeight = 4096,
+  metrics?: (text: string, font: string) => GnumarusTextRunMetrics,
 ): GnumarusLaidOutText {
   interface LineRun extends GnumarusTextRun {
     width: number;
   }
-  const lines: Array<{ align: "left" | "center" | "right"; runs: LineRun[]; width: number; height: number }> = [];
+  const lines: Array<{
+    align: "left" | "center" | "right";
+    runs: LineRun[];
+    width: number;
+    height: number;
+    ascent: number;
+  }> = [];
   for (const paragraph of paragraphs) {
     const runs: LineRun[] = [];
     let width = 0;
     let height = 0;
+    let ascent = 0;
+    let descent = 0;
     for (const raw of paragraph.runs) {
       const run = defaultTextRun(raw);
       if (run.text === "") {
         continue;
       }
-      const runWidth = Math.max(0, measure(run.text, textRunFont(run)));
+      const font = textRunFont(run);
+      const runWidth = Math.max(0, measure(run.text, font));
       runs.push({ ...run, width: runWidth });
       width += runWidth;
       height = Math.max(height, run.fontSize * GNUMARUS_TEXT_DEFAULT_LINE_HEIGHT);
+      const measured = metrics?.(run.text, font);
+      const runAscent =
+        measured !== undefined && Number.isFinite(measured.ascent) && measured.ascent > 0
+          ? measured.ascent
+          : run.fontSize * GNUMARUS_TEXT_FALLBACK_ASCENT_RATIO;
+      const runDescent =
+        measured !== undefined && Number.isFinite(measured.descent) && measured.descent > 0
+          ? measured.descent
+          : run.fontSize * GNUMARUS_TEXT_FALLBACK_DESCENT_RATIO;
+      ascent = Math.max(ascent, runAscent);
+      descent = Math.max(descent, runDescent);
     }
     if (paragraph.runs.length === 0 || (runs.length === 0 && paragraph.runs.length > 0)) {
       height = Math.max(height, GNUMARUS_TEXT_DEFAULT_FONT_SIZE * GNUMARUS_TEXT_DEFAULT_LINE_HEIGHT);
+      ascent = Math.max(ascent, GNUMARUS_TEXT_DEFAULT_FONT_SIZE * GNUMARUS_TEXT_FALLBACK_ASCENT_RATIO);
+      descent = Math.max(descent, GNUMARUS_TEXT_DEFAULT_FONT_SIZE * GNUMARUS_TEXT_FALLBACK_DESCENT_RATIO);
     }
-    lines.push({ align: paragraph.align, runs, width, height });
+    height = Math.max(height, ascent + descent);
+    lines.push({ align: paragraph.align, runs, width, height, ascent });
   }
   const boxWidth = Math.min(maxWidth, Math.max(0, ...lines.map((line) => line.width)));
   let y = 0;
@@ -233,7 +273,7 @@ export function layoutTextDocument(
       x += run.width;
       return placed;
     });
-    laid.push({ y, height: line.height, runs: out });
+    laid.push({ y, height: line.height, ascent: line.ascent, runs: out });
     y += line.height;
   }
   return { width: boxWidth, height: y, lines: laid };

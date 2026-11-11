@@ -2622,6 +2622,21 @@ export class GnumarusCanvasEngine {
         return context.measureText(text).width;
       },
       GNUMARUS_TEXT_MAX_RASTER_DIMENSION / GNUMARUS_TEXT_RASTER_SCALE,
+      GNUMARUS_TEXT_MAX_RASTER_DIMENSION / GNUMARUS_TEXT_RASTER_SCALE,
+      (text, font) => {
+        context.font = font;
+        const measured = context.measureText(text);
+        // Typographic ascent keeps multi-line rhythm steady; actual bounds
+        // are the per-glyph fallback when the font metrics are missing.
+        const ascent =
+          measured.fontBoundingBoxAscent ?? measured.actualBoundingBoxAscent;
+        const descent =
+          measured.fontBoundingBoxDescent ?? measured.actualBoundingBoxDescent;
+        return {
+          ascent: typeof ascent === "number" ? ascent : Number.NaN,
+          descent: typeof descent === "number" ? descent : Number.NaN,
+        };
+      },
     );
     const raster = rasterizeLaidOutText(context, laidOut, GNUMARUS_TEXT_RASTER_SCALE);
     if (raster === null) {
