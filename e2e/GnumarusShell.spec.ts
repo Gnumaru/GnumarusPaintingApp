@@ -5922,6 +5922,98 @@ async function dragRect(
   await page.mouse.up();
 }
 
+async function engineBrushSize(page: import("@playwright/test").Page): Promise<number> {
+  return page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { getBrushSize(): number } } };
+    return root.__gnumarus?.engine?.getBrushSize() ?? -1;
+  });
+}
+
+test("wheel alone zooms, wheel with modifiers does not @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const before = (await getViewState(page)).zoom;
+  await page.mouse.wheel(0, 240);
+  const afterPlain = (await getViewState(page)).zoom;
+  expect(afterPlain).toBeLessThan(before);
+  await page.keyboard.down("Shift");
+  await page.mouse.wheel(0, 240);
+  await page.keyboard.up("Shift");
+  expect((await getViewState(page)).zoom).toBe(afterPlain);
+});
+
+test("ctrl+wheel resizes the brush in whole steps @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  expect(await engineBrushSize(page)).toBe(1);
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.keyboard.down("Control");
+  await page.mouse.wheel(0, -240);
+  await page.keyboard.up("Control");
+  expect(await engineBrushSize(page)).toBe(2);
+  await page.keyboard.down("Control");
+  await page.mouse.wheel(0, 240);
+  await page.keyboard.up("Control");
+  expect(await engineBrushSize(page)).toBe(1);
+});
+
+test("polygonal lasso commits on Enter @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  const corner = await layerScreenTarget(page, 0, 0);
+  await page.mouse.click(corner.x, corner.y);
+  await page.keyboard.press("p");
+  for (const [x, y] of [[10, 10], [30, 10], [10, 30]] as Array<[number, number]>) {
+    const target = await layerScreenTarget(page, x, y);
+    await page.mouse.click(target.x, target.y);
+  }
+  await page.keyboard.press("Enter");
+  const selection = await getFloatingSelection(page);
+  expect(selection).not.toBeNull();
+  expect(selection?.selected ?? 0).toBeGreaterThan(50);
+  expect(await readPixel(page, 12, 12)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 28, 28)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("polygonal lasso commits on right-click and combines with shift @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  const corner = await layerScreenTarget(page, 0, 0);
+  await page.mouse.click(corner.x, corner.y);
+  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  await dragRect(page, 10, 10, 12, 12);
+  expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 3, height: 3, selected: 9 });
+  await page.keyboard.press("p");
+  for (const [x, y] of [[20, 20], [26, 20], [20, 26]] as Array<[number, number]>) {
+    const target = await layerScreenTarget(page, x, y);
+    await page.mouse.click(target.x, target.y);
+  }
+  await page.keyboard.down("Shift");
+  const commit = await layerScreenTarget(page, 20, 20);
+  await page.mouse.click(commit.x, commit.y, { button: "right" });
+  await page.keyboard.up("Shift");
+  const selection = await getFloatingSelection(page);
+  expect(selection).not.toBeNull();
+  expect(selection?.selected ?? 0).toBeGreaterThan(9);
+  expect(await readPixel(page, 11, 11)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 21, 21)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+});
+
 async function paintDot(
   page: import("@playwright/test").Page,
   hex: string,

@@ -244,12 +244,13 @@ export type GnumarusCanvasTool =
   | "rectselect"
   | "ellipse"
   | "lasso"
+  | "polylasso"
   | "colorselect"
   | "destransform"
   | "destransform3d";
 
 /** Selection-family tools sharing the floating mask model. */
-export type GnumarusSelectionTool = "rectselect" | "ellipse" | "lasso" | "colorselect";
+export type GnumarusSelectionTool = "rectselect" | "ellipse" | "lasso" | "polylasso" | "colorselect";
 
 /** Floating selection cut out of a cell texture, without a cell of its own. */
 export interface GnumarusFloatingSelection {
@@ -765,6 +766,8 @@ export class GnumarusCanvasEngine {
   private ellipseDrag: { x0: number; y0: number; x1: number; y1: number } | null = null;
   /** Active freehand lasso path in cell image pixels (floats), or null. */
   private lassoPath: Array<{ x: number; y: number }> | null = null;
+  /** Active polygonal lasso vertices in cell image pixels (floats), or null. */
+  private polyLassoPath: Array<{ x: number; y: number }> | null = null;
   /** Color-selection similarity threshold 0..100 (0 = exact match). */
   private colorThreshold = 10;
   /** Color selection matches only the contiguous region when true. */
@@ -7833,6 +7836,30 @@ export class GnumarusCanvasEngine {
         return;
       }
     }
+    if (this.tool === "polylasso" && this.polyLassoPath !== null && this.polyLassoPath.length > 0) {
+      const layer = this.activeLayer();
+      if (layer !== null) {
+        const toClient = (imageX: number, imageY: number): string => {
+          const project = layerImageToProject(imageX, imageY, layer.width, layer.height, layer.transform);
+          const client = projectToScreen(
+            project.x,
+            project.y,
+            { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+            this.viewTransform(),
+          );
+          return `${client.x - rect.left},${client.y - rect.top}`;
+        };
+        const vertices = this.polyLassoPath.map((point) => toClient(point.x, point.y));
+        if (mouse !== null && this.polyLassoPath.length > 0) {
+          const cursor = rel(mouse.x, mouse.y);
+          vertices.push(`${cursor.x},${cursor.y}`);
+        }
+        this.previewSvg.style.display = "block";
+        this.previewLasso.style.display = "block";
+        this.previewLasso.setAttribute("d", `M${vertices.join("L")}`);
+        return;
+      }
+    }
     if (this.tool !== "curve") {
       // Preserve the stabilizer rope and selection overlays for other tools.
       this.hidePreviewSvgIfIdle();
@@ -8086,7 +8113,12 @@ export class GnumarusCanvasEngine {
   }
 
   /** Modifier combo for a selection release: plain replace by default. */
-  private selectionReleaseMode(event: PointerEvent): "union" | "intersect" | "subtract" | null {
+  private selectionReleaseMode(event: {
+    shiftKey: boolean;
+    ctrlKey: boolean;
+    metaKey: boolean;
+    altKey: boolean;
+  }): "union" | "intersect" | "subtract" | null {
     if (!event.shiftKey) {
       return null;
     }
@@ -8142,6 +8174,49 @@ export class GnumarusCanvasEngine {
       return this.cutMaskToFloating(tex, box.minX, box.minY, width, height, mask);
     }
     return this.combineMaskWithFloating(tex, box.minX, box.minY, width, height, mask, mode);
+  }
+
+  /**
+   * Commit the polygonal lasso path: fill and cut (or combine with the
+   * modifiers held at commit time). Returns false when there is nothing
+   * to commit; always clears the pending path.
+   */
+  private commitPolyLasso(event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean }): boolean {
+    const path = this.polyLassoPath;
+    this.polyLassoPath = null;
+    if (path === null || path.length < 2) {
+      this.updatePreviews();
+      return false;
+    }
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return false;
+    }
+    const ensured = this.ensureCellContent(layer.id, this.currentFrame);
+    if (ensured === null) {
+      return false;
+    }
+    this.syncLayerRender(layer);
+    this.refreshLayerStacking();
+    const tex = ensured.texture;
+    const filled = polygonSelectMask(path, tex.width, tex.height);
+    if (filled === null) {
+      this.updatePreviews();
+      return false;
+    }
+    const mode = this.selectionReleaseMode(event);
+    if (mode === null) {
+      return this.cutMaskToFloating(tex, filled.minX, filled.minY, filled.width, filled.height, filled.mask);
+    }
+    return this.combineMaskWithFloating(
+      tex,
+      filled.minX,
+      filled.minY,
+      filled.width,
+      filled.height,
+      filled.mask,
+      mode,
+    );
   }
 
   /** Minimum zoom fraction from settings (0.01..1, default 0.01). */
@@ -8273,6 +8348,7 @@ export class GnumarusCanvasEngine {
     this.rectDrag = null;
     this.ellipseDrag = null;
     this.lassoPath = null;
+    this.polyLassoPath = null;
     this.clearTransformGestures();
     this.resetPencilPixelPerfect();
     this.updatePreviews();
@@ -9133,6 +9209,11 @@ export class GnumarusCanvasEngine {
         canvas.setPointerCapture(event.pointerId);
         return;
       }
+      if (event.button === 2 && this.tool === "polylasso") {
+        // Right-click commits the polygon selection (needs 3+ points).
+        this.commitPolyLasso(event);
+        return;
+      }
       if (event.button !== 0) {
         return;
       }
@@ -9278,6 +9359,30 @@ export class GnumarusCanvasEngine {
           return;
         }
         this.lassoPath = [{ x: start.x, y: start.y }];
+        this.lastMouseClient = { x: event.clientX, y: event.clientY };
+        canvas.setPointerCapture(event.pointerId);
+        this.updatePreviews();
+        return;
+      }
+      if (this.tool === "polylasso") {
+        // Click appends polygon vertices; Enter/Right-click commits.
+        if (event.button !== 0) {
+          return;
+        }
+        const layer = this.activeLayer();
+        if (layer === null) {
+          return;
+        }
+        const point = this.clientToLayerImageFloat(event.clientX, event.clientY);
+        if (point === null) {
+          return;
+        }
+        const path = this.polyLassoPath ?? [];
+        const last = path[path.length - 1];
+        if (last === undefined || Math.abs(point.x - last.x) + Math.abs(point.y - last.y) > 1e-9) {
+          path.push({ x: point.x, y: point.y });
+        }
+        this.polyLassoPath = path;
         this.lastMouseClient = { x: event.clientX, y: event.clientY };
         canvas.setPointerCapture(event.pointerId);
         this.updatePreviews();
@@ -10005,10 +10110,16 @@ export class GnumarusCanvasEngine {
       this.layerCenterTap = null;
       this.layerFlipTap = null;
       this.rot3dCenterTap = null;
-      if (this.rectDrag !== null || this.ellipseDrag !== null || this.lassoPath !== null) {
+      if (
+        this.rectDrag !== null ||
+        this.ellipseDrag !== null ||
+        this.lassoPath !== null ||
+        this.polyLassoPath !== null
+      ) {
         this.rectDrag = null;
         this.ellipseDrag = null;
         this.lassoPath = null;
+        this.polyLassoPath = null;
         this.updatePreviews();
       }
       if (this.tool === "curve" && this.curvePhase === "dragging") {
@@ -10030,6 +10141,16 @@ export class GnumarusCanvasEngine {
       "wheel",
       (event: WheelEvent) => {
         event.preventDefault();
+        if (event.ctrlKey || event.altKey || event.shiftKey || event.metaKey) {
+          // Ctrl+wheel (alone) resizes the pencil brush in whole units.
+          if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey) {
+            const next = this.brushSize + (event.deltaY < 0 ? 1 : -1);
+            if (this.setBrushSize(next)) {
+              this.onToolSizeChanged?.("brush", this.brushSize);
+            }
+          }
+          return;
+        }
         this.zoomAtPoint(event.clientX, event.clientY, event.deltaY < 0 ? 1.25 : 0.8);
       },
       { passive: false },
@@ -10073,6 +10194,7 @@ export class GnumarusCanvasEngine {
           this.tool !== "rectselect" &&
           this.tool !== "ellipse" &&
           this.tool !== "lasso" &&
+          this.tool !== "polylasso" &&
           this.tool !== "colorselect"
         ) {
           this.beginTempEyedropper();
@@ -10082,6 +10204,14 @@ export class GnumarusCanvasEngine {
       if (!event.ctrlKey && !event.altKey && !event.metaKey && !inField) {
         if ((event.key === "Enter" || event.key === "Return" || event.key === "Escape") && this.hasFloatingSelection()) {
           this.commitFloating();
+          return;
+        }
+        if (
+          (event.key === "Enter" || event.key === "Return") &&
+          this.tool === "polylasso" &&
+          this.polyLassoPath !== null
+        ) {
+          this.commitPolyLasso(event);
           return;
         }        if (event.key === "b" || event.key === "B") {
           this.setTool("pencil");
@@ -10139,6 +10269,10 @@ export class GnumarusCanvasEngine {
           this.setTool("colorselect");
           return;
         }
+        if (event.key === "p" || event.key === "P") {
+          this.setTool("polylasso");
+          return;
+        }
         if (event.key === "m" || event.key === "M") {
           // M flips the canvas view horizontally, Shift+M vertically —
           // the same setFlip toggles the loupe middle-click gestures use.
@@ -10179,17 +10313,16 @@ export class GnumarusCanvasEngine {
           this.updatePreviews();
           return;
         }
-        if (event.key === "Escape" && this.tool === "rectselect" && this.rectDrag !== null) {
-          this.rectDrag = null;
-          this.updatePreviews();
-          return;
-        }
         if (
+          (event.key === "Escape" && this.tool === "rectselect" && this.rectDrag !== null) ||
           (event.key === "Escape" && this.tool === "ellipse" && this.ellipseDrag !== null) ||
-          (event.key === "Escape" && this.tool === "lasso" && this.lassoPath !== null)
+          (event.key === "Escape" && this.tool === "lasso" && this.lassoPath !== null) ||
+          (event.key === "Escape" && this.tool === "polylasso" && this.polyLassoPath !== null)
         ) {
+          this.rectDrag = null;
           this.ellipseDrag = null;
           this.lassoPath = null;
+          this.polyLassoPath = null;
           this.updatePreviews();
           return;
         }

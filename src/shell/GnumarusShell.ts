@@ -371,6 +371,7 @@ function gnumarusShortcuts(): GnumarusShortcutSection[] {
         { keys: "R", action: tr("sc.toolRectselect") },
         { keys: "O", action: tr("sc.toolEllipse") },
         { keys: "L", action: tr("sc.toolLasso") },
+        { keys: "P", action: tr("sc.toolPolylasso") },
         { keys: "W", action: tr("sc.toolColorselect") },
         { keys: "Shift / Ctrl+Shift / Alt+Shift + drag", action: tr("sc.rectselectModifiers") },
         { keys: "Right-click a drawer button", action: tr("sc.drawerFlyout") },
@@ -429,7 +430,7 @@ export interface GnumarusToolDrawerDef {
 
 export const GNUMARUS_TOOL_DRAWERS: GnumarusToolDrawerDef[] = [
   { id: "paint", tools: ["pencil", "line", "curve"] },
-  { id: "selection", tools: ["rectselect", "ellipse", "lasso", "colorselect"] },
+  { id: "selection", tools: ["rectselect", "ellipse", "lasso", "polylasso", "colorselect"] },
   { id: "destructive", tools: ["destransform", "destransform3d"] },
   { id: "transform", tools: ["transform", "transform3d"] },
 ];
@@ -3357,6 +3358,9 @@ export class GnumarusShell extends LitElement {
     if (tool === "lasso") {
       return tr("toolname.lasso");
     }
+    if (tool === "polylasso") {
+      return tr("toolname.polylasso");
+    }
     if (tool === "colorselect") {
       return tr("toolname.colorselect");
     }
@@ -3446,6 +3450,9 @@ export class GnumarusShell extends LitElement {
     if (tool === "lasso") {
       return tr("tool.lasso");
     }
+    if (tool === "polylasso") {
+      return tr("tool.polylasso");
+    }
     if (tool === "colorselect") {
       return tr("tool.colorselect");
     }
@@ -3493,6 +3500,9 @@ export class GnumarusShell extends LitElement {
     if (tool === "lasso") {
       return tr("tool.lassoHint");
     }
+    if (tool === "polylasso") {
+      return tr("tool.polylassoHint");
+    }
     if (tool === "colorselect") {
       return tr("tool.colorselectHint");
     }
@@ -3530,6 +3540,9 @@ export class GnumarusShell extends LitElement {
     }
     if (tool === "lasso") {
       return "〰";
+    }
+    if (tool === "polylasso") {
+      return "⬔";
     }
     if (tool === "colorselect") {
       return "✦";
@@ -4080,6 +4093,7 @@ export class GnumarusShell extends LitElement {
       this.tool === "rectselect" ||
       this.tool === "ellipse" ||
       this.tool === "lasso" ||
+      this.tool === "polylasso" ||
       this.tool === "colorselect"
     ) {
       return html`

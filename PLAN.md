@@ -526,3 +526,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 
 ## 97. Renamed 3D rotation tools (implemented)
 - `transform3d`: "3D rotation" -> "Non-destructive cell 3D rotation"; `destransform3d`: "Destructive 3D rotation" -> "Destructive selection 3D rotation" (tool names, hints, shortcuts entries, display names; en + pt-BR). Ids, shortcuts (`Y`/`U`) and behavior unchanged; e2e names/regexps updated.
+
+## 98. Wheel modifiers, Ctrl+wheel brush size, polygonal lasso (implemented)
+- Plain wheel alone zooms; any modifier disables canvas zoom. Ctrl+wheel (no Alt/Shift) resizes the pencil brush in whole units with options-bar/status sync.
+- New `polylasso` tool (`P`, selection drawer): left-click appends polygon vertices, Enter/Return or right-click commits (needs 3+ distinct points), Escape/tool-switch/pointercancel cancels; live polyline preview; boolean ops at commit via the shared modifiers.
+- All selection tools (rect/ellipse/lasso/polylasso/color) share modifier routing; e2e @recent covers wheel gating, Ctrl+wheel sizing, polygonal commit paths + a polygonal boolean op.
