@@ -300,3 +300,6 @@
 - [x] E2E mock fidelity (NotFoundError, create flag) + crop test seeds zip + corrupt test asserts status
 - [x] Unit tests (vitest) — 377 passed (previous 375 + archive pack/unpack/reject + projectFile parse)
 - [x] E2E (@recent only, per policy): 3 new tests green (zipped default save/reopen, plain mode + stale removal both ways, corrupt archive error) + 13 save/open neighbors green; full suite untouched
+- [x] Stale texture/data cleanup on storage format change: orphan helpers + save wiring
+- [x] Unit tests for orphan helpers green (381 passed)
+- [x] E2E format-switch saves (jxl->png->jpg->jxl chain + data gpa<->json neighbors) assert exact file lists green; build + deploy + docs

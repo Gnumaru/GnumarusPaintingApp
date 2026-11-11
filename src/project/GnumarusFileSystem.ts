@@ -1,4 +1,5 @@
 import {
+  collectProjectFileReferences,
   decodeProjectArchive,
   GNUMARUS_PROJECT_ARCHIVE_FILE,
   GNUMARUS_PROJECT_FILE,
@@ -173,6 +174,50 @@ export async function readProjectMeta(root: GnumarusDirectoryHandle): Promise<Gn
     throw new Error(`${GNUMARUS_PROJECT_ARCHIVE_FILE} or ${GNUMARUS_PROJECT_FILE} is missing from this folder`);
   }
   return parseProject(new TextDecoder().decode(plain));
+}
+
+/**
+ * Best-effort union of every file referenced by the previously saved project
+ * data files (`project.gpa` and `project.json`): data file paths that exist
+ * plus their texture/cell references (with JPEG alpha companions). Unreadable
+ * or unparsable files contribute nothing (or just their own path when the
+ * bytes exist), so this never blocks a save.
+ */
+export async function readOldProjectFileReferences(root: GnumarusDirectoryHandle): Promise<Set<string>> {
+  const out = new Set<string>();
+  let archived: Uint8Array | null = null;
+  let plain: Uint8Array | null = null;
+  try {
+    archived = await readFileBytes(root, GNUMARUS_PROJECT_ARCHIVE_FILE);
+  } catch {
+    archived = null;
+  }
+  try {
+    plain = await readFileBytes(root, GNUMARUS_PROJECT_FILE);
+  } catch {
+    plain = null;
+  }
+  if (archived !== null) {
+    out.add(GNUMARUS_PROJECT_ARCHIVE_FILE);
+    try {
+      for (const file of collectProjectFileReferences(parseProject(decodeProjectArchive(archived)))) {
+        out.add(file);
+      }
+    } catch {
+      // Corrupt archives contribute only their own path; the save still proceeds.
+    }
+  }
+  if (plain !== null) {
+    out.add(GNUMARUS_PROJECT_FILE);
+    try {
+      for (const file of collectProjectFileReferences(parseProject(new TextDecoder().decode(plain)))) {
+        out.add(file);
+      }
+    } catch {
+      // Corrupt JSON contributes only its own path; the save still proceeds.
+    }
+  }
+  return out;
 }
 
 /**

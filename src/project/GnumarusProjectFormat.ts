@@ -182,6 +182,65 @@ export function decodeProjectArchive(bytes: Uint8Array): string {
   return new TextDecoder().decode(inner);
 }
 
+/** Texture container extensions used for project texture files. */
+export const GNUMARUS_TEXTURE_EXTENSIONS = ["jxl", "webp", "png", "jpg"] as const;
+
+/**
+ * Companion grayscale alpha file for a JPEG texture file, or null when the
+ * path is not a JPEG color file (companions never nest).
+ */
+export function textureAlphaCompanion(file: string): string | null {
+  if (!file.endsWith(".jpg") || file.endsWith(".alpha.jpg")) {
+    return null;
+  }
+  return `${file.slice(0, -".jpg".length)}.alpha.jpg`;
+}
+
+/**
+ * Every file path referenced by a project: texture files, their JPEG alpha
+ * companions, and legacy per-cell files.
+ */
+export function collectProjectFileReferences(project: GnumarusProjectMeta): Set<string> {
+  const out = new Set<string>();
+  for (const texture of project.animation.textures) {
+    out.add(texture.file);
+    const companion = textureAlphaCompanion(texture.file);
+    if (companion !== null) {
+      out.add(companion);
+    }
+  }
+  for (const layer of project.layers) {
+    for (const cell of layer.cells ?? []) {
+      out.add(cell.file);
+    }
+  }
+  return out;
+}
+
+/**
+ * Every texture path that can exist for one stem (`t1`, `t2`, ...): one per
+ * container extension plus the JPEG alpha companion.
+ */
+export function staleTextureCandidates(stem: string): string[] {
+  const out = GNUMARUS_TEXTURE_EXTENSIONS.map((ext) => textureFilePath(stem, ext));
+  out.push(textureFilePath(`${stem}.alpha`, "jpg"));
+  return out;
+}
+
+/** Old paths that are no longer referenced: each old path missing from the new set. */
+export function findStaleProjectPaths(
+  oldPaths: Iterable<string>,
+  newPaths: ReadonlySet<string>,
+): string[] {
+  const stale: string[] = [];
+  for (const old of oldPaths) {
+    if (!newPaths.has(old)) {
+      stale.push(old);
+    }
+  }
+  return stale;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

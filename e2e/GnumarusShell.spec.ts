@@ -8653,6 +8653,48 @@ test("project meta plain mode writes project.json and removes project.gpa @recen
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
+test("changing texture storage removes stale texture files @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { setImportCleanup(mode: string): void } } };
+    root.__gnumarus?.shell?.setImportCleanup("none");
+  });
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  const project = await stubProjectDirectory(page);
+  const save = async (): Promise<void> => {
+    await page.getByRole("button", { name: "File" }).click();
+    await page.getByRole("button", { name: "Save Project" }).click();
+    await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  };
+  const setFormat = async (format: string): Promise<void> => {
+    await page.getByRole("button", { name: "Edit" }).click();
+    await page.getByRole("button", { name: "Settings" }).click();
+    await page.locator("gnumarus-shell dialog#settingsDialog select#storageFormat").selectOption(format);
+    await page.locator("gnumarus-shell dialog#settingsDialog").getByRole("button", { name: "Close" }).click();
+  };
+  await save();
+  expect(Object.keys(await project.writtenBlobs()).sort()).toEqual(["project.gpa", "textures/t1.jxl"]);
+  await setFormat("png");
+  await save();
+  expect(Object.keys(await project.writtenBlobs()).sort()).toEqual(["project.gpa", "textures/t1.png"]);
+  await setFormat("jpg");
+  await save();
+  expect(Object.keys(await project.writtenBlobs()).sort()).toEqual([
+    "project.gpa",
+    "textures/t1.alpha.jpg",
+    "textures/t1.jpg",
+  ]);
+  await setFormat("jxl");
+  await save();
+  expect(Object.keys(await project.writtenBlobs()).sort()).toEqual(["project.gpa", "textures/t1.jxl"]);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
 test("corrupt project.gpa fails to open with a clear error @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell");

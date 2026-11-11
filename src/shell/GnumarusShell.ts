@@ -14,6 +14,7 @@ import {
   pickProjectDirectory,
   pickSaveFile,
   readFileBytes,
+  readOldProjectFileReferences,
   readProjectFiles,
   readProjectMeta,
   removeProjectFile,
@@ -24,10 +25,12 @@ import {
 } from "../project/GnumarusFileSystem";
 import {
   encodeProjectArchive,
+  findStaleProjectPaths,
   GNUMARUS_APP_ID,
   GNUMARUS_PROJECT_ARCHIVE_FILE,
   GNUMARUS_PROJECT_FILE,
   serializeProject,
+  staleTextureCandidates,
   textureFilePath,
   type GnumarusContentMeta,
   type GnumarusProjectMeta,
@@ -9209,15 +9212,23 @@ export class GnumarusShell extends LitElement {
     try {
       this.statusMessage = "Saving...";
       const dir = this.directoryHandle ?? (await pickProjectDirectory());
+      let oldPaths = new Set<string>();
+      try {
+        oldPaths = await readOldProjectFileReferences(dir);
+      } catch {
+        oldPaths = new Set<string>();
+      }
       const size = this.engine.size;
       const exported = this.engine.exportAnimationProject();
       const texturesMeta: GnumarusTextureMeta[] = [];
       const blobs = new Map<string, Blob>();
+      const stems: string[] = [];
       const lossless = this.storageLossless;
       const quality = this.storageQuality;
       for (let index = 0; index < exported.textures.length; index += 1) {
         const texture = exported.textures[index] as (typeof exported.textures)[number];
         const stem = `t${index + 1}`;
+        stems.push(stem);
         if (this.storageFormat === "jpg") {
           const colorBlob = await encodeStillImage(
             texture.buffer,
@@ -9373,6 +9384,17 @@ export class GnumarusShell extends LitElement {
         );
       }
       await writeProjectFiles(dir, blobs);
+      const newPaths = new Set(blobs.keys());
+      for (const stale of findStaleProjectPaths(oldPaths, newPaths)) {
+        await removeProjectFile(dir, stale);
+      }
+      for (const stem of stems) {
+        for (const candidate of staleTextureCandidates(stem)) {
+          if (!newPaths.has(candidate)) {
+            await removeProjectFile(dir, candidate);
+          }
+        }
+      }
       await removeProjectFile(
         dir,
         this.storageProjectFile === "json" ? GNUMARUS_PROJECT_ARCHIVE_FILE : GNUMARUS_PROJECT_FILE,

@@ -479,3 +479,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Zipped saves write `project.gpa`: fflate `zipSync` level 9 with proper headers, single inner `project.json` identical to the plain bytes; plain saves write `project.json`; each save deletes the stale counterpart (`removeFile`, NotFound ignored).
 - Open/reload prefer `project.gpa`, fall back to `project.json`; corrupt archives fail with clear errors.
 - E2E mocks fixed for File System Access fidelity (`getFileHandle` honors `create:false` with `NotFoundError`, `getFile` throws `NotFoundError`); crop-on-open test seeds `project.gpa` (zip) instead of stale `project.json`; corrupt-archive test asserts the `Open failed` status text (open failures report via status, not toast).
+
+## 89. Remove stale project files on storage format change (implemented)
+- On save, after writing the new blobs, delete orphaned files: old texture paths (from previously saved `project.gpa`/`project.json`, union of both, plus `.alpha.jpg` companions and legacy cell paths) not in the new set, same-stem candidates with other extensions even if the old meta is unreadable, and the stale data-file counterpart.
+- Best-effort old-meta read never blocks the save; deletions ignore `NotFoundError` via `removeProjectFile`.
+- Unit tests for the pure orphan helpers (`textureAlphaCompanion`, `collectProjectFileReferences`, `staleTextureCandidates`, `findStaleProjectPaths`) + e2e `changing texture storage removes stale texture files` (jxl->png->jpg->jxl chain asserting exact file lists plus reopen pixels).

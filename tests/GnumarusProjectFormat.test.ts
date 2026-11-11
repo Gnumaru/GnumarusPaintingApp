@@ -2,11 +2,15 @@ import { describe, expect, it } from "vitest";
 import { unzipSync, zipSync } from "fflate";
 import {
   cellFilePath,
+  collectProjectFileReferences,
   createDefaultProject,
   decodeProjectArchive,
   encodeProjectArchive,
+  findStaleProjectPaths,
   parseProject,
   serializeProject,
+  staleTextureCandidates,
+  textureAlphaCompanion,
   textureFilePath,
   GNUMARUS_APP_ID,
   GNUMARUS_PROJECT_ARCHIVE_FILE,
@@ -336,5 +340,50 @@ describe("GnumarusProjectFormat", () => {
     expect(() => decodeProjectArchive(zipSync({ "other.txt": new Uint8Array([1]) }))).toThrow(
       /no project\.json inside/,
     );
+  });
+
+  it("maps JPEG color files to their alpha companions", () => {
+    expect(textureAlphaCompanion("textures/t1.jpg")).toBe("textures/t1.alpha.jpg");
+    expect(textureAlphaCompanion("textures/t1.alpha.jpg")).toBeNull();
+    expect(textureAlphaCompanion("textures/t1.png")).toBeNull();
+    expect(textureAlphaCompanion("textures/t1.jxl")).toBeNull();
+    expect(textureAlphaCompanion("textures/t1.webp")).toBeNull();
+  });
+
+  it("collects texture, companion and legacy cell references", () => {
+    const project = createDefaultProject(64, 64);
+    project.animation.textures = [
+      { id: "a", name: "t1", width: 64, height: 64, file: "textures/t1.jpg" },
+      { id: "b", name: "t2", width: 64, height: 64, file: "textures/t2.png" },
+    ];
+    project.layers = [
+      {
+        id: "layer0",
+        name: "L1",
+        visible: true,
+        opacity: 1,
+        lockedChannels: { r: false, g: false, b: false, a: false },
+        cells: [{ frame: 0, file: "cells/layer0_frame0.png" }],
+      },
+    ];
+    expect(collectProjectFileReferences(project)).toEqual(
+      new Set(["textures/t1.jpg", "textures/t1.alpha.jpg", "textures/t2.png", "cells/layer0_frame0.png"]),
+    );
+  });
+
+  it("lists every texture candidate for one stem", () => {
+    expect(staleTextureCandidates("t1").sort()).toEqual(
+      ["textures/t1.jxl", "textures/t1.webp", "textures/t1.png", "textures/t1.jpg", "textures/t1.alpha.jpg"].sort(),
+    );
+  });
+
+  it("finds old paths missing from the new set", () => {
+    expect(
+      findStaleProjectPaths(
+        ["project.gpa", "textures/t1.jxl", "textures/t1.alpha.jpg"],
+        new Set(["project.gpa", "textures/t1.png"]),
+      ).sort(),
+    ).toEqual(["textures/t1.alpha.jpg", "textures/t1.jxl"].sort());
+    expect(findStaleProjectPaths([], new Set(["project.gpa"]))).toEqual([]);
   });
 });
