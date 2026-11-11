@@ -518,3 +518,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Selection tools live in one drawer: front button left-click activates, right-click opens the flyout, picking swaps the front icon and closes. `R` keeps selecting rectangular (also resets front); front tracks the active selection tool.
 - Temp eyedropper no longer triggers on Ctrl for any selection tool. Toolbar hint + shortcuts rows + per-tool options hints (en + pt-BR).
 - Pure mask builders (ellipse/polygon/color flood/global) + unit tests; engine gestures + previews; e2e @recent (drawer, ellipse, lasso, color contiguous/global/threshold, cross-tool union).
+
+## 96. Tool drawers for paint/destructive/transform groups (implemented)
+- Generic drawer mechanism (def list + front-per-drawer + single open flyout): paint drawer (pencil/line/curve), selection drawer (existing 4), destructive drawer (destransform/destransform3d), transform drawer (transform/transform3d). Left-click activates front, right-click opens, pick swaps front and closes; front tracks the active tool via onToolChanged; R/O/L/W/B/N/C/V/U/T/Y keep working.
+- Toolbar keeps 8 buttons; icon-size e2e updated to the drawer fronts.
+- E2E @recent (drawer swap in each group, front persistence, shortcuts still select).

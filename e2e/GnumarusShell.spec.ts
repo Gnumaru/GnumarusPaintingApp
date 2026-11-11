@@ -1939,19 +1939,15 @@ test("toolbar icons fill buttons without growing them", async ({ page }) => {
       };
     });
   });
-  expect(boxes).toHaveLength(12);
+  expect(boxes).toHaveLength(8);
   const expected: Record<string, { w: number; h: number }> = {
     Pencil: { w: 33, h: 25 },
     Loupe: { w: 30, h: 25 },
     "Bucket fill": { w: 35, h: 26 },
     Eyedropper: { w: 35, h: 26 },
-    Line: { w: 30, h: 25 },
-    Curve: { w: 35, h: 29 },
     "Rectangular selection": { w: 34, h: 25 },
     "Destructive selection transform": { w: 33, h: 25 },
     "Non-destructive cell transform": { w: 31, h: 29 },
-    "3D rotation": { w: 36, h: 29 },
-    "Destructive 3D rotation": { w: 36, h: 29 },
     "Final preview": { w: 32, h: 29 },
   };
   for (const box of boxes) {
@@ -2439,7 +2435,7 @@ test("tool options bar shows drawing settings and empty labels otherwise", async
   await expect(options).not.toContainText("does not have any setting");
   await page.getByRole("button", { name: "Loupe" }).click();
   await expect(options).toContainText("the loupe tool does not have any setting or helper button");
-  await page.getByRole("button", { name: "Non-destructive cell transform" }).click();
+  await selectTool(page, 'Non-destructive cell transform');
   await expect(options).toContainText("the non-destructive cell transform tool does not have any setting or helper button");
   await page.getByRole("button", { name: "Pencil" }).click();
   await expect(options).toContainText("Brush size");
@@ -2567,9 +2563,9 @@ test("brush shape defaults to circle for pencil, line and curve", async ({ page 
   expect(await shapeOf("line")).toBe("circle");
   expect(await shapeOf("curve")).toBe("circle");
   await expect(page.locator("gnumarus-shell select#brushShape")).toHaveValue("circle");
-  await page.getByRole("button", { name: "Line", exact: true }).click();
+  await selectTool(page, 'Line');
   await expect(page.locator("gnumarus-shell select#lineShape")).toHaveValue("circle");
-  await page.getByRole("button", { name: "Curve", exact: true }).click();
+  await selectTool(page, 'Curve');
   await expect(page.locator("gnumarus-shell select#curveShape")).toHaveValue("circle");
 });
 
@@ -3658,7 +3654,7 @@ test("line tool draws two-click segments with width, shape and aliasing", async 
     ]);
   });
   await setPencil(page, "#ff0000");
-  await page.getByRole("button", { name: "Line" }).click();
+  await selectTool(page, 'Line');
   const options = page.locator('gnumarus-shell [data-testid="tool-options"]');
   await expect(options).toContainText("Line width");
   await expect(options).toContainText("Anti-aliasing");
@@ -3731,7 +3727,7 @@ test("brush and line previews follow the mouse", async ({ page }) => {
   });
   expect(tipSize.w).not.toBe("");
   expect(tipSize.radius).toBe("50%");
-  await page.getByRole("button", { name: "Line" }).click();
+  await selectTool(page, 'Line');
   await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toContainText("Line width");
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await expect.poll(() => previewState().then((state) => state.brush)).toBe("block");
@@ -3897,7 +3893,7 @@ test("curve tool draws cubic beziers with two control clicks", async ({ page }) 
     ]);
   });
   await setPencil(page, "#ff0000");
-  await page.getByRole("button", { name: "Curve" }).click();
+  await selectTool(page, 'Curve');
   await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toContainText("Curve width");
   await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toContainText("Anti-aliasing");
   await page.locator("gnumarus-shell input#curveWidth").fill("1");
@@ -4051,7 +4047,7 @@ test("brush and line widths accept floats with AA-dependent rounding", async ({ 
   expect(soft!.r).toBe(255);
   expect(soft!.a).toBeGreaterThan(0);
   expect(soft!.a).toBeLessThan(255);
-  await page.getByRole("button", { name: "Line" }).click();
+  await selectTool(page, 'Line');
   const lineOf = (): Promise<number> =>
     page.evaluate(() => {
       const root = window as unknown as { __gnumarus?: { engine?: { getLineWidth(): number } } };
@@ -4693,7 +4689,7 @@ test("shift-drag adjusts line and curve widths", async ({ page }) => {
   }
   const cx = box.x + box.width / 2;
   const cy = box.y + box.height / 2;
-  await page.getByRole("button", { name: "Line" }).click();
+  await selectTool(page, 'Line');
   await page.mouse.move(cx, cy);
   await page.keyboard.down("Shift");
   await page.mouse.down();
@@ -4706,7 +4702,7 @@ test("shift-drag adjusts line and curve widths", async ({ page }) => {
   });
   expect(lineWidth).toBeCloseTo(1 + 60 / 20, 5);
   await expect(page.locator("gnumarus-shell")).toContainText(`Line width: ${lineWidth}`);
-  await page.getByRole("button", { name: "Curve" }).click();
+  await selectTool(page, 'Curve');
   await page.mouse.move(cx, cy);
   await page.keyboard.down("Shift");
   await page.mouse.down();
@@ -5045,7 +5041,7 @@ test("curve pixel perfect is gated to 1px without AA and keeps curves thin", asy
   await page.waitForSelector("gnumarus-shell canvas");
   await loadTinyLayer(page, 16);
   await setPencil(page, "#ff0000");
-  await page.getByRole("button", { name: "Curve" }).click();
+  await selectTool(page, 'Curve');
   const pixelPerfect = page.locator("gnumarus-shell input#curvePixelPerfect");
   await expect(pixelPerfect).toBeEnabled();
   await page.locator("gnumarus-shell input#curveWidth").fill("2");
@@ -5937,6 +5933,38 @@ async function paintDot(
   await page.mouse.click(target.x, target.y);
 }
 
+/** Front buttons of each drawer, for tools hidden inside a closed flyout. */
+const DRAWER_FOR_TOOL: Record<string, string> = {
+  Line: "paint",
+  Curve: "paint",
+  "Rectangular selection": "selection",
+  "Elliptical selection": "selection",
+  "Freehand lasso": "selection",
+  "Color selection": "selection",
+  "Destructive selection transform": "destructive",
+  "Destructive 3D rotation": "destructive",
+  "Non-destructive cell transform": "transform",
+  "3D rotation": "transform",
+};
+
+/** Click a toolbar tool, opening its drawer flyout when it is not the front. */
+async function selectTool(page: import("@playwright/test").Page, name: string): Promise<void> {
+  const direct = page.getByRole("button", { name, exact: true });
+  if ((await direct.count()) > 0) {
+    await direct.first().click();
+    return;
+  }
+  const drawer = DRAWER_FOR_TOOL[name];
+  if (drawer === undefined) {
+    throw new Error(`no drawer known for tool ${name}`);
+  }
+  await page.locator(`gnumarus-shell [data-testid="${drawer}-drawer"] > button`).click({ button: "right" });
+  await page
+    .locator(`gnumarus-shell [data-testid="${drawer}-flyout"]`)
+    .getByRole("button", { name, exact: true })
+    .click();
+}
+
 test("selection drawer swaps the front tool on flyout pick @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
@@ -5950,6 +5978,38 @@ test("selection drawer swaps the front tool on flyout pick @recent", async ({ pa
   await expect(page.locator("gnumarus-shell")).toContainText("Elliptical selection");
   await page.keyboard.press("r");
   await expect(drawer.getByRole("button", { name: "Rectangular selection" })).toBeVisible();
+});
+
+test("paint drawer swaps line and curve through the flyout @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const drawer = page.locator('gnumarus-shell [data-testid="paint-drawer"]');
+  await expect(drawer.getByRole("button", { name: "Pencil" })).toBeVisible();
+  await drawer.getByRole("button", { name: "Pencil" }).click({ button: "right" });
+  await expect(page.locator('gnumarus-shell [data-testid="paint-flyout"]')).toBeVisible();
+  await page.locator('gnumarus-shell [data-testid="paint-flyout"]').getByRole("button", { name: "Curve" }).click();
+  await expect(page.locator('gnumarus-shell [data-testid="paint-flyout"]')).toBeHidden();
+  await expect(drawer.getByRole("button", { name: "Curve" })).toBeVisible();
+  await expect(page.locator("gnumarus-shell")).toContainText("Curve tool");
+  await drawer.getByRole("button", { name: "Curve" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Curve tool");
+});
+
+test("destructive and transform drawers swap their front tools @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const destructive = page.locator('gnumarus-shell [data-testid="destructive-drawer"]');
+  await destructive.getByRole("button", { name: "Destructive selection transform" }).click({ button: "right" });
+  await page
+    .locator('gnumarus-shell [data-testid="destructive-flyout"]')
+    .getByRole("button", { name: "Destructive 3D rotation" })
+    .click();
+  await expect(destructive.getByRole("button", { name: "Destructive 3D rotation" })).toBeVisible();
+  const transform = page.locator('gnumarus-shell [data-testid="transform-drawer"]');
+  await transform.getByRole("button", { name: "Non-destructive cell transform" }).click({ button: "right" });
+  await page.locator('gnumarus-shell [data-testid="transform-flyout"]').getByRole("button", { name: "3D rotation" }).click();
+  await expect(transform.getByRole("button", { name: "3D rotation" })).toBeVisible();
+  await expect(page.locator("gnumarus-shell")).toContainText("3D rotation tool");
 });
 
 test("elliptical selection cuts an ellipse @recent", async ({ page }) => {
@@ -6061,7 +6121,7 @@ test("boolean ops combine ellipse with rectangle @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await paintDot(page, "#ff0000", 32, 32);
-  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  await selectTool(page, 'Rectangular selection');
   await dragRect(page, 10, 10, 12, 12);
   expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 3, height: 3, selected: 9 });
   await page.keyboard.press("o");
@@ -6080,7 +6140,7 @@ test("rectangular selection shift-drag adds to the selection @recent", async ({ 
   await page.getByRole("button", { name: "Bucket fill" }).click();
   const center = await layerScreenTarget(page, 32, 32);
   await page.mouse.click(center.x, center.y);
-  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  await selectTool(page, 'Rectangular selection');
   await dragRect(page, 10, 10, 12, 12);
   expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 3, height: 3, selected: 9 });
   expect(await readPixel(page, 11, 11)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
@@ -6112,7 +6172,7 @@ test("rectangular selection ctrl-shift-drag intersects the selection @recent", a
   await page.getByRole("button", { name: "Bucket fill" }).click();
   const center = await layerScreenTarget(page, 32, 32);
   await page.mouse.click(center.x, center.y);
-  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  await selectTool(page, 'Rectangular selection');
   await dragRect(page, 10, 10, 20, 20);
   expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 11, height: 11, selected: 121 });
   await page.keyboard.down("Control");
@@ -6136,7 +6196,7 @@ test("rectangular selection ctrl-shift-drag with no overlap clears the selection
   await page.getByRole("button", { name: "Bucket fill" }).click();
   const center = await layerScreenTarget(page, 32, 32);
   await page.mouse.click(center.x, center.y);
-  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  await selectTool(page, 'Rectangular selection');
   await dragRect(page, 10, 10, 12, 12);
   expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 3, height: 3, selected: 9 });
   await page.keyboard.down("Control");
@@ -6155,7 +6215,7 @@ test("rectangular selection alt-shift-drag subtracts from the selection @recent"
   await page.getByRole("button", { name: "Bucket fill" }).click();
   const center = await layerScreenTarget(page, 32, 32);
   await page.mouse.click(center.x, center.y);
-  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  await selectTool(page, 'Rectangular selection');
   await dragRect(page, 10, 10, 20, 20);
   await page.keyboard.down("Alt");
   await page.keyboard.down("Shift");
@@ -6178,7 +6238,7 @@ test("rectangular selection alt-shift-drag with no overlap changes nothing @rece
   await page.getByRole("button", { name: "Bucket fill" }).click();
   const center = await layerScreenTarget(page, 32, 32);
   await page.mouse.click(center.x, center.y);
-  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  await selectTool(page, 'Rectangular selection');
   await dragRect(page, 10, 10, 12, 12);
   await page.keyboard.down("Alt");
   await page.keyboard.down("Shift");
@@ -6201,9 +6261,9 @@ test("rectangular selection cuts to floating and destructive transform moves and
   const center = await layerScreenTarget(page, 32, 32);
   await page.mouse.click(center.x, center.y);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
-  await page.getByRole("button", { name: "Destructive selection transform" }).click();
+  await selectTool(page, 'Destructive selection transform');
   await expect(page.getByRole("button", { name: "Commit selection" })).toBeDisabled();
-  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  await selectTool(page, 'Rectangular selection');
   const start = await layerScreenTarget(page, 30, 30);
   const end = await layerScreenTarget(page, 34, 34);
   await page.mouse.move(start.x, start.y);
@@ -6213,7 +6273,7 @@ test("rectangular selection cuts to floating and destructive transform moves and
   await page.mouse.up();
   expect(await floatingRect(page)).toEqual({ x: 30, y: 30, width: 5, height: 5 });
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
-  await page.getByRole("button", { name: "Destructive selection transform" }).click();
+  await selectTool(page, 'Destructive selection transform');
   await expect(page.getByRole("button", { name: "Commit selection" })).toBeEnabled();
   const grab = await layerScreenTarget(page, 31, 31);
   const drop = await layerScreenTarget(page, 39, 31);
@@ -6239,7 +6299,7 @@ test("destructive transform auto-selects the whole texture and Esc merges", asyn
   await page.waitForSelector("gnumarus-shell canvas");
   await page.mouse.click((await layerScreenTarget(page, 32, 32)).x, (await layerScreenTarget(page, 32, 32)).y);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
-  await page.getByRole("button", { name: "Destructive selection transform" }).click();
+  await selectTool(page, 'Destructive selection transform');
   const center = await layerScreenTarget(page, 32, 32);
   await page.mouse.move(center.x, center.y);
   await page.mouse.down();
@@ -6261,7 +6321,7 @@ test("undo and redo track the floating selection lifecycle", async ({ page }) =>
   });
   const center = await layerScreenTarget(page, 32, 32);
   await page.mouse.click(center.x, center.y);
-  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  await selectTool(page, 'Rectangular selection');
   const start = await layerScreenTarget(page, 30, 30);
   const end = await layerScreenTarget(page, 34, 34);
   await page.mouse.move(start.x, start.y);
@@ -6296,7 +6356,7 @@ test("floating selection survives frame switches hidden and merges explicitly", 
   await page.waitForSelector("gnumarus-shell canvas");
   const center = await layerScreenTarget(page, 32, 32);
   await page.mouse.click(center.x, center.y);
-  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  await selectTool(page, 'Rectangular selection');
   const start = await layerScreenTarget(page, 30, 30);
   const end = await layerScreenTarget(page, 34, 34);
   await page.mouse.move(start.x, start.y);
@@ -6388,7 +6448,7 @@ test("final preview follows non-destructive transforms live", async ({ page }) =
       return [data[0], data[1], data[2], data[3]];
     }, [x, y]);
   expect(await previewPixel(32, 32)).toEqual([0, 0, 0, 255]);
-  await page.getByRole("button", { name: "Non-destructive cell transform" }).click();
+  await selectTool(page, 'Non-destructive cell transform');
   const zoom = (await getViewState(page)).zoom;
   const shift = 10;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -6623,14 +6683,14 @@ async function cutRedBlock(page: import("@playwright/test").Page): Promise<void>
   await page.locator('gnumarus-shell select#brushShape').selectOption("square");
   const center = await layerScreenTarget(page, 32, 32);
   await page.mouse.click(center.x, center.y);
-  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  await selectTool(page, 'Rectangular selection');
   const start = await layerScreenTarget(page, 30, 30);
   const end = await layerScreenTarget(page, 34, 34);
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
   await page.mouse.move(end.x, end.y, { steps: 4 });
   await page.mouse.up();
-  await page.getByRole("button", { name: "Destructive selection transform" }).click();
+  await selectTool(page, 'Destructive selection transform');
 }
 
 test("corner anchors resize the floating selection", async ({ page }) => {
@@ -6768,14 +6828,14 @@ async function cutSingleRedPixel(
   });
   const target = await layerScreenTarget(page, lx, ly);
   await page.mouse.click(target.x, target.y);
-  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  await selectTool(page, 'Rectangular selection');
   const start = await layerScreenTarget(page, 30, 30);
   const end = await layerScreenTarget(page, 34, 34);
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
   await page.mouse.move(end.x, end.y, { steps: 4 });
   await page.mouse.up();
-  await page.getByRole("button", { name: "Destructive selection transform" }).click();
+  await selectTool(page, 'Destructive selection transform');
 }
 
 test("flip anchors mirror the floating selection about its center", async ({ page }) => {
@@ -6853,7 +6913,7 @@ async function layerDragHandle(
     const root = window as unknown as { __gnumarus?: { engine?: { setZoom(zoom: number): void } } };
     root.__gnumarus?.engine?.setZoom(4);
   });
-  await page.getByRole("button", { name: "Non-destructive cell transform" }).click();
+  await selectTool(page, 'Non-destructive cell transform');
   const box = await page.locator("gnumarus-shell canvas").boundingBox();
   if (box === null) {
     throw new Error("canvas has no bounding box");
@@ -6893,7 +6953,7 @@ test("non-destructive rotate anchors turn the layer about its center", async ({ 
     const root = window as unknown as { __gnumarus?: { engine?: { setZoom(zoom: number): void } } };
     root.__gnumarus?.engine?.setZoom(4);
   });
-  await page.getByRole("button", { name: "Non-destructive cell transform" }).click();
+  await selectTool(page, 'Non-destructive cell transform');
   const box = await page.locator("gnumarus-shell canvas").boundingBox();
   if (box === null) {
     throw new Error("canvas has no bounding box");
@@ -6951,7 +7011,7 @@ test("non-destructive flip anchors toggle the layer mirrors", async ({ page }) =
     const root = window as unknown as { __gnumarus?: { engine?: { setZoom(zoom: number): void } } };
     root.__gnumarus?.engine?.setZoom(4);
   });
-  await page.getByRole("button", { name: "Non-destructive cell transform" }).click();
+  await selectTool(page, 'Non-destructive cell transform');
   const box = await page.locator("gnumarus-shell canvas").boundingBox();
   if (box === null) {
     throw new Error("canvas has no bounding box");
@@ -6985,7 +7045,7 @@ test("non-destructive center anchor resets the layer transform", async ({ page }
     const root = window as unknown as { __gnumarus?: { engine?: { setZoom(zoom: number): void } } };
     root.__gnumarus?.engine?.setZoom(4);
   });
-  await page.getByRole("button", { name: "Non-destructive cell transform" }).click();
+  await selectTool(page, 'Non-destructive cell transform');
   const box = await page.locator("gnumarus-shell canvas").boundingBox();
   if (box === null) {
     throw new Error("canvas has no bounding box");
@@ -7068,7 +7128,7 @@ async function getPlaneMatrix(
 test("floating plane renders over the layer without shift or flip", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await page.getByRole("button", { name: "Destructive selection transform" }).click();
+  await selectTool(page, 'Destructive selection transform');
   const box = await page.locator("gnumarus-shell canvas").boundingBox();
   if (box === null) {
     throw new Error("canvas has no bounding box");
@@ -7213,7 +7273,7 @@ test("3d rotation center resets only the rotations", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   // Displace the layer first with the 2d tool so the reset scope is visible.
-  await page.getByRole("button", { name: "Non-destructive cell transform", exact: true }).click();
+  await selectTool(page, 'Non-destructive cell transform');
   const box = await page.locator("gnumarus-shell canvas").boundingBox();
   if (box === null) {
     throw new Error("canvas has no bounding box");
@@ -9796,7 +9856,7 @@ test("rectangular selection chains three unions @recent", async ({ page }) => {
   await page.getByRole("button", { name: "Bucket fill" }).click();
   const center = await layerScreenTarget(page, 32, 32);
   await page.mouse.click(center.x, center.y);
-  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  await selectTool(page, 'Rectangular selection');
   await dragRect(page, 5, 5, 7, 7);
   expect(await getFloatingSelection(page)).toEqual({ x: 5, y: 5, width: 3, height: 3, selected: 9 });
   await page.keyboard.down("Shift");

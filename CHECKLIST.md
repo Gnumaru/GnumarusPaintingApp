@@ -322,3 +322,6 @@
 - [x] Engine tool ids (ellipse/lasso/colorselect + O/L/W), gesture previews, generalized combine, eyedropper guard, color options state
 - [x] Shell drawer UI (front/flyout/blocker) + options + shortcuts + i18n (en/pt-BR)
 - [x] E2E @recent (7 new: drawer/ellipse/lasso/color x3/cross-combine); build clean, unit 404, recent 20/20; docs updated
+- [x] Generic drawer mechanism + 4 drawers (paint/selection/destructive/transform) in toolbar
+- [x] Front tracking via onToolChanged, shortcuts rows (incl. drawer row), hints (en + pt-BR)
+- [x] E2E @recent (3 drawer swaps + icon map + full selection set); build clean, unit 404, recent 15/15; docs updated

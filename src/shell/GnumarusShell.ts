@@ -373,6 +373,7 @@ function gnumarusShortcuts(): GnumarusShortcutSection[] {
         { keys: "L", action: tr("sc.toolLasso") },
         { keys: "W", action: tr("sc.toolColorselect") },
         { keys: "Shift / Ctrl+Shift / Alt+Shift + drag", action: tr("sc.rectselectModifiers") },
+        { keys: "Right-click a drawer button", action: tr("sc.drawerFlyout") },
         { keys: "V", action: tr("sc.toolDestransform") },
         { keys: "U", action: tr("sc.toolDestransform3d") },
         { keys: "E", action: tr("sc.toggleEraser") },
@@ -419,6 +420,19 @@ function gnumarusShortcuts(): GnumarusShortcutSection[] {
     },
   ];
 }
+
+/** Toolbar drawers: tool groups sharing one button with a flyout. */
+export interface GnumarusToolDrawerDef {
+  id: string;
+  tools: GnumarusCanvasTool[];
+}
+
+export const GNUMARUS_TOOL_DRAWERS: GnumarusToolDrawerDef[] = [
+  { id: "paint", tools: ["pencil", "line", "curve"] },
+  { id: "selection", tools: ["rectselect", "ellipse", "lasso", "colorselect"] },
+  { id: "destructive", tools: ["destransform", "destransform3d"] },
+  { id: "transform", tools: ["transform", "transform3d"] },
+];
 
 export class GnumarusShell extends LitElement {
   static styles = css`
@@ -1361,8 +1375,8 @@ export class GnumarusShell extends LitElement {
     brushShape: { type: String },
     presetName: { type: String },
     brushTipKind: { type: String },
-    selectionDrawerFront: { type: String },
-    selectionDrawerOpen: { type: Boolean },
+    drawerFront: { type: Object },
+    drawerOpen: { type: String },
     colorThreshold: { type: Number },
     colorContiguous: { type: Boolean },
     brushHardness: { type: Number },
@@ -1403,8 +1417,8 @@ export class GnumarusShell extends LitElement {
   };
 
   declare tool: GnumarusCanvasTool;
-  declare selectionDrawerFront: "rectselect" | "ellipse" | "lasso" | "colorselect";
-  declare selectionDrawerOpen: boolean;
+  declare drawerFront: Record<string, GnumarusCanvasTool>;
+  declare drawerOpen: string | null;
   declare colorThreshold: number;
   declare colorContiguous: boolean;
   declare actionPaletteQuery: string;
@@ -1565,8 +1579,13 @@ export class GnumarusShell extends LitElement {
   constructor() {
     super();
     this.tool = "pencil";
-    this.selectionDrawerFront = "rectselect";
-    this.selectionDrawerOpen = false;
+    this.drawerFront = {
+      paint: "pencil",
+      selection: "rectselect",
+      destructive: "destransform",
+      transform: "transform",
+    };
+    this.drawerOpen = null;
     this.colorThreshold = 10;
     this.colorContiguous = true;
     this.actionPaletteQuery = "";
@@ -1782,17 +1801,7 @@ export class GnumarusShell extends LitElement {
       ${this.renderToolOptions()}
       <div class="body">
         <div class="toolbar" ?hidden=${this.uiHidden}>
-          <button
-            class=${this.tool === "pencil" ? "active" : ""}
-            title=${tr("tool.pencilHint")}
-            aria-label=${tr("tool.pencil")}
-            @click=${(): void => {
-              this.tool = "pencil";
-              this.engine?.setTool("pencil");
-            }}
-          >
-            <span class="tool-icon">✎</span>
-          </button>
+          ${this.renderToolDrawer("paint")}
           <button
             class=${this.tool === "loupe" ? "active" : ""}
             title=${tr("tool.loupeHint")}
@@ -1856,117 +1865,11 @@ export class GnumarusShell extends LitElement {
               </svg>
             </span>
           </button>
-          <button
-            class=${this.tool === "line" ? "active" : ""}
-            title=${tr("tool.lineHint")}
-            aria-label=${tr("tool.line")}
-            @click=${(): void => {
-              this.tool = "line";
-              this.engine?.setTool("line");
-            }}
-          >
-            <span class="tool-icon">╲</span>
-          </button>
-          <button
-            class=${this.tool === "curve" ? "active" : ""}
-            title=${tr("tool.curveHint")}
-            aria-label=${tr("tool.curve")}
-            @click=${(): void => {
-              this.tool = "curve";
-              this.engine?.setTool("curve");
-            }}
-          >
-            <span class="tool-icon">〜</span>
-          </button>
-          <div class="tool-drawer" data-testid="selection-drawer">
-            <button
-              class=${this.tool === this.selectionDrawerFront ? "active" : ""}
-              title=${this.drawerFrontHint()}
-              aria-label=${this.drawerFrontName()}
-              @click=${(): void => this.selectDrawerFront(this.selectionDrawerFront)}
-              @contextmenu=${(event: MouseEvent): void => {
-                event.preventDefault();
-                this.selectionDrawerOpen = !this.selectionDrawerOpen;
-              }}
-            >
-              <span class="tool-icon">${this.drawerFrontGlyph()}</span>
-            </button>
-            ${this.selectionDrawerOpen
-              ? html`<div class="tool-flyout" data-testid="selection-flyout">
-                  ${(
-                    [
-                      ["rectselect", "▭"],
-                      ["ellipse", "◯"],
-                      ["lasso", "〰"],
-                      ["colorselect", "✦"],
-                    ] as const
-                  ).map(
-                    ([name, glyph]) => html`<button
-                      class=${this.selectionDrawerFront === name ? "active" : ""}
-                      title=${this.drawerToolHint(name)}
-                      aria-label=${this.drawerToolName(name)}
-                      @click=${(): void => this.selectDrawerFront(name, true)}
-                    >
-                      <span class="tool-icon">${glyph}</span>
-                    </button>`,
-                  )}
-                </div>
-                <div
-                  class="drawer-blocker"
-                  @click=${(): void => {
-                    this.selectionDrawerOpen = false;
-                  }}
-                  @contextmenu=${(event: Event): void => {
-                    event.preventDefault();
-                    this.selectionDrawerOpen = false;
-                  }}
-                ></div>`
-              : html``}
-          </div>
-          <button
-            class=${this.tool === "destransform" ? "active" : ""}
-            title=${tr("tool.destransformHint")}
-            aria-label=${tr("tool.destransform")}
-            @click=${(): void => {
-              this.tool = "destransform";
-              this.engine?.setTool("destransform");
-            }}
-          >
-            <span class="tool-icon">✛</span>
-          </button>
-          <button
-            class=${this.tool === "transform" ? "active" : ""}
-            title=${tr("tool.transformHint")}
-            aria-label=${tr("tool.transform")}
-            @click=${(): void => {
-              this.tool = "transform";
-              this.engine?.setTool("transform");
-            }}
-          >
-            <span class="tool-icon">⤢</span>
-          </button>
-          <button
-            class=${this.tool === "transform3d" ? "active" : ""}
-            title=${tr("tool.transform3dHint")}
-            aria-label=${tr("tool.transform3d")}
-            @click=${(): void => {
-              this.tool = "transform3d";
-              this.engine?.setTool("transform3d");
-            }}
-          >
-            <span class="tool-icon">⟳</span>
-          </button>
-          <button
-            class=${this.tool === "destransform3d" ? "active" : ""}
-            title=${tr("tool.destransform3dHint")}
-            aria-label=${tr("tool.destransform3d")}
-            @click=${(): void => {
-              this.tool = "destransform3d";
-              this.engine?.setTool("destransform3d");
-            }}
-          >
-            <span class="tool-icon">⟲</span>
-          </button>
+
+
+          ${this.renderToolDrawer("selection")}
+          ${this.renderToolDrawer("destructive")}
+          ${this.renderToolDrawer("transform")}
           <gnumarus-color-picker
             id="pencilColor"
             .value=${this.colorValue}
@@ -3475,25 +3378,75 @@ export class GnumarusShell extends LitElement {
     return tr("toolname.curve");
   }
 
-  /** Selection-drawer helpers: the front tool doubles as the drawer button. */
-  private drawerToolName(tool: "rectselect" | "ellipse" | "lasso" | "colorselect"): string {
-    if (tool === "ellipse") {
-      return tr("tool.ellipse");
+  /** Drawer helpers: the front tool doubles as the drawer button. */
+  /** One toolbar drawer: front button activates, right-click opens the flyout. */
+  private renderToolDrawer(id: string): unknown {
+    const def = GNUMARUS_TOOL_DRAWERS.find((entry) => entry.id === id);
+    if (def === undefined) {
+      return html``;
     }
-    if (tool === "lasso") {
-      return tr("tool.lasso");
-    }
-    if (tool === "colorselect") {
-      return tr("tool.colorselect");
-    }
-    return tr("tool.rectselect");
+    const front = this.drawerFrontTool(id);
+    const open = this.drawerOpen === id;
+    return html`
+      <div class="tool-drawer" data-testid=${`${id}-drawer`}>
+        <button
+          class=${this.tool === front ? "active" : ""}
+          title=${this.drawerFrontHint(id)}
+          aria-label=${this.drawerFrontName(id)}
+          @click=${(): void => this.selectDrawerTool(id, front)}
+          @contextmenu=${(event: MouseEvent): void => {
+            event.preventDefault();
+            this.drawerOpen = open ? null : id;
+          }}
+        >
+          <span class="tool-icon">${this.drawerToolGlyph(front)}</span>
+        </button>
+        ${open
+          ? html`<div class="tool-flyout" data-testid=${`${id}-flyout`}>
+              ${def.tools.map(
+                (name) => html`<button
+                  class=${front === name ? "active" : ""}
+                  title=${this.drawerToolHint(name)}
+                  aria-label=${this.drawerToolName(name)}
+                  @click=${(): void => this.selectDrawerTool(id, name, true)}
+                >
+                  <span class="tool-icon">${this.drawerToolGlyph(name)}</span>
+                </button>`,
+              )}
+            </div>
+            <div
+              class="drawer-blocker"
+              @click=${(): void => {
+                this.drawerOpen = null;
+              }}
+              @contextmenu=${(event: Event): void => {
+                event.preventDefault();
+                this.drawerOpen = null;
+              }}
+            ></div>`
+          : html``}
+      </div>
+    `;
   }
 
-  private drawerFrontName(): string {
-    return this.drawerToolName(this.selectionDrawerFront);
+  private drawerFrontTool(id: string): GnumarusCanvasTool {
+    const def = GNUMARUS_TOOL_DRAWERS.find((entry) => entry.id === id);
+    const front = this.drawerFront[id];
+    if (def !== undefined && front !== undefined && (def.tools as GnumarusCanvasTool[]).includes(front)) {
+      return front;
+    }
+    return def?.tools[0] ?? "pencil";
   }
 
-  private drawerToolHint(tool: "rectselect" | "ellipse" | "lasso" | "colorselect"): string {
+  private drawerToolName(tool: GnumarusCanvasTool): string {
+    return this.toolDisplayName(tool);
+  }
+
+  private drawerFrontName(id: string): string {
+    return this.drawerToolName(this.drawerFrontTool(id));
+  }
+
+  private drawerToolHint(tool: GnumarusCanvasTool): string {
     if (tool === "ellipse") {
       return tr("tool.ellipseHint");
     }
@@ -3503,36 +3456,75 @@ export class GnumarusShell extends LitElement {
     if (tool === "colorselect") {
       return tr("tool.colorselectHint");
     }
-    return tr("tool.rectselectHint");
+    if (tool === "line") {
+      return tr("tool.lineHint");
+    }
+    if (tool === "curve") {
+      return tr("tool.curveHint");
+    }
+    if (tool === "destransform") {
+      return tr("tool.destransformHint");
+    }
+    if (tool === "destransform3d") {
+      return tr("tool.destransform3dHint");
+    }
+    if (tool === "transform") {
+      return tr("tool.transformHint");
+    }
+    if (tool === "transform3d") {
+      return tr("tool.transform3dHint");
+    }
+    if (tool === "rectselect") {
+      return tr("tool.rectselectHint");
+    }
+    return tr("tool.pencilHint");
   }
 
-  private drawerFrontHint(): string {
-    return this.drawerToolHint(this.selectionDrawerFront);
+  private drawerFrontHint(id: string): string {
+    return `${this.drawerToolHint(this.drawerFrontTool(id))} (${tr("tool.drawerHint")})`;
   }
 
-  private drawerFrontGlyph(): string {
-    if (this.selectionDrawerFront === "ellipse") {
+  private drawerToolGlyph(tool: GnumarusCanvasTool): string {
+    if (tool === "ellipse") {
       return "◯";
     }
-    if (this.selectionDrawerFront === "lasso") {
+    if (tool === "lasso") {
       return "〰";
     }
-    if (this.selectionDrawerFront === "colorselect") {
+    if (tool === "colorselect") {
       return "✦";
     }
-    return "▭";
+    if (tool === "line") {
+      return "╲";
+    }
+    if (tool === "curve") {
+      return "〜";
+    }
+    if (tool === "destransform") {
+      return "✛";
+    }
+    if (tool === "destransform3d") {
+      return "⟲";
+    }
+    if (tool === "transform") {
+      return "⤢";
+    }
+    if (tool === "transform3d") {
+      return "⟳";
+    }
+    if (tool === "rectselect") {
+      return "▭";
+    }
+    return "✎";
   }
 
-  /** Activate a selection tool through the drawer (optionally closing it). */
-  private selectDrawerFront(
-    tool: "rectselect" | "ellipse" | "lasso" | "colorselect",
-    close = false,
-  ): void {
-    this.selectionDrawerFront = tool;
+  /** Activate a drawer tool (optionally closing the flyout). */
+  private selectDrawerTool(id: string, tool: GnumarusCanvasTool, close = false): void {
+    this.drawerFront = { ...this.drawerFront, [id]: tool };
     this.tool = tool;
     this.engine?.setTool(tool);
     if (close) {
-      this.selectionDrawerOpen = false;
+      this.drawerOpen = null;
     }
   }
 
@@ -4426,8 +4418,9 @@ export class GnumarusShell extends LitElement {
       this.engine = new GnumarusCanvasEngine(host, {
         onToolChanged: (tool): void => {
           this.tool = tool;
-          if (tool === "rectselect" || tool === "ellipse" || tool === "lasso" || tool === "colorselect") {
-            this.selectionDrawerFront = tool;
+          const drawer = GNUMARUS_TOOL_DRAWERS.find((entry) => entry.tools.includes(tool))?.id;
+          if (drawer !== undefined) {
+            this.drawerFront = { ...this.drawerFront, [drawer]: tool };
           }
         },
         onLayersChanged: (): void => {
@@ -4541,7 +4534,7 @@ export class GnumarusShell extends LitElement {
     this.fileMenuOpen = false;
     this.editMenuOpen = false;
     this.helpMenuOpen = false;
-    this.selectionDrawerOpen = false;
+    this.drawerOpen = null;
   }
 
   /** Header click toggles one menu, closing the others. */
