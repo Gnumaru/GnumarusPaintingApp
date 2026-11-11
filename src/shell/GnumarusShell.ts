@@ -1349,6 +1349,11 @@ export class GnumarusShell extends LitElement {
       padding: 8px;
       font-size: 16px;
     }
+    .text-editor-title {
+      cursor: move;
+      user-select: none;
+      touch-action: none;
+    }
     .text-editor-area:focus {
       outline: 2px solid #0e639c;
     }
@@ -1748,6 +1753,7 @@ export class GnumarusShell extends LitElement {
     this.texturePickerContentId = null;
     this.textPickerTarget = null;
     this.textEditor = null;
+    this.savedTextRange = null;
     this.textEditorColor = "#000000";
     this.fitTextureTarget = null;
     this.fitThreshold = 0;
@@ -8449,6 +8455,49 @@ export class GnumarusShell extends LitElement {
     }
   }
 
+  /**
+   * Drag the text editor dialog by its title bar so the canvas stays
+   * visible while editing. The native modal dialog is centered by
+   * default; the first drag pins it to fixed coordinates, later drags
+   * move it from there.
+   */
+  private startTextDialogDrag(event: PointerEvent): void {
+    const dialog = this.shadowRoot?.getElementById("textEditorDialog") as HTMLDialogElement | null;
+    if (dialog === null || dialog === undefined || !dialog.open) {
+      return;
+    }
+    event.preventDefault();
+    const rect = dialog.getBoundingClientRect();
+    dialog.style.position = "fixed";
+    dialog.style.margin = "0";
+    dialog.style.left = `${rect.left}px`;
+    dialog.style.top = `${rect.top}px`;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const baseLeft = rect.left;
+    const baseTop = rect.top;
+    const onMove = (moveEvent: PointerEvent): void => {
+      const nextLeft = Math.min(
+        Math.max(baseLeft + moveEvent.clientX - startX, 8 - rect.width),
+        window.innerWidth - 40,
+      );
+      const nextTop = Math.min(
+        Math.max(baseTop + moveEvent.clientY - startY, 0),
+        window.innerHeight - 40,
+      );
+      dialog.style.left = `${nextLeft}px`;
+      dialog.style.top = `${nextTop}px`;
+    };
+    const onUp = (): void => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  }
+
   /** System font families offered by the text editor (matches the sanitizer allowlist). */
   private textFontFamilies(): string[] {
     return [
@@ -8502,15 +8551,19 @@ export class GnumarusShell extends LitElement {
     const document = this.engine.getTextDocument(editor.textId);
     return html`
       <dialog id="textEditorDialog" data-testid="text-editor-dialog" @close=${(): void => this.onTextEditorClosed()}>
-        <h3>${tr("dialog.editText")}</h3>
+        <h3
+          class="text-editor-title"
+          data-testid="text-editor-title"
+          @pointerdown=${(event: PointerEvent): void => this.startTextDialogDrag(event)}
+        >${tr("dialog.editText")}</h3>
         <div class="text-toolbar" role="toolbar" aria-label=${tr("dialog.editText")}>
-          <button data-testid="text-bold" title=${tr("dialog.textBold")} @click=${(): void => this.applyTextCommand("bold")}>
+          <button data-testid="text-bold" title=${tr("dialog.textBold")} @mousedown=${(event: MouseEvent): void => event.preventDefault()} @click=${(): void => this.applyTextCommand("bold")}>
             <b>B</b>
           </button>
-          <button data-testid="text-italic" title=${tr("dialog.textItalic")} @click=${(): void => this.applyTextCommand("italic")}>
+          <button data-testid="text-italic" title=${tr("dialog.textItalic")} @mousedown=${(event: MouseEvent): void => event.preventDefault()} @click=${(): void => this.applyTextCommand("italic")}>
             <i>I</i>
           </button>
-          <button data-testid="text-underline" title=${tr("dialog.textUnderline")} @click=${(): void => this.applyTextCommand("underline")}>
+          <button data-testid="text-underline" title=${tr("dialog.textUnderline")} @mousedown=${(event: MouseEvent): void => event.preventDefault()} @click=${(): void => this.applyTextCommand("underline")}>
             <u>U</u>
           </button>
           <label title=${tr("dialog.textFont")}>${tr("dialog.textFont")}
@@ -8548,7 +8601,7 @@ export class GnumarusShell extends LitElement {
               }}
             ></gnumarus-color-picker>
           </span>
-          <button data-testid="text-apply-size" title=${tr("dialog.textSize")} @click=${(): void => this.applyTextSizeFromDialog()}>
+          <button data-testid="text-apply-size" title=${tr("dialog.textSize")} @mousedown=${(event: MouseEvent): void => event.preventDefault()} @click=${(): void => this.applyTextSizeFromDialog()}>
             ${tr("btn.set")}
           </button>
         </div>
@@ -8557,7 +8610,13 @@ export class GnumarusShell extends LitElement {
           class="text-editor-area"
           data-testid="text-editor-area"
           contenteditable="true"
-          @input=${(): void => this.onTextEditorInput()}
+          @input=${(): void => {
+            this.saveTextSelection();
+            this.onTextEditorInput();
+          }}
+          @blur=${(): void => this.saveTextSelection()}
+          @keyup=${(): void => this.saveTextSelection()}
+          @mouseup=${(): void => this.saveTextSelection()}
           @paste=${(event: ClipboardEvent): void => this.onTextEditorPaste(event)}
         ></div>
         ${document === null
@@ -8571,6 +8630,9 @@ export class GnumarusShell extends LitElement {
     `;
   }
 
+  /** Last editor selection (toolbar controls steal focus; restored before styling). */
+  private savedTextRange: Range | null = null;
+
   /** Run a formatting command inside the editor, then push a live preview. */
   private applyTextCommand(command: "bold" | "italic" | "underline" | "foreColor", value?: string): void {
     const area = this.shadowRoot?.getElementById("textEditorArea");
@@ -8578,6 +8640,7 @@ export class GnumarusShell extends LitElement {
       return;
     }
     area.focus();
+    this.restoreTextSelection();
     try {
       document.execCommand(command, false, value ?? undefined);
     } catch {
@@ -8605,6 +8668,73 @@ export class GnumarusShell extends LitElement {
   }
 
   /**
+   * Selection scoped to the shell shadow tree (where the editor lives).
+   * `document.getSelection` does not pierce shadow DOM, so it reports the
+   * host/body instead of the real in-editor range.
+   */
+  private editorSelection(): Selection | null {
+    const scoped = (
+      this.shadowRoot as ShadowRoot & { getSelection?: () => Selection | null }
+    )?.getSelection?.();
+    return scoped ?? document.getSelection();
+  }
+
+  /**
+   * Snapshot the editor selection (called on area blur/keys/mouse, i.e.
+   * right before a toolbar control steals focus).
+   */
+  private saveTextSelection(): void {
+    const area = this.shadowRoot?.getElementById("textEditorArea");
+    if (!(area instanceof HTMLElement)) {
+      return;
+    }
+    const selection = this.editorSelection();
+    if (selection !== null && selection.rangeCount > 0 && area.contains(selection.anchorNode)) {
+      try {
+        this.savedTextRange = selection.getRangeAt(0).cloneRange();
+      } catch {
+        this.savedTextRange = null;
+      }
+    }
+  }
+
+  /**
+   * Re-select the snapshot inside the editor (toolbar controls steal
+   * focus; without this, styling applies to an empty selection and looks
+   * like a no-op). A live non-collapsed range wins; otherwise a live
+   * non-collapsed snapshot wins over a stale collapsed caret (e.g. the
+   * caret `focus()` restores after typing in a toolbar field).
+   */
+  private restoreTextSelection(): boolean {
+    const area = this.shadowRoot?.getElementById("textEditorArea");
+    if (!(area instanceof HTMLElement)) {
+      return false;
+    }
+    const selection = this.editorSelection();
+    if (selection !== null && selection.rangeCount > 0 && area.contains(selection.anchorNode)) {
+      if (!selection.isCollapsed) {
+        return true;
+      }
+    }
+    const saved = this.savedTextRange;
+    if (selection !== null && saved !== null) {
+      try {
+        if (area.contains(saved.startContainer) && area.contains(saved.endContainer)) {
+          const probe = saved.cloneRange();
+          if (!probe.collapsed) {
+            selection.removeAllRanges();
+            selection.addRange(saved.cloneRange());
+            return true;
+          }
+        }
+      } catch {
+        // Fall through to the current selection below.
+      }
+    }
+    return selection !== null && selection.rangeCount > 0 && area.contains(selection.anchorNode);
+  }
+
+  /**
    * Wrap the editor selection in a styled span (or insert a styled
    * placeholder when collapsed), then push a live preview.
    */
@@ -8614,7 +8744,8 @@ export class GnumarusShell extends LitElement {
       return;
     }
     area.focus();
-    const selection = document.getSelection();
+    this.restoreTextSelection();
+    const selection = this.editorSelection();
     const span = document.createElement("span");
     span.setAttribute("style", style);
     if (selection !== null && !selection.isCollapsed && area.contains(selection.anchorNode)) {
@@ -8704,6 +8835,7 @@ export class GnumarusShell extends LitElement {
     const beforeHtml = editor.beforeHtml;
     const textId = editor.textId;
     this.textEditor = null;
+    this.savedTextRange = null;
     const dialog = this.shadowRoot?.getElementById("textEditorDialog") as HTMLDialogElement | null;
     dialog?.close();
     if (this.engine.commitTextEdit(textId, beforeHtml)) {
@@ -8719,6 +8851,7 @@ export class GnumarusShell extends LitElement {
     const editor = this.textEditor;
     // Clear state before closing so @close does not restore twice.
     this.textEditor = null;
+    this.savedTextRange = null;
     const dialog = this.shadowRoot?.getElementById("textEditorDialog") as HTMLDialogElement | null;
     dialog?.close();
     if (editor !== null && this.engine !== null) {
@@ -8731,6 +8864,7 @@ export class GnumarusShell extends LitElement {
   private onTextEditorClosed(): void {
     const editor = this.textEditor;
     this.textEditor = null;
+    this.savedTextRange = null;
     if (editor !== null && this.engine !== null) {
       this.engine.previewTextEdit(editor.textId, editor.beforeHtml);
       this.refreshLayers();

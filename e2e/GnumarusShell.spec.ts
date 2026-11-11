@@ -10643,3 +10643,112 @@ test("text raster keeps descenders below the baseline", async ({ page }) => {
   expect(ratio).toBeGreaterThan(0.9);
   expect(ratio).toBeLessThan(1.1);
 });
+
+test("text toolbar font size applies to the selection and renders", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.locator('gnumarus-shell [data-testid="tool-text"]').click();
+  await paintCenter(page);
+  const area = page.locator('gnumarus-shell [data-testid="text-editor-area"]');
+  await area.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("Hello");
+  await area.click();
+  await page.keyboard.press("Control+a");
+  await page.locator('gnumarus-shell [data-testid="text-size"]').fill("64");
+  await page.locator('gnumarus-shell [data-testid="text-apply-size"]').click();
+  // The editor DOM shows the sized span immediately (not just on OK).
+  await expect(area.locator('span[style*="font-size:64px"]')).toHaveCount(1);
+  await page.locator('gnumarus-shell [data-testid="text-ok"]').click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Text updated");
+  const html = await textHtml(page, (await cellTextId(page, "layer0", 0)) as string);
+  expect(html).toContain("font-size:64px");
+  const maxX = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { readPixel(x: number, y: number): { a: number } | null } };
+    };
+    const engine = root.__gnumarus?.engine;
+    if (engine === undefined) {
+      return -1;
+    }
+    let found = -1;
+    for (let y = 0; y < 512; y += 4) {
+      for (let x = 0; x < 1024; x += 4) {
+        if ((engine.readPixel(x, y)?.a ?? 0) > 0 && x > found) {
+          found = x;
+        }
+      }
+    }
+    return found;
+  });
+  // 64px "Hello" spans well past the default 32px footprint.
+  expect(maxX).toBeGreaterThan(250);
+});
+
+test("text color picker applies to the selection and renders red", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.locator('gnumarus-shell [data-testid="tool-text"]').click();
+  await paintCenter(page);
+  const area = page.locator('gnumarus-shell [data-testid="text-editor-area"]');
+  await area.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("Hello");
+  await area.click();
+  await page.keyboard.press("Control+a");
+  await page.locator("gnumarus-shell #textEditorColor .swatch").click();
+  await page.locator("gnumarus-shell #textEditorColor [data-testid='hex-input']").fill("#ff0000");
+  // execCommand paints a legacy <font> tag live; sanitize normalizes it to a span on preview/OK.
+  await expect(area.locator('font[color="#ff0000"]')).toBeVisible();
+  // Dismiss the picker popup (it overlays the dialog actions), then confirm.
+  await area.click();
+  await page.locator('gnumarus-shell [data-testid="text-ok"]').click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Text updated");
+  const html = await textHtml(page, (await cellTextId(page, "layer0", 0)) as string);
+  expect(html).toContain("color:#ff0000ff");
+  const redCount = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { readPixel(x: number, y: number): { r: number; g: number; b: number; a: number } | null } };
+    };
+    const engine = root.__gnumarus?.engine;
+    if (engine === undefined) {
+      return -1;
+    }
+    let count = 0;
+    for (let y = 0; y < 512; y += 2) {
+      for (let x = 0; x < 1024; x += 2) {
+        const pixel = engine.readPixel(x, y);
+        if (pixel !== null && pixel.a > 0 && pixel.r > 200 && pixel.g < 100 && pixel.b < 100) {
+          count += 1;
+        }
+      }
+    }
+    return count;
+  });
+  expect(redCount).toBeGreaterThan(20);
+});
+
+test("text editor dialog can be dragged by its title", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.locator('gnumarus-shell [data-testid="tool-text"]').click();
+  await paintCenter(page);
+  const dialog = page.locator('gnumarus-shell [data-testid="text-editor-dialog"]');
+  await expect(dialog).toBeVisible();
+  const title = page.locator('gnumarus-shell [data-testid="text-editor-title"]');
+  const before = await dialog.boundingBox();
+  expect(before).not.toBeNull();
+  const center = await title.boundingBox();
+  expect(center).not.toBeNull();
+  await page.mouse.move(center!.x + center!.width / 2, center!.y + center!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(center!.x + center!.width / 2 + 80, center!.y + center!.height / 2 + 60, { steps: 5 });
+  await page.mouse.up();
+  const after = await dialog.boundingBox();
+  expect(after).not.toBeNull();
+  expect(Math.abs(after!.x - before!.x - 80)).toBeLessThan(8);
+  expect(Math.abs(after!.y - before!.y - 60)).toBeLessThan(8);
+  // The editor still works after the move.
+  await page.locator('gnumarus-shell [data-testid="text-cancel"]').click();
+  await expect(dialog).toBeHidden();
+});
