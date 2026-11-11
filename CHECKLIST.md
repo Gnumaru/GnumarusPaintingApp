@@ -318,3 +318,7 @@
 - [x] Floating boundary overlay during rectDrag (+ eligible floating)
 - [x] E2E @recent mid-drag both-visible (mask 4-run box); build + unit (401) + e2e; docs updated
 - [x] Chained-union overlay fix (rubber band hidden by released-state branch) + 3-union chain e2e
+- [x] Pure selection mask builders + unit tests (13 passed: rect/mask + shapes + color)
+- [x] Engine tool ids (ellipse/lasso/colorselect + O/L/W), gesture previews, generalized combine, eyedropper guard, color options state
+- [x] Shell drawer UI (front/flyout/blocker) + options + shortcuts + i18n (en/pt-BR)
+- [x] E2E @recent (7 new: drawer/ellipse/lasso/color x3/cross-combine); build clean, unit 404, recent 20/20; docs updated

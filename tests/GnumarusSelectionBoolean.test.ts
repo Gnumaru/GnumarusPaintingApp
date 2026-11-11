@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   clampSelectionRect,
+  colorDistanceRGBA,
+  colorSelectTolerance,
+  ellipseSelectMask,
+  floodSelectMask,
+  globalSelectMask,
   countSelectionMask,
   intersectSelectionRects,
   isEmptySelectionRect,
   normalizeSelectionRect,
+  polygonSelectMask,
   selectionMaskBoundaryPath,
   selectionMaskBox,
   unionSelectionBox,
@@ -99,5 +105,51 @@ describe("selectionMaskBoundaryPath", () => {
     expect(donutPath.match(/M/g)?.length ?? 0).toBe(8);
     expect(donutPath).toContain("M0,0L5,0");
     expect(donutPath).toContain("M2,2L3,2");
+  });
+});
+
+describe("selection shape masks", () => {
+  it("masks an inscribed ellipse (1px box selects its pixel)", () => {
+    expect(Array.from(ellipseSelectMask({ minX: 5, minY: 5, maxX: 6, maxY: 6 }))).toEqual([255]);
+    const mask = ellipseSelectMask({ minX: 0, minY: 0, maxX: 5, maxY: 5 });
+    expect(mask.length).toBe(25);
+    // Corners out, edge centers in.
+    expect(mask[0]).toBe(0);
+    expect(mask[2]).toBe(255);
+    expect(mask[12]).toBe(255);
+    expect(countSelectionMask(mask)).toBeGreaterThan(0);
+  });
+
+  it("fills lasso polygons with the even-odd rule", () => {
+    const triangle = polygonSelectMask(
+      [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 0, y: 10 },
+      ],
+      64,
+      64,
+    );
+    expect(triangle).not.toBeNull();
+    expect(triangle?.minX).toBe(0);
+    expect(triangle?.minY).toBe(0);
+    expect(countSelectionMask(triangle?.mask ?? new Uint8Array(0))).toBeGreaterThan(0);
+    expect(polygonSelectMask([{ x: 1, y: 1 }], 64, 64)).toBeNull();
+    expect(polygonSelectMask([], 64, 64)).toBeNull();
+  });
+
+  it("matches colors by RGBA distance with a threshold", () => {
+    expect(colorDistanceRGBA(0, 0, 0, 0, 0, 0, 0, 0)).toBe(0);
+    expect(colorSelectTolerance(0)).toBe(0);
+    expect(colorSelectTolerance(100)).toBeCloseTo(510, 0);
+    // 4x1: red, near-red, blue, transparent.
+    const buffer = new Uint8ClampedArray([255, 0, 0, 255, 254, 0, 0, 255, 0, 0, 255, 255, 0, 0, 0, 0]);
+    const exact = floodSelectMask(buffer, 4, 1, 0, 0, colorSelectTolerance(0));
+    expect(Array.from(exact)).toEqual([255, 0, 0, 0]);
+    const loose = floodSelectMask(buffer, 4, 1, 0, 0, colorSelectTolerance(100));
+    expect(countSelectionMask(loose)).toBe(4);
+    const global = globalSelectMask(buffer, 4, 1, 2, 0, colorSelectTolerance(0));
+    expect(Array.from(global)).toEqual([0, 0, 255, 0]);
+    expect(countSelectionMask(floodSelectMask(buffer, 4, 1, 9, 9, 10))).toBe(0);
   });
 });

@@ -99,12 +99,19 @@ import {
   type GnumarusWrapMode,
 } from "./GnumarusViewportMath";
 import {
+  clampColorThreshold,
   clampSelectionRect,
+  colorSelectTolerance,
   countSelectionMask,
+  ellipseSelectMask,
+  floodSelectMask,
+  globalSelectMask,
   intersectSelectionRects,
   isEmptySelectionRect,
   normalizeSelectionRect,
+  polygonSelectMask,
   selectionMaskBoundaryRuns,
+  selectionMaskBox,
   unionSelectionBox,
   type GnumarusSelectionRect,
 } from "./GnumarusSelectionBoolean";
@@ -235,8 +242,14 @@ export type GnumarusCanvasTool =
   | "transform3d"
   | "eyedropper"
   | "rectselect"
+  | "ellipse"
+  | "lasso"
+  | "colorselect"
   | "destransform"
   | "destransform3d";
+
+/** Selection-family tools sharing the floating mask model. */
+export type GnumarusSelectionTool = "rectselect" | "ellipse" | "lasso" | "colorselect";
 
 /** Floating selection cut out of a cell texture, without a cell of its own. */
 export interface GnumarusFloatingSelection {
@@ -714,6 +727,10 @@ export class GnumarusCanvasEngine {
   private readonly previewSvg: SVGSVGElement;
   private readonly previewLine: SVGLineElement;
   private readonly previewCurve: SVGPathElement;
+  /** Rubber-band ellipse for the ellipse selection tool. */
+  private readonly previewSelectEllipse: SVGEllipseElement;
+  /** Freehand path preview for the lasso selection tool. */
+  private readonly previewLasso: SVGPathElement;
   private readonly previewHandleA: SVGLineElement;
   private readonly previewHandleB: SVGLineElement;
   private readonly previewStabilizerLine: SVGLineElement;
@@ -744,6 +761,14 @@ export class GnumarusCanvasEngine {
   private floating: GnumarusFloatingSelection | null = null;
   /** Active rectangular-selection drag in cell image pixels, or null. */
   private rectDrag: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  /** Active ellipse-selection drag in cell image pixels, or null. */
+  private ellipseDrag: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  /** Active freehand lasso path in cell image pixels (floats), or null. */
+  private lassoPath: Array<{ x: number; y: number }> | null = null;
+  /** Color-selection similarity threshold 0..100 (0 = exact match). */
+  private colorThreshold = 10;
+  /** Color selection matches only the contiguous region when true. */
+  private colorContiguous = true;
   /** Active destructive-transform move (grab offset from the selection center). */
   private moveDrag: { grabDX: number; grabDY: number } | null = null;
   /** Active corner/edge resize gesture. */
@@ -977,6 +1002,24 @@ export class GnumarusCanvasEngine {
     this.previewCurve.setAttribute("fill", "none");
     this.previewCurve.setAttribute("opacity", "0.9");
     this.previewSvg.appendChild(this.previewCurve);
+    this.previewSelectEllipse = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
+    this.previewSelectEllipse.setAttribute("data-testid", "ellipse-preview");
+    this.previewSelectEllipse.setAttribute("fill", "none");
+    this.previewSelectEllipse.setAttribute("stroke", "#ffffff");
+    this.previewSelectEllipse.setAttribute("stroke-width", "1.5");
+    this.previewSelectEllipse.setAttribute("stroke-dasharray", "6 4");
+    this.previewSelectEllipse.setAttribute("opacity", "0.9");
+    this.previewSelectEllipse.style.display = "none";
+    this.previewSvg.appendChild(this.previewSelectEllipse);
+    this.previewLasso = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    this.previewLasso.setAttribute("data-testid", "lasso-preview");
+    this.previewLasso.setAttribute("fill", "none");
+    this.previewLasso.setAttribute("stroke", "#ffffff");
+    this.previewLasso.setAttribute("stroke-width", "1.5");
+    this.previewLasso.setAttribute("stroke-dasharray", "6 4");
+    this.previewLasso.setAttribute("opacity", "0.9");
+    this.previewLasso.style.display = "none";
+    this.previewSvg.appendChild(this.previewLasso);
     const makeHandle = (testId: string): SVGLineElement => {
       const handle = document.createElementNS("http://www.w3.org/2000/svg", "line");
       handle.setAttribute("data-testid", testId);
@@ -6414,15 +6457,50 @@ export class GnumarusCanvasEngine {
     if (minX >= maxX || minY >= maxY) {
       return false;
     }
-    this.commitFloating();
-    const base = tex.buffer.slice();
     const width = maxX - minX;
     const height = maxY - minY;
+    return this.cutMaskToFloating(tex, minX, minY, width, height, new Uint8Array(width * height).fill(255));
+  }
+
+  /**
+   * Cut masked pixels out of a texture into a fresh floating selection
+   * (layer-aligned, identity placement). Commits any active floating
+   * selection first. Unmasked pixels stay in the layer. Returns false for
+   * degenerate boxes or an empty mask.
+   */
+  private cutMaskToFloating(
+    tex: { id: string; buffer: Uint8ClampedArray; width: number; height: number },
+    minX: number,
+    minY: number,
+    width: number,
+    height: number,
+    mask: Uint8Array,
+  ): boolean {
+    const layer = this.activeLayer();
+    if (layer === null || width < 1 || height < 1 || mask.length !== width * height) {
+      return false;
+    }
+    if (minX < 0 || minY < 0 || minX + width > tex.width || minY + height > tex.height) {
+      return false;
+    }
+    if (countSelectionMask(mask) === 0) {
+      return false;
+    }
+    this.commitFloating();
+    const base = tex.buffer.slice();
     const cut = new Uint8ClampedArray(width * height * 4);
     for (let row = 0; row < height; row += 1) {
-      const source = ((minY + row) * tex.width + minX) * 4;
-      cut.set(tex.buffer.subarray(source, source + width * 4), row * width * 4);
-      tex.buffer.fill(0, source, source + width * 4);
+      for (let col = 0; col < width; col += 1) {
+        if ((mask[row * width + col] ?? 0) === 0) {
+          continue;
+        }
+        const at = ((minY + row) * tex.width + minX + col) * 4;
+        cut.set(tex.buffer.subarray(at, at + 4), (row * width + col) * 4);
+        tex.buffer[at] = 0;
+        tex.buffer[at + 1] = 0;
+        tex.buffer[at + 2] = 0;
+        tex.buffer[at + 3] = 0;
+      }
     }
     const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
     if (diff !== null) {
@@ -6432,8 +6510,8 @@ export class GnumarusCanvasEngine {
       buffer: cut,
       width,
       height,
-      mask: new Uint8Array(width * height).fill(255),
-      maskFull: true,
+      mask: mask.slice(),
+      maskFull: countSelectionMask(mask) === width * height,
       cx: minX + width / 2,
       cy: minY + height / 2,
       rotation: 0,
@@ -6506,30 +6584,70 @@ export class GnumarusCanvasEngine {
     this.syncLayerRender(layer);
     this.refreshLayerStacking();
     const tex = ensured.texture;
+    const next = clampSelectionRect(normalizeSelectionRect(x0, y0, x1, y1), tex.width, tex.height);
+    if (next === null) {
+      if (mode === "intersect" && this.combinableFloating(tex) !== null) {
+        this.commitFloating();
+      }
+      return true;
+    }
+    const width = next.maxX - next.minX;
+    const height = next.maxY - next.minY;
+    return this.combineMaskWithFloating(
+      tex,
+      next.minX,
+      next.minY,
+      width,
+      height,
+      new Uint8Array(width * height).fill(255),
+      mode,
+    );
+  }
+
+  /** Floating selection eligible for boolean ops on the given texture, or null. */
+  private combinableFloating(tex: { id: string }): GnumarusFloatingSelection | null {
+    const layer = this.activeLayer();
     const floating = this.floating;
+    if (layer === null || floating === null || !floating.active) {
+      return null;
+    }
     if (
-      floating === null ||
-      !floating.active ||
       floating.layerId !== layer.id ||
       floating.frame !== this.currentFrame ||
       floating.textureId !== tex.id ||
       floating.buffer.length !== floating.width * floating.height * 4 ||
       floating.mask.length !== floating.width * floating.height
     ) {
+      return null;
+    }
+    return floating;
+  }
+
+  /**
+   * Combine a new selection mask (layer-space box) with the active floating
+   * selection: same union/intersect/subtract semantics as
+   * combineRectWithFloating, generalized beyond rectangles.
+   */
+  private combineMaskWithFloating(
+    tex: { id: string; buffer: Uint8ClampedArray; width: number; height: number },
+    nx: number,
+    ny: number,
+    nw: number,
+    nh: number,
+    newMask: Uint8Array,
+    mode: "union" | "intersect" | "subtract",
+  ): boolean {
+    const floating = this.combinableFloating(tex);
+    if (floating === null) {
       return false;
     }
-    const next = clampSelectionRect(normalizeSelectionRect(x0, y0, x1, y1), tex.width, tex.height);
-    if (mode === "union" && next === null) {
+    if (nw < 1 || nh < 1 || newMask.length !== nw * nh || countSelectionMask(newMask) === 0) {
+      if (mode === "intersect") {
+        this.commitFloating();
+      }
       return true;
     }
-    if (mode === "subtract" && next === null) {
-      return true;
-    }
-    if (mode === "intersect" && next === null) {
-      this.commitFloating();
-      return true;
-    }
-    const added = next as GnumarusSelectionRect;
+    const box: GnumarusSelectionRect = { minX: nx, minY: ny, maxX: nx + nw, maxY: ny + nh };
     const placement = this.floatingPlacement(floating);
     // Membership of a layer pixel in the old selection, nearest-mapped
     // exactly like the merge loop below.
@@ -6550,7 +6668,11 @@ export class GnumarusCanvasEngine {
       return { sx, sy };
     };
     const inNew = (x: number, y: number): boolean =>
-      x >= added.minX && x < added.maxX && y >= added.minY && y < added.maxY;
+      x >= nx &&
+      x < nx + nw &&
+      y >= ny &&
+      y < ny + nh &&
+      (newMask[(y - ny) * nw + (x - nx)] ?? 0) !== 0;
     if (mode === "intersect") {
       const overlap = intersectSelectionRects(
         {
@@ -6559,7 +6681,7 @@ export class GnumarusCanvasEngine {
           maxX: Math.min(tex.width, Math.ceil(selectionCornerBox(placement).maxX)),
           maxY: Math.min(tex.height, Math.ceil(selectionCornerBox(placement).maxY)),
         },
-        added,
+        box,
       );
       if (overlap === null) {
         this.commitFloating();
@@ -6629,8 +6751,8 @@ export class GnumarusCanvasEngine {
     if (mode === "subtract") {
       // No selected pixel inside the new rect: nothing changes.
       let touches = false;
-      for (let y = added.minY; y < added.maxY && !touches; y += 1) {
-        for (let x = added.minX; x < added.maxX; x += 1) {
+      for (let y = box.minY; y < box.maxY && !touches; y += 1) {
+        for (let x = box.minX; x < box.maxX; x += 1) {
           if (inOld(x, y) !== null) {
             touches = true;
             break;
@@ -6691,16 +6813,16 @@ export class GnumarusCanvasEngine {
       maxX: Math.min(tex.width, Math.ceil(selectionCornerBox(placement).maxX)),
       maxY: Math.min(tex.height, Math.ceil(selectionCornerBox(placement).maxY)),
     };
-    const box = isEmptySelectionRect(oldBox) ? added : unionSelectionBox(oldBox, added);
+    const unionBox = isEmptySelectionRect(oldBox) ? box : unionSelectionBox(oldBox, box);
     const base = tex.buffer.slice();
-    const width = Math.max(1, box.maxX - box.minX);
-    const height = Math.max(1, box.maxY - box.minY);
+    const width = Math.max(1, unionBox.maxX - unionBox.minX);
+    const height = Math.max(1, unionBox.maxY - unionBox.minY);
     const cut = new Uint8ClampedArray(width * height * 4);
     const mask = new Uint8Array(width * height);
     for (let y = 0; y < height; y += 1) {
       for (let x = 0; x < width; x += 1) {
-        const gx = box.minX + x;
-        const gy = box.minY + y;
+        const gx = unionBox.minX + x;
+        const gy = unionBox.minY + y;
         const hit = inOld(gx, gy);
         if (hit !== null) {
           const source = (hit.sy * floating.width + hit.sx) * 4;
@@ -6717,7 +6839,7 @@ export class GnumarusCanvasEngine {
         }
       }
     }
-    return this.replaceFloating(tex, base, cut, box.minX, box.minY, width, height, mask);
+    return this.replaceFloating(tex, base, cut, unionBox.minX, unionBox.minY, width, height, mask);
   }
 
   /**
@@ -7605,6 +7727,8 @@ export class GnumarusCanvasEngine {
     this.previewLine.removeAttribute("display");
     this.previewLine.style.display = "none";
     this.previewCurve.style.display = "none";
+    this.previewSelectEllipse.style.display = "none";
+    this.previewLasso.style.display = "none";
     this.previewHandleA.style.display = "none";
     this.previewHandleB.style.display = "none";
     this.previewStabilizerLine.style.display = "none";
@@ -7651,6 +7775,63 @@ export class GnumarusCanvasEngine {
       this.previewLine.setAttribute("stroke-width", String(Math.max(1, this.lineWidth * this.zoom)));
       this.previewLine.setAttribute("stroke-linecap", this.lineShape === "circle" ? "round" : "butt");
       return;
+    }
+    if (this.tool === "ellipse" && this.ellipseDrag !== null) {
+      const layer = this.activeLayer();
+      if (layer !== null) {
+        const drag = this.ellipseDrag;
+        const x0 = Math.min(drag.x0, drag.x1);
+        const y0 = Math.min(drag.y0, drag.y1);
+        const x1 = Math.max(drag.x0, drag.x1) + 1;
+        const y1 = Math.max(drag.y0, drag.y1) + 1;
+        const toClient = (imageX: number, imageY: number): { x: number; y: number } => {
+          const project = layerImageToProject(imageX, imageY, layer.width, layer.height, layer.transform);
+          const client = projectToScreen(
+            project.x,
+            project.y,
+            { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+            this.viewTransform(),
+          );
+          return { x: client.x - rect.left, y: client.y - rect.top };
+        };
+        const center = toClient((x0 + x1) / 2, (y0 + y1) / 2);
+        const edgeX = toClient(x1, (y0 + y1) / 2);
+        const edgeY = toClient((x0 + x1) / 2, y1);
+        const rx = Math.max(1, Math.hypot(edgeX.x - center.x, edgeX.y - center.y));
+        const ry = Math.max(1, Math.hypot(edgeY.x - center.x, edgeY.y - center.y));
+        const angle =
+          (Math.atan2(edgeX.y - center.y, edgeX.x - center.x) * 180) / Math.PI;
+        this.previewSvg.style.display = "block";
+        this.previewSelectEllipse.style.display = "block";
+        this.previewSelectEllipse.setAttribute("cx", String(center.x));
+        this.previewSelectEllipse.setAttribute("cy", String(center.y));
+        this.previewSelectEllipse.setAttribute("rx", String(rx));
+        this.previewSelectEllipse.setAttribute("ry", String(ry));
+        this.previewSelectEllipse.setAttribute("transform", `rotate(${angle} ${center.x} ${center.y})`);
+        return;
+      }
+    }
+    if (this.tool === "lasso" && this.lassoPath !== null && this.lassoPath.length > 1) {
+      const layer = this.activeLayer();
+      if (layer !== null) {
+        const toClient = (imageX: number, imageY: number): string => {
+          const project = layerImageToProject(imageX, imageY, layer.width, layer.height, layer.transform);
+          const client = projectToScreen(
+            project.x,
+            project.y,
+            { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+            this.viewTransform(),
+          );
+          return `${client.x - rect.left},${client.y - rect.top}`;
+        };
+        const d =
+          "M" +
+          this.lassoPath.map((point) => toClient(point.x, point.y)).join("L");
+        this.previewSvg.style.display = "block";
+        this.previewLasso.style.display = "block";
+        this.previewLasso.setAttribute("d", d);
+        return;
+      }
     }
     if (this.tool !== "curve") {
       // Preserve the stabilizer rope and selection overlays for other tools.
@@ -7741,6 +7922,8 @@ export class GnumarusCanvasEngine {
     this.previewSvg.style.display = "none";
     this.previewLine.style.display = "none";
     this.previewCurve.style.display = "none";
+    this.previewSelectEllipse.style.display = "none";
+    this.previewLasso.style.display = "none";
     this.previewHandleA.style.display = "none";
     this.previewHandleB.style.display = "none";
     this.previewStabilizerLine.style.display = "none";
@@ -7883,6 +8066,84 @@ export class GnumarusCanvasEngine {
     return this.bucketFillAt(seed.x, seed.y);
   }
 
+  /** Color similarity threshold 0..100 for the color selection tool. */
+  setColorThreshold(value: number): boolean {
+    const next = clampColorThreshold(value);
+    if (next === this.colorThreshold) {
+      return false;
+    }
+    this.colorThreshold = next;
+    return true;
+  }
+
+  /** Whether color selection matches only the contiguous region. */
+  setColorContiguous(value: boolean): boolean {
+    if (value === this.colorContiguous) {
+      return false;
+    }
+    this.colorContiguous = value;
+    return true;
+  }
+
+  /** Modifier combo for a selection release: plain replace by default. */
+  private selectionReleaseMode(event: PointerEvent): "union" | "intersect" | "subtract" | null {
+    if (!event.shiftKey) {
+      return null;
+    }
+    if (event.ctrlKey || event.metaKey) {
+      return "intersect";
+    }
+    if (event.altKey) {
+      return "subtract";
+    }
+    return "union";
+  }
+
+  /**
+   * Click-to-select by color: flood the contiguous region or match the whole
+   * texture against the clicked pixel within the similarity threshold, then
+   * cut or combine. Returns false when nothing was selected.
+   */
+  private pickColorSelection(event: PointerEvent): boolean {
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return false;
+    }
+    const ensured = this.ensureCellContent(layer.id, this.currentFrame);
+    if (ensured === null) {
+      return false;
+    }
+    this.syncLayerRender(layer);
+    this.refreshLayerStacking();
+    const tex = ensured.texture;
+    const pixel = this.toImagePixel(event.clientX, event.clientY);
+    if (pixel === null) {
+      return false;
+    }
+    const tolerance = colorSelectTolerance(this.colorThreshold);
+    const full = this.colorContiguous
+      ? floodSelectMask(tex.buffer, tex.width, tex.height, pixel.x, pixel.y, tolerance)
+      : globalSelectMask(tex.buffer, tex.width, tex.height, pixel.x, pixel.y, tolerance);
+    const box = selectionMaskBox(full, tex.width, tex.height);
+    if (box === null) {
+      return false;
+    }
+    const width = box.maxX - box.minX;
+    const height = box.maxY - box.minY;
+    const mask = new Uint8Array(width * height);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        mask[y * width + x] = full[(box.minY + y) * tex.width + box.minX + x] ?? 0;
+      }
+    }
+    this.lastMouseClient = { x: event.clientX, y: event.clientY };
+    const mode = this.selectionReleaseMode(event);
+    if (mode === null) {
+      return this.cutMaskToFloating(tex, box.minX, box.minY, width, height, mask);
+    }
+    return this.combineMaskWithFloating(tex, box.minX, box.minY, width, height, mask, mode);
+  }
+
   /** Minimum zoom fraction from settings (0.01..1, default 0.01). */
   setViewMinZoom(value: number): void {
     this.viewMinZoom = normalizeViewMinZoom(value);
@@ -8010,6 +8271,8 @@ export class GnumarusCanvasEngine {
     }
     this.sizeDrag = null;
     this.rectDrag = null;
+    this.ellipseDrag = null;
+    this.lassoPath = null;
     this.clearTransformGestures();
     this.resetPencilPixelPerfect();
     this.updatePreviews();
@@ -8988,6 +9251,46 @@ export class GnumarusCanvasEngine {
         this.updatePreviews();
         return;
       }
+      if (this.tool === "ellipse") {
+        // Drag marks an ellipse; releasing cuts it out as a floating texture.
+        const layer = this.activeLayer();
+        if (layer === null) {
+          return;
+        }
+        const pixel = this.toImagePixel(event.clientX, event.clientY);
+        if (pixel === null) {
+          return;
+        }
+        this.ellipseDrag = { x0: pixel.x, y0: pixel.y, x1: pixel.x, y1: pixel.y };
+        this.lastMouseClient = { x: event.clientX, y: event.clientY };
+        canvas.setPointerCapture(event.pointerId);
+        this.updatePreviews();
+        return;
+      }
+      if (this.tool === "lasso") {
+        // Freehand path; releasing closes and fills it as a floating texture.
+        const layer = this.activeLayer();
+        if (layer === null) {
+          return;
+        }
+        const start = this.clientToLayerImageFloat(event.clientX, event.clientY);
+        if (start === null) {
+          return;
+        }
+        this.lassoPath = [{ x: start.x, y: start.y }];
+        this.lastMouseClient = { x: event.clientX, y: event.clientY };
+        canvas.setPointerCapture(event.pointerId);
+        this.updatePreviews();
+        return;
+      }
+      if (this.tool === "colorselect") {
+        // Click cuts similar colors (contiguous flood or global match).
+        if (!this.pickColorSelection(event)) {
+          this.lastMouseClient = { x: event.clientX, y: event.clientY };
+          this.updatePreviews();
+        }
+        return;
+      }
       if (this.tool === "line") {
         // Two clicks define a segment: first arms the start, second draws.
         const layer = this.activeLayer();
@@ -9356,6 +9659,31 @@ export class GnumarusCanvasEngine {
         }
         return;
       }
+      if (this.ellipseDrag !== null) {
+        const target = this.clientToLayerImageFloat(event.clientX, event.clientY);
+        if (target !== null) {
+          this.ellipseDrag.x1 = Math.floor(target.x);
+          this.ellipseDrag.y1 = Math.floor(target.y);
+          this.lastMouseClient = { x: event.clientX, y: event.clientY };
+          this.updatePreviews();
+        }
+        return;
+      }
+      if (this.lassoPath !== null) {
+        const target = this.clientToLayerImageFloat(event.clientX, event.clientY);
+        if (target !== null) {
+          const last = this.lassoPath[this.lassoPath.length - 1];
+          if (
+            last === undefined ||
+            Math.abs(target.x - last.x) + Math.abs(target.y - last.y) > 0.5
+          ) {
+            this.lassoPath.push({ x: target.x, y: target.y });
+            this.lastMouseClient = { x: event.clientX, y: event.clientY };
+            this.updatePreviews();
+          }
+        }
+        return;
+      }
       if (this.resizeDrag !== null || this.rotateDrag !== null || this.skewDrag !== null) {
         this.updateTransformGesture(event.clientX, event.clientY);
         return;
@@ -9565,24 +9893,92 @@ export class GnumarusCanvasEngine {
       if (this.rectDrag !== null && event.button === 0) {
         const drag = this.rectDrag;
         this.rectDrag = null;
-        // Modifier release routing: plain replaces; Shift adds, Ctrl+Shift
-        // (Cmd+Shift) intersects, Alt+Shift subtracts. With several held,
-        // intersect wins, then subtract.
-        let mode: "union" | "intersect" | "subtract" | null = null;
-        if (event.shiftKey) {
-          if (event.ctrlKey || event.metaKey) {
-            mode = "intersect";
-          } else if (event.altKey) {
-            mode = "subtract";
-          } else {
-            mode = "union";
-          }
-        }
+        const mode = this.selectionReleaseMode(event);
         if (
           mode === null ||
           !this.combineRectWithFloating(drag.x0, drag.y0, drag.x1, drag.y1, mode)
         ) {
           this.cutRectToFloating(drag.x0, drag.y0, drag.x1, drag.y1);
+        }
+        return;
+      }
+      if (this.ellipseDrag !== null && event.button === 0) {
+        const drag = this.ellipseDrag;
+        this.ellipseDrag = null;
+        const layer = this.activeLayer();
+        if (layer === null) {
+          return;
+        }
+        const ensured = this.ensureCellContent(layer.id, this.currentFrame);
+        if (ensured === null) {
+          return;
+        }
+        this.syncLayerRender(layer);
+        this.refreshLayerStacking();
+        const tex = ensured.texture;
+        const box = clampSelectionRect(
+          normalizeSelectionRect(drag.x0, drag.y0, drag.x1, drag.y1),
+          tex.width,
+          tex.height,
+        );
+        if (box === null) {
+          return;
+        }
+        const width = box.maxX - box.minX;
+        const height = box.maxY - box.minY;
+        const mask = ellipseSelectMask(box);
+        const mode = this.selectionReleaseMode(event);
+        if (mode === null) {
+          const tight = selectionMaskBox(mask, width, height);
+          if (tight === null) {
+            return;
+          }
+          const tw = tight.maxX - tight.minX;
+          const th = tight.maxY - tight.minY;
+          const tightMask = new Uint8Array(tw * th);
+          for (let y = 0; y < th; y += 1) {
+            for (let x = 0; x < tw; x += 1) {
+              tightMask[y * tw + x] = mask[(tight.minY + y) * width + tight.minX + x] ?? 0;
+            }
+          }
+          this.cutMaskToFloating(tex, box.minX + tight.minX, box.minY + tight.minY, tw, th, tightMask);
+        } else {
+          this.combineMaskWithFloating(tex, box.minX, box.minY, width, height, mask, mode);
+        }
+        return;
+      }
+      if (this.lassoPath !== null && event.button === 0) {
+        const path = this.lassoPath;
+        this.lassoPath = null;
+        this.hidePreviewSvgIfIdle();
+        const layer = this.activeLayer();
+        if (layer === null || path.length < 3) {
+          return;
+        }
+        const ensured = this.ensureCellContent(layer.id, this.currentFrame);
+        if (ensured === null) {
+          return;
+        }
+        this.syncLayerRender(layer);
+        this.refreshLayerStacking();
+        const tex = ensured.texture;
+        const filled = polygonSelectMask(path, tex.width, tex.height);
+        if (filled === null) {
+          return;
+        }
+        const mode = this.selectionReleaseMode(event);
+        if (mode === null) {
+          this.cutMaskToFloating(tex, filled.minX, filled.minY, filled.width, filled.height, filled.mask);
+        } else {
+          this.combineMaskWithFloating(
+            tex,
+            filled.minX,
+            filled.minY,
+            filled.width,
+            filled.height,
+            filled.mask,
+            mode,
+          );
         }
         return;
       }
@@ -9609,8 +10005,10 @@ export class GnumarusCanvasEngine {
       this.layerCenterTap = null;
       this.layerFlipTap = null;
       this.rot3dCenterTap = null;
-      if (this.rectDrag !== null) {
+      if (this.rectDrag !== null || this.ellipseDrag !== null || this.lassoPath !== null) {
         this.rectDrag = null;
+        this.ellipseDrag = null;
+        this.lassoPath = null;
         this.updatePreviews();
       }
       if (this.tool === "curve" && this.curvePhase === "dragging") {
@@ -9669,9 +10067,14 @@ export class GnumarusCanvasEngine {
         );
       })();
       if (event.key === "Control" && !event.repeat && !event.altKey && !event.metaKey && !inField) {
-        // The Ctrl selection modifiers belong to the rectangular selection
-        // tool; summoning the eyedropper there would steal its drags.
-        if (this.tool !== "rectselect") {
+        // The Ctrl selection modifiers belong to the selection tools;
+        // summoning the eyedropper there would steal their drags.
+        if (
+          this.tool !== "rectselect" &&
+          this.tool !== "ellipse" &&
+          this.tool !== "lasso" &&
+          this.tool !== "colorselect"
+        ) {
           this.beginTempEyedropper();
         }
         return;
@@ -9724,6 +10127,18 @@ export class GnumarusCanvasEngine {
           this.setTool("destransform3d");
           return;
         }
+        if (event.key === "o" || event.key === "O") {
+          this.setTool("ellipse");
+          return;
+        }
+        if (event.key === "l" || event.key === "L") {
+          this.setTool("lasso");
+          return;
+        }
+        if (event.key === "w" || event.key === "W") {
+          this.setTool("colorselect");
+          return;
+        }
         if (event.key === "m" || event.key === "M") {
           // M flips the canvas view horizontally, Shift+M vertically —
           // the same setFlip toggles the loupe middle-click gestures use.
@@ -9766,6 +10181,15 @@ export class GnumarusCanvasEngine {
         }
         if (event.key === "Escape" && this.tool === "rectselect" && this.rectDrag !== null) {
           this.rectDrag = null;
+          this.updatePreviews();
+          return;
+        }
+        if (
+          (event.key === "Escape" && this.tool === "ellipse" && this.ellipseDrag !== null) ||
+          (event.key === "Escape" && this.tool === "lasso" && this.lassoPath !== null)
+        ) {
+          this.ellipseDrag = null;
+          this.lassoPath = null;
           this.updatePreviews();
           return;
         }

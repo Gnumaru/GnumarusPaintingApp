@@ -5926,6 +5926,153 @@ async function dragRect(
   await page.mouse.up();
 }
 
+async function paintDot(
+  page: import("@playwright/test").Page,
+  hex: string,
+  x: number,
+  y: number,
+): Promise<void> {
+  await setPencil(page, hex);
+  const target = await layerScreenTarget(page, x, y);
+  await page.mouse.click(target.x, target.y);
+}
+
+test("selection drawer swaps the front tool on flyout pick @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const drawer = page.locator('gnumarus-shell [data-testid="selection-drawer"]');
+  await expect(drawer.getByRole("button", { name: "Rectangular selection" })).toBeVisible();
+  await drawer.getByRole("button", { name: "Rectangular selection" }).click({ button: "right" });
+  await expect(page.locator('gnumarus-shell [data-testid="selection-flyout"]')).toBeVisible();
+  await page.locator('gnumarus-shell [data-testid="selection-flyout"]').getByRole("button", { name: "Elliptical selection" }).click();
+  await expect(page.locator('gnumarus-shell [data-testid="selection-flyout"]')).toBeHidden();
+  await expect(drawer.getByRole("button", { name: "Elliptical selection" })).toBeVisible();
+  await expect(page.locator("gnumarus-shell")).toContainText("Elliptical selection");
+  await page.keyboard.press("r");
+  await expect(drawer.getByRole("button", { name: "Rectangular selection" })).toBeVisible();
+});
+
+test("elliptical selection cuts an ellipse @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  const corner = await layerScreenTarget(page, 0, 0);
+  await page.mouse.click(corner.x, corner.y);
+  await page.keyboard.press("o");
+  await dragRect(page, 10, 10, 20, 20);
+  const selection = await getFloatingSelection(page);
+  expect(selection).not.toBeNull();
+  expect(selection?.x).toBe(10);
+  expect(selection?.y).toBe(10);
+  expect(selection?.width).toBe(11);
+  expect(selection?.height).toBe(11);
+  expect(selection?.selected ?? 0).toBeGreaterThan(0);
+  expect(selection?.selected ?? 121).toBeLessThan(121);
+  // Center cut out, bbox corner left intact.
+  expect(await readPixel(page, 15, 15)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 10, 10)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("lasso selection cuts a freehand shape @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  const corner = await layerScreenTarget(page, 0, 0);
+  await page.mouse.click(corner.x, corner.y);
+  await page.keyboard.press("l");
+  const corners = [
+    await layerScreenTarget(page, 10, 10),
+    await layerScreenTarget(page, 30, 10),
+    await layerScreenTarget(page, 10, 30),
+  ];
+  const first = corners[0];
+  if (first === undefined) {
+    throw new Error("lasso start has no screen target");
+  }
+  await page.mouse.move(first.x, first.y);
+  await page.mouse.down();
+  for (const corner of corners.slice(1)) {
+    await page.mouse.move(corner.x, corner.y, { steps: 5 });
+  }
+  await page.mouse.move(first.x, first.y, { steps: 5 });
+  await page.mouse.up();
+  const selection = await getFloatingSelection(page);
+  expect(selection).not.toBeNull();
+  expect(selection?.selected ?? 0).toBeGreaterThan(100);
+  expect(await readPixel(page, 12, 12)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 28, 28)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("color selection cuts the contiguous region @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintDot(page, "#ff0000", 32, 32);
+  await paintDot(page, "#0000ff", 10, 10);
+  await paintDot(page, "#0000ff", 40, 40);
+  await page.keyboard.press("w");
+  const target = await layerScreenTarget(page, 10, 10);
+  await page.mouse.click(target.x, target.y);
+  expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 1, height: 1, selected: 1 });
+  expect(await readPixel(page, 10, 10)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 40, 40)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+});
+
+test("color selection matches the whole texture when not contiguous @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintDot(page, "#ff0000", 32, 32);
+  await paintDot(page, "#0000ff", 10, 10);
+  await paintDot(page, "#0000ff", 40, 40);
+  await page.keyboard.press("w");
+  await page.locator("gnumarus-shell input#colorContiguous").uncheck();
+  const target = await layerScreenTarget(page, 10, 10);
+  await page.mouse.click(target.x, target.y);
+  expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 31, height: 31, selected: 2 });
+  expect(await readPixel(page, 10, 10)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 40, 40)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+});
+
+test("color selection threshold gates near matches @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  const corner = await layerScreenTarget(page, 0, 0);
+  await page.mouse.click(corner.x, corner.y);
+  await page.getByRole("button", { name: "Pencil" }).click();
+  await paintDot(page, "#fe0000", 20, 20);
+  await page.keyboard.press("w");
+  // Exact match selects only the contiguous near-red dot.
+  await page.locator("gnumarus-shell input#colorThreshold").fill("0");
+  const target = await layerScreenTarget(page, 20, 20);
+  await page.mouse.click(target.x, target.y);
+  expect(await getFloatingSelection(page)).toEqual({ x: 20, y: 20, width: 1, height: 1, selected: 1 });
+  expect(await readPixel(page, 30, 30)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  // Undo, widen the tolerance, and the red background joins the selection.
+  await page.keyboard.press("Control+z");
+  await page.locator("gnumarus-shell input#colorThreshold").fill("2");
+  await page.mouse.click(target.x, target.y);
+  expect(await getFloatingSelection(page)).toEqual({ x: 0, y: 0, width: 64, height: 64, selected: 4096 });
+});
+
+test("boolean ops combine ellipse with rectangle @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintDot(page, "#ff0000", 32, 32);
+  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  await dragRect(page, 10, 10, 12, 12);
+  expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 3, height: 3, selected: 9 });
+  await page.keyboard.press("o");
+  await page.keyboard.down("Shift");
+  await dragRect(page, 20, 20, 22, 22);
+  await page.keyboard.up("Shift");
+  expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 13, height: 13, selected: 18 });
+  expect(await readPixel(page, 11, 11)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 21, 21)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+});
+
 test("rectangular selection shift-drag adds to the selection @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

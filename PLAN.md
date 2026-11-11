@@ -511,3 +511,10 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 ## 94. Show both selections during boolean drags (implemented)
 - During a rectselect rubber-band drag over an eligible floating selection, keep rendering the floating boundary (mask paths, even for plain rects since the quad polygons show the rubber band) alongside it.
 - E2E @recent: mid-drag both overlays visible with the old 4-run box; release keeps the existing union asserts.
+
+## 95. Ellipse/lasso/color selections + tool drawer (implemented)
+- New tools ellipse (`O`), lasso (`L`), color (`W`, threshold 0..100 + contiguous toggle): ellipse drag = inscribed ellipse mask; lasso = freehand even-odd polygon fill; color click = tolerant flood (contiguous) or global match, RGBA euclidean threshold.
+- All selection tools share the mask floating model: boolean ops (Shift/Ctrl+Shift/Alt+Shift) work across tools via generalized mask combine; merge/ants/handles/undo unchanged.
+- Selection tools live in one drawer: front button left-click activates, right-click opens the flyout, picking swaps the front icon and closes. `R` keeps selecting rectangular (also resets front); front tracks the active selection tool.
+- Temp eyedropper no longer triggers on Ctrl for any selection tool. Toolbar hint + shortcuts rows + per-tool options hints (en + pt-BR).
+- Pure mask builders (ellipse/polygon/color flood/global) + unit tests; engine gestures + previews; e2e @recent (drawer, ellipse, lasso, color contiguous/global/threshold, cross-tool union).

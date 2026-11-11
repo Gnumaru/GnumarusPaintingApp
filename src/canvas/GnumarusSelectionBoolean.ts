@@ -77,6 +77,237 @@ export function countSelectionMask(mask: Uint8Array): number {  let count = 0;
 }
 
 /**
+ * Mask of an inscribed ellipse over an exclusive-max box: pixel centers
+ * with ((x+.5-cx)/rx)^2 + ((y+.5-cy)/ry)^2 <= 1. Always non-empty for a
+ * non-empty box (a 1px box yields its single pixel).
+ */
+export function ellipseSelectMask(box: GnumarusSelectionRect): Uint8Array {
+  const width = Math.max(0, box.maxX - box.minX);
+  const height = Math.max(0, box.maxY - box.minY);
+  const mask = new Uint8Array(width * height);
+  if (width < 1 || height < 1) {
+    return mask;
+  }
+  const cx = (box.minX + box.maxX) / 2;
+  const cy = (box.minY + box.maxY) / 2;
+  const rx = width / 2;
+  const ry = height / 2;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const dx = (box.minX + x + 0.5 - cx) / rx;
+      const dy = (box.minY + y + 0.5 - cy) / ry;
+      if (dx * dx + dy * dy <= 1) {
+        mask[y * width + x] = 255;
+      }
+    }
+  }
+  return mask;
+}
+
+/**
+ * Even-odd scanline fill of a freehand polygon in layer pixels. Returns the
+ * tight bbox mask or null for fewer than 3 distinct points or an empty fill.
+ */
+export function polygonSelectMask(
+  points: ReadonlyArray<{ x: number; y: number }>,
+  textureWidth: number,
+  textureHeight: number,
+): { mask: Uint8Array; minX: number; minY: number; width: number; height: number } | null {
+  const distinct = points.filter(
+    (point, index) =>
+      index === 0 || point.x !== points[index - 1]?.x || point.y !== points[index - 1]?.y,
+  );
+  if (distinct.length < 3 || textureWidth < 1 || textureHeight < 1) {
+    return null;
+  }
+  let loX = Number.POSITIVE_INFINITY;
+  let loY = Number.POSITIVE_INFINITY;
+  let hiX = Number.NEGATIVE_INFINITY;
+  let hiY = Number.NEGATIVE_INFINITY;
+  for (const point of distinct) {
+    loX = Math.min(loX, point.x);
+    loY = Math.min(loY, point.y);
+    hiX = Math.max(hiX, point.x);
+    hiY = Math.max(hiY, point.y);
+  }
+  const minX = Math.max(0, Math.floor(loX));
+  const minY = Math.max(0, Math.floor(loY));
+  const maxX = Math.min(textureWidth, Math.ceil(hiX));
+  const maxY = Math.min(textureHeight, Math.ceil(hiY));
+  const width = maxX - minX;
+  const height = maxY - minY;
+  if (width < 1 || height < 1) {
+    return null;
+  }
+  const mask = new Uint8Array(width * height);
+  const closed = [...distinct, distinct[0] as { x: number; y: number }];
+  for (let y = 0; y < height; y += 1) {
+    const cy = minY + y + 0.5;
+    const crossings: number[] = [];
+    for (let i = 0; i + 1 < closed.length; i += 1) {
+      const a = closed[i] as { x: number; y: number };
+      const b = closed[i + 1] as { x: number; y: number };
+      if ((a.y <= cy && b.y > cy) || (b.y <= cy && a.y > cy)) {
+        crossings.push(a.x + ((cy - a.y) / (b.y - a.y)) * (b.x - a.x));
+      }
+    }
+    crossings.sort((first, second) => first - second);
+    for (let i = 0; i + 1 < crossings.length; i += 2) {
+      const from = Math.max(0, Math.ceil((crossings[i] as number) - 0.5 - minX));
+      const to = Math.min(width, Math.ceil((crossings[i + 1] as number) - 0.5 - minX));
+      for (let x = from; x < to; x += 1) {
+        mask[y * width + x] = 255;
+      }
+    }
+  }
+  if (countSelectionMask(mask) === 0) {
+    return null;
+  }
+  return { mask, minX, minY, width, height };
+}
+
+/** Euclidean distance in RGBA space (0..510). */
+export function colorDistanceRGBA(
+  r1: number,
+  g1: number,
+  b1: number,
+  a1: number,
+  r2: number,
+  g2: number,
+  b2: number,
+  a2: number,
+): number {
+  return Math.sqrt(
+    (r1 - r2) * (r1 - r2) + (g1 - g2) * (g1 - g2) + (b1 - b2) * (b1 - b2) + (a1 - a2) * (a1 - a2),
+  );
+}
+
+/** Tolerance for a 0..100 similarity threshold (0 = exact match). */
+export function colorSelectTolerance(threshold: number): number {  const clamped = Math.min(100, Math.max(0, threshold));
+  return (clamped / 100) * 510;
+}
+
+/**
+ * Flood-selected mask of pixels similar to the seed pixel (4-way,
+ * tolerance-based, explicit stack like the paint flood fill).
+ */
+export function floodSelectMask(
+  buffer: Uint8ClampedArray,
+  width: number,
+  height: number,
+  startX: number,
+  startY: number,
+  tolerance: number,
+): Uint8Array {
+  const mask = new Uint8Array(width * height);
+  if (!Number.isInteger(startX) || !Number.isInteger(startY)) {
+    return mask;
+  }
+  if (startX < 0 || startY < 0 || startX >= width || startY >= height || width < 1 || height < 1) {
+    return mask;
+  }
+  if (buffer.length !== width * height * 4) {
+    return mask;
+  }
+  const seed = (startY * width + startX) * 4;
+  const sr = buffer[seed] ?? 0;
+  const sg = buffer[seed + 1] ?? 0;
+  const sb = buffer[seed + 2] ?? 0;
+  const sa = buffer[seed + 3] ?? 0;
+  const similar = (index: number): boolean => {
+    const at = index * 4;
+    return (
+      colorDistanceRGBA(
+        buffer[at] ?? 0,
+        buffer[at + 1] ?? 0,
+        buffer[at + 2] ?? 0,
+        buffer[at + 3] ?? 0,
+        sr,
+        sg,
+        sb,
+        sa,
+      ) <= tolerance
+    );
+  };
+  const visited = new Uint8Array(width * height);
+  const stack: number[] = [startY * width + startX];
+  visited[startY * width + startX] = 1;
+  while (stack.length > 0) {
+    const index = stack.pop();
+    if (index === undefined) {
+      break;
+    }
+    if (!similar(index)) {
+      continue;
+    }
+    mask[index] = 255;
+    const x = index % width;
+    const y = Math.floor(index / width);
+    if (x > 0 && visited[index - 1] === 0) {
+      visited[index - 1] = 1;
+      stack.push(index - 1);
+    }
+    if (x + 1 < width && visited[index + 1] === 0) {
+      visited[index + 1] = 1;
+      stack.push(index + 1);
+    }
+    if (y > 0 && visited[index - width] === 0) {
+      visited[index - width] = 1;
+      stack.push(index - width);
+    }
+    if (y + 1 < height && visited[index + width] === 0) {
+      visited[index + width] = 1;
+      stack.push(index + width);
+    }
+  }
+  return mask;
+}
+
+/** Mask of every pixel in the texture similar to the seed pixel. */
+export function globalSelectMask(
+  buffer: Uint8ClampedArray,
+  width: number,
+  height: number,
+  startX: number,
+  startY: number,
+  tolerance: number,
+): Uint8Array {
+  const mask = new Uint8Array(width * height);
+  if (!Number.isInteger(startX) || !Number.isInteger(startY)) {
+    return mask;
+  }
+  if (startX < 0 || startY < 0 || startX >= width || startY >= height || width < 1 || height < 1) {
+    return mask;
+  }
+  if (buffer.length !== width * height * 4) {
+    return mask;
+  }
+  const seed = (startY * width + startX) * 4;
+  const sr = buffer[seed] ?? 0;
+  const sg = buffer[seed + 1] ?? 0;
+  const sb = buffer[seed + 2] ?? 0;
+  const sa = buffer[seed + 3] ?? 0;
+  for (let i = 0; i < width * height; i += 1) {
+    const at = i * 4;
+    if (
+      colorDistanceRGBA(
+        buffer[at] ?? 0,
+        buffer[at + 1] ?? 0,
+        buffer[at + 2] ?? 0,
+        buffer[at + 3] ?? 0,
+        sr,
+        sg,
+        sb,
+        sa,
+      ) <= tolerance
+    ) {
+      mask[i] = 255;
+    }
+  }
+  return mask;
+}
+
+/**
  * Tight exclusive-max box around the set mask bits, in mask-local coords;
  * null when no bit is set.
  */
@@ -193,4 +424,12 @@ export function selectionMaskBoundaryPath(mask: Uint8Array, width: number, heigh
   return selectionMaskBoundaryRuns(mask, width, height)
     .map((run) => `M${run.ax},${run.ay}L${run.bx},${run.by}`)
     .join(" ");
+}
+
+/** Clamp a color similarity threshold to an integer 0..100. */
+export function clampColorThreshold(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 10;
+  }
+  return Math.min(100, Math.max(0, Math.floor(value)));
 }

@@ -369,6 +369,9 @@ function gnumarusShortcuts(): GnumarusShortcutSection[] {
         { keys: "T", action: tr("sc.toolTransform") },
         { keys: "Y", action: tr("sc.toolRot3d") },
         { keys: "R", action: tr("sc.toolRectselect") },
+        { keys: "O", action: tr("sc.toolEllipse") },
+        { keys: "L", action: tr("sc.toolLasso") },
+        { keys: "W", action: tr("sc.toolColorselect") },
         { keys: "Shift / Ctrl+Shift / Alt+Shift + drag", action: tr("sc.rectselectModifiers") },
         { keys: "V", action: tr("sc.toolDestransform") },
         { keys: "U", action: tr("sc.toolDestransform3d") },
@@ -483,6 +486,38 @@ export class GnumarusShell extends LitElement {
     }
     .toolbar .tool-icon svg {
       display: block;
+    }
+    .tool-drawer {
+      position: relative;
+    }
+    .tool-drawer > button::after {
+      content: "";
+      position: absolute;
+      right: 3px;
+      bottom: 3px;
+      border-left: 5px solid transparent;
+      border-bottom: 5px solid #9a9a9a;
+    }
+    .tool-drawer > button {
+      position: relative;
+    }
+    .tool-flyout {
+      position: absolute;
+      left: calc(100% + 4px);
+      top: 0;
+      display: flex;
+      flex-direction: row;
+      gap: 4px;
+      background: #252526;
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 4px;
+      z-index: 30;
+    }
+    .drawer-blocker {
+      position: fixed;
+      inset: 0;
+      z-index: 29;
     }
     .menu > button:hover,
     .toolbar button:hover {
@@ -1326,6 +1361,10 @@ export class GnumarusShell extends LitElement {
     brushShape: { type: String },
     presetName: { type: String },
     brushTipKind: { type: String },
+    selectionDrawerFront: { type: String },
+    selectionDrawerOpen: { type: Boolean },
+    colorThreshold: { type: Number },
+    colorContiguous: { type: Boolean },
     brushHardness: { type: Number },
     brushSpacing: { type: Number },
     brushFlow: { type: Number },
@@ -1364,6 +1403,10 @@ export class GnumarusShell extends LitElement {
   };
 
   declare tool: GnumarusCanvasTool;
+  declare selectionDrawerFront: "rectselect" | "ellipse" | "lasso" | "colorselect";
+  declare selectionDrawerOpen: boolean;
+  declare colorThreshold: number;
+  declare colorContiguous: boolean;
   declare actionPaletteQuery: string;
   declare actionPaletteIndex: number;
   declare rotText: string;
@@ -1522,6 +1565,10 @@ export class GnumarusShell extends LitElement {
   constructor() {
     super();
     this.tool = "pencil";
+    this.selectionDrawerFront = "rectselect";
+    this.selectionDrawerOpen = false;
+    this.colorThreshold = 10;
+    this.colorContiguous = true;
     this.actionPaletteQuery = "";
     this.actionPaletteIndex = 0;
     this.registerActions();
@@ -1831,17 +1878,51 @@ export class GnumarusShell extends LitElement {
           >
             <span class="tool-icon">〜</span>
           </button>
-          <button
-            class=${this.tool === "rectselect" ? "active" : ""}
-            title=${tr("tool.rectselectHint")}
-            aria-label=${tr("tool.rectselect")}
-            @click=${(): void => {
-              this.tool = "rectselect";
-              this.engine?.setTool("rectselect");
-            }}
-          >
-            <span class="tool-icon">▭</span>
-          </button>
+          <div class="tool-drawer" data-testid="selection-drawer">
+            <button
+              class=${this.tool === this.selectionDrawerFront ? "active" : ""}
+              title=${this.drawerFrontHint()}
+              aria-label=${this.drawerFrontName()}
+              @click=${(): void => this.selectDrawerFront(this.selectionDrawerFront)}
+              @contextmenu=${(event: MouseEvent): void => {
+                event.preventDefault();
+                this.selectionDrawerOpen = !this.selectionDrawerOpen;
+              }}
+            >
+              <span class="tool-icon">${this.drawerFrontGlyph()}</span>
+            </button>
+            ${this.selectionDrawerOpen
+              ? html`<div class="tool-flyout" data-testid="selection-flyout">
+                  ${(
+                    [
+                      ["rectselect", "▭"],
+                      ["ellipse", "◯"],
+                      ["lasso", "〰"],
+                      ["colorselect", "✦"],
+                    ] as const
+                  ).map(
+                    ([name, glyph]) => html`<button
+                      class=${this.selectionDrawerFront === name ? "active" : ""}
+                      title=${this.drawerToolHint(name)}
+                      aria-label=${this.drawerToolName(name)}
+                      @click=${(): void => this.selectDrawerFront(name, true)}
+                    >
+                      <span class="tool-icon">${glyph}</span>
+                    </button>`,
+                  )}
+                </div>
+                <div
+                  class="drawer-blocker"
+                  @click=${(): void => {
+                    this.selectionDrawerOpen = false;
+                  }}
+                  @contextmenu=${(event: Event): void => {
+                    event.preventDefault();
+                    this.selectionDrawerOpen = false;
+                  }}
+                ></div>`
+              : html``}
+          </div>
           <button
             class=${this.tool === "destransform" ? "active" : ""}
             title=${tr("tool.destransformHint")}
@@ -3351,7 +3432,8 @@ export class GnumarusShell extends LitElement {
   }
 
   /** User-facing name of a tool. The internal id stays unchanged. */
-  private toolDisplayName(tool: GnumarusCanvasTool): string {    if (tool === "transform") {
+  private toolDisplayName(tool: GnumarusCanvasTool): string {
+    if (tool === "transform") {
       return tr("toolname.transform");
     }
     if (tool === "transform3d") {
@@ -3365,6 +3447,15 @@ export class GnumarusShell extends LitElement {
     }
     if (tool === "rectselect") {
       return tr("toolname.rectselect");
+    }
+    if (tool === "ellipse") {
+      return tr("toolname.ellipse");
+    }
+    if (tool === "lasso") {
+      return tr("toolname.lasso");
+    }
+    if (tool === "colorselect") {
+      return tr("toolname.colorselect");
     }
     if (tool === "pencil") {
       return tr("toolname.pencil");
@@ -3382,6 +3473,67 @@ export class GnumarusShell extends LitElement {
       return tr("toolname.line");
     }
     return tr("toolname.curve");
+  }
+
+  /** Selection-drawer helpers: the front tool doubles as the drawer button. */
+  private drawerToolName(tool: "rectselect" | "ellipse" | "lasso" | "colorselect"): string {
+    if (tool === "ellipse") {
+      return tr("tool.ellipse");
+    }
+    if (tool === "lasso") {
+      return tr("tool.lasso");
+    }
+    if (tool === "colorselect") {
+      return tr("tool.colorselect");
+    }
+    return tr("tool.rectselect");
+  }
+
+  private drawerFrontName(): string {
+    return this.drawerToolName(this.selectionDrawerFront);
+  }
+
+  private drawerToolHint(tool: "rectselect" | "ellipse" | "lasso" | "colorselect"): string {
+    if (tool === "ellipse") {
+      return tr("tool.ellipseHint");
+    }
+    if (tool === "lasso") {
+      return tr("tool.lassoHint");
+    }
+    if (tool === "colorselect") {
+      return tr("tool.colorselectHint");
+    }
+    return tr("tool.rectselectHint");
+  }
+
+  private drawerFrontHint(): string {
+    return this.drawerToolHint(this.selectionDrawerFront);
+  }
+
+  private drawerFrontGlyph(): string {
+    if (this.selectionDrawerFront === "ellipse") {
+      return "◯";
+    }
+    if (this.selectionDrawerFront === "lasso") {
+      return "〰";
+    }
+    if (this.selectionDrawerFront === "colorselect") {
+      return "✦";
+    }
+    return "▭";
+  }
+
+  /** Activate a selection tool through the drawer (optionally closing it). */
+  private selectDrawerFront(
+    tool: "rectselect" | "ellipse" | "lasso" | "colorselect",
+    close = false,
+  ): void {
+    this.selectionDrawerFront = tool;
+    this.tool = tool;
+    this.engine?.setTool(tool);
+    if (close) {
+      this.selectionDrawerOpen = false;
+    }
   }
 
   private renderBlendModeOption() {
@@ -3892,13 +4044,45 @@ export class GnumarusShell extends LitElement {
         </div>
       `;
     }
+    if (
+      this.tool === "rectselect" ||
+      this.tool === "ellipse" ||
+      this.tool === "lasso" ||
+      this.tool === "colorselect"
+    ) {
+      return html`
+        <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
+          ${this.tool === "colorselect"
+            ? html`<label title=${tr("opt.colorThresholdHint")}
+                >${tr("opt.colorThreshold")}
+                <input
+                  type="number"
+                  id="colorThreshold"
+                  min="0"
+                  max="100"
+                  step="1"
+                  .value=${String(this.colorThreshold)}
+                  @input=${(): void => this.applyColorThresholdFromDialog()}
+                />
+              </label>
+              <label title=${tr("opt.contiguousHint")}
+                ><input
+                  type="checkbox"
+                  id="colorContiguous"
+                  ?checked=${this.colorContiguous}
+                  @change=${(): void => this.applyColorContiguousFromDialog()}
+                />
+                ${tr("opt.contiguous")}
+              </label>`
+            : html`<span class="tool-options-empty">${tr("opt.rectselectModifiers")}</span>`}
+        </div>
+      `;
+    }
     return html`
       <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
-        ${this.tool === "rectselect"
-          ? html`<span class="tool-options-empty">${tr("opt.rectselectModifiers")}</span>`
-          : html`<span class="tool-options-empty"
-              >${tr("options.empty", { tool: this.toolDisplayName(this.tool) })}</span
-            >`}
+        <span class="tool-options-empty"
+          >${tr("options.empty", { tool: this.toolDisplayName(this.tool) })}</span
+        >
       </div>
     `;
   }
@@ -4242,6 +4426,9 @@ export class GnumarusShell extends LitElement {
       this.engine = new GnumarusCanvasEngine(host, {
         onToolChanged: (tool): void => {
           this.tool = tool;
+          if (tool === "rectselect" || tool === "ellipse" || tool === "lasso" || tool === "colorselect") {
+            this.selectionDrawerFront = tool;
+          }
         },
         onLayersChanged: (): void => {
           this.refreshLayers();
@@ -4354,6 +4541,7 @@ export class GnumarusShell extends LitElement {
     this.fileMenuOpen = false;
     this.editMenuOpen = false;
     this.helpMenuOpen = false;
+    this.selectionDrawerOpen = false;
   }
 
   /** Header click toggles one menu, closing the others. */
@@ -6074,6 +6262,21 @@ export class GnumarusShell extends LitElement {
     this.brushSize = size;
     this.engine?.setBrushSize(size);
     this.statusMessage = tr("status.brushSize", { value: size });
+  }
+
+  private applyColorThresholdFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("colorThreshold") as HTMLInputElement | null;
+    const raw = Math.floor(Number(input?.value));
+    const value = Number.isFinite(raw) ? Math.min(100, Math.max(0, raw)) : this.colorThreshold;
+    this.colorThreshold = value;
+    this.engine?.setColorThreshold(value);
+  }
+
+  private applyColorContiguousFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("colorContiguous") as HTMLInputElement | null;
+    const value = input?.checked ?? this.colorContiguous;
+    this.colorContiguous = value;
+    this.engine?.setColorContiguous(value);
   }
 
   private applyBrushShapeFromDialog(): void {
