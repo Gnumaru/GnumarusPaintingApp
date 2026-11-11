@@ -124,6 +124,36 @@ export async function pickSvgFile(): Promise<GnumarusFileHandle | null> {
 }
 
 /**
+ * Open the operating system file dialog to pick a 3D model file in any
+ * format three.js loads natively (glb/gltf/obj/stl/ply/fbx/dae/3mf/amf).
+ * Returns null when the dialog API is missing; throws AbortError when the
+ * user cancels (silent for callers).
+ */
+export async function pickModel3dFile(): Promise<GnumarusFileHandle | null> {
+  const showPicker = pickerWindow().showOpenFilePicker;
+  if (showPicker === undefined) {
+    return null;
+  }
+  const handles = await showPicker.call(window, {
+    multiple: false,
+    types: [
+      {
+        description: "3D models (three.js formats)",
+        accept: {
+          "model/gltf-binary": [".glb"],
+          "model/gltf+json": [".gltf"],
+          "model/obj": [".obj"],
+          "model/stl": [".stl"],
+          "model/ply": [".ply"],
+          "application/octet-stream": [".fbx", ".dae", ".3mf", ".amf"],
+        },
+      },
+    ],
+  });
+  return handles[0] ?? null;
+}
+
+/**
  * Save one blob through the OS save dialog. Returns the written handle, or
  * null when the API is missing (callers fall back to a plain download).
  * Throws AbortError when the user cancels (callers treat it as silent).
@@ -335,6 +365,14 @@ export async function readProjectFiles(root: GnumarusDirectoryHandle): Promise<{
     const handle = await resolveFile(root, vector.file, false);
     const buffer = await (await handle.getFile()).arrayBuffer();
     fileBlobs.set(vector.file, new Blob([buffer], { type: "image/svg+xml" }));
+  }
+  for (const model of project.animation.models3d) {
+    if (fileBlobs.has(model.file)) {
+      continue;
+    }
+    const handle = await resolveFile(root, model.file, false);
+    const buffer = await (await handle.getFile()).arrayBuffer();
+    fileBlobs.set(model.file, new Blob([buffer], { type: "application/octet-stream" }));
   }
   for (const layer of project.layers) {
     for (const cell of layer.cells ?? []) {

@@ -44,6 +44,13 @@ export interface GnumarusSvgMeta {
   file?: string;
 }
 
+export interface GnumarusModel3dMeta {
+  id: string;
+  name: string;
+  /** External model file under 3dmodels/; models are always stored as raw files. */
+  file: string;
+}
+
 export interface GnumarusContentMeta {
   id: string;
   name: string;
@@ -53,6 +60,8 @@ export interface GnumarusContentMeta {
   textId: string | null;
   /** Vector graphic shown instead of a texture or text; mutually exclusive with both. */
   svgId: string | null;
+  /** 3D model shown instead of a texture, text or vector; mutually exclusive with all. */
+  model3dId: string | null;
   transform: GnumarusLayerTransform;
 }
 
@@ -96,6 +105,7 @@ export interface GnumarusAnimationMeta {
   textures: GnumarusTextureMeta[];
   texts: GnumarusTextMeta[];
   svgs: GnumarusSvgMeta[];
+  models3d: GnumarusModel3dMeta[];
   contents: GnumarusContentMeta[];
   cells: GnumarusMatrixCellRef[];
 }
@@ -213,6 +223,40 @@ export function decodeSvgFile(file: string, bytes: Uint8Array): string {
   return new TextDecoder().decode(entries[expected] as Uint8Array);
 }
 
+/** 3D model extensions readable via three.js loaders. */
+export const SUPPORTED_MODEL3D_EXTENSIONS = ["glb", "gltf", "obj", "stl", "ply", "fbx", "dae", "3mf", "amf"] as const;
+
+export type GnumarusModel3dExtension = (typeof SUPPORTED_MODEL3D_EXTENSIONS)[number];
+
+/** Lowercase 3D model extension of a file name, or null when unsupported. */
+export function parseModel3dExtension(fileName: string): GnumarusModel3dExtension | null {
+  const dot = fileName.toLowerCase().lastIndexOf(".");
+  if (dot < 0) {
+    return null;
+  }
+  const ext = fileName.toLowerCase().slice(dot + 1);
+  return (SUPPORTED_MODEL3D_EXTENSIONS as readonly string[]).includes(ext)
+    ? (ext as GnumarusModel3dExtension)
+    : null;
+}
+
+/** Raw model file for one 3D entry (`3dmodels/<id>.<ext>`). */
+export function model3dFilePath(modelId: string, ext: string): string {
+  return `3dmodels/${modelId}.${ext.toLowerCase()}`;
+}
+
+/** Valid external model file: `3dmodels/<stem>.<supported ext>` (no traversal). */
+export function parseModel3dFilePath(file: unknown): string | null {
+  if (typeof file !== "string") {
+    return null;
+  }
+  const match = /^3dmodels\/([A-Za-z0-9_-]+)\.([A-Za-z0-9]+)$/.exec(file);
+  if (match === null || parseModel3dExtension(file) === null) {
+    return null;
+  }
+  return file;
+}
+
 /** Pack one text document as a single-file ZIP (`<textId>.html` inside). */
 export function encodeTextArchive(textId: string, html: string): Uint8Array {
   return zipSync({ [`${textId}.html`]: new TextEncoder().encode(html) }, { level: 9 });
@@ -272,6 +316,7 @@ export function createDefaultProject(width: number, height: number): GnumarusPro
       textures: [{ id: "layer0", name: "t1", width, height, file: textureFilePath("layer0") }],
       texts: [],
       svgs: [],
+      models3d: [],
       contents: [
         {
           id: "content1",
@@ -279,6 +324,7 @@ export function createDefaultProject(width: number, height: number): GnumarusPro
           textureId: "layer0",
           textId: null,
           svgId: null,
+          model3dId: null,
           transform: { ...IDENTITY_LAYER_TRANSFORM },
         },
       ],
@@ -352,6 +398,9 @@ export function collectProjectFileReferences(project: GnumarusProjectMeta): Set<
     if (vector.file !== undefined) {
       out.add(vector.file);
     }
+  }
+  for (const model of project.animation.models3d) {
+    out.add(model.file);
   }
   for (const layer of project.layers) {
     for (const cell of layer.cells ?? []) {
@@ -437,7 +486,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
   if (!isRecord(value)) {
     throw new GnumarusProjectError("project.json has an invalid animation section");
   }
-  const { frames, currentFrame, defaultFrameDuration, frameDurations, frameNames, namedAnimations, activeAnimation, textures, texts, svgs, contents, cells } = value;
+  const { frames, currentFrame, defaultFrameDuration, frameDurations, frameNames, namedAnimations, activeAnimation, textures, texts, svgs, models3d, contents, cells } = value;
   if (!Number.isInteger(frames) || (frames as number) < 1) {
     throw new GnumarusProjectError("project.json has an invalid frame count");
   }
@@ -483,6 +532,8 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
   const textIds = new Set(checkedTexts.map((entry) => entry.id));
   const checkedSvgs = parseSvgMetas(svgs);
   const svgIds = new Set(checkedSvgs.map((entry) => entry.id));
+  const checkedModels3d = parseModel3dMetas(models3d);
+  const model3dIds = new Set(checkedModels3d.map((entry) => entry.id));
   if (!Array.isArray(contents)) {
     throw new GnumarusProjectError("project.json has invalid contents");
   }
@@ -497,7 +548,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
       throw new GnumarusProjectError("project.json has duplicate content ids");
     }
     contentIds.add(id);
-    const { name, textureId, textId, svgId, transform } = entry;
+    const { name, textureId, textId, svgId, model3dId, transform } = entry;
     if (textureId !== null && textureId !== undefined && typeof textureId !== "string") {
       throw new GnumarusProjectError("project.json has a content with an invalid texture reference");
     }
@@ -519,9 +570,16 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
     if (resolvedSvg !== null && !svgIds.has(resolvedSvg)) {
       throw new GnumarusProjectError("project.json has a content with an unknown vector graphic");
     }
-    const linkedKinds = [resolvedTexture, resolvedText, resolvedSvg].filter((ref) => ref !== null).length;
+    if (model3dId !== null && model3dId !== undefined && typeof model3dId !== "string") {
+      throw new GnumarusProjectError("project.json has a content with an invalid 3D model reference");
+    }
+    const resolvedModel3d = model3dId === undefined ? null : (model3dId as string | null);
+    if (resolvedModel3d !== null && !model3dIds.has(resolvedModel3d)) {
+      throw new GnumarusProjectError("project.json has a content with an unknown 3D model");
+    }
+    const linkedKinds = [resolvedTexture, resolvedText, resolvedSvg, resolvedModel3d].filter((ref) => ref !== null).length;
     if (linkedKinds > 1) {
-      throw new GnumarusProjectError("project.json has a content with more than one texture, text or vector graphic");
+      throw new GnumarusProjectError("project.json has a content with more than one texture, text, vector graphic or 3D model");
     }
     checkedContents.push({
       id,
@@ -529,6 +587,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
       textureId: resolvedTexture,
       textId: resolvedText,
       svgId: resolvedSvg,
+      model3dId: resolvedModel3d,
       transform: parseLayerTransform(transform),
     });
   }
@@ -617,6 +676,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
     textures: checkedTextures,
     texts: checkedTexts,
     svgs: checkedSvgs,
+    models3d: checkedModels3d,
     contents: checkedContents,
     cells: checkedCells,
   };
@@ -704,6 +764,40 @@ function parseSvgMetas(value: unknown): GnumarusSvgMeta[] {
         document: { svg: (document as { svg: string }).svg },
       });
     }
+  }
+  return checked;
+}
+
+/** Strict 3D model list (absent in legacy files means none). Files load separately. */
+function parseModel3dMetas(value: unknown): GnumarusModel3dMeta[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new GnumarusProjectError("project.json has invalid 3D models");
+  }
+  const checked: GnumarusModel3dMeta[] = [];
+  const seenIds = new Set<string>();
+  const seenFiles = new Set<string>();
+  for (const entry of value) {
+    if (!isRecord(entry)) {
+      throw new GnumarusProjectError("project.json has an invalid 3D model");
+    }
+    const id = checkedId(entry.id, "3D model");
+    if (seenIds.has(id)) {
+      throw new GnumarusProjectError("project.json has duplicate 3D model ids");
+    }
+    seenIds.add(id);
+    const { name, file } = entry;
+    const modelFile = parseModel3dFilePath(file);
+    if (modelFile === null) {
+      throw new GnumarusProjectError("project.json has a 3D model with an invalid file");
+    }
+    if (seenFiles.has(modelFile)) {
+      throw new GnumarusProjectError("project.json has duplicate 3D model files");
+    }
+    seenFiles.add(modelFile);
+    checked.push({ id, name: checkedName(name, "3D model"), file: modelFile });
   }
   return checked;
 }
@@ -799,6 +893,7 @@ function migrateLegacyLayersToAnimation(
       textureId: layer.id,
       textId: null,
       svgId: null,
+      model3dId: null,
       transform: layer.transform !== undefined ? { ...layer.transform } : { ...IDENTITY_LAYER_TRANSFORM },
     });
     cells.push({ layer: layer.id, frame: 0, content: contentId });
@@ -814,6 +909,7 @@ function migrateLegacyLayersToAnimation(
     textures,
     texts: [],
     svgs: [],
+    models3d: [],
     contents,
     cells,
   };

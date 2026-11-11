@@ -345,3 +345,6 @@
 - [x] Text raster canvas resize fix + e2e clipping regression test; build + unit (436) + e2e green; docs updated
 - [x] Text descender clipping fix (measured ascent baseline, box fits ascent+descent) + unit (3) + e2e reference-comparison test; build + unit (439) + e2e green; docs updated
 - [x] Movable text editor dialog (title drag handle) + toolbar font/size/color selection save/restore fix; 3 e2e; build + unit (439) + full e2e (273) green; docs updated
+- [x] 3D model pool (`models3d`, `model3dId`, 4-way exclusivity) + format refs + ext allowlist + unit tests (441 passed)
+- [x] Engine async three.js raster + guards + picker/menu/action/import + save/open + UI + i18n (en + pt-BR)
+- [x] E2E (5 new: stl render, occupied/extension/corrupt refusals, raw round-trip); build + unit (441) + e2e (278/278) green; docs updated

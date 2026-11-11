@@ -17,6 +17,7 @@ import {
   isFileSaveSupported,
   isFileSystemAccessSupported,
   pickImportFile,
+  pickModel3dFile,
   pickProjectDirectory,
   pickSvgFile,
   pickSaveFile,
@@ -40,6 +41,8 @@ import {
   GNUMARUS_APP_ID,
   GNUMARUS_PROJECT_ARCHIVE_FILE,
   GNUMARUS_PROJECT_FILE,
+  model3dFilePath,
+  parseModel3dExtension,
   serializeProject,
   staleTextureCandidates,
   svgArchivePath,
@@ -48,6 +51,7 @@ import {
   textFilePath,
   textureFilePath,
   type GnumarusContentMeta,
+  type GnumarusModel3dMeta,
   type GnumarusProjectMeta,
   type GnumarusSvgMeta,
   type GnumarusTextureMeta,
@@ -1865,6 +1869,7 @@ export class GnumarusShell extends LitElement {
                   <button title=${tr("menu.saveTitle")} @click=${(): void => void this.runAction("save-project")}>${tr("menu.saveProject")}</button>
                   <button @click=${(): void => void this.runAction("import")}>${tr("menu.import")}</button>
                   <button @click=${(): void => void this.runAction("import-svg")}>${tr("menu.importSvg")}</button>
+                  <button @click=${(): void => void this.runAction("import-3d-model")}>${tr("menu.importModel3d")}</button>
                   <button @click=${(): void => void this.runAction("export")}>${tr("menu.export")}</button>
                 </div>
               `
@@ -4699,6 +4704,8 @@ export class GnumarusShell extends LitElement {
             this.statusMessage = tr("status.textPaintBlocked");
           } else if (kind === "vector-paint-blocked") {
             this.statusMessage = tr("status.vectorPaintBlocked");
+          } else if (kind === "model3d-paint-blocked") {
+            this.statusMessage = tr("status.model3dPaintBlocked");
           }
         },
         onToolSizeChanged: (kind, size): void => {
@@ -5243,6 +5250,14 @@ export class GnumarusShell extends LitElement {
       requirements: [],
       run: (): void => {
         void this.importSvgFile();
+      },
+    });
+    this.actionRegistry.register({
+      id: "import-3d-model",
+      name: tr("menu.importModel3d"),
+      requirements: [],
+      run: (): void => {
+        void this.importModel3dFile();
       },
     });
     this.actionRegistry.register({
@@ -7953,6 +7968,7 @@ export class GnumarusShell extends LitElement {
     textureId: string | null;
     textId: string | null;
     svgId: string | null;
+    model3dId: string | null;
     width: number;
     height: number;
   }> {
@@ -8075,6 +8091,45 @@ export class GnumarusShell extends LitElement {
     }
   }
 
+  /** Rasterize a 3D model entry into a picker thumbnail data URL (sync cache only). */
+  private model3dThumbnailDataUrl(modelId: string): string | null {
+    if (this.engine === null) {
+      return null;
+    }
+    const raster = this.engine.rasterizeModel3d(modelId);
+    if (raster === null || raster.width < 1 || raster.height < 1) {
+      return null;
+    }
+    try {
+      const maxSide = 128;
+      const scale = Math.min(1, maxSide / Math.max(raster.width, raster.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(raster.width * scale));
+      canvas.height = Math.max(1, Math.round(raster.height * scale));
+      const ctx = canvas.getContext("2d");
+      if (ctx === null) {
+        return null;
+      }
+      const image = new ImageData(new Uint8ClampedArray(raster.buffer), raster.width, raster.height);
+      if (scale >= 1) {
+        ctx.putImageData(image, 0, 0);
+      } else {
+        const full = document.createElement("canvas");
+        full.width = raster.width;
+        full.height = raster.height;
+        const fullCtx = full.getContext("2d");
+        if (fullCtx === null) {
+          return null;
+        }
+        fullCtx.putImageData(image, 0, 0);
+        ctx.drawImage(full, 0, 0, canvas.width, canvas.height);
+      }
+      return canvas.toDataURL();
+    } catch {
+      return null;
+    }
+  }
+
   private renderContentPickerDialog() {
     const contents = this.sortedContents();
     return html`
@@ -8111,17 +8166,21 @@ export class GnumarusShell extends LitElement {
                 ? this.textThumbnailDataUrl(content.textId)
                 : content.svgId !== null
                   ? this.svgThumbnailDataUrl(content.svgId)
-                  : content.textureId === null
-                    ? null
-                    : this.thumbnailDataUrl(content.textureId);
+                  : content.model3dId !== null
+                    ? this.model3dThumbnailDataUrl(content.model3dId)
+                    : content.textureId === null
+                      ? null
+                      : this.thumbnailDataUrl(content.textureId);
             const kind =
               content.textId !== null
                 ? tr("dialog.kindText")
                 : content.svgId !== null
                   ? tr("dialog.kindVector")
-                  : content.textureId !== null
-                    ? tr("dialog.kindTexture")
-                    : tr("dialog.kindEmpty");
+                  : content.model3dId !== null
+                    ? tr("dialog.kindModel3d")
+                    : content.textureId !== null
+                      ? tr("dialog.kindTexture")
+                      : tr("dialog.kindEmpty");
             return html`
               <button
                 class="picker-item"
@@ -10473,6 +10532,35 @@ export class GnumarusShell extends LitElement {
    * corrupt files.
    */
   /**
+   * Decode one external 3D model file from the loaded blobs. Throws on
+   * missing files or invalid references (empty payloads fail at raster
+   * time and render nothing, like undecodable SVGs).
+   */
+  private async decodeStoredModel3dFile(file: string, fileBlobs: Map<string, Blob>): Promise<Uint8Array> {
+    const blob = fileBlobs.get(file);
+    if (blob === undefined) {
+      throw new Error(`Missing 3D model file: ${file}`);
+    }
+    return new Uint8Array(await blob.arrayBuffer());
+  }
+
+  /**
+   * Resolve stored 3D models to engine entries: raw bytes plus extension
+   * (loaders dispatch on it). Rasters decode asynchronously after load.
+   */
+  private async resolveStoredModels3d(
+    models: GnumarusModel3dMeta[],
+    fileBlobs: Map<string, Blob>,
+  ): Promise<Array<{ id: string; name: string; ext: string; bytes: Uint8Array }>> {
+    const out: Array<{ id: string; name: string; ext: string; bytes: Uint8Array }> = [];
+    for (const model of models) {
+      const ext = model.file.slice(model.file.lastIndexOf(".") + 1).toLowerCase();
+      out.push({ id: model.id, name: model.name, ext, bytes: await this.decodeStoredModel3dFile(model.file, fileBlobs) });
+    }
+    return out;
+  }
+
+  /**
    * Decode one external vector file from the loaded blobs (raw `.svg` or
    * single-file `.zip`, sniffed by extension). Throws on missing or
    * corrupt files.
@@ -10612,12 +10700,14 @@ export class GnumarusShell extends LitElement {
         textures,
         texts: await this.resolveStoredTexts(project.animation.texts, fileBlobs),
         svgs: await this.resolveStoredSvgs(project.animation.svgs, fileBlobs),
+        models3d: await this.resolveStoredModels3d(project.animation.models3d, fileBlobs),
         contents: project.animation.contents.map((content) => ({
           id: content.id,
           name: content.name,
           textureId: content.textureId,
           textId: content.textId,
           svgId: content.svgId,
+          model3dId: content.model3dId,
           transform: { ...content.transform },
         })),
         cells: project.animation.cells.map((cell) => ({ ...cell })),
@@ -10725,6 +10815,73 @@ export class GnumarusShell extends LitElement {
     } else {
       this.statusMessage = tr("status.svgImported", { name });
     }
+    this.showToast(this.statusMessage);
+  }
+
+  /**
+   * Import a 3D model into the current cell. Only empty cells (or cells
+   * holding an empty content) accept the import; anything else shows an
+   * error toast so existing work is never destroyed. The model is decoded
+   * first: unreadable files or unsupported formats show an error toast and
+   * import nothing. No editing tools exist in v1; the cell renders an
+   * offscreen turntable-style raster of the model.
+   */
+  private async importModel3dFile(): Promise<void> {
+    this.fileMenuOpen = false;
+    if (this.engine === null) {
+      return;
+    }
+    if (!isFilePickerSupported()) {
+      this.statusMessage = tr("status.importNeedsFs");
+      return;
+    }
+    this.stopPlayback();
+    const layerId = this.engine.getActiveLayerId();
+    const frame = this.engine.getCurrentFrame();
+    if (!this.engine.isCellContentEmpty(layerId, frame)) {
+      this.statusMessage = tr("status.model3dCellOccupied");
+      this.showToast(tr("status.model3dCellOccupied"));
+      return;
+    }
+    let handle;
+    try {
+      handle = await pickModel3dFile();
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
+      const reason = error instanceof Error ? error.message : String(error);
+      this.statusMessage = tr("status.importFailed", { reason });
+      this.showToast(tr("status.importFailed", { reason }));
+      return;
+    }
+    if (handle === null) {
+      this.statusMessage = tr("status.importNeedsFs");
+      return;
+    }
+    const fileName = await this.svgPickerFileName(handle);
+    const ext = parseModel3dExtension(fileName);
+    if (ext === null) {
+      this.statusMessage = tr("status.model3dUnsupported", { name: fileName });
+      this.showToast(tr("status.model3dUnsupported", { name: fileName }));
+      return;
+    }
+    const bytes = new Uint8Array(await (await handle.getFile()).arrayBuffer());
+    if (bytes.length === 0) {
+      this.statusMessage = tr("status.model3dInvalid");
+      this.showToast(tr("status.model3dInvalid"));
+      return;
+    }
+    const name = fileName.replace(/\.[^.]+$/, "").slice(0, 64) || "Model";
+    const created = await this.engine.ensureModel3dContent(layerId, frame, name, ext, bytes);
+    if (created === null) {
+      this.statusMessage = tr("status.model3dInvalid");
+      this.showToast(tr("status.model3dInvalid"));
+      return;
+    }
+    this.refreshLayers();
+    this.dirty = true;
+    this.statusMessage = tr("status.model3dImported", { name });
     this.showToast(this.statusMessage);
   }
 
@@ -11136,10 +11293,12 @@ export class GnumarusShell extends LitElement {
         textureId: content.textureId,
         textId: content.textId ?? null,
         svgId: content.svgId ?? null,
+        model3dId: content.model3dId ?? null,
         transform: { ...content.transform },
       }));
       const textsMeta: GnumarusTextMeta[] = [];
       const svgsMeta: GnumarusSvgMeta[] = [];
+      const models3dMeta: GnumarusModel3dMeta[] = [];
       for (const text of exported.texts ?? []) {
         if (this.storageTextStorage === "html") {
           const file = textFilePath(text.id);
@@ -11176,6 +11335,11 @@ export class GnumarusShell extends LitElement {
           svgsMeta.push({ id: vector.id, name: vector.name, document: { svg: vector.svg } });
         }
       }
+      for (const model of exported.models3d ?? []) {
+        const file = model3dFilePath(model.id, model.ext);
+        models3dMeta.push({ id: model.id, name: model.name, file });
+        blobs.set(file, new Blob([model.bytes as Uint8Array<ArrayBuffer>], { type: "application/octet-stream" }));
+      }
       const meta: GnumarusProjectMeta = {
         app: GNUMARUS_APP_ID,
         version: 3,
@@ -11203,6 +11367,7 @@ export class GnumarusShell extends LitElement {
           textures: texturesMeta,
           texts: textsMeta,
           svgs: svgsMeta,
+          models3d: models3dMeta,
           contents: contentsMeta,
           cells: exported.cells.map((cell) => ({ ...cell })),
         },

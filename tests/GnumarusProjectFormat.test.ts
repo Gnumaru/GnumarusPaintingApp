@@ -15,6 +15,9 @@ import {
   staleTextureCandidates,
   decodeSvgFile,
   encodeSvgArchive,
+  model3dFilePath,
+  parseModel3dExtension,
+  parseModel3dFilePath,
   parseSvgFilePath,
   svgArchivePath,
   svgFilePath,
@@ -44,6 +47,7 @@ describe("GnumarusProjectFormat", () => {
         textureId: "layer0",
         textId: null,
         svgId: null,
+        model3dId: null,
         transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
       },
     ]);
@@ -103,6 +107,7 @@ describe("GnumarusProjectFormat", () => {
       textureId: "layer0",
       textId: null,
       svgId: null,
+      model3dId: null,
       transform: { x: 1, y: 2, rotation: 0.5, flipX: true, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
     });
     expect(parsed.layers[0]).toMatchObject({ opacity: 0.5, lockedChannels: { r: true, g: false, b: false, a: false } });
@@ -118,6 +123,7 @@ describe("GnumarusProjectFormat", () => {
       textureId: null,
       textId: null,
       svgId: null,
+      model3dId: null,
       transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
     });
     project.animation.cells.push(
@@ -414,6 +420,7 @@ describe("GnumarusProjectFormat", () => {
       textureId: null,
       textId: "text1",
       svgId: null,
+      model3dId: null,
       transform: { x: 5, y: 5, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
     });
     project.animation.cells.push({ layer: "layer0", frame: 1, content: "content2" });
@@ -577,6 +584,7 @@ describe("GnumarusProjectFormat", () => {
       textureId: null,
       textId: null,
       svgId: "vec1",
+      model3dId: null,
       transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
     });
     const parsed = parseProject(serializeProject(project));
@@ -603,6 +611,54 @@ describe("GnumarusProjectFormat", () => {
     dual.animation.texts.push({ id: "t", name: "T", document: { html: "<div>x</div>" } });
     dual.animation.contents[0] = { ...dual.animation.contents[0], textId: "t", svgId: "v" };
     dual.animation.svgs.push({ id: "v", name: "V", document: { svg: "<svg></svg>" } });
+    expect(() => parseProject(serializeProject(dual))).toThrow(GnumarusProjectError);
+  });
+
+  it("maps 3D models to files and validates extensions", () => {
+    expect(model3dFilePath("car1", "glb")).toBe("3dmodels/car1.glb");
+    expect(model3dFilePath("car1", "GLB")).toBe("3dmodels/car1.glb");
+    expect(parseModel3dExtension("car.glb")).toBe("glb");
+    expect(parseModel3dExtension("CAR.FBX")).toBe("fbx");
+    expect(parseModel3dExtension("car.txt")).toBeNull();
+    expect(parseModel3dExtension("car")).toBeNull();
+    expect(parseModel3dFilePath("3dmodels/car1.glb")).toBe("3dmodels/car1.glb");
+    expect(parseModel3dFilePath("3dmodels/my-car_2.obj")).toBe("3dmodels/my-car_2.obj");
+    expect(parseModel3dFilePath("3dmodels/car1.txt")).toBeNull();
+    expect(parseModel3dFilePath("3dmodels/../car1.glb")).toBeNull();
+    expect(parseModel3dFilePath("textures/car1.glb")).toBeNull();
+    expect(parseModel3dFilePath(undefined)).toBeNull();
+  });
+
+  it("parses 3D model references and rejects bad ones", () => {
+    const project = createDefaultProject(8, 8);
+    project.animation.models3d.push({ id: "model1", name: "M1", file: "3dmodels/model1.glb" });
+    project.animation.contents.push({
+      id: "content2",
+      name: "C2",
+      textureId: null,
+      textId: null,
+      svgId: null,
+      model3dId: "model1",
+      transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
+    });
+    const parsed = parseProject(serializeProject(project));
+    expect(parsed.animation.models3d).toEqual([{ id: "model1", name: "M1", file: "3dmodels/model1.glb" }]);
+    expect(parsed.animation.contents[1]).toMatchObject({ model3dId: "model1" });
+    expect(collectProjectFileReferences(parsed)).toContain("3dmodels/model1.glb");
+    const badExt = createDefaultProject(8, 8);
+    badExt.animation.models3d.push({ id: "m", name: "M", file: "3dmodels/m.txt" });
+    expect(() => parseProject(serializeProject(badExt))).toThrow(GnumarusProjectError);
+    const duplicate = createDefaultProject(8, 8);
+    duplicate.animation.models3d.push({ id: "m1", name: "A", file: "3dmodels/shared.obj" });
+    duplicate.animation.models3d.push({ id: "m2", name: "B", file: "3dmodels/shared.obj" });
+    expect(() => parseProject(serializeProject(duplicate))).toThrow(GnumarusProjectError);
+    const unknown = createDefaultProject(8, 8);
+    unknown.animation.contents[0] = { ...unknown.animation.contents[0], model3dId: "missing" };
+    expect(() => parseProject(serializeProject(unknown))).toThrow(GnumarusProjectError);
+    const dual = createDefaultProject(8, 8);
+    dual.animation.texts.push({ id: "t", name: "T", document: { html: "<div>x</div>" } });
+    dual.animation.contents[0] = { ...dual.animation.contents[0], textId: "t", model3dId: "v" };
+    dual.animation.models3d.push({ id: "v", name: "V", file: "3dmodels/v.stl" });
     expect(() => parseProject(serializeProject(dual))).toThrow(GnumarusProjectError);
   });
 });

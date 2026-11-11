@@ -397,6 +397,8 @@ interface GnumarusCellContent {
   textId: string | null;
   /** Vector graphic shown instead of a texture or text; mutually exclusive with both. */
   svgId: string | null;
+  /** 3D model shown instead of a texture, text or vector; mutually exclusive with all. */
+  model3dId: string | null;
   transform: GnumarusLayerTransform;
 }
 
@@ -426,6 +428,7 @@ export interface GnumarusAnimationMatrixView {
     textureId: string | null;
     textId: string | null;
     svgId: string | null;
+    model3dId: string | null;
     width: number;
     height: number;
     transform: GnumarusLayerTransform;
@@ -444,7 +447,8 @@ export interface GnumarusAnimationProjectData {
   textures: GnumarusTexturePixels[];
   texts?: Array<{ id: string; name: string; document: GnumarusTextDocument }>;
   svgs?: Array<{ id: string; name: string; svg: string }>;
-  contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null; svgId?: string | null; transform: GnumarusLayerTransform }>;
+  models3d?: Array<{ id: string; name: string; ext: string; bytes: Uint8Array }>;
+  contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null; svgId?: string | null; model3dId?: string | null; transform: GnumarusLayerTransform }>;
   cells: Array<{ layer: string; frame: number; content: string }>;
   frames: number;
   currentFrame: number;
@@ -587,7 +591,7 @@ export interface GnumarusEngineOptions {
   /** Fired when the text tool requests the text editor for a cell. */
   onTextEditRequested?: (info: { layerId: string; frame: number; contentId: string; textId: string }) => void;
   /** Fired for user-facing notices that need a toast (blocked paint on derived cells). */
-  onNotice?: (kind: "text-paint-blocked" | "vector-paint-blocked") => void;
+  onNotice?: (kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked") => void;
   checker?: GnumarusCheckerSettings;
   gridMinZoom?: number;
   gridOpacityPercent?: number;
@@ -648,6 +652,16 @@ export class GnumarusCanvasEngine {
   private svgPending = new Set<string>();
   private svgCounter = 1;
   private svgNameCounter = 1;
+  /** 3D model entries by id (source bytes, decoded on demand). */
+  private models3d = new Map<string, { id: string; name: string; ext: string; bytes: Uint8Array }>();
+  /** Raster cache by model id (512px offscreen renders). */
+  private modelRasters = new Map<string, { buffer: Uint8ClampedArray; width: number; height: number }>();
+  /** Model ids with a decode already in flight. */
+  private modelPending = new Set<string>();
+  private modelCounter = 1;
+  private modelNameCounter = 1;
+  /** Shared offscreen renderer for 3D model thumbnails (lazy). */
+  private modelRenderer: THREE.WebGLRenderer | null = null;
   private frameCount = 1;
   private currentFrame = 0;
   private frameDurations = new Map<number, number>();
@@ -955,7 +969,7 @@ export class GnumarusCanvasEngine {
   private readonly onTextEditRequested:
     | ((info: { layerId: string; frame: number; contentId: string; textId: string }) => void)
     | undefined;
-  private readonly onNotice: ((kind: "text-paint-blocked" | "vector-paint-blocked") => void) | undefined;
+  private readonly onNotice: ((kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked") => void) | undefined;
 
   constructor(container: HTMLElement, options: GnumarusEngineOptions) {
     this.container = container;
@@ -1400,6 +1414,7 @@ export class GnumarusCanvasEngine {
       textureId: "layer0",
       textId: null,
       svgId: null,
+      model3dId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(animationCellKey("layer0", 0), "content1");
@@ -1418,6 +1433,13 @@ export class GnumarusCanvasEngine {
     this.svgs.clear();
     this.svgRasters.clear();
     this.svgPending.clear();
+    this.modelCounter = 1;
+    this.modelNameCounter = 1;
+    this.models3d.clear();
+    this.modelRasters.clear();
+    this.modelPending.clear();
+    this.modelRenderer?.dispose();
+    this.modelRenderer = null;
     this.resetSymmetryCenter();
     this.syncAllLayerRenders();
 
@@ -1556,6 +1578,16 @@ export class GnumarusCanvasEngine {
           textures.set(derivedId, { width: raster.width, height: raster.height, buffer: raster.buffer });
           textureId = derivedId;
         }
+      } else if (content.model3dId !== null) {
+        const raster = this.rasterizeModel3d(content.model3dId);
+        if (raster === null) {
+          this.ensureModelRaster(content.model3dId);
+          textureId = null;
+        } else {
+          const derivedId = `model3d:${content.model3dId}`;
+          textures.set(derivedId, { width: raster.width, height: raster.height, buffer: raster.buffer });
+          textureId = derivedId;
+        }
       }
       contents.set(id, { textureId, transform: content.transform });
     }
@@ -1678,6 +1710,10 @@ export class GnumarusCanvasEngine {
     }
     if (content.svgId !== null) {
       const size = this.svgRasterSize(content.svgId);
+      return size === null ? { width: 0, height: 0 } : size;
+    }
+    if (content.model3dId !== null) {
+      const size = this.model3dRasterSize(content.model3dId);
       return size === null ? { width: 0, height: 0 } : size;
     }
     if (content.textureId === null) {
@@ -2093,6 +2129,19 @@ export class GnumarusCanvasEngine {
     return this.svgs.has(content.svgId) ? content.svgId : null;
   }
 
+  /** 3D model id of a cell's content, or null (read-only: never creates anything). */
+  getCellModel3dId(layerId: string, frame: number): string | null {
+    const contentId = this.cells.get(animationCellKey(layerId, frame));
+    if (contentId === undefined) {
+      return null;
+    }
+    const content = this.contents.get(contentId);
+    if (content === undefined || content.model3dId === null) {
+      return null;
+    }
+    return this.models3d.has(content.model3dId) ? content.model3dId : null;
+  }
+
   /** True when the cell has no content or its content renders nothing (empty or fully transparent). */
   isCellContentEmpty(layerId: string, frame: number): boolean {
     const contentId = this.cells.get(animationCellKey(layerId, frame));
@@ -2103,7 +2152,7 @@ export class GnumarusCanvasEngine {
     if (content === undefined) {
       return true;
     }
-    if (content.textId !== null || content.svgId !== null) {
+    if (content.textId !== null || content.svgId !== null || content.model3dId !== null) {
       return false;
     }
     if (content.textureId === null) {
@@ -2129,6 +2178,10 @@ export class GnumarusCanvasEngine {
     }
     if (this.getCellSvgId(layer.id, this.currentFrame) !== null) {
       this.onNotice?.("vector-paint-blocked");
+      return true;
+    }
+    if (this.getCellModel3dId(layer.id, this.currentFrame) !== null) {
+      this.onNotice?.("model3d-paint-blocked");
       return true;
     }
     return false;
@@ -2164,6 +2217,7 @@ export class GnumarusCanvasEngine {
           textureId: content.textureId,
           textId: content.textId,
           svgId: content.svgId,
+          model3dId: content.model3dId,
           width: size.width,
           height: size.height,
           transform: { ...content.transform },
@@ -2201,6 +2255,7 @@ export class GnumarusCanvasEngine {
       textureId,
       textId: null,
       svgId: null,
+      model3dId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(animationCellKey(layerId, frame), contentId);
@@ -2228,6 +2283,7 @@ export class GnumarusCanvasEngine {
       textureId: null,
       textId: null,
       svgId: null,
+      model3dId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(animationCellKey(layerId, frame), contentId);
@@ -2318,10 +2374,7 @@ export class GnumarusCanvasEngine {
     if (content.textureId === textureId) {
       return false;
     }
-    if (content.textId !== null || content.svgId !== null) {
-      return false;
-    }
-    if (content.textId !== null) {
+    if (content.textId !== null || content.svgId !== null || content.model3dId !== null) {
       return false;
     }
     content.textureId = textureId;
@@ -2378,7 +2431,7 @@ export class GnumarusCanvasEngine {
     if (content.textId === textId) {
       return false;
     }
-    if (content.textureId !== null || content.svgId !== null) {
+    if (content.textureId !== null || content.svgId !== null || content.model3dId !== null) {
       return false;
     }
     content.textId = textId;
@@ -2409,6 +2462,7 @@ export class GnumarusCanvasEngine {
       textureId: null,
       textId,
       svgId: null,
+      model3dId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(animationCellKey(layerId, frame), contentId);
@@ -2439,6 +2493,7 @@ export class GnumarusCanvasEngine {
       textureId: null,
       textId,
       svgId: null,
+      model3dId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(animationCellKey(layerId, frame), contentId);
@@ -2576,6 +2631,7 @@ export class GnumarusCanvasEngine {
       textureId,
       textId: null,
       svgId: null,
+      model3dId: null,
       transform: { ...content.transform },
     });
     this.cells.set(key, bakedId);
@@ -2759,6 +2815,7 @@ export class GnumarusCanvasEngine {
       textureId: null,
       textId: null,
       svgId,
+      model3dId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(key, createdId);
@@ -2866,6 +2923,339 @@ export class GnumarusCanvasEngine {
     return parseSvgDimensions(entry.svg);
   }
 
+  /** Fixed raster edge for 3D model renders (models carry no intrinsic size). */
+  private modelRasterEdge(): number {
+    return 512;
+  }
+
+  private nextModelId(): string {
+    return `model${this.modelCounter++}`;
+  }
+
+  private nextModelName(): string {
+    return `M${this.modelNameCounter++}`;
+  }
+
+  /** All 3D model entries (for pickers), sorted by name. */
+  getModel3dEntries(): Array<{ id: string; name: string; ext: string }> {
+    return [...this.models3d.values()]
+      .map((entry) => ({ id: entry.id, name: entry.name, ext: entry.ext }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  /**
+   * Resolve a cell for a 3D model import: reuse the cell's empty content
+   * (a blank texture is detached, dropped when unshared), or create a
+   * fresh model content. Decodes first so failures import nothing (callers
+   * show the error toast); non-empty cells are refused outright.
+   */
+  async ensureModel3dContent(
+    layerId: string,
+    frame: number,
+    name: string,
+    ext: string,
+    bytes: Uint8Array,
+  ): Promise<{ contentId: string; modelId: string } | null> {
+    if (this.findLayer(layerId) === null) {
+      return null;
+    }
+    if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
+      return null;
+    }
+    const key = animationCellKey(layerId, frame);
+    const contentId = this.cells.get(key);
+    const content = contentId === undefined ? undefined : this.contents.get(contentId);
+    if (content !== undefined) {
+      if (content.textId !== null || content.svgId !== null || content.model3dId !== null) {
+        return null;
+      }
+      if (content.textureId !== null) {
+        if (!this.isTextureBlank(content.textureId)) {
+          return null;
+        }
+        let shared = false;
+        for (const other of this.contents.values()) {
+          if (other !== content && other.textureId === content.textureId) {
+            shared = true;
+            break;
+          }
+        }
+        if (!shared) {
+          this.textures.delete(content.textureId);
+        }
+        content.textureId = null;
+      }
+    }
+    const raster = await this.decodeModel3d(ext, bytes);
+    if (raster === null) {
+      return null;
+    }
+    const modelId = this.nextModelId();
+    this.models3d.set(modelId, { id: modelId, name: name === "" ? this.nextModelName() : name, ext, bytes: bytes.slice() });
+    this.modelRasters.set(modelId, raster);
+    if (content !== undefined) {
+      content.model3dId = modelId;
+      this.syncAllLayerRenders();
+      this.refreshLayerStacking();
+      this.render();
+      this.onPixelsChanged();
+      this.onLayersChanged?.();
+      return { contentId: content.id, modelId };
+    }
+    const createdId = this.nextContentId();
+    this.contents.set(createdId, {
+      id: createdId,
+      name: `C${this.contentCounter - 1}`,
+      textureId: null,
+      textId: null,
+      svgId: null,
+      model3dId: modelId,
+      transform: { ...IDENTITY_LAYER_TRANSFORM },
+    });
+    this.cells.set(key, createdId);
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return { contentId: createdId, modelId };
+  }
+
+  /**
+   * Kick off the asynchronous 3D decode for a model entry (no-op when
+   * cached or already in flight). Refreshes the canvas when it arrives.
+   */
+  ensureModelRaster(modelId: string): void {
+    const entry = this.models3d.get(modelId);
+    if (entry === undefined || this.modelRasters.has(modelId) || this.modelPending.has(modelId)) {
+      return;
+    }
+    this.modelPending.add(modelId);
+    void this.decodeModel3d(entry.ext, entry.bytes)
+      .then((raster) => {
+        if (raster !== null) {
+          this.modelRasters.set(modelId, raster);
+          this.syncAllLayerRenders();
+          this.refreshLayerStacking();
+          this.render();
+          this.onPixelsChanged();
+          this.onLayersChanged?.();
+        }
+      })
+      .finally(() => {
+        this.modelPending.delete(modelId);
+      });
+  }
+
+  /**
+   * Rasterize a 3D model entry from the cache. Returns null when the async
+   * decode has not finished yet (callers should kick ensureModelRaster).
+   */
+  rasterizeModel3d(modelId: string): { buffer: Uint8ClampedArray; width: number; height: number } | null {
+    const entry = this.models3d.get(modelId);
+    if (entry === undefined) {
+      return null;
+    }
+    const cached = this.modelRasters.get(modelId);
+    if (cached === undefined) {
+      return null;
+    }
+    return { buffer: cached.buffer, width: cached.width, height: cached.height };
+  }
+
+  /** Layout-space size of a 3D model raster (fixed edge; ready or not). */
+  model3dRasterSize(modelId: string): { width: number; height: number } | null {
+    const raster = this.rasterizeModel3d(modelId);
+    if (raster !== null) {
+      return { width: raster.width, height: raster.height };
+    }
+    if (!this.models3d.has(modelId)) {
+      return null;
+    }
+    const edge = this.modelRasterEdge();
+    return { width: edge, height: edge };
+  }
+
+  /** Lazily created offscreen renderer for 3D model thumbnails. */
+  private ensureModelRenderer(): THREE.WebGLRenderer | null {
+    if (this.modelRenderer !== null) {
+      return this.modelRenderer;
+    }
+    try {
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+      const edge = this.modelRasterEdge();
+      renderer.setSize(edge, edge, false);
+      renderer.setClearColor(0x000000, 0);
+      this.modelRenderer = renderer;
+      return renderer;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Dispose geometries/materials/maps of a decoded model (keeps RAM conservative). */
+  private disposeModelObject(object: THREE.Object3D): void {
+    interface DisposableNode {
+      geometry?: { dispose(): void };
+      material?: { dispose(): void } | Array<{ dispose(): void }> | undefined;
+      map?: { dispose(): void } | null;
+      normalMap?: { dispose(): void } | null;
+      roughnessMap?: { dispose(): void } | null;
+      metalnessMap?: { dispose(): void } | null;
+      emissiveMap?: { dispose(): void } | null;
+    }
+    object.traverse((node: THREE.Object3D) => {
+      const mesh = node as unknown as DisposableNode;
+      try {
+        mesh.geometry?.dispose();
+      } catch {
+        // Best effort: never fail teardown.
+      }
+      const materials = Array.isArray(mesh.material) ? mesh.material : mesh.material === undefined ? [] : [mesh.material];
+      for (const material of materials) {
+        try {
+          const textured = material as unknown as DisposableNode;
+          textured.map?.dispose();
+          textured.normalMap?.dispose();
+          textured.roughnessMap?.dispose();
+          textured.metalnessMap?.dispose();
+          textured.emissiveMap?.dispose();
+          material.dispose();
+        } catch {
+          // Best effort: never fail teardown.
+        }
+      }
+    });
+  }
+
+  /** Copy model bytes into a fresh ArrayBuffer for loader parsing. */
+  private modelBytesToBuffer(bytes: Uint8Array): ArrayBuffer {
+    return bytes.slice().buffer as ArrayBuffer;
+  }
+
+  /** Load a model file into a scene object via the matching three.js addon (lazy imports). */
+  private async loadModel3dObject(ext: string, bytes: Uint8Array): Promise<THREE.Object3D | null> {
+    try {
+      const normalized = ext.toLowerCase();
+      if (normalized === "glb" || normalized === "gltf") {
+        const { GLTFLoader } = await import("three/addons/loaders/GLTFLoader.js");
+        const loader = new GLTFLoader();
+        const payload =
+          normalized === "glb" ? this.modelBytesToBuffer(bytes) : new TextDecoder().decode(bytes);
+        const gltf = await loader.parseAsync(payload, "");
+        return gltf.scene ?? null;
+      }
+      if (normalized === "obj") {
+        const { OBJLoader } = await import("three/addons/loaders/OBJLoader.js");
+        return new OBJLoader().parse(new TextDecoder().decode(bytes));
+      }
+      if (normalized === "stl") {
+        const { STLLoader } = await import("three/addons/loaders/STLLoader.js");
+        const geometry = new STLLoader().parse(this.modelBytesToBuffer(bytes));
+        return new THREE.Mesh(
+          geometry,
+          new THREE.MeshStandardMaterial({ color: 0xcfcfcf, roughness: 0.6, metalness: 0.1, side: THREE.DoubleSide }),
+        );
+      }
+      if (normalized === "ply") {
+        const { PLYLoader } = await import("three/addons/loaders/PLYLoader.js");
+        const geometry = new PLYLoader().parse(this.modelBytesToBuffer(bytes));
+        return new THREE.Mesh(
+          geometry,
+          new THREE.MeshStandardMaterial({ color: 0xcfcfcf, roughness: 0.6, metalness: 0.1, side: THREE.DoubleSide }),
+        );
+      }
+      if (normalized === "fbx") {
+        const { FBXLoader } = await import("three/addons/loaders/FBXLoader.js");
+        return new FBXLoader().parse(this.modelBytesToBuffer(bytes), "");
+      }
+      if (normalized === "dae") {
+        const { ColladaLoader } = await import("three/addons/loaders/ColladaLoader.js");
+        const parsed = new ColladaLoader().parse(new TextDecoder().decode(bytes), "");
+        return parsed.scene ?? null;
+      }
+      if (normalized === "3mf") {
+        const { ThreeMFLoader } = await import("three/addons/loaders/3MFLoader.js");
+        return new ThreeMFLoader().parse(this.modelBytesToBuffer(bytes));
+      }
+      if (normalized === "amf") {
+        const { AMFLoader } = await import("three/addons/loaders/AMFLoader.js");
+        return new AMFLoader().parse(this.modelBytesToBuffer(bytes));
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Decode model bytes to a raster via an offscreen three.js render:
+   * normalized to a unit box, fitted perspective camera, default lights,
+   * transparent background. Null when unloadable or degenerate.
+   */
+  private async decodeModel3d(
+    ext: string,
+    bytes: Uint8Array,
+  ): Promise<{ buffer: Uint8ClampedArray; width: number; height: number } | null> {
+    const renderer = this.ensureModelRenderer();
+    if (renderer === null || bytes.length === 0) {
+      return null;
+    }
+    const edge = this.modelRasterEdge();
+    let object: THREE.Object3D | null = null;
+    try {
+      object = await this.loadModel3dObject(ext, bytes);
+      if (object === null) {
+        return null;
+      }
+      const box = new THREE.Box3().setFromObject(object);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      const dims = [size.x, size.y, size.z, center.x, center.y, center.z];
+      if (!dims.every((value) => Number.isFinite(value))) {
+        return null;
+      }
+      const maxDim = Math.max(size.x, size.y, size.z);
+      if (!(maxDim > 0)) {
+        return null;
+      }
+      const group = new THREE.Group();
+      group.add(object);
+      const normalized = 2 / maxDim;
+      group.scale.setScalar(normalized);
+      group.position.copy(center).multiplyScalar(-normalized);
+      const scene = new THREE.Scene();
+      scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
+      const key = new THREE.DirectionalLight(0xffffff, 1.5);
+      key.position.set(2, 3, 4);
+      scene.add(key);
+      scene.add(group);
+      const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 100);
+      const distance = (1 / Math.tan(THREE.MathUtils.degToRad(20))) * 1.25;
+      camera.position.set(1, 0.7, 1.2).normalize().multiplyScalar(distance);
+      camera.lookAt(0, 0, 0);
+      renderer.clear();
+      renderer.render(scene, camera);
+      const canvas = document.createElement("canvas");
+      canvas.width = edge;
+      canvas.height = edge;
+      const context = canvas.getContext("2d");
+      if (context === null) {
+        return null;
+      }
+      context.drawImage(renderer.domElement, 0, 0);
+      const image = context.getImageData(0, 0, edge, edge);
+      return { buffer: new Uint8ClampedArray(image.data), width: edge, height: edge };
+    } catch {
+      return null;
+    } finally {
+      if (object !== null) {
+        this.disposeModelObject(object);
+      }
+    }
+  }
+
   /**
    * Ensure the cell has content backed by a texture, creating both as needed.
    * Painting and transforming an empty cell materialize it so the canvas
@@ -2893,6 +3283,7 @@ export class GnumarusCanvasEngine {
       textureId: null,
       textId: null,
       svgId: null,
+      model3dId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     };
     this.contents.set(createdId, created);
@@ -2915,14 +3306,15 @@ export class GnumarusCanvasEngine {
         textureId: null,
         textId: null,
         svgId: null,
+        model3dId: null,
         transform: { ...IDENTITY_LAYER_TRANSFORM },
       };
       this.contents.set(createdId, content);
       this.cells.set(key, createdId);
       contentId = createdId;
     }
-    if (content.textId !== null || content.svgId !== null) {
-      // Derived contents (text/vector) have no paintable texture;
+    if (content.textId !== null || content.svgId !== null || content.model3dId !== null) {
+      // Derived contents (text/vector/3D) have no paintable texture;
       // callers needing only the content/transform must use ensureCellContentOnly.
       return null;
     }
@@ -2977,12 +3369,19 @@ export class GnumarusCanvasEngine {
         name: vector.name,
         svg: vector.svg,
       })),
+      models3d: [...this.models3d.values()].map((model) => ({
+        id: model.id,
+        name: model.name,
+        ext: model.ext,
+        bytes: model.bytes,
+      })),
       contents: [...this.contents.values()].map((content) => ({
         id: content.id,
         name: content.name,
         textureId: content.textureId,
         textId: content.textId,
         svgId: content.svgId,
+        model3dId: content.model3dId,
         transform: { ...content.transform },
       })),
       cells: [...this.cells.entries()].map(([key, content]) => {
@@ -4259,6 +4658,7 @@ export class GnumarusCanvasEngine {
         textureId: input.id,
         textId: null,
         svgId: null,
+        model3dId: null,
         transform: {
           ...input.transform,
           rotation: normalizeRotation(input.transform.rotation),
@@ -4306,7 +4706,8 @@ export class GnumarusCanvasEngine {
       textures: GnumarusTexturePixels[];
       texts?: Array<{ id: string; name: string; document: GnumarusTextDocument }>;
       svgs?: Array<{ id: string; name: string; svg: string }>;
-      contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null; svgId?: string | null; transform: GnumarusLayerTransform }>;
+  models3d?: Array<{ id: string; name: string; ext: string; bytes: Uint8Array }>;
+      contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null; svgId?: string | null; model3dId?: string | null; transform: GnumarusLayerTransform }>;
       cells: Array<{ layer: string; frame: number; content: string }>;
       frames: number;
       currentFrame: number;
@@ -4381,6 +4782,9 @@ export class GnumarusCanvasEngine {
     this.svgs.clear();
     this.svgRasters.clear();
     this.svgPending.clear();
+    this.models3d.clear();
+    this.modelRasters.clear();
+    this.modelPending.clear();
     const textIds = new Set<string>();
     for (const text of data.texts ?? []) {
       if (typeof text.id !== "string" || text.id === "" || typeof text.name !== "string" || text.name === "") {
@@ -4417,6 +4821,24 @@ export class GnumarusCanvasEngine {
       this.svgs.set(vector.id, { id: vector.id, name: vector.name, svg: vector.svg });
       this.ensureSvgRaster(vector.id);
     }
+    this.models3d.clear();
+    this.modelRasters.clear();
+    this.modelPending.clear();
+    const model3dIds = new Set<string>();
+    for (const model of data.models3d ?? []) {
+      if (typeof model.id !== "string" || model.id === "" || typeof model.name !== "string" || model.name === "") {
+        throw new Error("Project has an invalid 3D model entry.");
+      }
+      if (model3dIds.has(model.id)) {
+        throw new Error(`Project has a duplicate 3D model id: ${model.id}.`);
+      }
+      if (!(model.bytes instanceof Uint8Array) || model.bytes.length === 0 || typeof model.ext !== "string" || model.ext === "") {
+        throw new Error(`3D model ${model.id} has invalid data.`);
+      }
+      model3dIds.add(model.id);
+      this.models3d.set(model.id, { id: model.id, name: model.name, ext: model.ext, bytes: new Uint8Array(model.bytes) });
+      this.ensureModelRaster(model.id);
+    }
     for (const content of data.contents) {
       if (content.textId !== null && content.textId !== undefined && !textIds.has(content.textId)) {
         throw new Error(`Content references a missing text: ${content.id}`);
@@ -4424,8 +4846,11 @@ export class GnumarusCanvasEngine {
       if (content.svgId !== null && content.svgId !== undefined && !svgIds.has(content.svgId)) {
         throw new Error(`Content references a missing vector graphic: ${content.id}`);
       }
-      if ([content.textureId, content.textId, content.svgId].filter((ref) => ref != null).length > 1) {
-        throw new Error(`Content has more than one texture, text or vector graphic: ${content.id}`);
+      if (content.model3dId !== null && content.model3dId !== undefined && !model3dIds.has(content.model3dId)) {
+        throw new Error(`Content references a missing 3D model: ${content.id}`);
+      }
+      if ([content.textureId, content.textId, content.svgId, content.model3dId].filter((ref) => ref != null).length > 1) {
+        throw new Error(`Content has more than one texture, text, vector graphic or 3D model: ${content.id}`);
       }
     }
     for (const content of data.contents) {
@@ -4435,6 +4860,7 @@ export class GnumarusCanvasEngine {
         textureId: content.textureId,
         textId: content.textId ?? null,
         svgId: content.svgId ?? null,
+        model3dId: content.model3dId ?? null,
         transform: { ...content.transform, rotation: normalizeRotation(content.transform.rotation) },
       });
     }
@@ -4535,6 +4961,20 @@ export class GnumarusCanvasEngine {
     }
     this.svgCounter = Math.max(maxSvg, (data.svgs ?? []).length + 1, 1);
     this.svgNameCounter = Math.max(maxSvgName, (data.svgs ?? []).length + 1, 1);
+    let maxModel = 0;
+    let maxModelName = 0;
+    for (const model of data.models3d ?? []) {
+      const idMatch = /^model(\d+)$/.exec(model.id);
+      if (idMatch?.[1] !== undefined) {
+        maxModel = Math.max(maxModel, Number.parseInt(idMatch[1], 10) + 1);
+      }
+      const nameMatch = /^M(\d+)$/.exec(model.name);
+      if (nameMatch?.[1] !== undefined) {
+        maxModelName = Math.max(maxModelName, Number.parseInt(nameMatch[1], 10) + 1);
+      }
+    }
+    this.modelCounter = Math.max(maxModel, (data.models3d ?? []).length + 1, 1);
+    this.modelNameCounter = Math.max(maxModelName, (data.models3d ?? []).length + 1, 1);
     const top = this.layers[this.layers.length - 1];
     if (top !== undefined) {
       this.activeLayerId = top.id;
@@ -4616,6 +5056,7 @@ export class GnumarusCanvasEngine {
       textureId: "layer0",
       textId: null,
       svgId: null,
+      model3dId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(animationCellKey("layer0", 0), "content1");
@@ -4632,6 +5073,13 @@ export class GnumarusCanvasEngine {
     this.svgs.clear();
     this.svgRasters.clear();
     this.svgPending.clear();
+    this.modelCounter = 1;
+    this.modelNameCounter = 1;
+    this.models3d.clear();
+    this.modelRasters.clear();
+    this.modelPending.clear();
+    this.modelRenderer?.dispose();
+    this.modelRenderer = null;
     this.frameCount = 1;
     this.currentFrame = 0;
     this.frameNames = [defaultFrameName(0)];

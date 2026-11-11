@@ -10752,3 +10752,133 @@ test("text editor dialog can be dragged by its title", async ({ page }) => {
   await page.locator('gnumarus-shell [data-testid="text-cancel"]').click();
   await expect(dialog).toBeHidden();
 });
+
+async function stubModelPicker(page: import("@playwright/test").Page, fileName: string, data: string | number[]): Promise<void> {
+  await page.evaluate(
+    ([name, payload]: [string, string | number[]]) => {
+      const root = window as unknown as {
+        showOpenFilePicker?: () => Promise<Array<{ getFile(): Promise<File> }>>;
+      };
+      const bytes = typeof payload === "string" ? new TextEncoder().encode(payload) : new Uint8Array(payload);
+      root.showOpenFilePicker = async () => [
+        {
+          getFile: async () => new File([bytes], name, { type: "application/octet-stream" }),
+        },
+      ];
+    },
+    [fileName, data] as [string, string | number[]],
+  );
+}
+
+async function cellModel3dId(page: import("@playwright/test").Page, layerId: string, frame: number): Promise<string | null> {
+  return page.evaluate(([layer, targetFrame]: [string, number]) => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getCellModel3dId(layerId: string, frame: number): string | null } };
+    };
+    return root.__gnumarus?.engine?.getCellModel3dId(layer, targetFrame) ?? null;
+  }, [layerId, frame] as [string, number]);
+}
+
+async function modelPaintedPixels(page: import("@playwright/test").Page): Promise<number> {
+  return page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { readPixel(x: number, y: number): { a: number } | null } };
+    };
+    const engine = root.__gnumarus?.engine;
+    if (engine === undefined) {
+      return -1;
+    }
+    let count = 0;
+    for (let y = 0; y < 512; y += 8) {
+      for (let x = 0; x < 512; x += 8) {
+        if ((engine.readPixel(x, y)?.a ?? 0) > 0) {
+          count += 1;
+        }
+      }
+    }
+    return count;
+  });
+}
+
+const SIMPLE_STL = `solid test
+facet normal 0 0 1
+outer loop
+vertex 0 0 0
+vertex 64 0 0
+vertex 0 64 0
+endloop
+endfacet
+endsolid test
+`;
+
+test("import 3d model renders into an empty cell", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubModelPicker(page, "tri.stl", SIMPLE_STL);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText('3D model "tri" imported');
+  const modelId = await cellModel3dId(page, "layer0", 0);
+  expect(typeof modelId).toBe("string");
+  await expect
+    .poll(async () => modelPaintedPixels(page), { timeout: 10000 })
+    .toBeGreaterThan(0);
+});
+
+test("import 3d model refuses an occupied cell", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
+  await stubModelPicker(page, "tri.stl", SIMPLE_STL);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("already has content");
+  expect(await cellModel3dId(page, "layer0", 0)).toBeNull();
+});
+
+test("import 3d model rejects unsupported extensions", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubModelPicker(page, "notes.txt", "hello");
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("not supported");
+  expect(await cellModel3dId(page, "layer0", 0)).toBeNull();
+});
+
+test("import 3d model rejects corrupt files", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubModelPicker(page, "bad.stl", [1, 2, 3, 4]);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("not a valid 3D model");
+  expect(await cellModel3dId(page, "layer0", 0)).toBeNull();
+});
+
+test("3d models save as raw files and reopen", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubModelPicker(page, "tri.stl", SIMPLE_STL);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("imported");
+  const modelId = await cellModel3dId(page, "layer0", 0);
+  expect(typeof modelId).toBe("string");
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  expect(Object.keys(await project.writtenBlobs()).sort()).toEqual(
+    ["project.gpa", `3dmodels/${modelId}.stl`].sort(),
+  );
+  const saved = await project.writtenProject();
+  expect(saved).toContain(`"file": "3dmodels/${modelId}.stl"`);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject");
+  expect(await cellModel3dId(page, "layer0", 0)).toBe(modelId);
+  await expect
+    .poll(async () => modelPaintedPixels(page), { timeout: 10000 })
+    .toBeGreaterThan(0);
+});

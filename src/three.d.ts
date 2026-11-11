@@ -14,11 +14,34 @@ declare module "three" {
     z: number;
     constructor(x?: number, y?: number, z?: number);
     set(x: number, y: number, z: number): this;
+    copy(source: Vector3): this;
+    multiplyScalar(scalar: number): this;
+    normalize(): this;
+    setScalar(scalar: number): this;
+  }
+
+  export class Object3D {
+    readonly position: Vector3;
+    readonly scale: Vector3;
+    readonly rotation: Vector3;
+    add(object: Object3D): this;
+    traverse(callback: (node: Object3D) => void): void;
+  }
+
+  export class Group extends Object3D {
+    constructor();
+  }
+
+  export class Box3 {
+    constructor();
+    setFromObject(object: Object3D): this;
+    getSize(target: Vector3): Vector3;
+    getCenter(target: Vector3): Vector3;
   }
 
   export class Scene {
-    add(object: Mesh | LineSegments): void;
-    remove(object: Mesh | LineSegments): void;
+    add(object: Object3D): void;
+    remove(object: Object3D): void;
   }
 
   export class OrthographicCamera {
@@ -33,6 +56,41 @@ declare module "three" {
     lookAt(x: number, y: number, z: number): void;
     updateProjectionMatrix(): void;
   }
+
+  export class PerspectiveCamera {
+    fov: number;
+    aspect: number;
+    near: number;
+    far: number;
+    readonly position: Vector3;
+    constructor(fov: number, aspect: number, near: number, far: number);
+    lookAt(x: number, y: number, z: number): void;
+    updateProjectionMatrix(): void;
+  }
+
+  export class HemisphereLight extends Object3D {
+    constructor(skyColor?: number, groundColor?: number, intensity?: number);
+  }
+
+  export class DirectionalLight extends Object3D {
+    constructor(color?: number, intensity?: number);
+  }
+
+  export class Texture {
+    dispose(): void;
+  }
+
+  export class Material {
+    dispose(): void;
+  }
+
+  export class MeshStandardMaterial extends Material {
+    constructor(options?: { color?: number; roughness?: number; metalness?: number; side?: number });
+  }
+
+  export const MathUtils: {
+    degToRad(degrees: number): number;
+  };
 
   export interface DataTextureImage {
     data: Uint8ClampedArray | Uint8Array;
@@ -73,9 +131,8 @@ declare module "three" {
     dispose(): void;
   }
 
-  export class PlaneGeometry {
+  export class PlaneGeometry extends BufferGeometry {
     constructor(width: number, height: number);
-    dispose(): void;
   }
 
   export class Color {
@@ -102,7 +159,7 @@ declare module "three" {
     dispose(): void;
   }
 
-  export class LineSegments {
+  export class LineSegments extends Object3D {
     readonly geometry: BufferGeometry;
     material: LineBasicMaterial | ShaderMaterial;
     matrixAutoUpdate: boolean;
@@ -113,19 +170,19 @@ declare module "three" {
     constructor(geometry?: BufferGeometry, material?: LineBasicMaterial);
   }
 
-  export class Mesh {
-    readonly geometry: PlaneGeometry;
-    readonly scale: Vector3;
-    readonly position: Vector3;
-    readonly rotation: Vector3;
+  export class Mesh extends Object3D {
+    readonly geometry: BufferGeometry;
     readonly matrix: Matrix4;
     matrixAutoUpdate: boolean;
     matrixWorldNeedsUpdate: boolean;
     frustumCulled: boolean;
-    material: MeshBasicMaterial | ShaderMaterial;
+    material: MeshBasicMaterial | ShaderMaterial | MeshStandardMaterial;
     renderOrder: number;
     visible: boolean;
-    constructor(geometry: PlaneGeometry, material: MeshBasicMaterial | ShaderMaterial);
+    constructor(
+      geometry: BufferGeometry,
+      material: MeshBasicMaterial | ShaderMaterial | MeshStandardMaterial,
+    );
   }
 
   export class Matrix4 {
@@ -154,7 +211,64 @@ declare module "three" {
     setClearColor(color: number, alpha: number): void;
     setPixelRatio(ratio: number): void;
     setSize(width: number, height: number, updateStyle?: boolean): void;
-    render(scene: Scene, camera: OrthographicCamera): void;
+    clear(): void;
+    render(scene: Scene, camera: OrthographicCamera | PerspectiveCamera): void;
     dispose(): void;
+  }
+}
+
+declare module "three/addons/loaders/GLTFLoader.js" {
+  import type { Object3D } from "three";
+  export class GLTFLoader {
+    parseAsync(data: ArrayBuffer | string, path: string): Promise<{ scene: Object3D }>;
+  }
+}
+
+declare module "three/addons/loaders/OBJLoader.js" {
+  import type { Object3D } from "three";
+  export class OBJLoader {
+    parse(data: string): Object3D;
+  }
+}
+
+declare module "three/addons/loaders/STLLoader.js" {
+  import type { BufferGeometry } from "three";
+  export class STLLoader {
+    parse(data: ArrayBuffer): BufferGeometry;
+  }
+}
+
+declare module "three/addons/loaders/PLYLoader.js" {
+  import type { BufferGeometry } from "three";
+  export class PLYLoader {
+    parse(data: ArrayBuffer): BufferGeometry;
+  }
+}
+
+declare module "three/addons/loaders/FBXLoader.js" {
+  import type { Object3D } from "three";
+  export class FBXLoader {
+    parse(data: ArrayBuffer, path: string): Object3D;
+  }
+}
+
+declare module "three/addons/loaders/ColladaLoader.js" {
+  import type { Object3D } from "three";
+  export class ColladaLoader {
+    parse(data: string, path: string): { scene: Object3D };
+  }
+}
+
+declare module "three/addons/loaders/3MFLoader.js" {
+  import type { Object3D } from "three";
+  export class ThreeMFLoader {
+    parse(data: ArrayBuffer): Object3D;
+  }
+}
+
+declare module "three/addons/loaders/AMFLoader.js" {
+  import type { Object3D } from "three";
+  export class AMFLoader {
+    parse(data: ArrayBuffer): Object3D;
   }
 }
