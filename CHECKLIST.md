@@ -351,6 +351,6 @@
 - [x] Tilemap pool (`tilemaps`, `tilemapId`, 5-way exclusivity) + wrap-blit helper + format validation + history entry + unit tests (448 passed)
 - [x] Engine sync raster/resolve/guards/tile-brush tool (pointer/R/H/V/preview/undo) + shell (button/options/tiles window/tileset picker/i18n en+pt-BR)
 - [x] E2E (5 new: create+place, transform+reset, erase+undo, save/reopen, picker badge); build + unit (448) + e2e (283/283) green; docs updated
-- [ ] 3D model view (orbit/zoom/pan/reset) + live raster + commit/cancel + history + format persistence + unit tests
-- [ ] Tool UI (button/options/readout/drag/keys) + i18n en+pt-BR
-- [ ] E2E (orbit/commit/cancel/undo/reopen); build + unit + e2e; docs updated
+- [x] 3D model view (orbit/zoom/pan/reset) + live raster + commit/cancel + history + format persistence + unit tests (452 passed)
+- [x] Tool UI (button/options/readout/drag/keys) + i18n en+pt-BR
+- [x] E2E (orbit/commit/cancel/undo/reopen); build + unit + e2e (302/302) green; docs updated

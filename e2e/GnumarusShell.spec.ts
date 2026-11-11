@@ -1788,7 +1788,11 @@ test("cell context menu opens adjacent to the clicked cell and inside the viewpo
   expect(menuBox.y).toBeGreaterThanOrEqual(0);
   expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(viewport.width);
   expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(viewport.height);
-  expect(Math.abs(menuBox.y - cellBox.y)).toBeLessThan(80);
+  // The menu lists all cell actions (select/text/fit/crop/resize), so it is
+  // tall and shifts up when it would overflow the viewport bottom. The cell
+  // row must either sit near the menu top or overlap the menu vertically.
+  const overlapsVertically = cellBox.y >= menuBox.y && cellBox.y <= menuBox.y + menuBox.height;
+  expect(overlapsVertically || Math.abs(menuBox.y - cellBox.y) < 80).toBe(true);
 });
 
 test("frames can be removed but never the last one", async ({ page }) => {
@@ -1939,12 +1943,15 @@ test("toolbar icons fill buttons without growing them", async ({ page }) => {
       };
     });
   });
-  expect(boxes).toHaveLength(8);
+  expect(boxes).toHaveLength(11);
   const expected: Record<string, { w: number; h: number }> = {
     Pencil: { w: 33, h: 25 },
     Loupe: { w: 30, h: 25 },
     "Bucket fill": { w: 35, h: 26 },
     Eyedropper: { w: 35, h: 26 },
+    Text: { w: 32, h: 25 },
+    "Tile brush": { w: 34, h: 25 },
+    "3D model transform": { w: 33, h: 25 },
     "Rectangular selection": { w: 34, h: 25 },
     "Destructive selection transform": { w: 33, h: 25 },
     "Non-destructive cell transform": { w: 31, h: 29 },
@@ -5539,6 +5546,8 @@ test("quick action palette filters and runs actions", async ({ page }) => {
     "Export",
     "Fit All Textures to Size",
     "Import",
+    "Import 3D Model",
+    "Import SVG",
     "New Project",
     "Open Project",
     "Reload All Textures",
@@ -5662,9 +5671,10 @@ test("Crop All Cells to Canvas crops every cell at once", async ({ page }) => {
   ]);
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell");
+  await setImportCleanup(page, "none");
   await stubAsepritePicker(page, "crop.xcf", bytes);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import", exact: true }).click();
   await expect(page.locator('gnumarus-shell [data-testid="toast"]')).toContainText("Imported crop.xcf (2 layers)");
   let state = await getLayers(page);
   expect(state.layers[1]?.transform).toMatchObject({ x: 2, y: 2 });
@@ -6489,13 +6499,12 @@ test("tool tooltips start with the selection shortcut", async ({ page }) => {
     { label: "Loupe", title: expect.stringMatching(/^Z: Loupe \(/) },
     { label: "Bucket fill", title: expect.stringMatching(/^G or F: Bucket fill \(/) },
     { label: "Eyedropper", title: expect.stringMatching(/^Ctrl \(hold\): Eyedropper \(/) },
-    { label: "Line", title: expect.stringMatching(/^N: Line \(/) },
-    { label: "Curve", title: expect.stringMatching(/^C: Curve \(/) },
+    { label: "Text", title: expect.stringMatching(/^X: Text \(/) },
+    { label: "Tile brush", title: "Tile brush (click an empty cell to create a tilemap, click a tilemap cell to place the selected tile; right-click erases)" },
+    { label: "3D model transform", title: "3D model transform (drag to orbit the model, wheel to zoom, right-drag to pan; R resets, Enter commits, Esc cancels)" },
     { label: "Rectangular selection", title: expect.stringMatching(/^R: Rectangular selection \(/) },
     { label: "Destructive selection transform", title: expect.stringMatching(/^V: Destructive selection transform \(/) },
     { label: "Non-destructive cell transform", title: expect.stringMatching(/^T: Non-destructive cell transform \(/) },
-    { label: "Non-destructive cell 3D rotation", title: expect.stringMatching(/^Y: Non-destructive cell 3D rotation \(/) },
-    { label: "Destructive selection 3D rotation", title: expect.stringMatching(/^U: Destructive selection 3D rotation \(/) },
   ]);
 });
 
@@ -7420,8 +7429,12 @@ test("destructive selection 3d rotation auto-selects, tilts and merges", async (
   await page.mouse.down();
   await page.mouse.move(center.x + 40, center.y, { steps: 4 });
   await page.mouse.up();
-  // Sphere radius is half the 64px selection times zoom 8 = 256 screen px.
-  expect((await getFloatingTransform(page))?.rotationY).toBeCloseTo(-40 / 256, 4);
+  // Sphere radius is half the 64px selection times the live canvas zoom.
+  const liveZoom = await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { getViewState(): { zoom: number } } } };
+    return root.__gnumarus?.engine?.getViewState().zoom ?? 8;
+  });
+  expect((await getFloatingTransform(page))?.rotationY).toBeCloseTo(-40 / (32 * liveZoom), 4);
   await page.keyboard.press("Enter");
   expect(await floatingRect(page)).toBeNull();
   // The symmetric block survives the small tilt with its center intact.
@@ -7641,7 +7654,7 @@ test("File > Import loads layers, frames and durations from .ase", async ({ page
   await page.waitForSelector("gnumarus-shell");
   await stubAsepritePicker(page, "hero.ase", await buildAsepriteBytes(page));
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import", exact: true }).click();
   const toast = page.locator('gnumarus-shell [data-testid="toast"]');
   await expect(toast).toBeVisible();
   await expect(toast).toContainText("Imported hero.ase (2 layers, 2 frames)");
@@ -7675,7 +7688,7 @@ test("File > Import loads frame tags as named animations", async ({ page }) => {
     await buildAsepriteBytes(page, [{ name: "wave", from: 1, to: 1, loop: 2, repeat: 0 }]),
   );
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import", exact: true }).click();
   const toast = page.locator('gnumarus-shell [data-testid="toast"]');
   await expect(toast).toBeVisible();
   await expect(toast).toContainText("Imported tagged.ase (2 layers, 2 frames, 1 animation)");
@@ -7915,7 +7928,7 @@ test("File > Import loads layers and pixels from .xcf", async ({ page }) => {
   await page.waitForSelector("gnumarus-shell");
   await stubAsepritePicker(page, "art.xcf", bytes);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import", exact: true }).click();
   const toast = page.locator('gnumarus-shell [data-testid="toast"]');
   await expect(toast).toBeVisible();
   await expect(toast).toContainText("Imported art.xcf (2 layers)");
@@ -7988,9 +8001,10 @@ test("File > Import loads layers, pixels and frames from .kra", async ({ page })
   ]);
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell");
+  await setImportCleanup(page, "none");
   await stubAsepritePicker(page, "art.kra", bytes);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import", exact: true }).click();
   const toast = page.locator('gnumarus-shell [data-testid="toast"]');
   await expect(toast).toBeVisible();
   await expect(toast).toContainText("Imported art.kra (2 layers, 2 frames)");
@@ -8035,7 +8049,7 @@ test("File > Import loads layers and pixels from .psd", async ({ page }) => {
   await page.waitForSelector("gnumarus-shell");
   await stubAsepritePicker(page, "art.psd", bytes);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import", exact: true }).click();
   const toast = page.locator('gnumarus-shell [data-testid="toast"]');
   await expect(toast).toBeVisible();
   await expect(toast).toContainText("Imported art.psd (2 layers)");
@@ -8065,7 +8079,7 @@ test("File > Import falls back to the composite image for flattened .psd", async
   await page.waitForSelector("gnumarus-shell");
   await stubAsepritePicker(page, "flat.psd", bytes);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import", exact: true }).click();
   const toast = page.locator('gnumarus-shell [data-testid="toast"]');
   await expect(toast).toBeVisible();
   await expect(toast).toContainText("Imported flat.psd (1 layer)");
@@ -8085,7 +8099,7 @@ test("File > Import rejects corrupt files with an error toast", async ({ page })
   await page.waitForSelector("gnumarus-shell");
   await stubAsepritePicker(page, "broken.ase", new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7]));
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import", exact: true }).click();
   const toast = page.locator('gnumarus-shell [data-testid="toast"]');
   await expect(toast).toBeVisible();
   await expect(toast).toContainText("Import failed");
@@ -8102,7 +8116,7 @@ test("File > Import cancellation stays silent", async ({ page }) => {
     };
   });
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import", exact: true }).click();
   await expect(page.locator('gnumarus-shell [data-testid="toast"]')).toBeHidden();
 });
 
@@ -8761,7 +8775,7 @@ test("File > Export lists only formats the browser truly encodes", async ({ page
   let prev: string | null = null;
   for (const mime of values) {
     await page.getByRole("button", { name: "File" }).click();
-    await page.getByRole("button", { name: "Export" }).click();
+    await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export", exact: true }).click();
     await expect(dialog).toBeVisible();
     await dialog.locator("select#exportFormat").selectOption(mime);
     await dialog.locator("#exportOk").click();
@@ -8806,7 +8820,7 @@ test("File > Export JPEG quality changes the file size", async ({ page }) => {
 
   async function exportJpegSize(quality: string): Promise<number> {
     await page.getByRole("button", { name: "File" }).click();
-    await page.getByRole("button", { name: "Export" }).click();
+    await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export", exact: true }).click();
     await expect(dialog).toBeVisible();
     await dialog.locator("input#exportQuality").fill(quality);
     await page.evaluate(() => {
