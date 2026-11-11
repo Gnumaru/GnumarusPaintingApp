@@ -507,3 +507,7 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Ops combine with the active floating on the same cell/texture (any placement, nearest-mapped); otherwise fall back to plain cut. Ctrl no longer summons the temporary eyedropper while rectselect is active.
 - Rubber band still shows the drag rect; ants trace the true masked boundary (bbox quad only for plain rects). Shortcuts modal + toolbar hint + rectselect options hint document the modifiers (en + pt-BR).
 - Pure rect/mask helpers in `GnumarusSelectionBoolean.ts` + unit tests; e2e @recent (union/intersect/subtract/empty-clear/no-op) via layer pixels + floating hook.
+
+## 94. Show both selections during boolean drags (implemented)
+- During a rectselect rubber-band drag over an eligible floating selection, keep rendering the floating boundary (mask paths, even for plain rects since the quad polygons show the rubber band) alongside it.
+- E2E @recent: mid-drag both overlays visible with the old 4-run box; release keeps the existing union asserts.

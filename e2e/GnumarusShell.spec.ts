@@ -5938,7 +5938,16 @@ test("rectangular selection shift-drag adds to the selection @recent", async ({ 
   expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 3, height: 3, selected: 9 });
   expect(await readPixel(page, 11, 11)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   await page.keyboard.down("Shift");
-  await dragRect(page, 20, 20, 22, 22);
+  const unionFrom = await layerScreenTarget(page, 20, 20);
+  const unionTo = await layerScreenTarget(page, 22, 22);
+  await page.mouse.move(unionFrom.x, unionFrom.y);
+  await page.mouse.down();
+  await page.mouse.move(unionTo.x, unionTo.y, { steps: 5 });
+  // Both the rubber band and the previous selection stay visible mid-drag.
+  expect(await selectionOverlayDisplay(page)).toBe("block");
+  expect(await selectionMaskDisplay(page)).toBe("block");
+  expect(await selectionMaskMoves(page)).toBe(4);
+  await page.mouse.up();
   await page.keyboard.up("Shift");
   expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 13, height: 13, selected: 18 });
   expect(await readPixel(page, 21, 21)).toEqual({ r: 0, g: 0, b: 0, a: 0 });

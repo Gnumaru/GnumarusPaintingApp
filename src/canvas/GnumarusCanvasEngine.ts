@@ -7465,6 +7465,35 @@ export class GnumarusCanvasEngine {
     this.previewSelectWhite.style.display = "block";
     this.previewSelectBlack.setAttribute("points", points);
     this.previewSelectBlack.style.display = "block";
+    // During a rubber-band drag over an eligible floating selection, keep
+    // showing the floating boundary too (mask paths even for plain rects,
+    // since the quad polygons are busy with the rubber band).
+    if (this.rectDrag !== null) {
+      const floating = this.floating;
+      if (
+        floating !== null &&
+        floating.active &&
+        this.floatingHomeVisible() &&
+        floating.buffer.length === floating.width * floating.height * 4 &&
+        floating.mask.length === floating.width * floating.height
+      ) {
+        const placement = this.floatingPlacement(floating);
+        const runs = selectionMaskBoundaryRuns(floating.mask, floating.width, floating.height);
+        if (runs.length > 0) {
+          const d = runs
+            .map((run) => {
+              const a = forwardSelectionPoint(placement, run.ax, run.ay);
+              const b = forwardSelectionPoint(placement, run.bx, run.by);
+              return `M${toClient(a.x, a.y)}L${toClient(b.x, b.y)}`;
+            })
+            .join(" ");
+          this.previewSelectMaskWhite.setAttribute("d", d);
+          this.previewSelectMaskWhite.style.display = "block";
+          this.previewSelectMaskBlack.setAttribute("d", d);
+          this.previewSelectMaskBlack.style.display = "block";
+        }
+      }
+    }
     if (this.tool === "destransform" || this.tool === "transform") {
       const layout =
         this.tool === "destransform" ? this.selectionHandleLayout() : this.layerHandleLayout();

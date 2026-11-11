@@ -315,3 +315,5 @@
 - [x] Engine floating mask + merge gating + combine ops + pointer wiring + eyedropper guard + test hook
 - [x] UI hints (toolbar title, shortcuts entry, rectselect options label, en + pt-BR)
 - [x] E2E @recent (5 boolean + outline-shape tests green); build + unit (401) clean; docs updated
+- [x] Floating boundary overlay during rectDrag (+ eligible floating)
+- [x] E2E @recent mid-drag both-visible (mask 4-run box); build + unit (401) + e2e; docs updated
