@@ -2509,7 +2509,7 @@ test("pencil brush size and shape paint thick strokes", async ({ page }) => {
   await expect(page.locator("gnumarus-shell")).toContainText("Brush size: 3");
   expect(await brushOf()).toEqual({ size: 3, shape: "circle" });
   await page.locator("gnumarus-shell select#brushShape").selectOption("square");
-  await expect(page.locator("gnumarus-shell")).toContainText("Brush shape: square");
+  await expect(page.locator("gnumarus-shell")).toContainText("Brush shape: Square");
   expect(await brushOf()).toEqual({ size: 3, shape: "square" });
   await page.locator("gnumarus-shell input#brushSize").fill("99");
   expect(await brushOf()).toEqual({ size: 64, shape: "square" });
@@ -3188,7 +3188,7 @@ test("editor bar stays visible across tools and holds wrap", async ({ page }) =>
   await expect(editor).toBeVisible();
   await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toHaveAttribute("aria-label", "Bucket options");
   await editor.locator("select#wrapMode").selectOption("x");
-  await expect(page.locator("gnumarus-shell")).toContainText("Wrap: x");
+  await expect(page.locator("gnumarus-shell")).toContainText("Wrap: Left-right");
   await page.getByRole("button", { name: "Pencil" }).click();
   await expect(editor.locator("select#wrapMode")).toHaveValue("x");
 });
@@ -3345,7 +3345,7 @@ test("import cleanup setting is configurable and persists", async ({ page }) => 
   const dialog = page.locator("gnumarus-shell dialog#settingsDialog");
   await expect(dialog.locator("select#importCleanup")).toHaveValue("crop+fit");
   await dialog.locator("select#importCleanup").selectOption("fit");
-  await expect(page.locator("gnumarus-shell")).toContainText("Import cleanup: fit");
+  await expect(page.locator("gnumarus-shell")).toContainText("Import cleanup: Fit (trim transparent borders)");
   const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.importCleanup.v1"));
   expect(persisted).toContain('"cleanup": "fit"');
   await page.locator('gnumarus-shell [aria-label="Reset import cleanup to default"]').click();
@@ -4172,7 +4172,7 @@ test("normal blend accumulates translucent paint and eraser subtracts alpha", as
   await page.getByRole("button", { name: "Pencil" }).click();
   await page.locator("gnumarus-shell input#brushSize").fill("1");
   await page.locator("gnumarus-shell select#blendMode").selectOption("normal");
-  await expect(page.locator("gnumarus-shell")).toContainText("Blend mode: normal");
+  await expect(page.locator("gnumarus-shell")).toContainText("Blend mode: Normal");
   const canvas = page.locator("gnumarus-shell canvas");
   const box = await canvas.boundingBox();
   if (box === null) {
@@ -4202,7 +4202,7 @@ test("normal blend accumulates translucent paint and eraser subtracts alpha", as
   await clickAt(4, 4);
   expect(await readPixel(page, 4, 4)).toEqual({ r: 0, g: 0, b: 0, a: 128 });
   await page.locator("gnumarus-shell select#blendMode").selectOption("eraser");
-  await expect(page.locator("gnumarus-shell")).toContainText("Blend mode: eraser");
+  await expect(page.locator("gnumarus-shell")).toContainText("Blend mode: Eraser");
   await clickAt(4, 4);
   expect(await readPixel(page, 4, 4)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   await setPencil(page, "#00000020");
@@ -4227,10 +4227,10 @@ test("E toggles eraser and strokes can opt out of accumulation", async ({ page }
   expect(await blendOf()).toBe("normal");
   await page.keyboard.press("e");
   expect(await blendOf()).toBe("eraser");
-  await expect(page.locator("gnumarus-shell")).toContainText("Blend mode: eraser");
+  await expect(page.locator("gnumarus-shell")).toContainText("Blend mode: Eraser");
   await page.keyboard.press("e");
   expect(await blendOf()).toBe("normal");
-  await expect(page.locator("gnumarus-shell")).toContainText("Blend mode: normal");
+  await expect(page.locator("gnumarus-shell")).toContainText("Blend mode: Normal");
   await page.locator("gnumarus-shell select#blendMode").selectOption("copy");
   await page.evaluate(() => {
     (document.activeElement as HTMLElement | null)?.blur?.();
@@ -4239,7 +4239,7 @@ test("E toggles eraser and strokes can opt out of accumulation", async ({ page }
   expect(await blendOf()).toBe("eraser");
   await page.keyboard.press("e");
   expect(await blendOf()).toBe("copy");
-  await expect(page.locator("gnumarus-shell")).toContainText("Blend mode: copy");
+  await expect(page.locator("gnumarus-shell")).toContainText("Blend mode: Copy");
   await page.evaluate(() => {
     const root = window as unknown as {
       __gnumarus?: {
@@ -4442,7 +4442,7 @@ test("pencil stabilizer dropdown defaults to none with conditional rope and foll
   expect(await engineMode()).toBe("none");
 
   await mode.selectOption("rope");
-  await expect(page.locator("gnumarus-shell")).toContainText("Stabilizer: rope");
+  await expect(page.locator("gnumarus-shell")).toContainText("Stabilizer: Rope");
   expect(await engineMode()).toBe("rope");
   await expect(page.locator("gnumarus-shell input#ropeLength")).toBeVisible();
   await expect(page.locator("gnumarus-shell input#followStrength")).toHaveCount(0);
@@ -4450,7 +4450,7 @@ test("pencil stabilizer dropdown defaults to none with conditional rope and foll
   await expect(page.locator("gnumarus-shell")).toContainText("Rope length: 25");
 
   await mode.selectOption("follow");
-  await expect(page.locator("gnumarus-shell")).toContainText("Stabilizer: follow");
+  await expect(page.locator("gnumarus-shell")).toContainText("Stabilizer: Follow");
   expect(await engineMode()).toBe("follow");
   await expect(page.locator("gnumarus-shell input#followStrength")).toBeVisible();
   await expect(page.locator("gnumarus-shell input#ropeLength")).toHaveCount(0);
@@ -4802,7 +4802,7 @@ test("pencil pressure size scales the stroke", async ({ page }) => {
   await page.getByRole("button", { name: "Pencil" }).click();
   await page.locator("gnumarus-shell input#brushSize").fill("10");
   await page.locator("gnumarus-shell select#pressureResponse").selectOption("size");
-  await expect(page.locator("gnumarus-shell")).toContainText("Pressure response: size");
+  await expect(page.locator("gnumarus-shell")).toContainText("Pressure response: Size");
   const center = await canvasCenter(page);
   await penDot(page, center.x, center.y, 1);
   const full = await paintedPixelCount(page);
@@ -5491,6 +5491,39 @@ test("Help menu Source code opens the GitHub project page @recent", async ({ pag
   ]);
   expect(popup.url()).toContain("github.com/Gnumaru/GnumarusPaintingApp");
   await popup.close();
+});
+
+test("language setting translates the interface to Brazilian Portuguese @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await expect(page.getByRole("button", { name: "File", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#settingsDialog");
+  await expect(dialog.locator("select#localeSelect")).toHaveValue("system");
+  await dialog.locator("select#localeSelect").selectOption("pt-BR");
+  await expect(page.locator("gnumarus-shell")).toContainText("Idioma: Português (Brasil)");
+  const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.locale.v1"));
+  expect(persisted).toContain('"locale": "pt-BR"');
+  await expect(page.locator("html")).toHaveAttribute("lang", "pt-BR");
+  await dialog.getByRole("button", { name: "Fechar" }).click();
+  await expect(page.getByRole("button", { name: "Arquivo", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Editar", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ajuda", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Arquivo", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Novo projeto", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Novo projeto", exact: true }).click();
+  const newDialog = page.locator("gnumarus-shell dialog#newDialog");
+  await expect(newDialog).toBeVisible();
+  await expect(newDialog).toContainText("Novo canvas");
+  await expect(newDialog.getByRole("button", { name: "Criar" })).toBeVisible();
+  await newDialog.getByRole("button", { name: "Cancelar" }).click();
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { setLocale(mode: string): void } } };
+    root.__gnumarus?.shell?.setLocale("en");
+  });
+  await expect(page.getByRole("button", { name: "File", exact: true })).toBeVisible();
+  await expect(page.locator("gnumarus-shell")).toContainText("Language: English");
 });
 
 test("quick action palette filters and runs actions", async ({ page }) => {

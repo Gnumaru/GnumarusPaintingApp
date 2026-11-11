@@ -308,3 +308,6 @@
 - [x] Range context menu (Delete frames only) + confirm dialog (count + collapsed ranges, OK/Cancel, refuses every-frame removal)
 - [x] Engine removeFrames() bulk pass + formatFrameRanges()/normalizeFrameSet()/removal pure helpers
 - [x] Unit tests (vitest) — 384 passed; E2E @recent (Shift+click range + bulk delete incl. Cancel path) green + frame-area neighbors green (3 Import failures are pre-existing duplicate-button strict violations); build + deploy + docs
+- [x] i18n core (catalog en/pt-BR, resolution system/browser, interpolation) + locale setting + Settings row + plumbing
+- [x] Migrated all shell/picker UI texts + status/toast/console messages to the catalog
+- [x] Unit (parity/interpolation/resolution/locale-settings/axis-labels) + @recent e2e (locale switch pt-BR/en) green; neighbors green (4 brush-status + 1 cleanup-status + 1 anim-delete expectations updated to display labels; remaining failures match the pre-existing import/export/3d set); build + deploy + docs

@@ -237,6 +237,21 @@ import {
   type GnumarusBrushPreset,
 } from "../canvas/GnumarusBrushPresets";
 import { parseHexToRgbaBytes, rgbaBytesToHex } from "../color/GnumarusColorModels";
+import {
+  getActiveLocale,
+  resolveLocale,
+  setActiveLocale,
+  tr,
+  type GnumarusLocale,
+  type GnumarusLocaleSetting,
+} from "../i18n/GnumarusI18n";
+import {
+  DEFAULT_LOCALE_SETTINGS,
+  LOCALE_SETTINGS_STORAGE_KEY,
+  parseLocaleSetting,
+  parseLocaleSettings,
+  serializeLocaleSettings,
+} from "../settings/GnumarusLocaleSettings";
 import { type GnumarusTexturePixels } from "../animation/GnumarusAnimationModel";
 import {
   countAnimationFrames,
@@ -301,103 +316,105 @@ function isGimpFile(bytes: Uint8Array): boolean {
 /** Public source repository opened by Help > Source code. */
 export const GNUMARUS_SOURCE_URL = "https://github.com/Gnumaru/GnumarusPaintingApp";
 
-const GNUMARUS_SHORTCUTS: GnumarusShortcutSection[] = [
-  {
-    title: "File",
-    entries: [
-      { keys: "Ctrl+S (Cmd+S on macOS)", action: "Save (reuses the chosen folder, otherwise shows the folder picker)" },
-    ],
-  },
-  {
-    title: "History",
-    entries: [
-      { keys: "Ctrl+Z (Cmd+Z on macOS)", action: "Undo" },
-      { keys: "Ctrl+Y or Shift+Ctrl+Z (Cmd+Y or Shift+Cmd+Z on macOS)", action: "Redo" },
-    ],
-  },
-  {
-    title: "Layers",
-    entries: [
-      { keys: "Ctrl+E (Cmd+E on macOS)", action: "Merge active layer down (same as Merge Down)" },
-      { keys: "PageUp", action: "Select layer above (wraps around)" },
-      { keys: "PageDown", action: "Select layer below (wraps around)" },
-      { keys: "ArrowUp", action: "Select layer above (wraps around)" },
-      { keys: "ArrowDown", action: "Select layer below (wraps around)" },
-      { keys: "Shift+ArrowUp", action: "Move active layer up (wraps around)" },
-      { keys: "Shift+ArrowDown", action: "Move active layer down (wraps around)" },
-      { keys: "Insert", action: "Insert layer above the active layer" },
-      { keys: "Delete", action: "Reset current cell texture to transparent" },
-      { keys: "Ctrl+Shift+ArrowUp", action: "Expand current cell texture up by the configured step" },
-      { keys: "Ctrl+Shift+ArrowDown", action: "Expand current cell texture down by the configured step" },
-      { keys: "Ctrl+Shift+ArrowLeft", action: "Expand current cell texture left by the configured step" },
-      { keys: "Ctrl+Shift+ArrowRight", action: "Expand current cell texture right by the configured step" },
-    ],
-  },
-  {
-    title: "Frames",
-    entries: [
-      { keys: "ArrowLeft", action: "Select previous frame (wraps around)" },
-      { keys: "ArrowRight", action: "Select next frame (wraps around)" },
-      { keys: "Shift+ArrowLeft", action: "Move current frame left (wraps around)" },
-      { keys: "Shift+ArrowRight", action: "Move current frame right (wraps around)" },
-    ],
-  },
-  {
-    title: "Tools",
-    entries: [
-      { keys: "B", action: "Pencil tool" },
-      { keys: "G or F", action: "Bucket fill tool" },
-      { keys: "N", action: "Line tool" },
-      { keys: "C", action: "Curve tool" },
-      { keys: "Z", action: "Loupe tool" },
-      { keys: "T", action: "Non-destructive cell transform tool" },
-      { keys: "Y", action: "3D rotation tool" },
-      { keys: "R", action: "Rectangular selection tool" },
-      { keys: "V", action: "Destructive selection transform tool" },
-      { keys: "U", action: "Destructive 3D rotation tool" },
-      { keys: "E", action: "Toggle eraser blend mode" },
-      { keys: "Hold Ctrl", action: "Temporary eyedropper (release to restore the previous tool)" },
-      { keys: "Enter, Return or Esc", action: "Merge floating selection into the cell" },
-      { keys: "Escape", action: "Cancel line/curve/rectangular selection in progress; close menus and rename fields" },
-    ],
-  },
-  {
-    title: "View",
-    entries: [
-      { keys: "1 (main keyboard)", action: "Zoom to 100%" },
-      { keys: "2 (main keyboard)", action: "Fit rotated canvas on screen" },
-      { keys: "0 (main keyboard)", action: "Reset canvas transform (zoom, pan and rotation)" },
-      { keys: "4 (main and numpad)", action: "Rotate canvas counterclockwise by step" },
-      { keys: "6 (main and numpad)", action: "Rotate canvas clockwise by step" },
-      { keys: "5 (main and numpad)", action: "Reset canvas rotation" },
-      { keys: "M", action: "Flip canvas view horizontally" },
-      { keys: "Shift+M", action: "Flip canvas view vertically" },
-      { keys: "Ctrl+Alt+=", action: "Zoom in (numpad + also works)" },
-      { keys: "Ctrl+Alt+-", action: "Zoom out (numpad - also works)" },
-      { keys: "Hold Space and drag, or middle-drag", action: "Pan canvas" },
-      { keys: "Mouse wheel", action: "Zoom canvas at cursor" },
-      { keys: "Hold Ctrl+Space, left-drag up/down", action: "Zoom canvas in/out like the loupe" },
-      { keys: "Hold Shift+Space and left-drag", action: "Rotate canvas like the loupe" },
-      { keys: "Alt+middle-click (loupe or cell transform tool)", action: "Reset canvas view or active layer transform" },
-      { keys: "Middle-click (loupe or cell transform tool)", action: "Flip canvas view or active layer (Shift flips vertical)" },
-      { keys: "Right-drag (loupe or cell transform tool)", action: "Rotate canvas view or active layer" },
-      { keys: "Shift+Left-drag (pencil, line, curve)", action: "Resize tool live from horizontal movement" },
-    ],
-  },
-  {
-    title: "Actions",
-    entries: [
-      {
-        keys: "Ctrl+Shift+P (Cmd+Shift+P on macOS)",
-        action: "Quick action search (type to filter, arrows to move, Enter to run)",
-      },
-    ],
-  },
-  {
-    title: "Interface",
-    entries: [{ keys: "Tab", action: "Hide/show all interface chrome except the canvas" }],
-  },
-];
+function gnumarusShortcuts(): GnumarusShortcutSection[] {
+  return [
+    {
+      title: tr("sc.file"),
+      entries: [
+        { keys: "Ctrl+S (Cmd+S on macOS)", action: tr("sc.saveFolder") },
+      ],
+    },
+    {
+      title: tr("sc.history"),
+      entries: [
+        { keys: "Ctrl+Z (Cmd+Z on macOS)", action: tr("sc.undo") },
+        { keys: "Ctrl+Y or Shift+Ctrl+Z (Cmd+Y or Shift+Cmd+Z on macOS)", action: tr("sc.redo") },
+      ],
+    },
+    {
+      title: tr("sc.layers"),
+      entries: [
+        { keys: "Ctrl+E (Cmd+E on macOS)", action: tr("sc.mergeDown") },
+        { keys: "PageUp", action: tr("sc.layerAbove") },
+        { keys: "PageDown", action: tr("sc.layerBelow") },
+        { keys: "ArrowUp", action: tr("sc.layerAbove") },
+        { keys: "ArrowDown", action: tr("sc.layerBelow") },
+        { keys: "Shift+ArrowUp", action: tr("sc.moveLayerUp") },
+        { keys: "Shift+ArrowDown", action: tr("sc.moveLayerDown") },
+        { keys: "Insert", action: tr("sc.insertLayer") },
+        { keys: "Delete", action: tr("sc.deleteCell") },
+        { keys: "Ctrl+Shift+ArrowUp", action: tr("sc.expandUp") },
+        { keys: "Ctrl+Shift+ArrowDown", action: tr("sc.expandDown") },
+        { keys: "Ctrl+Shift+ArrowLeft", action: tr("sc.expandLeft") },
+        { keys: "Ctrl+Shift+ArrowRight", action: tr("sc.expandRight") },
+      ],
+    },
+    {
+      title: tr("sc.frames"),
+      entries: [
+        { keys: "ArrowLeft", action: tr("sc.prevFrame") },
+        { keys: "ArrowRight", action: tr("sc.nextFrame") },
+        { keys: "Shift+ArrowLeft", action: tr("sc.moveFrameLeft") },
+        { keys: "Shift+ArrowRight", action: tr("sc.moveFrameRight") },
+      ],
+    },
+    {
+      title: tr("sc.tools"),
+      entries: [
+        { keys: "B", action: tr("sc.toolPencil") },
+        { keys: "G or F", action: tr("sc.toolBucket") },
+        { keys: "N", action: tr("sc.toolLine") },
+        { keys: "C", action: tr("sc.toolCurve") },
+        { keys: "Z", action: tr("sc.toolLoupe") },
+        { keys: "T", action: tr("sc.toolTransform") },
+        { keys: "Y", action: tr("sc.toolRot3d") },
+        { keys: "R", action: tr("sc.toolRectselect") },
+        { keys: "V", action: tr("sc.toolDestransform") },
+        { keys: "U", action: tr("sc.toolDestransform3d") },
+        { keys: "E", action: tr("sc.toggleEraser") },
+        { keys: "Hold Ctrl", action: tr("sc.tempEyedropper") },
+        { keys: "Enter, Return or Esc", action: tr("sc.mergeFloating") },
+        { keys: "Escape", action: tr("sc.cancelStroke") },
+      ],
+    },
+    {
+      title: tr("sc.view"),
+      entries: [
+        { keys: "1 (main keyboard)", action: tr("sc.zoom100") },
+        { keys: "2 (main keyboard)", action: tr("sc.fitRotated") },
+        { keys: "0 (main keyboard)", action: tr("sc.resetTransform") },
+        { keys: "4 (main and numpad)", action: tr("sc.rotateCcw") },
+        { keys: "6 (main and numpad)", action: tr("sc.rotateCw") },
+        { keys: "5 (main and numpad)", action: tr("sc.resetRotation") },
+        { keys: "M", action: tr("sc.flipH") },
+        { keys: "Shift+M", action: tr("sc.flipV") },
+        { keys: "Ctrl+Alt+=", action: tr("sc.zoomIn") },
+        { keys: "Ctrl+Alt+-", action: tr("sc.zoomOut") },
+        { keys: "Hold Space and drag, or middle-drag", action: tr("sc.pan") },
+        { keys: "Mouse wheel", action: tr("sc.zoomAtCursor") },
+        { keys: "Hold Ctrl+Space, left-drag up/down", action: tr("sc.loupeZoom") },
+        { keys: "Hold Shift+Space and left-drag", action: tr("sc.loupeRotate") },
+        { keys: "Alt+middle-click (loupe or cell transform tool)", action: tr("sc.loupeReset") },
+        { keys: "Middle-click (loupe or cell transform tool)", action: tr("sc.loupeFlip") },
+        { keys: "Right-drag (loupe or cell transform tool)", action: tr("sc.loupeRotateDrag") },
+        { keys: "Shift+Left-drag (pencil, line, curve)", action: tr("sc.liveResize") },
+      ],
+    },
+    {
+      title: tr("sc.actions"),
+      entries: [
+        {
+          keys: "Ctrl+Shift+P (Cmd+Shift+P on macOS)",
+          action: tr("sc.quickSearch"),
+        },
+      ],
+    },
+    {
+      title: tr("sc.interface"),
+      entries: [{ keys: "Tab", action: tr("sc.hideChrome") }],
+    },
+  ];
+}
 
 export class GnumarusShell extends LitElement {
   static styles = css`
@@ -1290,6 +1307,7 @@ export class GnumarusShell extends LitElement {
     uiHidden: { type: Boolean },
     toastMessage: { type: String },
     toastDurationSec: { type: Number },
+    locale: { type: String },
     fitDefaultThreshold: { type: Number },
     storageLossless: { type: Boolean },
     storageQuality: { type: Number },
@@ -1433,6 +1451,7 @@ export class GnumarusShell extends LitElement {
   declare uiHidden: boolean;
   declare toastMessage: string;
   declare toastDurationSec: number;
+  declare locale: GnumarusLocaleSetting;
   declare fitDefaultThreshold: number;
   declare storageLossless: boolean;
   declare storageQuality: number;
@@ -1497,7 +1516,7 @@ export class GnumarusShell extends LitElement {
   private playbackDirection: 1 | -1 = 1;
   private toastTimer: number | null = null;
 
-  private readonly actionRegistry = new GnumarusActionRegistry();
+  private actionRegistry = new GnumarusActionRegistry();
 
   constructor() {
     super();
@@ -1513,7 +1532,7 @@ export class GnumarusShell extends LitElement {
     this.canvasText = "64 x 64";
     this.projectName = "Untitled";
     this.dirty = false;
-    this.statusMessage = "Ready";
+    this.statusMessage = tr("status.ready");
     this.fileMenuOpen = false;
     this.editMenuOpen = false;
     this.helpMenuOpen = false;
@@ -1547,7 +1566,7 @@ export class GnumarusShell extends LitElement {
     this.layers = [];
     this.activeLayerId = "";
     this.layerText = "-";
-    this.frameText = "Frame 1/1";
+    this.frameText = tr("frame.label", { frame: 1, count: 1, name: "F1" });
     this.renamingId = null;
     this.contextMenuLayerId = null;
     this.contextMenuX = 0;
@@ -1587,6 +1606,7 @@ export class GnumarusShell extends LitElement {
     this.uiHidden = false;
     this.toastMessage = "";
     this.toastDurationSec = DEFAULT_TOAST_SETTINGS.durationSec;
+    this.locale = DEFAULT_LOCALE_SETTINGS.locale;
     this.fitDefaultThreshold = DEFAULT_FIT_SETTINGS.alphaThreshold;
     this.storageLossless = DEFAULT_STORAGE_SETTINGS.lossless;
     this.storageQuality = DEFAULT_STORAGE_SETTINGS.quality;
@@ -1652,16 +1672,16 @@ export class GnumarusShell extends LitElement {
             @click=${(): void => this.toggleMenu("file")}
             @mouseenter=${(): void => this.hoverMenu("file")}
           >
-            File
+            ${tr("menu.file")}
           </button>
           ${this.fileMenuOpen
             ? html`
                 <div class="dropdown">
-                  <button @click=${(): void => void this.runAction("new-project")}>New Project</button>
-                  <button @click=${(): void => void this.runAction("open-project")}>Open Project</button>
-                  <button title="Save (Ctrl+S)" @click=${(): void => void this.runAction("save-project")}>Save Project</button>
-                  <button @click=${(): void => void this.runAction("import")}>Import</button>
-                  <button @click=${(): void => void this.runAction("export")}>Export</button>
+                  <button @click=${(): void => void this.runAction("new-project")}>${tr("menu.newProject")}</button>
+                  <button @click=${(): void => void this.runAction("open-project")}>${tr("menu.openProject")}</button>
+                  <button title=${tr("menu.saveTitle")} @click=${(): void => void this.runAction("save-project")}>${tr("menu.saveProject")}</button>
+                  <button @click=${(): void => void this.runAction("import")}>${tr("menu.import")}</button>
+                  <button @click=${(): void => void this.runAction("export")}>${tr("menu.export")}</button>
                 </div>
               `
             : html``}
@@ -1672,20 +1692,20 @@ export class GnumarusShell extends LitElement {
             @click=${(): void => this.toggleMenu("edit")}
             @mouseenter=${(): void => this.hoverMenu("edit")}
           >
-            Edit
+            ${tr("menu.edit")}
           </button>
           ${this.editMenuOpen
             ? html`
                 <div class="dropdown">
-                  <button ?disabled=${!this.canUndo} @click=${(): void => this.doUndo()}>Undo</button>
-                  <button ?disabled=${!this.canRedo} @click=${(): void => this.doRedo()}>Redo</button>
-                  <button @click=${(): void => this.openSettingsDialog()}>Settings</button>
+                  <button ?disabled=${!this.canUndo} @click=${(): void => this.doUndo()}>${tr("menu.undo")}</button>
+                  <button ?disabled=${!this.canRedo} @click=${(): void => this.doRedo()}>${tr("menu.redo")}</button>
+                  <button @click=${(): void => this.openSettingsDialog()}>${tr("menu.settings")}</button>
                   <button
                     @click=${(): void => {
                       this.runAction("reset-canvas-transform");
                     }}
                   >
-                    Reset Canvas Transform
+                    ${tr("menu.resetCanvasTransform")}
                   </button>
                 </div>
               `
@@ -1697,18 +1717,18 @@ export class GnumarusShell extends LitElement {
             @click=${(): void => this.toggleMenu("help")}
             @mouseenter=${(): void => this.hoverMenu("help")}
           >
-            Help
+            ${tr("menu.help")}
           </button>
           ${this.helpMenuOpen
             ? html`
                 <div class="dropdown">
-                  <button @click=${(): void => this.openShortcutsDialog()}>Shortcuts</button>
-                  <button @click=${(): void => this.openSourceCode()}>Source code</button>
+                  <button @click=${(): void => this.openShortcutsDialog()}>${tr("menu.shortcuts")}</button>
+                  <button @click=${(): void => this.openSourceCode()}>${tr("menu.sourceCode")}</button>
                 </div>
               `
             : html``}
         </div>
-        <span class="app-title">Gnumaru's Painting and Animation App${this.dirty ? " — *modified*" : ""}</span>
+        <span class="app-title">Gnumaru's Painting and Animation App${this.dirty ? tr("app.modified") : ""}</span>
       </div>
       ${this.renderEditorOptions()}
       ${this.renderToolOptions()}
@@ -1716,8 +1736,8 @@ export class GnumarusShell extends LitElement {
         <div class="toolbar" ?hidden=${this.uiHidden}>
           <button
             class=${this.tool === "pencil" ? "active" : ""}
-            title="B: Pencil (pixel-art solid brush, size and shape in the options bar)"
-            aria-label="Pencil"
+            title=${tr("tool.pencilHint")}
+            aria-label=${tr("tool.pencil")}
             @click=${(): void => {
               this.tool = "pencil";
               this.engine?.setTool("pencil");
@@ -1727,8 +1747,8 @@ export class GnumarusShell extends LitElement {
           </button>
           <button
             class=${this.tool === "loupe" ? "active" : ""}
-            title="Z: Loupe (left-drag zoom, right-drag rotate, middle-click flip)"
-            aria-label="Loupe"
+            title=${tr("tool.loupeHint")}
+            aria-label=${tr("tool.loupe")}
             @click=${(): void => {
               this.tool = "loupe";
               this.engine?.setTool("loupe");
@@ -1738,8 +1758,8 @@ export class GnumarusShell extends LitElement {
           </button>
           <button
             class=${this.tool === "bucket" ? "active" : ""}
-            title="G or F: Bucket fill (click fills contiguous same-color region)"
-            aria-label="Bucket fill"
+            title=${tr("tool.bucketHint")}
+            aria-label=${tr("tool.bucket")}
             @click=${(): void => {
               this.tool = "bucket";
               this.engine?.setTool("bucket");
@@ -1765,8 +1785,8 @@ export class GnumarusShell extends LitElement {
           </button>
           <button
             class=${this.tool === "eyedropper" ? "active" : ""}
-            title="Ctrl (hold): Eyedropper (click a pixel to copy its color)"
-            aria-label="Eyedropper"
+            title=${tr("tool.eyedropperHint")}
+            aria-label=${tr("tool.eyedropper")}
             @click=${(): void => {
               this.tool = "eyedropper";
               this.engine?.setTool("eyedropper");
@@ -1790,8 +1810,8 @@ export class GnumarusShell extends LitElement {
           </button>
           <button
             class=${this.tool === "line" ? "active" : ""}
-            title="N: Line (click start point, click end point)"
-            aria-label="Line"
+            title=${tr("tool.lineHint")}
+            aria-label=${tr("tool.line")}
             @click=${(): void => {
               this.tool = "line";
               this.engine?.setTool("line");
@@ -1801,8 +1821,8 @@ export class GnumarusShell extends LitElement {
           </button>
           <button
             class=${this.tool === "curve" ? "active" : ""}
-            title="C: Curve (drag endpoints, then two control clicks)"
-            aria-label="Curve"
+            title=${tr("tool.curveHint")}
+            aria-label=${tr("tool.curve")}
             @click=${(): void => {
               this.tool = "curve";
               this.engine?.setTool("curve");
@@ -1812,8 +1832,8 @@ export class GnumarusShell extends LitElement {
           </button>
           <button
             class=${this.tool === "rectselect" ? "active" : ""}
-            title="R: Rectangular selection (drag to mark, release cuts to floating)"
-            aria-label="Rectangular selection"
+            title=${tr("tool.rectselectHint")}
+            aria-label=${tr("tool.rectselect")}
             @click=${(): void => {
               this.tool = "rectselect";
               this.engine?.setTool("rectselect");
@@ -1823,8 +1843,8 @@ export class GnumarusShell extends LitElement {
           </button>
           <button
             class=${this.tool === "destransform" ? "active" : ""}
-            title="V: Destructive selection transform (drag anchors to move, resize, rotate or skew; Enter merges)"
-            aria-label="Destructive selection transform"
+            title=${tr("tool.destransformHint")}
+            aria-label=${tr("tool.destransform")}
             @click=${(): void => {
               this.tool = "destransform";
               this.engine?.setTool("destransform");
@@ -1834,8 +1854,8 @@ export class GnumarusShell extends LitElement {
           </button>
           <button
             class=${this.tool === "transform" ? "active" : ""}
-            title="T: Non-destructive cell transform (drag anchors to move, resize, rotate, skew or flip; center resets)"
-            aria-label="Non-destructive cell transform"
+            title=${tr("tool.transformHint")}
+            aria-label=${tr("tool.transform")}
             @click=${(): void => {
               this.tool = "transform";
               this.engine?.setTool("transform");
@@ -1845,8 +1865,8 @@ export class GnumarusShell extends LitElement {
           </button>
           <button
             class=${this.tool === "transform3d" ? "active" : ""}
-            title="Y: 3D rotation (drag to tilt the layer, rings rotate one axis, center resets rotations)"
-            aria-label="3D rotation"
+            title=${tr("tool.transform3dHint")}
+            aria-label=${tr("tool.transform3d")}
             @click=${(): void => {
               this.tool = "transform3d";
               this.engine?.setTool("transform3d");
@@ -1856,8 +1876,8 @@ export class GnumarusShell extends LitElement {
           </button>
           <button
             class=${this.tool === "destransform3d" ? "active" : ""}
-            title="U: Destructive 3D rotation (drag to tilt the selection, rings rotate one axis, Enter merges)"
-            aria-label="Destructive 3D rotation"
+            title=${tr("tool.destransform3dHint")}
+            aria-label=${tr("tool.destransform3d")}
             @click=${(): void => {
               this.tool = "destransform3d";
               this.engine?.setTool("destransform3d");
@@ -1878,8 +1898,8 @@ export class GnumarusShell extends LitElement {
           ></gnumarus-color-picker>
           <button
             class=${this.previewOpen ? "active" : ""}
-            title="Final preview (flattened image)"
-            aria-label="Final preview"
+            title=${tr("preview.hint")}
+            aria-label=${tr("preview.title")}
             @click=${(): void => {
               this.togglePreview();
             }}
@@ -1899,21 +1919,21 @@ export class GnumarusShell extends LitElement {
                     class="preview-header"
                     @pointerdown=${(event: PointerEvent): void => this.onPreviewDragStart(event)}
                   >
-                    <span>Final preview</span>
+                    <span>${tr("preview.title")}</span>
                     <span class="spacer"></span>
-                    <button aria-label="Close preview" title="Close preview" @click=${(): void => this.togglePreview()}>
+                    <button aria-label=${tr("preview.close")} title=${tr("preview.close")} @click=${(): void => this.togglePreview()}>
                       ×
                     </button>
                   </div>
                   <div class="preview-toolbar">
-                    <button aria-label="Zoom out preview" title="Zoom out preview" @click=${(): void => this.zoomPreview(0.5)}>
+                    <button aria-label=${tr("preview.zoomOut")} title=${tr("preview.zoomOut")} @click=${(): void => this.zoomPreview(0.5)}>
                       −
                     </button>
                     <span>${Math.round(this.previewZoom * 100)}%</span>
-                    <button aria-label="Zoom in preview" title="Zoom in preview" @click=${(): void => this.zoomPreview(2)}>
+                    <button aria-label=${tr("preview.zoomIn")} title=${tr("preview.zoomIn")} @click=${(): void => this.zoomPreview(2)}>
                       +
                     </button>
-                    <button aria-label="Reset preview zoom" title="Reset preview zoom" @click=${(): void => this.resetPreviewZoom()}>
+                    <button aria-label=${tr("preview.resetZoom")} title=${tr("preview.resetZoom")} @click=${(): void => this.resetPreviewZoom()}>
                       1:1
                     </button>
                   </div>
@@ -1942,10 +1962,10 @@ export class GnumarusShell extends LitElement {
             ? html`<div class="toast" data-testid="toast">${this.toastMessage}</div>`
             : html``}
         </div>
-        <aside class="layers-panel" aria-label="Layers" ?hidden=${this.uiHidden}>
+        <aside class="layers-panel" aria-label=${tr("layer.layers")} ?hidden=${this.uiHidden}>
           <div class="layers-header">
-            <span>Layers</span>
-            <button aria-label="Add layer" title="Add layer" @click=${(): void => this.onAddLayer()}>+</button>
+            <span>${tr("layer.layers")}</span>
+            <button aria-label=${tr("layer.add")} title=${tr("layer.add")} @click=${(): void => this.onAddLayer()}>+</button>
           </div>
           <div class="layers-list">
             ${[...this.layers].reverse().map(
@@ -1962,7 +1982,7 @@ export class GnumarusShell extends LitElement {
                   <div class="layer-top">
                     <input
                       type="checkbox"
-                      aria-label="Toggle layer visibility"
+                      aria-label=${tr("layer.toggleVisibility")}
                       .checked=${layer.visible}
                       @click=${(event: Event): void => event.stopPropagation()}
                       @change=${(event: Event): void => {
@@ -1996,8 +2016,8 @@ export class GnumarusShell extends LitElement {
                           <span class="layer-dims">${layer.width}×${layer.height}</span>
                         `}
                     <button
-                      aria-label="Move layer up"
-                      title="Move up"
+                      aria-label=${tr("layer.moveUp")}
+                      title=${tr("layer.moveUpTitle")}
                       ?disabled=${displayIndex === 0}
                       @click=${(event: Event): void => {
                         event.stopPropagation();
@@ -2007,8 +2027,8 @@ export class GnumarusShell extends LitElement {
                       ▲
                     </button>
                     <button
-                      aria-label="Move layer down"
-                      title="Move down"
+                      aria-label=${tr("layer.moveDown")}
+                      title=${tr("layer.moveDownTitle")}
                       ?disabled=${displayIndex === displayLayers.length - 1}
                       @click=${(event: Event): void => {
                         event.stopPropagation();
@@ -2018,8 +2038,8 @@ export class GnumarusShell extends LitElement {
                       ▼
                     </button>
                     <button
-                      aria-label="Delete layer"
-                      title="Delete layer"
+                      aria-label=${tr("layer.delete")}
+                      title=${tr("layer.delete")}
                       ?disabled=${this.layers.length <= 1}
                       @click=${(event: Event): void => {
                         event.stopPropagation();
@@ -2030,12 +2050,12 @@ export class GnumarusShell extends LitElement {
                     </button>
                   </div>
                   <div class="layer-opacity">
-                    <span>Opacity</span>
+                    <span>${tr("layer.opacity")}</span>
                     <input
                       type="range"
                       min="0"
                       max="100"
-                      aria-label="Layer opacity"
+                      aria-label=${tr("layer.opacityAria")}
                       .value=${String(Math.round(layer.opacity * 100))}
                       @input=${(event: Event): void => {
                         const target = event.target as HTMLInputElement | null;
@@ -2046,11 +2066,11 @@ export class GnumarusShell extends LitElement {
                     />
                   </div>
                   <div class="layer-channels">
-                    <span>Lock</span>
+                    <span>${tr("layer.lock")}</span>
                     <button
                       class=${layer.lockedChannels.r ? "active" : ""}
-                      title=${layer.lockedChannels.r ? "Unlock red channel" : "Lock red channel"}
-                      aria-label="Lock red channel"
+                      title=${layer.lockedChannels.r ? tr("layer.unlockChannel", { channel: tr("channel.red") }) : tr("layer.lockChannel", { channel: tr("channel.red") })}
+                      aria-label=${tr("layer.lockChannel", { channel: tr("channel.red") })}
                       aria-pressed=${layer.lockedChannels.r ? "true" : "false"}
                       @click=${(): void => {
                         this.onToggleChannelLock(layer.id, "r");
@@ -2060,8 +2080,8 @@ export class GnumarusShell extends LitElement {
                     </button>
                     <button
                       class=${layer.lockedChannels.g ? "active" : ""}
-                      title=${layer.lockedChannels.g ? "Unlock green channel" : "Lock green channel"}
-                      aria-label="Lock green channel"
+                      title=${layer.lockedChannels.g ? tr("layer.unlockChannel", { channel: tr("channel.green") }) : tr("layer.lockChannel", { channel: tr("channel.green") })}
+                      aria-label=${tr("layer.lockChannel", { channel: tr("channel.green") })}
                       aria-pressed=${layer.lockedChannels.g ? "true" : "false"}
                       @click=${(): void => {
                         this.onToggleChannelLock(layer.id, "g");
@@ -2071,8 +2091,8 @@ export class GnumarusShell extends LitElement {
                     </button>
                     <button
                       class=${layer.lockedChannels.b ? "active" : ""}
-                      title=${layer.lockedChannels.b ? "Unlock blue channel" : "Lock blue channel"}
-                      aria-label="Lock blue channel"
+                      title=${layer.lockedChannels.b ? tr("layer.unlockChannel", { channel: tr("channel.blue") }) : tr("layer.lockChannel", { channel: tr("channel.blue") })}
+                      aria-label=${tr("layer.lockChannel", { channel: tr("channel.blue") })}
                       aria-pressed=${layer.lockedChannels.b ? "true" : "false"}
                       @click=${(): void => {
                         this.onToggleChannelLock(layer.id, "b");
@@ -2082,8 +2102,8 @@ export class GnumarusShell extends LitElement {
                     </button>
                     <button
                       class=${layer.lockedChannels.a ? "active" : ""}
-                      title=${layer.lockedChannels.a ? "Unlock alpha channel" : "Lock alpha channel"}
-                      aria-label="Lock alpha channel"
+                      title=${layer.lockedChannels.a ? tr("layer.unlockChannel", { channel: tr("channel.alpha") }) : tr("layer.lockChannel", { channel: tr("channel.alpha") })}
+                      aria-label=${tr("layer.lockChannel", { channel: tr("channel.alpha") })}
                       aria-pressed=${layer.lockedChannels.a ? "true" : "false"}
                       @click=${(): void => {
                         this.onToggleChannelLock(layer.id, "a");
@@ -2093,16 +2113,16 @@ export class GnumarusShell extends LitElement {
                     </button>
                   </div>
                   <div class="layer-resize">
-                    <span>Size</span>
+                    <span>${tr("layer.size")}</span>
                     <button
-                      aria-label="Resize layer"
-                      title="Resize layer (expand right and down, crop right and below)"
+                      aria-label=${tr("layer.resize")}
+                      title=${tr("layer.resizeHint")}
                       @click=${(event: Event): void => {
                         event.stopPropagation();
                         this.openResizeDialog(layer.id);
                       }}
                     >
-                      ${layer.width}×${layer.height} Resize
+                      ${tr("layer.resizeButton", { dims: `${layer.width}×${layer.height}` })}
                     </button>
                   </div>
                 </div>
@@ -2130,7 +2150,7 @@ export class GnumarusShell extends LitElement {
                     }
                   }}
                 >
-                  Merge Down
+                  ${tr("ctx.mergeDown")}
                 </button>
                 <button
                   @click=${(): void => {
@@ -2139,7 +2159,7 @@ export class GnumarusShell extends LitElement {
                     }
                   }}
                 >
-                  Add above
+                  ${tr("ctx.addAbove")}
                 </button>
                 <button
                   @click=${(): void => {
@@ -2148,7 +2168,7 @@ export class GnumarusShell extends LitElement {
                     }
                   }}
                 >
-                  Add below
+                  ${tr("ctx.addBelow")}
                 </button>
                 <button
                   @click=${(): void => {
@@ -2157,7 +2177,7 @@ export class GnumarusShell extends LitElement {
                     }
                   }}
                 >
-                  Reset transform
+                  ${tr("ctx.resetTransform")}
                 </button>
                 <button
                   ?disabled=${this.contextMenuLayerId === null ||
@@ -2168,7 +2188,7 @@ export class GnumarusShell extends LitElement {
                     }
                   }}
                 >
-                  Fit texture to size
+                  ${tr("ctx.fitTexture")}
                 </button>
                 <button
                   ?disabled=${this.contextMenuLayerId === null ||
@@ -2179,7 +2199,7 @@ export class GnumarusShell extends LitElement {
                     }
                   }}
                 >
-                  Crop to canvas
+                  ${tr("ctx.cropCanvas")}
                 </button>
                 <button
                   ?disabled=${this.contextMenuLayerId === null ||
@@ -2190,7 +2210,7 @@ export class GnumarusShell extends LitElement {
                     }
                   }}
                 >
-                  Resize to canvas
+                  ${tr("ctx.resizeCanvas")}
                 </button>
               </div>
             `
@@ -2214,18 +2234,18 @@ export class GnumarusShell extends LitElement {
         <span>${this.statusMessage}</span>
       </div>
       <dialog id="newDialog">
-        <h3>New canvas</h3>
+        <h3>${tr("dialog.new")}</h3>
         <label
-          >Preset
+          >${tr("dialog.preset")}
           <select id="newPreset" .value=${this.newPreset} @change=${(): void => this.applyNewPresetFromDialog()}>
-            <option value="">Custom</option>
+            <option value="">${tr("dialog.custom")}</option>
             ${GNUMARUS_NEW_PROJECT_PRESETS.map(
               (preset) => html`<option value=${preset.name}>${preset.name}</option>`,
             )}
           </select>
         </label>
         <label
-          >Width
+          >${tr("dialog.width")}
           <input
             type="number"
             id="newWidth"
@@ -2235,7 +2255,7 @@ export class GnumarusShell extends LitElement {
             @input=${(): void => this.applyNewDimensionsFromDialog()}
         /></label>
         <label
-          >Height
+          >${tr("dialog.height")}
           <input
             type="number"
             id="newHeight"
@@ -2245,7 +2265,7 @@ export class GnumarusShell extends LitElement {
             @input=${(): void => this.applyNewDimensionsFromDialog()}
         /></label>
         <label
-          >Texture format
+          >${tr("dialog.textureFormat")}
           <select
             id="newStorageFormat"
             .value=${this.newStorageFormat}
@@ -2257,21 +2277,21 @@ export class GnumarusShell extends LitElement {
           </select>
         </label>
         <label
-          >Texture mode
+          >${tr("dialog.textureMode")}
           <select
             id="newStorageMode"
             .value=${this.newStorageLossless ? "lossless" : "lossy"}
             @change=${(): void => this.applyNewStorageFromDialog()}
           >
-            <option value="lossless">Lossless</option>
+            <option value="lossless">${tr("val.lossless")}</option>
             ${this.newStorageFormat === "png"
               ? html``
-              : html`<option value="lossy">Lossy</option>`}
+              : html`<option value="lossy">${tr("val.lossy")}</option>`}
           </select>
         </label>
         ${this.newStorageFormat !== "png" && !this.newStorageLossless
           ? html`<label
-              >Lossy quality
+              >${tr("dialog.lossyQuality")}
               <input
                 type="number"
                 id="newStorageQuality"
@@ -2283,36 +2303,36 @@ export class GnumarusShell extends LitElement {
             /></label>`
           : html``}
         <div class="dialog-actions">
-          <button @click=${(): void => this.closeNewDialog()}>Cancel</button>
-          <button @click=${(): void => void this.createNew()}>Create</button>
+          <button @click=${(): void => this.closeNewDialog()}>${tr("btn.cancel")}</button>
+          <button @click=${(): void => void this.createNew()}>${tr("btn.create")}</button>
         </div>
       </dialog>
       <dialog id="resizeDialog">
-        <h3>Resize layer</h3>
-        <p>Expanding adds transparent pixels right and below. Shrinking crops right and below.</p>
-        <label>Width <input type="number" id="resizeWidth" min="1" max="1024" .value=${String(this.resizeWidth)} /></label>
-        <label>Height <input type="number" id="resizeHeight" min="1" max="1024" .value=${String(this.resizeHeight)} /></label>
+        <h3>${tr("dialog.resize")}</h3>
+        <p>${tr("dialog.resizeHint")}</p>
+        <label>${tr("dialog.width")} <input type="number" id="resizeWidth" min="1" max="1024" .value=${String(this.resizeWidth)} /></label>
+        <label>${tr("dialog.height")} <input type="number" id="resizeHeight" min="1" max="1024" .value=${String(this.resizeHeight)} /></label>
         <div class="dialog-actions">
-          <button @click=${(): void => this.closeResizeDialog()}>Cancel</button>
-          <button @click=${(): void => this.confirmResize()}>Resize</button>
+          <button @click=${(): void => this.closeResizeDialog()}>${tr("btn.cancel")}</button>
+          <button @click=${(): void => this.confirmResize()}>${tr("btn.resize")}</button>
         </div>
       </dialog>
       <dialog id="fitTextureDialog">
-        <h3>Fit texture to size</h3>
-        <p>Crops transparent borders on all four sides. Pixels with alpha up to the threshold count as empty.</p>
+        <h3>${tr("ctx.fitTexture")}</h3>
+        <p>${tr("dialog.fitHint")}</p>
         <label
-          >Alpha threshold
+          >${tr("dialog.alphaThreshold")}
           <input type="number" id="fitThreshold" min="0" max="254" step="1" .value=${String(this.fitThreshold)} />
         </label>
         <div class="dialog-actions">
-          <button @click=${(): void => this.closeFitTextureDialog()}>Cancel</button>
-          <button id="fitTextureOk" @click=${(): void => this.confirmFitTexture()}>OK</button>
+          <button @click=${(): void => this.closeFitTextureDialog()}>${tr("btn.cancel")}</button>
+          <button id="fitTextureOk" @click=${(): void => this.confirmFitTexture()}>${tr("btn.ok")}</button>
         </div>
       </dialog>
       <dialog id="shortcutsDialog">
-        <h3>Keyboard shortcuts</h3>
+        <h3>${tr("dialog.shortcuts")}</h3>
         <div class="shortcuts-list">
-          ${GNUMARUS_SHORTCUTS.map(
+          ${gnumarusShortcuts().map(
             (section) => html`
               <h4>${section.title}</h4>
               <table>
@@ -2329,19 +2349,19 @@ export class GnumarusShell extends LitElement {
           )}
         </div>
         <div class="dialog-actions">
-          <button @click=${(): void => this.closeShortcutsDialog()}>Close</button>
+          <button @click=${(): void => this.closeShortcutsDialog()}>${tr("btn.close")}</button>
         </div>
       </dialog>
       <dialog id="actionPaletteDialog" @close=${(): void => this.closeActionPalette()}>
-        <h3>Run action</h3>
+        <h3>${tr("palette.title")}</h3>
         <input
           type="text"
           id="actionPaletteInput"
           data-testid="action-palette-input"
-          placeholder="Type an action name…"
+          placeholder=${tr("palette.placeholder")}
           autocomplete="off"
           spellcheck="false"
-          aria-label="Search actions"
+          aria-label=${tr("palette.searchLabel")}
           .value=${this.actionPaletteQuery}
           @input=${(event: Event): void => {
             this.actionPaletteQuery = (event.target as HTMLInputElement).value;
@@ -2352,7 +2372,7 @@ export class GnumarusShell extends LitElement {
         ${((): unknown => {
           const results = this.paletteResults();
           if (results.length === 0) {
-            return html`<p data-testid="action-palette-empty">No actions found</p>`;
+            return html`<p data-testid="action-palette-empty">${tr("palette.empty")}</p>`;
           }
           const selected = Math.min(this.actionPaletteIndex, results.length - 1);
           return html`<div class="action-palette-list" data-testid="action-palette-list" role="listbox">
@@ -2375,21 +2395,21 @@ export class GnumarusShell extends LitElement {
         })()}
       </dialog>
       <dialog id="settingsDialog">
-        <h3>Settings</h3>
-        <div class="settings-section">Background</div>
+        <h3>${tr("dialog.settings")}</h3>
+        <div class="settings-section">${tr("setting.background")}</div>
         <div class="setting-row">
           <label
-            >Background mode
+            >${tr("setting.backgroundMode")}
             <select id="backgroundMode" .value=${this.backgroundMode} @change=${(): void => this.applyBackgroundFromDialog()}>
-              <option value="checkerboard">Checkerboard</option>
-              <option value="solid">Solid color</option>
+              <option value="checkerboard">${tr("setting.checkerboard")}</option>
+              <option value="solid">${tr("setting.solidColor")}</option>
             </select>
           </label>
           ${this.backgroundMode !== DEFAULT_BACKGROUND_SETTINGS.mode
             ? html`<button
                 class="reset-btn"
-                aria-label="Reset background mode to default"
-                title="Reset to default"
+                aria-label=${tr("a11y.resetBackgroundMode")}
+                title=${tr("a11y.resetToDefault")}
                 @click=${(): void => this.resetBackgroundModeToDefault()}
               >
                 ↻
@@ -2399,7 +2419,7 @@ export class GnumarusShell extends LitElement {
         ${this.backgroundMode === "solid"
           ? html`
               <div class="setting-row">
-                <span>Solid color</span>
+                <span>${tr("setting.solidColor")}</span>
                 <gnumarus-color-picker
                   id="backgroundColor"
                   .value=${this.backgroundColor}
@@ -2414,8 +2434,8 @@ export class GnumarusShell extends LitElement {
                 ${this.backgroundColor.toLowerCase() !== DEFAULT_BACKGROUND_SETTINGS.color.toLowerCase()
                   ? html`<button
                       class="reset-btn"
-                      aria-label="Reset background color to default"
-                      title="Reset to default"
+                      aria-label=${tr("a11y.resetBackgroundColor")}
+                      title=${tr("a11y.resetToDefault")}
                       @click=${(): void => this.resetBackgroundColorToDefault()}
                     >
                       ↻
@@ -2426,24 +2446,24 @@ export class GnumarusShell extends LitElement {
           : html``}
         ${this.backgroundMode === "checkerboard"
           ? html`
-              <div class="settings-section">Checkerboard</div>
+              <div class="settings-section">${tr("setting.checkerboard")}</div>
               <div class="setting-row">
                 <label
-                  >Checkerboard mode
+                  >${tr("setting.checkerboardMode")}
                   <select
                     id="checkerMode"
                     .value=${this.checkerMode}
                     @change=${(): void => this.applyCheckerFromDialog()}
                   >
-                    <option value="image">Image-space (moves and zooms with the canvas)</option>
-                    <option value="screen">Screen-space (fixed on screen)</option>
+                    <option value="image">${tr("setting.checkerImage")}</option>
+                    <option value="screen">${tr("setting.checkerScreen")}</option>
                   </select>
                 </label>
                 ${this.checkerMode !== DEFAULT_CHECKER_SETTINGS.mode
                   ? html`<button
                       class="reset-btn"
-                      aria-label="Reset checkerboard mode to default"
-                      title="Reset to default"
+                      aria-label=${tr("a11y.resetCheckerMode")}
+                      title=${tr("a11y.resetToDefault")}
                       @click=${(): void => this.resetCheckerModeToDefault()}
                     >
                       ↻
@@ -2452,7 +2472,7 @@ export class GnumarusShell extends LitElement {
               </div>
               <div class="setting-row">
                 <label
-                  >Checker width
+                  >${tr("setting.checkerWidth")}
                   <input
                     type="number"
                     id="checkerSizeX"
@@ -2465,8 +2485,8 @@ export class GnumarusShell extends LitElement {
                 ${this.checkerSizeX !== DEFAULT_CHECKER_SETTINGS.sizeX
                   ? html`<button
                       class="reset-btn"
-                      aria-label="Reset checker width to default"
-                      title="Reset to default"
+                      aria-label=${tr("a11y.resetCheckerWidth")}
+                      title=${tr("a11y.resetToDefault")}
                       @click=${(): void => this.resetCheckerSizeXToDefault()}
                     >
                       ↻
@@ -2475,7 +2495,7 @@ export class GnumarusShell extends LitElement {
               </div>
               <div class="setting-row">
                 <label
-                  >Checker height
+                  >${tr("setting.checkerHeight")}
                   <input
                     type="number"
                     id="checkerSizeY"
@@ -2488,8 +2508,8 @@ export class GnumarusShell extends LitElement {
                 ${this.checkerSizeY !== DEFAULT_CHECKER_SETTINGS.sizeY
                   ? html`<button
                       class="reset-btn"
-                      aria-label="Reset checker height to default"
-                      title="Reset to default"
+                      aria-label=${tr("a11y.resetCheckerHeight")}
+                      title=${tr("a11y.resetToDefault")}
                       @click=${(): void => this.resetCheckerSizeYToDefault()}
                     >
                       ↻
@@ -2497,7 +2517,7 @@ export class GnumarusShell extends LitElement {
                   : html``}
               </div>
               <div class="setting-row">
-                <span>Checker color A</span>
+                <span>${tr("setting.checkerColorA")}</span>
                 <gnumarus-color-picker
                   id="checkerColorA"
                   .value=${this.checkerColorA}
@@ -2512,8 +2532,8 @@ export class GnumarusShell extends LitElement {
                 ${this.checkerColorA.toLowerCase() !== DEFAULT_CHECKER_SETTINGS.colorA.toLowerCase()
                   ? html`<button
                       class="reset-btn"
-                      aria-label="Reset checker color A to default"
-                      title="Reset to default"
+                      aria-label=${tr("a11y.resetCheckerColorA")}
+                      title=${tr("a11y.resetToDefault")}
                       @click=${(): void => this.resetCheckerColorAToDefault()}
                     >
                       ↻
@@ -2521,7 +2541,7 @@ export class GnumarusShell extends LitElement {
                   : html``}
               </div>
               <div class="setting-row">
-                <span>Checker color B</span>
+                <span>${tr("setting.checkerColorB")}</span>
                 <gnumarus-color-picker
                   id="checkerColorB"
                   .value=${this.checkerColorB}
@@ -2536,8 +2556,8 @@ export class GnumarusShell extends LitElement {
                 ${this.checkerColorB.toLowerCase() !== DEFAULT_CHECKER_SETTINGS.colorB.toLowerCase()
                   ? html`<button
                       class="reset-btn"
-                      aria-label="Reset checker color B to default"
-                      title="Reset to default"
+                      aria-label=${tr("a11y.resetCheckerColorB")}
+                      title=${tr("a11y.resetToDefault")}
                       @click=${(): void => this.resetCheckerColorBToDefault()}
                     >
                       ↻
@@ -2546,10 +2566,10 @@ export class GnumarusShell extends LitElement {
               </div>
             `
           : html``}
-        <div class="settings-section">Pixel grid</div>
+        <div class="settings-section">${tr("setting.pixelGrid")}</div>
         <div class="setting-row">
           <label
-            >Pixel grid minimum zoom (percent)
+            >${tr("setting.gridMinZoom")}
             <input
               type="number"
               id="gridMinZoom"
@@ -2563,8 +2583,8 @@ export class GnumarusShell extends LitElement {
           ${Math.abs(this.gridMinZoom - DEFAULT_GRID_SETTINGS.minZoom) > 1e-9
             ? html`<button
                 class="reset-btn"
-                aria-label="Reset pixel grid minimum zoom to default"
-                title="Reset to default"
+                aria-label=${tr("a11y.resetGridMinZoom")}
+                title=${tr("a11y.resetToDefault")}
                 @click=${(): void => this.resetGridMinZoomToDefault()}
               >
                 ↻
@@ -2573,7 +2593,7 @@ export class GnumarusShell extends LitElement {
         </div>
         <div class="setting-row">
           <label
-            >Pixel grid opacity (percent)
+            >${tr("setting.gridOpacity")}
             <input
               type="number"
               id="gridOpacity"
@@ -2587,18 +2607,18 @@ export class GnumarusShell extends LitElement {
           ${this.gridOpacity !== DEFAULT_GRID_SETTINGS.opacityPercent
             ? html`<button
                 class="reset-btn"
-                aria-label="Reset pixel grid opacity to default"
-                title="Reset to default"
+                aria-label=${tr("a11y.resetGridOpacity")}
+                title=${tr("a11y.resetToDefault")}
                 @click=${(): void => this.resetGridOpacityToDefault()}
               >
                 ↻
               </button>`
             : html``}
         </div>
-        <div class="settings-section">Canvas view</div>
+        <div class="settings-section">${tr("setting.canvasView")}</div>
         <div class="setting-row">
           <label
-            >Canvas rotation step (degrees)
+            >${tr("setting.rotationStep")}
             <input
               type="number"
               id="rotationStep"
@@ -2612,8 +2632,8 @@ export class GnumarusShell extends LitElement {
           ${this.rotationStepDeg !== DEFAULT_ROTATION_SETTINGS.stepDeg
             ? html`<button
                 class="reset-btn"
-                aria-label="Reset canvas rotation step to default"
-                title="Reset to default"
+                aria-label=${tr("a11y.resetRotationStep")}
+                title=${tr("a11y.resetToDefault")}
                 @click=${(): void => this.resetRotationStepToDefault()}
               >
                 ↻
@@ -2622,7 +2642,7 @@ export class GnumarusShell extends LitElement {
         </div>
         <div class="setting-row">
           <label
-            >Minimum zoom (percent)
+            >${tr("setting.zoomMin")}
             <input
               type="number"
               id="zoomMinZoom"
@@ -2636,18 +2656,18 @@ export class GnumarusShell extends LitElement {
           ${this.zoomMinPercent !== DEFAULT_ZOOM_SETTINGS.minZoomPercent
             ? html`<button
                 class="reset-btn"
-                aria-label="Reset minimum zoom to default"
-                title="Reset to default"
+                aria-label=${tr("a11y.resetZoomMin")}
+                title=${tr("a11y.resetToDefault")}
                 @click=${(): void => this.resetZoomMinToDefault()}
               >
                 ↻
               </button>`
             : html``}
         </div>
-        <div class="settings-section">Animation</div>
+        <div class="settings-section">${tr("setting.animation")}</div>
         <div class="setting-row">
           <label
-            >Default frame duration (s)
+            >${tr("setting.defaultFrameDuration")}
             <input
               type="number"
               id="defaultFrameDuration"
@@ -2662,18 +2682,41 @@ export class GnumarusShell extends LitElement {
           ${this.defaultFrameDuration !== DEFAULT_ANIMATION_FRAME_DURATION
             ? html`<button
                 class="reset-btn"
-                aria-label="Reset default frame duration to default"
-                title="Reset to default"
+                aria-label=${tr("a11y.resetFrameDuration")}
+                title=${tr("a11y.resetToDefault")}
                 @click=${(): void => this.resetDefaultFrameDuration()}
               >
                 ↻
               </button>`
             : html``}
         </div>
-        <div class="settings-section">Interface</div>
+        <div class="settings-section">${tr("setting.interface")}</div>
+        <div class="setting-row">
+          <label>${tr("locale.language")}
+            <select
+              id="localeSelect"
+              .value=${this.locale}
+              @change=${(): void => this.applyLocaleFromDialog()}
+            >
+              <option value="system">${tr("locale.system")}</option>
+              <option value="en">${tr("locale.english")}</option>
+              <option value="pt-BR">${tr("locale.portuguese")}</option>
+            </select>
+          </label>
+          ${this.locale !== DEFAULT_LOCALE_SETTINGS.locale
+            ? html`<button
+                class="reset-btn"
+                aria-label=${tr("a11y.resetLanguage")}
+                title=${tr("a11y.resetToDefault")}
+                @click=${(): void => this.resetLocaleToDefault()}
+              >
+                ↻
+              </button>`
+            : html``}
+        </div>
         <div class="setting-row">
           <label
-            >Toast display time (seconds)
+            >${tr("setting.toastDuration")}
             <input
               type="number"
               id="toastDuration"
@@ -2687,8 +2730,8 @@ export class GnumarusShell extends LitElement {
           ${Math.abs(this.toastDurationSec - DEFAULT_TOAST_SETTINGS.durationSec) > 1e-9
             ? html`<button
                 class="reset-btn"
-                aria-label="Reset toast display time to default"
-                title="Reset to default"
+                aria-label=${tr("a11y.resetToast")}
+                title=${tr("a11y.resetToDefault")}
                 @click=${(): void => this.resetToastDurationToDefault()}
               >
                 ↻
@@ -2697,7 +2740,7 @@ export class GnumarusShell extends LitElement {
         </div>
         <div class="setting-row">
           <label
-            >Fit texture default alpha threshold
+            >${tr("setting.fitThreshold")}
             <input
               type="number"
               id="fitDefaultThreshold"
@@ -2711,8 +2754,8 @@ export class GnumarusShell extends LitElement {
           ${this.fitDefaultThreshold !== DEFAULT_FIT_SETTINGS.alphaThreshold
             ? html`<button
                 class="reset-btn"
-                aria-label="Reset fit alpha threshold to default"
-                title="Reset to default"
+                aria-label=${tr("a11y.resetFit")}
+                title=${tr("a11y.resetToDefault")}
                 @click=${(): void => this.resetFitToDefault()}
               >
                 ↻
@@ -2720,19 +2763,19 @@ export class GnumarusShell extends LitElement {
             : html``}
         </div>
         <div class="setting-row">
-          <label>Project data file
+          <label>${tr("setting.projectFile")}
             <select
               id="storageProjectFile"
               .value=${this.storageProjectFile}
               @change=${(): void => this.applyStorageFromDialog()}
             >
-              <option value="gpa">Zipped JSON (.gpa)</option>
-              <option value="json">Plain JSON (.json)</option>
+              <option value="gpa">${tr("setting.projectFileGpa")}</option>
+              <option value="json">${tr("setting.projectFileJson")}</option>
             </select>
           </label>
         </div>
         <div class="setting-row">
-          <label>Project texture format
+          <label>${tr("setting.textureFormat")}
             <select
               id="storageFormat"
               .value=${this.storageFormat}
@@ -2748,8 +2791,8 @@ export class GnumarusShell extends LitElement {
             ? html``
             : html`<button
                 class="reset-btn"
-                aria-label="Reset project texture format to default"
-                title="Reset to default"
+                aria-label=${tr("a11y.resetTextureFormat")}
+                title=${tr("a11y.resetToDefault")}
                 @click=${(): void => this.resetStorageToDefault()}
               >
                 ↻
@@ -2757,14 +2800,14 @@ export class GnumarusShell extends LitElement {
         </div>
         ${this.storageFormat === "jxl" || this.storageFormat === "webp"
           ? html`<div class="setting-row">
-              <label>Project texture ${this.storageFormat === "webp" ? "WebP" : "JXL"} mode
+              <label>${tr("setting.textureMode", { format: this.storageFormat === "webp" ? "WebP" : "JXL" })}
                 <select
                   id="storageJxlMode"
                   .value=${this.storageLossless ? "lossless" : "lossy"}
                   @change=${(): void => this.applyStorageFromDialog()}
                 >
-                  <option value="lossless">Lossless ${this.storageFormat === "webp" ? "WebP" : "JXL"}</option>
-                  <option value="lossy">Lossy ${this.storageFormat === "webp" ? "WebP" : "JXL"}</option>
+                  <option value="lossless">${tr("setting.losslessFormat", { format: this.storageFormat === "webp" ? "WebP" : "JXL" })}</option>
+                  <option value="lossy">${tr("setting.lossyFormat", { format: this.storageFormat === "webp" ? "WebP" : "JXL" })}</option>
                 </select>
               </label>
             </div>`
@@ -2772,7 +2815,7 @@ export class GnumarusShell extends LitElement {
         ${this.storageLossless === false && (this.storageFormat === "jxl" || this.storageFormat === "webp")
           ? html`<div class="setting-row">
               <label
-                >Project texture lossy quality
+                >${tr("setting.lossyQuality")}
                 <input
                   type="number"
                   id="storageQuality"
@@ -2786,8 +2829,8 @@ export class GnumarusShell extends LitElement {
               ${this.storageQuality !== DEFAULT_STORAGE_SETTINGS.quality
                 ? html`<button
                     class="reset-btn"
-                    aria-label="Reset project texture quality to default"
-                    title="Reset to default"
+                    aria-label=${tr("a11y.resetTextureQuality")}
+                    title=${tr("a11y.resetToDefault")}
                     @click=${(): void => this.resetStorageToDefault()}
                   >
                     ↻
@@ -2798,7 +2841,7 @@ export class GnumarusShell extends LitElement {
         ${this.storageFormat === "png"
           ? html`<div class="setting-row">
               <label
-                >Project texture PNG compression
+                >${tr("setting.pngLevel")}
                 <input
                   type="number"
                   id="storagePngLevel"
@@ -2812,8 +2855,8 @@ export class GnumarusShell extends LitElement {
               ${this.storagePngLevel !== DEFAULT_STORAGE_SETTINGS.pngLevel
                 ? html`<button
                     class="reset-btn"
-                    aria-label="Reset project texture PNG compression to default"
-                    title="Reset to default"
+                    aria-label=${tr("a11y.resetPngLevel")}
+                    title=${tr("a11y.resetToDefault")}
                     @click=${(): void => this.resetStorageToDefault()}
                   >
                     ↻
@@ -2824,7 +2867,7 @@ export class GnumarusShell extends LitElement {
         ${this.storageFormat === "jpg"
           ? html`<div class="setting-row">
               <label
-                >Project texture JPEG quality
+                >${tr("setting.jpegQuality")}
                 <input
                   type="number"
                   id="storageJpegQuality"
@@ -2838,8 +2881,8 @@ export class GnumarusShell extends LitElement {
               ${this.storageJpegQuality !== DEFAULT_STORAGE_SETTINGS.jpgQuality
                 ? html`<button
                     class="reset-btn"
-                    aria-label="Reset project texture JPEG quality to default"
-                    title="Reset to default"
+                    aria-label=${tr("a11y.resetJpegQuality")}
+                    title=${tr("a11y.resetToDefault")}
                     @click=${(): void => this.resetStorageToDefault()}
                   >
                     ↻
@@ -2849,7 +2892,7 @@ export class GnumarusShell extends LitElement {
           : html``}
         <div class="setting-row">
           <label
-            >Brush tip JXL quality
+            >${tr("setting.brushQuality")}
             <input
               type="number"
               id="brushQuality"
@@ -2863,30 +2906,30 @@ export class GnumarusShell extends LitElement {
           ${this.brushQuality !== DEFAULT_STORAGE_SETTINGS.brushQuality
             ? html`<button
                 class="reset-btn"
-                aria-label="Reset brush tip JXL quality to default"
-                title="Reset to default"
+                aria-label=${tr("a11y.resetBrushQuality")}
+                title=${tr("a11y.resetToDefault")}
                 @click=${(): void => this.resetStorageToDefault()}
               >
                 ↻
               </button>`
             : html``}
         </div>
-        <div class="settings-section">Import</div>
+        <div class="settings-section">${tr("setting.import")}</div>
         <div class="setting-row">
           <label
-            >Texture cleanup on open/import
+            >${tr("setting.cleanup")}
             <select id="importCleanup" .value=${this.importCleanup} @change=${(): void => this.applyImportCleanupFromDialog()}>
-              <option value="none">None</option>
-              <option value="fit">Fit (trim transparent borders)</option>
-              <option value="crop">Crop to canvas</option>
-              <option value="crop+fit">Crop + fit</option>
+              <option value="none">${tr("val.none")}</option>
+              <option value="fit">${tr("setting.cleanupFit")}</option>
+              <option value="crop">${tr("setting.cleanupCrop")}</option>
+              <option value="crop+fit">${tr("setting.cleanupCropFit")}</option>
             </select>
           </label>
           ${this.importCleanup !== DEFAULT_IMPORT_CLEANUP
             ? html`<button
                 class="reset-btn"
-                aria-label="Reset import cleanup to default"
-                title="Reset to default"
+                aria-label=${tr("a11y.resetCleanup")}
+                title=${tr("a11y.resetToDefault")}
                 @click=${(): void => this.resetImportCleanupToDefault()}
               >
                 ↻
@@ -2895,7 +2938,7 @@ export class GnumarusShell extends LitElement {
         </div>
         <div class="setting-row">
           <label
-            >Cell texture expand step (pixels)
+            >${tr("setting.expandStep")}
             <input
               type="number"
               id="expandStep"
@@ -2909,23 +2952,23 @@ export class GnumarusShell extends LitElement {
           ${this.expandStep !== DEFAULT_EXPAND_SETTINGS.step
             ? html`<button
                 class="reset-btn"
-                aria-label="Reset expand step to default"
-                title="Reset to default"
+                aria-label=${tr("a11y.resetExpand")}
+                title=${tr("a11y.resetToDefault")}
                 @click=${(): void => this.resetExpandToDefault()}
               >
                 ↻
               </button>`
             : html``}
         </div>
-          <button @click=${(): void => this.resetCheckerDefaults()}>Reset defaults</button>
-          <button @click=${(): void => this.closeSettingsDialog()}>Close</button>
+          <button @click=${(): void => this.resetCheckerDefaults()}>${tr("setting.resetDefaults")}</button>
+          <button @click=${(): void => this.closeSettingsDialog()}>${tr("btn.close")}</button>
         </div>
       </dialog>
       <dialog id="frameDurationDialog">
-        <h3>Frame duration</h3>
-        <p>How long this frame shows during playback. Empty means the project default.</p>
+        <h3>${tr("dialog.duration")}</h3>
+        <p>${tr("dialog.durationHint")}</p>
         <label
-          >Duration (s)
+          >${tr("dialog.durationLabel")}
           <input
             type="number"
             id="frameDuration"
@@ -2937,26 +2980,24 @@ export class GnumarusShell extends LitElement {
           />
         </label>
         <div class="dialog-actions">
-          <button @click=${(): void => this.closeFrameDurationDialog()}>Cancel</button>
-          <button @click=${(): void => this.clearFrameDuration()}>Clear</button>
-          <button @click=${(): void => this.confirmFrameDuration()}>Set</button>
+          <button @click=${(): void => this.closeFrameDurationDialog()}>${tr("btn.cancel")}</button>
+          <button @click=${(): void => this.clearFrameDuration()}>${tr("btn.clear")}</button>
+          <button @click=${(): void => this.confirmFrameDuration()}>${tr("btn.set")}</button>
         </div>
       </dialog>
       <dialog id="animationDialog">
-        <h3>Named animations</h3>
+        <h3>${tr("dialog.animations")}</h3>
         <p>
-          Define one animation as <code>name,loop,frames</code>, e.g.
-          <code>walk,forward,1:400,2-4,7</code>. Loop is none, forward or ping-pong; frames
-          count from 1; <code>A-B</code> spans a range and <code>:ms</code> overrides the
-          duration of one frame (or every frame of a range).
+          ${tr("dialog.animHintStart")} <code>name,loop,frames</code>${tr("dialog.animHintMiddle")}
+          <code>${tr("dialog.animExample")}</code>${tr("dialog.animHintEnd")}
         </p>
         <label
-          >Animation definition
+          >${tr("dialog.animDefinition")}
           <input
             type="text"
             id="animationInput"
             maxlength="256"
-            placeholder="walk,forward,1,2,3"
+            placeholder=${tr("dialog.animPlaceholder")}
             .value=${this.animationInput}
             @input=${(event: Event): void => {
               this.animationInput = (event.target as HTMLInputElement).value;
@@ -2967,20 +3008,20 @@ export class GnumarusShell extends LitElement {
           ? html`<p class="dialog-error" role="alert">${this.animationError}</p>`
           : html``}
         <div class="dialog-actions">
-          <button @click=${(): void => this.closeAnimationDialog()}>Close</button>
-          <button @click=${(): void => this.confirmAddAnimation()}>Add</button>
+          <button @click=${(): void => this.closeAnimationDialog()}>${tr("btn.close")}</button>
+          <button @click=${(): void => this.confirmAddAnimation()}>${tr("btn.add")}</button>
         </div>
         <ul class="animation-list" data-testid="animation-list">
           ${(this.engine?.getNamedAnimations() ?? []).map(
             (animation) => html`
               <li>
-                <span>${describeNamedAnimation(animation)}</span>
+                <span>${describeNamedAnimation(animation, { frame: tr("anim.frameOne"), frames: tr("anim.framesMany") })}</span>
                 <button
-                  aria-label=${`Delete animation ${animation.name}`}
-                  title=${`Delete animation ${animation.name}`}
+                  aria-label=${tr("dialog.deleteAnim") + ` ${animation.name}`}
+                  title=${tr("dialog.deleteAnim") + ` ${animation.name}`}
                   @click=${(): void => this.onDeleteAnimation(animation.name)}
                 >
-                  Delete
+                  ${tr("btn.delete")}
                 </button>
               </li>
             `,
@@ -2988,32 +3029,34 @@ export class GnumarusShell extends LitElement {
         </ul>
       </dialog>
       <dialog id="animationDeleteDialog" @close=${(): void => this.cancelDeleteAnimation()}>
-        <h3>Delete animation</h3>
+        <h3>${tr("dialog.deleteAnim")}</h3>
         <p>
-          Are you sure you want to delete
-          ${this.animationDeleteTarget === null ? "this animation" : `"${this.animationDeleteTarget}"`}?
+          ${tr("dialog.deleteAnimConfirm", { target: this.animationDeleteTarget === null ? tr("dialog.thisAnimation") : `"${this.animationDeleteTarget}"` })}
         </p>
         <div class="dialog-actions">
-          <button id="animationDeleteNo" @click=${(): void => this.cancelDeleteAnimation()}>No</button>
-          <button id="animationDeleteYes" @click=${(): void => this.confirmDeleteAnimation()}>Yes</button>
+          <button id="animationDeleteNo" @click=${(): void => this.cancelDeleteAnimation()}>${tr("dialog.no")}</button>
+          <button id="animationDeleteYes" @click=${(): void => this.confirmDeleteAnimation()}>${tr("btn.yes")}</button>
         </div>
       </dialog>
       <dialog id="deleteFramesDialog" @close=${(): void => this.cancelDeleteFrames()}>
-        <h3>Delete frames</h3>
+        <h3>${tr("dialog.deleteFrames")}</h3>
         <p>
-          Delete ${this.deleteFramesTarget?.length ?? 0}
-          frame${(this.deleteFramesTarget?.length ?? 0) === 1 ? "" : "s"}
-          (${this.deleteFramesTarget === null ? "" : formatFrameRanges(this.deleteFramesTarget)})?
+          ${(this.deleteFramesTarget?.length ?? 0) === 1 && this.deleteFramesTarget !== null
+            ? tr("dialog.deleteFrameOne", { ranges: formatFrameRanges(this.deleteFramesTarget) })
+            : tr("dialog.deleteFramesMany", {
+                count: this.deleteFramesTarget?.length ?? 0,
+                ranges: this.deleteFramesTarget === null ? "" : formatFrameRanges(this.deleteFramesTarget),
+              })}
         </p>
         <div class="dialog-actions">
-          <button id="deleteFramesNo" @click=${(): void => this.cancelDeleteFrames()}>Cancel</button>
-          <button id="deleteFramesYes" @click=${(): void => this.confirmDeleteFrames()}>OK</button>
+          <button id="deleteFramesNo" @click=${(): void => this.cancelDeleteFrames()}>${tr("btn.cancel")}</button>
+          <button id="deleteFramesYes" @click=${(): void => this.confirmDeleteFrames()}>${tr("btn.ok")}</button>
         </div>
       </dialog>
       <dialog id="exportDialog">
-        <h3>Export frame</h3>
+        <h3>${tr("dialog.exportFrame")}</h3>
         <label
-          >Frame
+          >${tr("dialog.frame")}
           <input
             type="number"
             id="exportFrame"
@@ -3024,7 +3067,7 @@ export class GnumarusShell extends LitElement {
           />
         </label>
         <label
-          >Format
+          >${tr("dialog.format")}
           <select
             id="exportFormat"
             .value=${this.exportFormat}
@@ -3039,7 +3082,7 @@ export class GnumarusShell extends LitElement {
         </label>
         ${this.exportFormat === JXL_MIME || this.exportFormat === WEBP_MIME
           ? html`<label
-              >Lossless
+              >${tr("val.lossless")}
               <input
                 type="checkbox"
                 id=${this.exportFormat === WEBP_MIME ? "exportWebpLossless" : "exportJxlLossless"}
@@ -3060,7 +3103,7 @@ export class GnumarusShell extends LitElement {
         (this.exportFormat === WEBP_MIME && this.exportWebpLossless)
           ? html``
           : html`<label
-              >Quality
+              >${tr("dialog.quality")}
               <input
                 type="number"
                 id="exportQuality"
@@ -3076,12 +3119,12 @@ export class GnumarusShell extends LitElement {
               />
             </label>`}
         <div class="dialog-actions">
-          <button @click=${(): void => this.closeExportDialog()}>Cancel</button>
-          <button id="exportOk" @click=${(): void => void this.confirmExportFrame()}>Export</button>
+          <button @click=${(): void => this.closeExportDialog()}>${tr("btn.cancel")}</button>
+          <button id="exportOk" @click=${(): void => void this.confirmExportFrame()}>${tr("btn.export")}</button>
         </div>
-        <h3>Export animation</h3>
+        <h3>${tr("dialog.exportAnimation")}</h3>
         <label
-          >Animation
+          >${tr("dialog.animation")}
           <select
             id="exportAnimation"
             .value=${this.exportAnimation}
@@ -3089,14 +3132,14 @@ export class GnumarusShell extends LitElement {
               this.exportAnimation = (event.target as HTMLSelectElement).value;
             }}
           >
-            <option value="">All frames</option>
+            <option value="">${tr("matrix.allFrames")}</option>
             ${this.engine?.getNamedAnimations().map(
               (animation) => html`<option value=${animation.name}>${animation.name}</option>`,
             ) ?? html``}
           </select>
         </label>
         <label
-          >Format
+          >${tr("dialog.format")}
           <select
             id="exportAnimatedFormat"
             .value=${this.exportAnimatedFormat}
@@ -3104,17 +3147,17 @@ export class GnumarusShell extends LitElement {
               this.exportAnimatedFormat = (event.target as HTMLSelectElement).value;
             }}
           >
-            <option value="gif">GIF animation</option>
-            <option value="jxl">JXL animation</option>
-            <option value="webp">WebP animation</option>
+            <option value="gif">${tr("dialog.animGif")}</option>
+            <option value="jxl">${tr("dialog.animJxl")}</option>
+            <option value="webp">${tr("dialog.animWebp")}</option>
             ${this.exportFormats.map(
-              (format) => html`<option value=${format.mime}>${format.label} sequence</option>`,
+              (format) => html`<option value=${format.mime}>${tr("dialog.sequence", { label: format.label })}</option>`,
             )}
           </select>
         </label>
         ${this.exportAnimatedFormat === "jxl" || this.exportAnimatedFormat === "webp"
           ? html`<label
-              >Lossless
+              >${tr("val.lossless")}
               <input
                 type="checkbox"
                 id=${this.exportAnimatedFormat === "webp" ? "exportAnimatedWebpLossless" : "exportAnimatedJxlLossless"}
@@ -3138,7 +3181,7 @@ export class GnumarusShell extends LitElement {
         (this.exportAnimatedFormat === "webp" && this.exportAnimatedWebpLossless)
           ? html``
           : html`<label
-              >Quality
+              >${tr("dialog.quality")}
               <input
                 type="number"
                 id="exportAnimatedQuality"
@@ -3155,12 +3198,12 @@ export class GnumarusShell extends LitElement {
             </label>`}
         <div class="dialog-actions">
           <button id="exportAnimatedOk" @click=${(): void => void this.confirmExportAnimated()}>
-            Export animation
+            ${tr("dialog.exportAnimation")}
           </button>
         </div>
-        <h3>Export spritesheet</h3>
+        <h3>${tr("dialog.exportSheet")}</h3>
         <div class="export-sheet-animations">
-          <label><input type="checkbox" id="exportSheetAll" />All frames</label>
+          <label><input type="checkbox" id="exportSheetAll" />${tr("matrix.allFrames")}</label>
           ${this.engine?.getNamedAnimations().map(
             (animation) =>
               html`<label
@@ -3169,11 +3212,11 @@ export class GnumarusShell extends LitElement {
           ) ?? html``}
         </div>
         <label
-          >Extra frames (1,3-5)
-          <input type="text" id="exportSheetFrames" placeholder="1,3-5" />
+          >${tr("dialog.extraFrames")}
+          <input type="text" id="exportSheetFrames" placeholder=${tr("dialog.extraFrames")} />
         </label>
         <label
-          >Layout
+          >${tr("dialog.layout")}
           <select
             id="exportSheetLayout"
             .value=${this.exportSheetLayout}
@@ -3182,13 +3225,13 @@ export class GnumarusShell extends LitElement {
             }}
           >
             ${GNUMARUS_SHEET_LAYOUTS.map(
-              (entry) => html`<option value=${entry.value}>${entry.label}</option>`,
+              (entry) => html`<option value=${entry.value}>${this.sheetLayoutLabel(entry.value)}</option>`,
             )}
-            <option value="individual">Individual frames</option>
+            <option value="individual">${tr("dialog.sheetIndividual")}</option>
           </select>
         </label>
         <label
-          >Lines/columns count
+          >${tr("dialog.linesCount")}
           <input
             type="number"
             id="exportSheetCount"
@@ -3198,7 +3241,7 @@ export class GnumarusShell extends LitElement {
           />
         </label>
         <label
-          >Format
+          >${tr("dialog.format")}
           <select
             id="exportSheetFormat"
             .value=${this.exportSheetFormat}
@@ -3213,7 +3256,7 @@ export class GnumarusShell extends LitElement {
         </label>
         ${this.exportSheetFormat === JXL_MIME || this.exportSheetFormat === WEBP_MIME
           ? html`<label
-              >Lossless
+              >${tr("val.lossless")}
               <input
                 type="checkbox"
                 id=${this.exportSheetFormat === WEBP_MIME ? "exportSheetWebpLossless" : "exportSheetJxlLossless"}
@@ -3236,7 +3279,7 @@ export class GnumarusShell extends LitElement {
         (this.exportSheetFormat === WEBP_MIME && this.exportSheetWebpLossless)
           ? html``
           : html`<label
-              >Quality
+              >${tr("dialog.quality")}
               <input
                 type="number"
                 id="exportSheetQuality"
@@ -3253,30 +3296,30 @@ export class GnumarusShell extends LitElement {
             </label>`}
         <div class="dialog-actions">
           <button id="exportSheetOk" @click=${(): void => void this.confirmExportSheet()}>
-            Export spritesheet
+            ${tr("dialog.exportSheet")}
           </button>
         </div>
       </dialog>
       <dialog id="frameRenameDialog">
-        <h3>Rename frame</h3>
+        <h3>${tr("dialog.renameFrame")}</h3>
         <label
-          >Frame name
+          >${tr("dialog.frameName")}
           <input type="text" id="frameRename" maxlength="64" .value=${this.frameRenameValue()} />
         </label>
         <div class="dialog-actions">
-          <button @click=${(): void => this.closeFrameRenameDialog()}>Cancel</button>
-          <button @click=${(): void => this.confirmFrameRename()}>Rename</button>
+          <button @click=${(): void => this.closeFrameRenameDialog()}>${tr("btn.cancel")}</button>
+          <button @click=${(): void => this.confirmFrameRename()}>${tr("btn.rename")}</button>
         </div>
       </dialog>
       <dialog id="layerRenameDialog">
-        <h3>Rename layer</h3>
+        <h3>${tr("dialog.renameLayer")}</h3>
         <label
-          >Layer name
+          >${tr("dialog.layerName")}
           <input type="text" id="layerRename" maxlength="64" .value=${this.layerRenameValue()} />
         </label>
         <div class="dialog-actions">
-          <button @click=${(): void => this.closeLayerRenameDialog()}>Cancel</button>
-          <button @click=${(): void => this.confirmLayerRename()}>Rename</button>
+          <button @click=${(): void => this.closeLayerRenameDialog()}>${tr("btn.cancel")}</button>
+          <button @click=${(): void => this.confirmLayerRename()}>${tr("btn.rename")}</button>
         </div>
       </dialog>
       ${this.contentPickerTarget !== null ? this.renderContentPickerDialog() : html``}
@@ -3284,34 +3327,70 @@ export class GnumarusShell extends LitElement {
     `;
   }
 
+  /** Translated spritesheet layout option label for a layout value. */
+  private sheetLayoutLabel(value: string): string {
+    switch (value) {
+      case "line":
+        return tr("dialog.sheetLine");
+      case "column":
+        return tr("dialog.sheetColumn");
+      case "per-line":
+        return tr("dialog.sheetPerLine");
+      case "per-column":
+        return tr("dialog.sheetPerColumn");
+      case "packed":
+        return tr("dialog.sheetPacked");
+      case "fixed-rows":
+        return tr("dialog.sheetFixedRows");
+      case "fixed-cols":
+        return tr("dialog.sheetFixedCols");
+      default:
+        return value;
+    }
+  }
+
   /** User-facing name of a tool. The internal id stays unchanged. */
-  private toolDisplayName(tool: GnumarusCanvasTool): string {
-    if (tool === "transform") {
-      return "non-destructive cell transform";
+  private toolDisplayName(tool: GnumarusCanvasTool): string {    if (tool === "transform") {
+      return tr("toolname.transform");
     }
     if (tool === "transform3d") {
-      return "3d rotation";
+      return tr("toolname.transform3d");
     }
     if (tool === "destransform") {
-      return "destructive selection transform";
+      return tr("toolname.destransform");
     }
     if (tool === "destransform3d") {
-      return "destructive 3d rotation";
+      return tr("toolname.destransform3d");
     }
     if (tool === "rectselect") {
-      return "rectangular selection";
+      return tr("toolname.rectselect");
     }
-    return tool;
+    if (tool === "pencil") {
+      return tr("toolname.pencil");
+    }
+    if (tool === "loupe") {
+      return tr("toolname.loupe");
+    }
+    if (tool === "bucket") {
+      return tr("toolname.bucket");
+    }
+    if (tool === "eyedropper") {
+      return tr("toolname.eyedropper");
+    }
+    if (tool === "line") {
+      return tr("toolname.line");
+    }
+    return tr("toolname.curve");
   }
 
   private renderBlendModeOption() {
     return html`
-      <label title="How paint combines with existing pixels: normal blends over, copy replaces, eraser clears alpha (E toggles)."
-        >Blend mode
+      <label title=${tr("opt.blendHint")}
+        >${tr("opt.blend")}
         <select id="blendMode" .value=${this.blendMode} @change=${(): void => this.applyBlendModeFromDialog()}>
-          <option value="normal">Normal</option>
-          <option value="copy">Copy</option>
-          <option value="eraser">Eraser</option>
+          <option value="normal">${tr("val.normal")}</option>
+          <option value="copy">${tr("val.copy")}</option>
+          <option value="eraser">${tr("val.eraser")}</option>
         </select>
       </label>
     `;
@@ -3319,36 +3398,36 @@ export class GnumarusShell extends LitElement {
 
   private renderAccumulateOption() {
     return html`
-      <label title="When on, dabs build over each other while scrubbing; when off, the stroke keeps uniform coverage."
+      <label title=${tr("opt.accumulateHint")}
         ><input
           type="checkbox"
           id="accumulate"
           .checked=${this.accumulate}
           @change=${(): void => this.applyAccumulateFromDialog()}
         />
-        Accumulate
+        ${tr("opt.accumulate")}
       </label>
     `;
   }
 
   private renderStabilizerOption() {
     return html`
-      <label title="Steady the stroke: rope leashes the tip, follow chases the cursor with smoothing."
-        >Stabilizer
+      <label title=${tr("opt.stabilizerHint")}
+        >${tr("opt.stabilizer")}
         <select
           id="stabilizerMode"
           .value=${this.stabilizerMode}
           @change=${(): void => this.applyStabilizerModeFromDialog()}
         >
-          <option value="none">None</option>
-          <option value="rope">Rope</option>
-          <option value="follow">Follow</option>
+          <option value="none">${tr("val.none")}</option>
+          <option value="rope">${tr("val.rope")}</option>
+          <option value="follow">${tr("val.follow")}</option>
         </select>
       </label>
       ${this.stabilizerMode === "rope"
         ? html`
-            <label title="Leash length in layer pixels: the tip stays put until the cursor pulls beyond it."
-              >Rope length
+            <label title=${tr("opt.ropeLengthHint")}
+              >${tr("opt.ropeLength")}
               <input
                 type="number"
                 id="ropeLength"
@@ -3363,8 +3442,8 @@ export class GnumarusShell extends LitElement {
         : html``}
       ${this.stabilizerMode === "follow"
         ? html`
-            <label title="Chase fraction per move: 100 snaps to the cursor, lower values lag behind."
-              >Follow strength
+            <label title=${tr("opt.followStrengthHint")}
+              >${tr("opt.followStrength")}
               <input
                 type="number"
                 id="followStrength"
@@ -3387,23 +3466,23 @@ export class GnumarusShell extends LitElement {
    */
   private renderEditorOptions() {
     return html`
-      <div class="tool-options" data-testid="editor-options" aria-label="Editor options" ?hidden=${this.uiHidden}>
-        <label title="Repeat textures infinitely while painting. You can paint outside the texture and it wraps around to the other side. Only the active layer shows its neighbors."
-          >Wrap
+      <div class="tool-options" data-testid="editor-options" aria-label=${tr("opt.editorAria")} ?hidden=${this.uiHidden}>
+        <label title=${tr("opt.wrapHint")}
+          >${tr("opt.wrap")}
           <select id="wrapMode" .value=${this.wrapMode} @change=${(): void => this.applyWrapModeFromDialog()}>
-            <option value="off">Off</option>
-            <option value="x">Left-right</option>
-            <option value="y">Up-down</option>
-            <option value="both">Both</option>
+            <option value="off">${tr("val.off")}</option>
+            <option value="x">${tr("val.leftRight")}</option>
+            <option value="y">${tr("val.upDown")}</option>
+            <option value="both">${tr("val.both")}</option>
           </select>
         </label>
-        <label title="Mirror every stroke across the canvas axes while painting (pencil only)."
-          >Symmetry
+        <label title=${tr("opt.symmetryHint")}
+          >${tr("opt.symmetry")}
           <select id="symmetryMode" .value=${this.symmetryMode} @change=${(): void => this.applySymmetryModeFromDialog()}>
-            <option value="off">Off</option>
-            <option value="mirror-x">Left-right</option>
-            <option value="mirror-y">Up-down</option>
-            <option value="both">Four-way</option>
+            <option value="off">${tr("val.off")}</option>
+            <option value="mirror-x">${tr("val.leftRight")}</option>
+            <option value="mirror-y">${tr("val.upDown")}</option>
+            <option value="both">${tr("val.fourWay")}</option>
           </select>
         </label>
       </div>
@@ -3412,17 +3491,17 @@ export class GnumarusShell extends LitElement {
 
   private renderToolOptions() {
     if (this.tool === "pencil") {      return html`
-        <div class="tool-options" data-testid="tool-options" aria-label="Pencil options" ?hidden=${this.uiHidden}>
-          <label title="Apply a saved brush preset (all pencil settings) to the current brush."
-            >Preset
+        <div class="tool-options" data-testid="tool-options" aria-label=${tr("opt.pencilAria")} ?hidden=${this.uiHidden}>
+          <label title=${tr("opt.presetHint")}
+            >${tr("opt.preset")}
             <select id="brushPreset" @change=${(): void => this.applyBrushPresetFromDialog()}>
               ${[...BUILT_IN_BRUSH_PRESETS, ...this.brushPresets].map(
                 (preset) => html`<option value=${preset.name}>${preset.name}</option>`,
               )}
             </select>
           </label>
-          <label title="Name a preset, then Save stores the current settings, Delete removes a custom preset, Export downloads it as JSON, Import loads a preset file."
-            >Preset name
+          <label title=${tr("opt.presetNameHint")}
+            >${tr("opt.presetName")}
             <input
               type="text"
               id="presetName"
@@ -3432,14 +3511,14 @@ export class GnumarusShell extends LitElement {
                 this.presetName = (event.target as HTMLInputElement | null)?.value ?? "";
               }}
             />
-            <button @click=${(): void => this.saveBrushPresetFromDialog()}>Save</button>
-            <button @click=${(): void => this.deleteBrushPresetFromDialog()}>Delete</button>
-            <button @click=${(): void => this.downloadBrushPreset()}>Export</button>
-            <button @click=${(): void => this.openBrushPresetPicker()}>Import</button>
+            <button @click=${(): void => this.saveBrushPresetFromDialog()}>${tr("btn.save")}</button>
+            <button @click=${(): void => this.deleteBrushPresetFromDialog()}>${tr("btn.delete")}</button>
+            <button @click=${(): void => this.downloadBrushPreset()}>${tr("btn.export")}</button>
+            <button @click=${(): void => this.openBrushPresetPicker()}>${tr("btn.import")}</button>
             <input type="file" id="brushPresetImport" accept="application/json,.json" hidden @change=${(): void => void this.importBrushPresetFromDialog()} />
           </label>
-          <label title="Brush diameter in layer pixels (0.1–64). Shift+Left-drag also resizes the active tool."
-            >Brush size
+          <label title=${tr("opt.brushSizeHint")}
+            >${tr("opt.brushSize")}
             <input
               type="number"
               id="brushSize"
@@ -3450,25 +3529,25 @@ export class GnumarusShell extends LitElement {
               @input=${(): void => this.applyBrushSizeFromDialog()}
             />
           </label>
-          <label title="Pixel tip footprint: full square or inscribed disk. Only used by the Pixel (hard) tip."
-            >Brush shape
+          <label title=${tr("opt.brushShapeHint")}
+            >${tr("opt.brushShape")}
             <select id="brushShape" .value=${this.brushShape} @change=${(): void => this.applyBrushShapeFromDialog()}>
-              <option value="square">Square</option>
-              <option value="circle">Circle</option>
+              <option value="square">${tr("val.square")}</option>
+              <option value="circle">${tr("val.circle")}</option>
             </select>
           </label>
-          <label title="Pixel paints hard aliased stamps (pixel art). Soft paints a round tip with hardness falloff. Image paints a grayscale tip as an alpha mask tinted with the paint color."
-            >Brush tip
+          <label title=${tr("opt.brushTipHint")}
+            >${tr("opt.brushTip")}
             <select id="brushTipKind" .value=${this.brushTipKind} @change=${(): void => this.applyBrushTipKindFromDialog()}>
-              <option value="pixel">Pixel (hard)</option>
-              <option value="soft">Soft round</option>
-              <option value="image">Image</option>
+              <option value="pixel">${tr("val.pixelHard")}</option>
+              <option value="soft">${tr("val.softRound")}</option>
+              <option value="image">${tr("val.image")}</option>
             </select>
           </label>
           ${this.brushTipKind === "pixel"
             ? html``
-            : html`<label title="Hardness of the soft tip edge: 100% is a hard disk, 0% fades across the whole radius."
-                >Tip softness
+            : html`<label title=${tr("opt.softnessHint")}
+                >${tr("opt.softness")}
                 <input
                   type="number"
                   id="brushHardness"
@@ -3479,8 +3558,8 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applyBrushHardnessFromDialog()}
                 />
               </label>
-              <label title="Distance between dabs as a percent of the tip diameter. Under 100% dabs overlap; over 100% they separate."
-                >Tip spacing (%)
+              <label title=${tr("opt.spacingHint")}
+                >${tr("opt.spacing")}
                 <input
                   type="number"
                   id="brushSpacing"
@@ -3491,8 +3570,8 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applyBrushSpacingFromDialog()}
                 />
               </label>
-              <label title="Paint applied per dab. Lower flow needs overlapping dabs to reach full opacity."
-                >Flow (%)
+              <label title=${tr("opt.flowHint")}
+                >${tr("opt.flow")}
                 <input
                   type="number"
                   id="brushFlow"
@@ -3503,8 +3582,8 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applyBrushFlowFromDialog()}
                 />
               </label>
-              <label title="Deterministic per-dab jitter of size, alpha and position. The same seed replays identically."
-                >Fuzzy (%)
+              <label title=${tr("opt.fuzzyHint")}
+                >${tr("opt.fuzzy")}
                 <input
                   type="number"
                   id="paintFuzzy"
@@ -3515,8 +3594,8 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applyPaintFuzzyFromDialog()}
                 />
               </label>
-              <label title="Paper grain strength: multiplies each dab by anchored value noise."
-                >Grain (%)
+              <label title=${tr("opt.grainHint")}
+                >${tr("opt.grain")}
                 <input
                   type="number"
                   id="paintGrainStrength"
@@ -3527,8 +3606,8 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applyPaintGrainFromDialog()}
                 />
               </label>
-              <label title="Paper grain cell size in layer pixels."
-                >Grain size (px)
+              <label title=${tr("opt.grainSizeHint")}
+                >${tr("opt.grainSize")}
                 <input
                   type="number"
                   id="paintGrainScale"
@@ -3539,8 +3618,8 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applyPaintGrainFromDialog()}
                 />
               </label>
-              <label title="How much pen tilt broadens dabs. 0% disables tilt dynamics."
-                >Tilt size (%)
+              <label title=${tr("opt.tiltSizeHint")}
+                >${tr("opt.tiltSize")}
                 <input
                   type="number"
                   id="tiltSizeAmount"
@@ -3551,8 +3630,8 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applyTiltSizeFromDialog()}
                 />
               </label>
-              <label title="How much fast strokes lose flow. 0% disables speed dynamics."
-                >Speed fade (%)
+              <label title=${tr("opt.speedFadeHint")}
+                >${tr("opt.speedFade")}
                 <input
                   type="number"
                   id="speedFadeAmount"
@@ -3563,15 +3642,15 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applySpeedFadeFromDialog()}
                 />
               </label>
-              <label title="Rotate the tip lookup with the stroke direction (image and dual masks only; the soft falloff is radial)."
-                >Tip rotation
+              <label title=${tr("opt.tipRotationHint")}
+                >${tr("opt.tipRotation")}
                 <select id="tipAngleMode" .value=${this.tipAngleMode} @change=${(): void => this.applyTipAngleModeFromDialog()}>
-                  <option value="none">None</option>
-                  <option value="direction">Follow direction</option>
+                  <option value="none">${tr("val.none")}</option>
+                  <option value="direction">${tr("val.followDirection")}</option>
                 </select>
               </label>
-              <label title="Timed dabs per second while the pointer is held, even without moving. 0 disables the airbrush."
-                >Airbrush (dabs/s)
+              <label title=${tr("opt.airbrushHint")}
+                >${tr("opt.airbrush")}
                 <input
                   type="number"
                   id="airbrushRate"
@@ -3582,8 +3661,8 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applyAirbrushRateFromDialog()}
                 />
               </label>
-              <label title="Pick up canvas paint into each dab (dry mixer). 0% paints only the brush color."
-                >Smudge (%)
+              <label title=${tr("opt.smudgeHint")}
+                >${tr("opt.smudge")}
                 <input
                   type="number"
                   id="smudgeRate"
@@ -3594,8 +3673,8 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applySmudgeFromDialog()}
                 />
               </label>
-              <label title="How much brush color mixes into the picked-up paint. 0% moves paint, 100% paints."
-                >Wetness (%)
+              <label title=${tr("opt.wetnessHint")}
+                >${tr("opt.wetness")}
                 <input
                   type="number"
                   id="smudgeWet"
@@ -3606,18 +3685,18 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applySmudgeFromDialog()}
                 />
               </label>
-              <label title="Second image mask multiplied over the primary dab: black blocks paint, white lets it through. Import a grayscale tip, Clear removes it."
-                >Dual tip ${this.paintDualName === "" ? "(none)" : `(${this.paintDualName})`}
+              <label title=${tr("opt.dualTipHint")}
+                >${tr("opt.dualTip")} ${this.paintDualName === "" ? tr("val.noneOption") : `(${this.paintDualName})`}
                 <input type="file" id="paintDualImport" accept="image/*" hidden @change=${(): void => void this.importPaintDualFromDialog()} />
-                <button @click=${(): void => this.openPaintDualPicker()}>Import dual…</button>
+                <button @click=${(): void => this.openPaintDualPicker()}>${tr("opt.importDual")}</button>
                 ${this.paintDualName === ""
                   ? html``
-                  : html`<button @click=${(): void => this.clearPaintDual()}>Clear</button>`}
+                  : html`<button @click=${(): void => this.clearPaintDual()}>${tr("btn.clear")}</button>`}
               </label>
               ${this.paintDualName === ""
                 ? html``
-                : html`<label title="Dual mask strength: 0% disables the second tip."
-                    >Dual strength (%)
+                : html`<label title=${tr("opt.dualStrengthHint")}
+                    >${tr("opt.dualStrength")}
                     <input
                       type="number"
                       id="paintDualStrength"
@@ -3628,8 +3707,8 @@ export class GnumarusShell extends LitElement {
                       @input=${(): void => this.applyPaintDualTuningFromDialog()}
                     />
                   </label>
-                  <label title="Dual tip size relative to the primary dab."
-                    >Dual size (%)
+                  <label title=${tr("opt.dualSizeHint")}
+                    >${tr("opt.dualSize")}
                     <input
                       type="number"
                       id="paintDualScale"
@@ -3641,64 +3720,64 @@ export class GnumarusShell extends LitElement {
                     />
                   </label>`}`}
           ${this.brushTipKind === "image"
-            ? html`<label title="Grayscale image tip: luminance becomes the dab alpha mask tinted with the paint color. Import a PNG (auto-trimmed, archived as JXL), Clear removes it."
-                >Image tip ${this.paintTipName === "" ? "(none)" : `(${this.paintTipName})`}
+            ? html`<label title=${tr("opt.imageTipHint")}
+                >${tr("opt.imageTip")} ${this.paintTipName === "" ? tr("val.noneOption") : `(${this.paintTipName})`}
                 <input type="file" id="paintTipImport" accept="image/*" hidden @change=${(): void => void this.importPaintTipFromDialog()} />
-                <button @click=${(): void => this.openPaintTipPicker()}>Import tip…</button>
+                <button @click=${(): void => this.openPaintTipPicker()}>${tr("opt.importTip")}</button>
                 ${this.paintTipName === ""
                   ? html``
-                  : html`<button @click=${(): void => this.clearPaintTip()}>Clear</button>`}
+                  : html`<button @click=${(): void => this.clearPaintTip()}>${tr("btn.clear")}</button>`}
               </label>`
             : html``}
-          <label title="Map pen pressure to brush size, paint alpha, or both. Mice always paint at full pressure."
-            >Pressure response
+          <label title=${tr("opt.pressureHint")}
+            >${tr("opt.pressure")}
             <select
               id="pressureResponse"
               .value=${this.pressureResponse}
               @change=${(): void => this.applyPressureResponseFromDialog()}
             >
-              <option value="none">None</option>
-              <option value="size">Size</option>
-              <option value="opacity">Opacity</option>
-              <option value="size+opacity">Size + opacity</option>
+              <option value="none">${tr("val.none")}</option>
+              <option value="size">${tr("val.size")}</option>
+              <option value="opacity">${tr("val.opacity")}</option>
+              <option value="size+opacity">${tr("val.sizeOpacity")}</option>
             </select>
           </label>
           ${this.pressureResponse === "none"
             ? html``
-            : html`<label title="Pressure-to-size response shape: linear is 1:1, soft answers early, firm needs hard presses."
-                >Size curve
+            : html`<label title=${tr("opt.sizeCurveHint")}
+                >${tr("opt.sizeCurve")}
                 <select
                   id="pressureSizeCurve"
                   .value=${this.pressureSizeCurve}
                   @change=${(): void => this.applyPressureSizeCurveFromDialog()}
                 >
-                  <option value="linear">Linear</option>
-                  <option value="soft">Soft</option>
-                  <option value="firm">Firm</option>
+                  <option value="linear">${tr("val.linear")}</option>
+                  <option value="soft">${tr("val.soft")}</option>
+                  <option value="firm">${tr("val.firm")}</option>
                 </select>
               </label>
-              <label title="Pressure-to-alpha response shape: linear is 1:1, soft answers early, firm needs hard presses."
-                >Alpha curve
+              <label title=${tr("opt.alphaCurveHint")}
+                >${tr("opt.alphaCurve")}
                 <select
                   id="pressureAlphaCurve"
                   .value=${this.pressureAlphaCurve}
                   @change=${(): void => this.applyPressureAlphaCurveFromDialog()}
                 >
-                  <option value="linear">Linear</option>
-                  <option value="soft">Soft</option>
-                  <option value="firm">Firm</option>
+                  <option value="linear">${tr("val.linear")}</option>
+                  <option value="soft">${tr("val.soft")}</option>
+                  <option value="firm">${tr("val.firm")}</option>
                 </select>
               </label>`}
-          <label title="Smooth stroke edges with partial-pixel coverage. Disables Pixel perfect."
+          <label title=${tr("opt.pencilAntialiasHint")}
             ><input
               type="checkbox"
               id="pencilAntialias"
               .checked=${this.pencilAntialias}
               @change=${(): void => this.applyPencilAntialiasFromDialog()}
             />
-            Anti-aliasing
+            ${tr("opt.antialias")}
           </label>
-          <label title="Keeps 1px strokes exactly 1px thick. Only applies at brush size 1 without anti-aliasing and with wrap off."
+          <label title=${tr("opt.pencilPixelPerfectHint")}
             ><input
               type="checkbox"
               id="pencilPixelPerfect"
@@ -3706,7 +3785,7 @@ export class GnumarusShell extends LitElement {
               ?disabled=${this.brushSize !== 1 || this.pencilAntialias || this.wrapMode !== "off"}
               @change=${(): void => this.applyPencilPixelPerfectFromDialog()}
             />
-            Pixel perfect
+            ${tr("opt.pixelPerfect")}
           </label>
           ${this.renderStabilizerOption()} ${this.renderBlendModeOption()} ${this.renderAccumulateOption()}
         </div>
@@ -3714,9 +3793,9 @@ export class GnumarusShell extends LitElement {
     }
     if (this.tool === "line") {
       return html`
-        <div class="tool-options" data-testid="tool-options" aria-label="Line options" ?hidden=${this.uiHidden}>
+        <div class="tool-options" data-testid="tool-options" aria-label=${tr("opt.lineAria")} ?hidden=${this.uiHidden}>
           <label
-            >Line width
+            >${tr("opt.lineWidth")}
             <input
               type="number"
               id="lineWidth"
@@ -3728,20 +3807,20 @@ export class GnumarusShell extends LitElement {
             />
           </label>
           <label
-            >Line shape
+            >${tr("opt.lineShape")}
             <select id="lineShape" .value=${this.lineShape} @change=${(): void => this.applyLineShapeFromDialog()}>
-              <option value="square">Square</option>
-              <option value="circle">Circle</option>
+              <option value="square">${tr("val.square")}</option>
+              <option value="circle">${tr("val.circle")}</option>
             </select>
           </label>
-          <label title="Smooth line edges with partial-pixel coverage."
+          <label title=${tr("opt.lineAntialiasHint")}
             ><input
               type="checkbox"
               id="lineAntialias"
               .checked=${this.lineAntialias}
               @change=${(): void => this.applyLineAntialiasFromDialog()}
             />
-            Anti-aliasing
+            ${tr("opt.antialias")}
           </label>
           ${this.renderBlendModeOption()} ${this.renderAccumulateOption()}
         </div>
@@ -3749,9 +3828,9 @@ export class GnumarusShell extends LitElement {
     }
     if (this.tool === "curve") {
       return html`
-        <div class="tool-options" data-testid="tool-options" aria-label="Curve options" ?hidden=${this.uiHidden}>
+        <div class="tool-options" data-testid="tool-options" aria-label=${tr("opt.curveAria")} ?hidden=${this.uiHidden}>
           <label
-            >Curve width
+            >${tr("opt.curveWidth")}
             <input
               type="number"
               id="curveWidth"
@@ -3763,22 +3842,22 @@ export class GnumarusShell extends LitElement {
             />
           </label>
           <label
-            >Curve shape
+            >${tr("opt.curveShape")}
             <select id="curveShape" .value=${this.curveShape} @change=${(): void => this.applyCurveShapeFromDialog()}>
-              <option value="square">Square</option>
-              <option value="circle">Circle</option>
+              <option value="square">${tr("val.square")}</option>
+              <option value="circle">${tr("val.circle")}</option>
             </select>
           </label>
-          <label title="Smooth curve edges with partial-pixel coverage."
+          <label title=${tr("opt.curveAntialiasHint")}
             ><input
               type="checkbox"
               id="curveAntialias"
               .checked=${this.curveAntialias}
               @change=${(): void => this.applyCurveAntialiasFromDialog()}
             />
-            Anti-aliasing
+            ${tr("opt.antialias")}
           </label>
-          <label title="Keeps 1px curves exactly 1px thick. Only applies at curve width 1 without anti-aliasing and with wrap off."
+          <label title=${tr("opt.curvePixelPerfectHint")}
             ><input
               type="checkbox"
               id="curvePixelPerfect"
@@ -3786,7 +3865,7 @@ export class GnumarusShell extends LitElement {
               ?disabled=${this.curveWidth !== 1 || this.curveAntialias || this.wrapMode !== "off"}
               @change=${(): void => this.applyCurvePixelPerfectFromDialog()}
             />
-            Pixel perfect
+            ${tr("opt.pixelPerfect")}
           </label>
           ${this.renderBlendModeOption()} ${this.renderAccumulateOption()}
         </div>
@@ -3794,28 +3873,28 @@ export class GnumarusShell extends LitElement {
     }
     if (this.tool === "bucket") {
       return html`
-        <div class="tool-options" data-testid="tool-options" aria-label="Bucket options" ?hidden=${this.uiHidden}>
+        <div class="tool-options" data-testid="tool-options" aria-label=${tr("opt.bucketAria")} ?hidden=${this.uiHidden}>
           ${this.renderBlendModeOption()}
         </div>
       `;
     }
     if (this.tool === "destransform" || this.tool === "destransform3d") {
       return html`
-        <div class="tool-options" data-testid="tool-options" aria-label="Destructive selection transform options" ?hidden=${this.uiHidden}>
+        <div class="tool-options" data-testid="tool-options" aria-label=${tr("opt.destransformAria")} ?hidden=${this.uiHidden}>
           <button
             ?disabled=${!this.floatingActive}
-            title="Merge the floating selection into the cell (Enter)"
+            title=${tr("opt.commitSelectionHint")}
             @click=${(): void => this.commitFloatingSelection()}
           >
-            Commit selection
+            ${tr("opt.commitSelection")}
           </button>
         </div>
       `;
     }
     return html`
-      <div class="tool-options" data-testid="tool-options" aria-label="${this.toolDisplayName(this.tool)} options" ?hidden=${this.uiHidden}>
+      <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
         <span class="tool-options-empty"
-          >the ${this.toolDisplayName(this.tool)} tool does not have any setting or helper button</span
+          >${tr("options.empty", { tool: this.toolDisplayName(this.tool) })}</span
         >
       </div>
     `;
@@ -3838,31 +3917,31 @@ export class GnumarusShell extends LitElement {
           );
     const animationFrameCounts = countAnimationFrames(this.engine.getNamedAnimations());
     return html`
-      <div class="anim-matrix" data-testid="animation-matrix" aria-label="Animation matrix" ?hidden=${this.uiHidden}>
+      <div class="anim-matrix" data-testid="animation-matrix" aria-label=${tr("matrix.matrixAria")} ?hidden=${this.uiHidden}>
         <div class="anim-scroll">
           <div class="anim-grid" style="grid-template-columns: ${columns};">
             <div class="anim-corner">
               <button
-                aria-label="Manage animations"
-                title="Define named frame animations"
+                aria-label=${tr("matrix.manageAnimations")}
+                title=${tr("matrix.manageAnimationsHint")}
                 @click=${(): void => this.openAnimationDialog()}
               >
                 ⚙</button
               >
-              <button aria-label="Add frame" title="Add frame" @click=${(): void => this.onAddFrame()}>+</button>
+              <button aria-label=${tr("matrix.addFrame")} title=${tr("matrix.addFrame")} @click=${(): void => this.onAddFrame()}>+</button>
               <button
-                aria-label=${this.playing ? "Stop animation" : "Play animation"}
-                title=${this.playing ? "Stop animation" : "Play animation"}
+                aria-label=${this.playing ? tr("matrix.stop") : tr("matrix.play")}
+                title=${this.playing ? tr("matrix.stop") : tr("matrix.play")}
                 @click=${(): void => this.togglePlayback()}
                 >${this.playing ? "■" : "▶"}</button
               >
               <select
                 data-testid="animation-select"
-                aria-label="Active animation"
-                title="Play only the frames of the selected animation"
+                aria-label=${tr("matrix.activeAnimation")}
+                title=${tr("matrix.activeAnimationHint")}
                 @change=${(event: Event): void => this.onSelectAnimation(event)}
               >
-                <option value="">All frames</option>
+                <option value="">${tr("matrix.allFrames")}</option>
                 ${(this.engine?.getNamedAnimations() ?? []).map(
                   (animation) => html`
                     <option
@@ -3885,8 +3964,10 @@ export class GnumarusShell extends LitElement {
               const inRange = this.selectedFrameSet().has(frame);
               const animationPhrase =
                 animationCount === 0
-                  ? "in no animations"
-                  : `in ${animationCount} animation${animationCount === 1 ? "" : "s"}`;
+                  ? tr("matrix.noAnimations")
+                  : animationCount === 1
+                    ? tr("matrix.oneAnimation")
+                    : tr("matrix.animations", { count: animationCount });
               return html`
                 <div class="anim-frame-header ${current ? "current" : ""} ${inAnimation ? "in-animation" : ""} ${inRange ? "in-range" : ""}">
                   ${isRenaming
@@ -3895,7 +3976,7 @@ export class GnumarusShell extends LitElement {
                         data-frame=${frame}
                         .value=${frameName}
                         maxlength="64"
-                        aria-label="Rename frame ${frame + 1}"
+                        aria-label=${tr("matrix.renameAria", { frame: frame + 1 })}
                         @click=${(event: Event): void => event.stopPropagation()}
                         @keydown=${(event: KeyboardEvent): void => {
                           if (event.key === "Enter") {
@@ -3910,8 +3991,20 @@ export class GnumarusShell extends LitElement {
                     : html`<button
                         data-testid="anim-frame"
                         data-frame=${frame}
-                        aria-label="Frame ${frame + 1}${current ? ", current" : ""}: ${frameName}, ${duration} seconds, ${animationPhrase}"
-                        title="Frame ${frame + 1}${current ? " (current)" : ""}: ${frameName} — ${duration} s, ${animationPhrase}"
+                        aria-label=${tr("matrix.frameAria", {
+                          frame: frame + 1,
+                          current: current ? tr("matrix.currentSuffix") : "",
+                          name: frameName,
+                          duration,
+                          animation: animationPhrase,
+                        })}
+                        title=${tr("matrix.frameTitle", {
+                          frame: frame + 1,
+                          current: current ? tr("matrix.currentParen") : "",
+                          name: frameName,
+                          duration,
+                          animation: animationPhrase,
+                        })}
                         @click=${(event: MouseEvent): void => this.onSelectFrameClick(frame, event.shiftKey)}
                         @dblclick=${(): void => this.onFrameRenameStart(frame)}
                         @contextmenu=${(event: MouseEvent): void => {
@@ -3932,7 +4025,7 @@ export class GnumarusShell extends LitElement {
                   data-matrix-layer=${row.layerId}
                   role="button"
                   tabindex="0"
-                  aria-label="Animation layer ${row.layerName}"
+                  aria-label=${tr("matrix.layerAria", { name: row.layerName })}
                   @contextmenu=${(event: MouseEvent): void => {
                     event.preventDefault();
                     this.openMatrixLayerMenu(row.layerId, event.clientX, event.clientY);
@@ -3944,7 +4037,7 @@ export class GnumarusShell extends LitElement {
                   const isActive = cell.layerId === matrix.activeLayerId && cell.frame === matrix.currentFrame;
                   const isCurrent = cell.frame === matrix.currentFrame;
                   const inAnimation = activeFrames !== null && activeFrames.has(cell.frame);
-                  const label = cell.contentName ?? "empty";
+                  const label = cell.contentName ?? tr("matrix.emptyCell");
                   return html`
                     <div
                       class="anim-cell ${cell.contentId !== null ? "filled" : ""} ${isCurrent ? "current-frame" : ""} ${isActive ? "active-cell" : ""} ${inAnimation ? "in-animation" : ""}"
@@ -3953,8 +4046,16 @@ export class GnumarusShell extends LitElement {
                       data-matrix-frame=${cell.frame}
                       role="button"
                       tabindex="0"
-                      aria-label="Animation cell, layer ${row.layerName}, frame ${cell.frame + 1}, ${label}"
-                      title="Layer ${row.layerName}, frame ${cell.frame + 1}: ${label}"
+                      aria-label=${tr("matrix.cellAria", {
+                        layer: row.layerName,
+                        frame: cell.frame + 1,
+                        label,
+                      })}
+                      title=${tr("matrix.cellTitle", {
+                        layer: row.layerName,
+                        frame: cell.frame + 1,
+                        label,
+                      })}
                       @click=${(): void => this.onCellClick(cell.layerId, cell.frame)}
                       @keydown=${(event: KeyboardEvent): void => {
                         if (event.key === "Enter" || event.key === " ") {
@@ -3994,11 +4095,11 @@ export class GnumarusShell extends LitElement {
           this.closeMatrixMenu();
         }}></div>
         <div class="context-menu" style="left: ${this.matrixMenu.x}px; top: ${this.matrixMenu.y}px;">
-          <button @click=${(): void => this.onAddFrameBefore(frame)}>Add frame before</button>
-          <button @click=${(): void => this.onAddFrameAfter(frame)}>Add frame after</button>
-          <button @click=${(): void => this.onOpenFrameDuration()}>Set frame duration…</button>
-          <button @click=${(): void => this.onRenameFrameFromMenu()}>Rename frame…</button>
-          <button ?disabled=${count <= 1} @click=${(): void => this.onRemoveFrame(frame)}>Remove frame</button>
+          <button @click=${(): void => this.onAddFrameBefore(frame)}>${tr("matrix.addBefore")}</button>
+          <button @click=${(): void => this.onAddFrameAfter(frame)}>${tr("matrix.addAfter")}</button>
+          <button @click=${(): void => this.onOpenFrameDuration()}>${tr("matrix.setDuration")}</button>
+          <button @click=${(): void => this.onRenameFrameFromMenu()}>${tr("matrix.renameFrame")}</button>
+          <button ?disabled=${count <= 1} @click=${(): void => this.onRemoveFrame(frame)}>${tr("matrix.removeFrame")}</button>
         </div>
       `;
     }
@@ -4011,7 +4112,7 @@ export class GnumarusShell extends LitElement {
         }}></div>
         <div class="context-menu" style="left: ${this.matrixMenu.x}px; top: ${this.matrixMenu.y}px;">
           <button @click=${(): void => this.onDeleteFrames([...frames])}>
-            Delete frames (${frames.length})
+            ${tr("matrix.deleteFrames", { count: frames.length })}
           </button>
         </div>
       `;
@@ -4023,7 +4124,7 @@ export class GnumarusShell extends LitElement {
           this.closeMatrixMenu();
         }}></div>
         <div class="context-menu" style="left: ${this.matrixMenu.x}px; top: ${this.matrixMenu.y}px;">
-          <button @click=${(): void => this.onRenameLayerFromMenu()}>Rename layer…</button>
+          <button @click=${(): void => this.onRenameLayerFromMenu()}>${tr("matrix.renameLayer")}</button>
         </div>
       `;
     }
@@ -4036,15 +4137,15 @@ export class GnumarusShell extends LitElement {
         this.closeMatrixMenu();
       }}></div>
       <div class="context-menu" style="left: ${menu.x}px; top: ${menu.y}px;">
-        <button @click=${(): void => void this.onOpenContentPicker()}>Select content</button>
+        <button @click=${(): void => void this.onOpenContentPicker()}>${tr("matrix.selectContent")}</button>
         <button ?disabled=${cellTextureId === null} @click=${(): void => this.onOpenFitTextureFromCell()}>
-          Fit texture to size
+          ${tr("ctx.fitTexture")}
         </button>
         <button ?disabled=${cellTextureId === null} @click=${(): void => this.onCropCellToCanvasFromCell()}>
-          Crop to canvas
+          ${tr("ctx.cropCanvas")}
         </button>
         <button ?disabled=${cellTextureId === null} @click=${(): void => this.onResizeCellToCanvasFromCell()}>
-          Resize to canvas
+          ${tr("ctx.resizeCanvas")}
         </button>
       </div>
     `;
@@ -4112,6 +4213,9 @@ export class GnumarusShell extends LitElement {
     this.backgroundColor = storedBackground.color;
     const storedToast = this.loadToastSettings();
     this.toastDurationSec = storedToast.durationSec;
+    const storedLocale = this.loadLocaleSettings();
+    this.locale = storedLocale.locale;
+    this.applyActiveLocale();
     const storedFit = this.loadFitSettings();
     this.fitDefaultThreshold = storedFit.alphaThreshold;
     const storedStorage = this.loadStorageSettings();
@@ -4128,7 +4232,7 @@ export class GnumarusShell extends LitElement {
     this.brushPresets = this.loadBrushPresets();
     const host = this.shadowRoot?.getElementById("canvasHost") ?? null;
     if (host === null) {
-      this.webglError = "Canvas host is missing.";
+      this.webglError = tr("status.webglHostMissing");
       return;
     }
     try {
@@ -4150,7 +4254,13 @@ export class GnumarusShell extends LitElement {
           this.canRedo = stats.canRedo;
           this.rotText = `${Math.round(stats.rotationDeg)}°`;
           this.flipText =
-            stats.flipX && stats.flipY ? "Flip XY" : stats.flipX ? "Flip X" : stats.flipY ? "Flip Y" : "";
+            stats.flipX && stats.flipY
+              ? tr("status.flipXY")
+              : stats.flipX
+                ? tr("status.flipX")
+                : stats.flipY
+                  ? tr("status.flipY")
+                  : "";
           this.cursorText =
             stats.cursorX === null || stats.cursorY === null ? "-" : `${stats.cursorX}, ${stats.cursorY}`;
           this.canvasText = `${stats.width} x ${stats.height}`;
@@ -4161,7 +4271,7 @@ export class GnumarusShell extends LitElement {
         },
         onEyedropperPick: (hex): void => {
           this.setPencilColor(hex);
-          this.statusMessage = `Eyedropper: ${hex}`;
+          this.statusMessage = tr("status.eyedropper", { hex });
         },
         onTransformChanged: (): void => {
           void this.refreshPreview();
@@ -4169,13 +4279,13 @@ export class GnumarusShell extends LitElement {
         onToolSizeChanged: (kind, size): void => {
           if (kind === "brush") {
             this.brushSize = size;
-            this.statusMessage = `Brush size: ${size}`;
+            this.statusMessage = tr("status.brushSize", { value: size });
           } else if (kind === "line") {
             this.lineWidth = size;
-            this.statusMessage = `Line width: ${size}`;
+            this.statusMessage = tr("status.lineWidth", { value: size });
           } else {
             this.curveWidth = size;
-            this.statusMessage = `Curve width: ${size}`;
+            this.statusMessage = tr("status.curveWidth", { value: size });
           }
         },
       });
@@ -4194,7 +4304,7 @@ export class GnumarusShell extends LitElement {
       // what Reset Canvas Transform computes later.
       void this.fitInitialView();
       if (!this.fsSupported) {
-        this.statusMessage = "File System Access API unavailable (use Chromium)";
+        this.statusMessage = tr("status.fsUnavailable");
       }
       (window as unknown as { __gnumarus?: unknown }).__gnumarus = {
         shell: this,
@@ -4204,7 +4314,7 @@ export class GnumarusShell extends LitElement {
       if (error instanceof GnumarusWebGlError) {
         this.webglError = error.message;
       } else {
-        this.webglError = "Failed to start WebGL2 canvas.";
+        this.webglError = tr("status.webglFailed");
       }
     }
   }
@@ -4459,7 +4569,7 @@ export class GnumarusShell extends LitElement {
 
   private frameToastFor(frame: number, count: number): string {
     const name = this.engine?.getFrameName(frame) ?? `F${frame + 1}`;
-    return `Frame ${frame + 1}/${count}: ${name}`;
+    return tr("frame.label", { frame: frame + 1, count, name });
   }
 
   /** Select the layer above (direction 1) or below (direction -1), wrapping around. */
@@ -4485,7 +4595,7 @@ export class GnumarusShell extends LitElement {
     this.engine.insertLayerAboveActive();
     this.refreshLayers();
     this.dirty = true;
-    this.statusMessage = "Layer added";
+    this.statusMessage = tr("status.layerAdded");
   }
 
   /** Select the previous/next frame with wraparound. */
@@ -4515,7 +4625,7 @@ export class GnumarusShell extends LitElement {
       this.selectSingleFrame(this.engine.getCurrentFrame());
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = `Frame moved ${direction === 1 ? "right" : "left"}`;
+      this.statusMessage = direction === 1 ? tr("status.frameMovedRight") : tr("status.frameMovedLeft");
     }
   }
 
@@ -4527,7 +4637,7 @@ export class GnumarusShell extends LitElement {
     if (this.engine.moveLayerWrapping(this.engine.getActiveLayerId(), direction)) {
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = `Layer moved ${direction}`;
+      this.statusMessage = direction === "up" ? tr("status.layerMovedUp") : tr("status.layerMovedDown");
     }
   }
 
@@ -4538,9 +4648,9 @@ export class GnumarusShell extends LitElement {
     if (this.engine.mergeDown(this.engine.getActiveLayerId())) {
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = "Layers merged";
+      this.statusMessage = tr("status.layersMerged");
     } else {
-      this.statusMessage = "Nothing below to merge with";
+      this.statusMessage = tr("status.nothingBelow");
     }
   }
 
@@ -4644,9 +4754,9 @@ export class GnumarusShell extends LitElement {
     if (this.engine.resizeLayer(targetId, width, height)) {
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = `Layer resized to ${width} x ${height}`;
+      this.statusMessage = tr("status.layerResized", { width, height });
     } else {
-      this.statusMessage = "Layer size unchanged";
+      this.statusMessage = tr("status.layerSizeUnchanged");
     }
     this.closeResizeDialog();
   }
@@ -4655,13 +4765,15 @@ export class GnumarusShell extends LitElement {
     this.editMenuOpen = false;
     this.fileMenuOpen = false;
     this.engine?.resetViewTransform();
-    this.statusMessage = "Canvas transform reset";
+    this.statusMessage = tr("status.canvasTransformReset");
   }
 
   private registerActions(): void {
+    // Rebuilt on every language change so palette names stay translated.
+    this.actionRegistry = new GnumarusActionRegistry();
     this.actionRegistry.register({
       id: "reset-canvas-transform",
-      name: "Reset Canvas Transform",
+      name: tr("menu.resetCanvasTransform"),
       requirements: [],
       run: (): void => {
         this.resetCanvasTransform();
@@ -4669,7 +4781,7 @@ export class GnumarusShell extends LitElement {
     });
     this.actionRegistry.register({
       id: "new-project",
-      name: "New Project",
+      name: tr("menu.newProject"),
       requirements: [],
       run: (): void => {
         void this.openNewDialog();
@@ -4677,7 +4789,7 @@ export class GnumarusShell extends LitElement {
     });
     this.actionRegistry.register({
       id: "open-project",
-      name: "Open Project",
+      name: tr("menu.openProject"),
       requirements: [],
       run: (): void => {
         void this.openProject();
@@ -4685,7 +4797,7 @@ export class GnumarusShell extends LitElement {
     });
     this.actionRegistry.register({
       id: "save-project",
-      name: "Save Project",
+      name: tr("menu.saveProject"),
       requirements: [],
       run: (): void => {
         void this.saveProject();
@@ -4693,7 +4805,7 @@ export class GnumarusShell extends LitElement {
     });
     this.actionRegistry.register({
       id: "import",
-      name: "Import",
+      name: tr("menu.import"),
       requirements: [],
       run: (): void => {
         void this.importImageFile();
@@ -4701,7 +4813,7 @@ export class GnumarusShell extends LitElement {
     });
     this.actionRegistry.register({
       id: "export",
-      name: "Export",
+      name: tr("menu.export"),
       requirements: [],
       run: (): void => {
         void this.openExportDialog();
@@ -4709,7 +4821,7 @@ export class GnumarusShell extends LitElement {
     });
     this.actionRegistry.register({
       id: "fit-all-textures-to-size",
-      name: "Fit All Textures to Size",
+      name: tr("action.fitAll"),
       requirements: [],
       run: (): void => {
         void this.openFitTextureDialogForAll();
@@ -4717,7 +4829,7 @@ export class GnumarusShell extends LitElement {
     });
     this.actionRegistry.register({
       id: "crop-all-cells-to-canvas",
-      name: "Crop All Cells to Canvas",
+      name: tr("action.cropAll"),
       requirements: [],
       run: (): void => {
         this.cropAllCellsToCanvas();
@@ -4725,7 +4837,7 @@ export class GnumarusShell extends LitElement {
     });
     this.actionRegistry.register({
       id: "reload-all-textures",
-      name: "Reload All Textures",
+      name: tr("action.reloadAll"),
       requirements: [],
       run: (): void => {
         void this.reloadAllTextures();
@@ -4744,12 +4856,12 @@ export class GnumarusShell extends LitElement {
   runAction(id: string): boolean {
     const action = this.actionRegistry.get(id);
     if (action === undefined) {
-      this.showToast(`Unknown action "${id}".`);
+      this.showToast(tr("action.unknown", { id }));
       return false;
     }
     const result = this.actionRegistry.execute(id, this.actionContext());
     if (!result.ok) {
-      this.showToast(actionBlockedMessage(action.name, result.reasons));
+      this.showToast(actionBlockedMessage(action.name, result.reasons, getActiveLocale()));
       return false;
     }
     return true;
@@ -4834,13 +4946,13 @@ export class GnumarusShell extends LitElement {
   private doUndo(): void {
     this.editMenuOpen = false;
     this.fileMenuOpen = false;
-    this.statusMessage = this.engine?.undo() === true ? "Undo" : "Nothing to undo";
+    this.statusMessage = this.engine?.undo() === true ? tr("status.undo") : tr("status.nothingToUndo");
   }
 
   private doRedo(): void {
     this.editMenuOpen = false;
     this.fileMenuOpen = false;
-    this.statusMessage = this.engine?.redo() === true ? "Redo" : "Nothing to redo";
+    this.statusMessage = this.engine?.redo() === true ? tr("status.redo") : tr("status.nothingToRedo");
   }
 
   private openSettingsDialog(): void {
@@ -4894,7 +5006,7 @@ export class GnumarusShell extends LitElement {
     this.gridMinZoom = minZoom;
     this.engine?.setGridMinZoom(minZoom);
     this.persistGrid();
-    this.statusMessage = `Pixel grid minimum zoom: ${Math.round(minZoom * 100)}%`;
+    this.statusMessage = tr("status.gridMinZoom", { value: Math.round(minZoom * 100) });
   }
 
   private currentDialogGridOpacity(): number {
@@ -4910,7 +5022,7 @@ export class GnumarusShell extends LitElement {
     this.gridOpacity = opacity;
     this.engine?.setGridOpacityPercent(opacity);
     this.persistGrid();
-    this.statusMessage = `Pixel grid opacity: ${opacity}%`;
+    this.statusMessage = tr("status.gridOpacity", { value: opacity });
   }
 
   /** Test hook: set the pixel grid opacity in percent (0..100, clamped). */
@@ -4918,7 +5030,7 @@ export class GnumarusShell extends LitElement {
     this.gridOpacity = clampGridOpacityPercent(value);
     this.engine?.setGridOpacityPercent(this.gridOpacity);
     this.persistGrid();
-    this.statusMessage = `Pixel grid opacity: ${this.gridOpacity}%`;
+    this.statusMessage = tr("status.gridOpacity", { value: this.gridOpacity });
   }
 
   private loadRotationSettings(): { stepDeg: number } {
@@ -4955,14 +5067,14 @@ export class GnumarusShell extends LitElement {
     this.rotationStepDeg = stepDeg;
     this.engine?.setRotationStepDeg(stepDeg);
     this.persistRotation();
-    this.statusMessage = `Canvas rotation step: ${stepDeg}°`;
+    this.statusMessage = tr("status.rotationStep", { value: stepDeg });
   }
 
   private resetRotationStepToDefault(): void {
     this.rotationStepDeg = DEFAULT_ROTATION_SETTINGS.stepDeg;
     this.engine?.setRotationStepDeg(this.rotationStepDeg);
     this.persistRotation();
-    this.statusMessage = "Canvas rotation step reset to default";
+    this.statusMessage = tr("status.rotationStepReset");
   }
 
   private loadZoomSettings(): { minZoomPercent: number } {
@@ -4999,14 +5111,14 @@ export class GnumarusShell extends LitElement {
     this.zoomMinPercent = minZoomPercent;
     this.engine?.setViewMinZoom(minZoomPercent / 100);
     this.persistZoom();
-    this.statusMessage = `Minimum zoom: ${minZoomPercent}%`;
+    this.statusMessage = tr("status.zoomMin", { value: minZoomPercent });
   }
 
   private resetZoomMinToDefault(): void {
     this.zoomMinPercent = DEFAULT_ZOOM_SETTINGS.minZoomPercent;
     this.engine?.setViewMinZoom(this.zoomMinPercent / 100);
     this.persistZoom();
-    this.statusMessage = "Minimum zoom reset to default";
+    this.statusMessage = tr("status.zoomMinReset");
   }
 
   private loadToastSettings(): { durationSec: number } {
@@ -5041,20 +5153,91 @@ export class GnumarusShell extends LitElement {
   private applyToastFromDialog(): void {
     this.toastDurationSec = this.currentDialogToastDuration();
     this.persistToast();
-    this.statusMessage = `Toast display time: ${this.toastDurationSec} s`;
+    this.statusMessage = tr("status.toastTime", { value: this.toastDurationSec });
   }
 
   private resetToastDurationToDefault(): void {
     this.toastDurationSec = DEFAULT_TOAST_SETTINGS.durationSec;
     this.persistToast();
-    this.statusMessage = "Toast display time reset to default";
+    this.statusMessage = tr("status.toastReset");
   }
 
   /** Test hook: set the toast display time in seconds (0.5..2.0, clamped). */
   setToastDurationSec(value: number): void {
     this.toastDurationSec = clampToastDurationSec(value);
     this.persistToast();
-    this.statusMessage = `Toast display time: ${this.toastDurationSec} s`;
+    this.statusMessage = tr("status.toastTime", { value: this.toastDurationSec });
+  }
+
+  private loadLocaleSettings(): { locale: GnumarusLocaleSetting } {
+    try {
+      const stored = window.localStorage.getItem(LOCALE_SETTINGS_STORAGE_KEY);
+      if (stored !== null) {
+        return parseLocaleSettings(stored);
+      }
+    } catch {
+      // Corrupt or unavailable storage falls back to defaults.
+    }
+    return { ...DEFAULT_LOCALE_SETTINGS };
+  }
+
+  private persistLocale(): void {
+    try {
+      window.localStorage.setItem(
+        LOCALE_SETTINGS_STORAGE_KEY,
+        serializeLocaleSettings({ locale: this.locale }),
+      );
+    } catch {
+      // Storage failures must not break the settings flow.
+    }
+  }
+
+  /** Resolve the language setting, publish it, and refresh translated UI. */
+  private applyActiveLocale(): GnumarusLocale {
+    const resolved = resolveLocale(this.locale);
+    setActiveLocale(resolved);
+    try {
+      document.documentElement.lang = resolved;
+    } catch {
+      // Non-DOM environments (unit tests) have no document.
+    }
+    this.registerActions();
+    const pickers = this.shadowRoot?.querySelectorAll("gnumarus-color-picker");
+    pickers?.forEach((picker) => {
+      (picker as unknown as LitElement).requestUpdate();
+    });
+    return resolved;
+  }
+
+  private currentDialogLocale(): GnumarusLocaleSetting {
+    const select = this.shadowRoot?.getElementById("localeSelect") as HTMLSelectElement | null;
+    return parseLocaleSetting(select?.value ?? this.locale);
+  }
+
+  private localeDisplayName(locale: GnumarusLocale): string {
+    return tr(locale === "pt-BR" ? "locale.portuguese" : "locale.english");
+  }
+
+  private applyLocaleFromDialog(): void {
+    this.locale = this.currentDialogLocale();
+    this.persistLocale();
+    const resolved = this.applyActiveLocale();
+    this.statusMessage = tr("status.language", { value: this.localeDisplayName(resolved) });
+  }
+
+  private resetLocaleToDefault(): void {
+    this.locale = DEFAULT_LOCALE_SETTINGS.locale;
+    this.persistLocale();
+    this.applyActiveLocale();
+    this.statusMessage = tr("status.languageReset");
+  }
+
+  /** Test hook: set the UI language (`system`, `en` or `pt-BR`). */
+  setLocale(value: GnumarusLocaleSetting): void {
+    this.locale = parseLocaleSetting(value);
+    this.persistLocale();
+    const resolved = this.applyActiveLocale();
+    this.statusMessage = tr("status.language", { value: this.localeDisplayName(resolved) });
   }
 
   private loadFitSettings(): { alphaThreshold: number } {
@@ -5089,20 +5272,20 @@ export class GnumarusShell extends LitElement {
   private applyFitFromDialog(): void {
     this.fitDefaultThreshold = this.currentDialogFitThreshold();
     this.persistFit();
-    this.statusMessage = `Fit texture default alpha threshold: ${this.fitDefaultThreshold}`;
+    this.statusMessage = tr("status.fitThreshold", { value: this.fitDefaultThreshold });
   }
 
   private resetFitToDefault(): void {
     this.fitDefaultThreshold = DEFAULT_FIT_SETTINGS.alphaThreshold;
     this.persistFit();
-    this.statusMessage = "Fit texture default alpha threshold reset to default";
+    this.statusMessage = tr("status.fitReset");
   }
 
   /** Test hook: set the fit texture default alpha threshold (0..254, clamped). */
   setFitDefaultThreshold(value: number): void {
     this.fitDefaultThreshold = clampFitAlphaThreshold(value);
     this.persistFit();
-    this.statusMessage = `Fit texture default alpha threshold: ${this.fitDefaultThreshold}`;
+    this.statusMessage = tr("status.fitThreshold", { value: this.fitDefaultThreshold });
   }
 
   private loadStorageSettings(): GnumarusStorageSettings {
@@ -5195,19 +5378,112 @@ export class GnumarusShell extends LitElement {
 
   private storageStatusMessage(): string {
     if (this.storageFormat === "png") {
-      return `Project textures save as PNG (compression ${this.storagePngLevel})`;
+      return tr("status.storagePng", { value: this.storagePngLevel });
     }
     if (this.storageFormat === "jpg") {
-      return `Project textures save as JPEG (quality ${this.storageJpegQuality})`;
+      return tr("status.storageJpeg", { value: this.storageJpegQuality });
     }
-    if (this.storageFormat === "webp") {
-      return this.storageLossless
-        ? "Project textures save as lossless WebP"
-        : `Project textures save as lossy WebP (quality ${this.storageQuality})`;
-    }
+    const format = this.storageFormat === "webp" ? "WebP" : "JXL";
     return this.storageLossless
-      ? "Project textures save as lossless JXL"
-      : `Project textures save as lossy JXL (quality ${this.storageQuality})`;
+      ? tr("status.storageLossless", { format })
+      : tr("status.storageLossy", { format, value: this.storageQuality });
+  }
+
+  /** Translated display label for a brush-shape value. */
+  private shapeLabel(shape: string): string {
+    return tr(shape === "square" ? "val.square" : "val.circle");
+  }
+
+  /** Translated display label for a paint blend mode. */
+  private blendLabel(mode: string): string {
+    if (mode === "copy") {
+      return tr("val.copy");
+    }
+    return tr(mode === "eraser" ? "val.eraser" : "val.normal");
+  }
+
+  /** Translated display label for a pressure-response value. */
+  private pressureLabel(response: string): string {
+    if (response === "size") {
+      return tr("val.size");
+    }
+    if (response === "opacity") {
+      return tr("val.opacity");
+    }
+    if (response === "size+opacity") {
+      return tr("val.sizeOpacity");
+    }
+    return tr("val.none");
+  }
+
+  /** Translated display label for a pressure-curve value. */
+  private curveLabel(curve: string): string {
+    if (curve === "soft") {
+      return tr("val.soft");
+    }
+    return tr(curve === "firm" ? "val.firm" : "val.linear");
+  }
+
+  /** Translated display label for a stabilizer mode. */
+  private stabilizerLabel(mode: string): string {
+    if (mode === "rope") {
+      return tr("val.rope");
+    }
+    return tr(mode === "follow" ? "val.follow" : "val.none");
+  }
+
+  /** Translated display label for a brush-tip kind. */
+  private tipKindLabel(kind: string): string {
+    if (kind === "soft") {
+      return tr("val.softRound");
+    }
+    return tr(kind === "image" ? "val.image" : "val.pixelHard");
+  }
+
+  /** Translated display label for a tip-angle mode. */
+  private tipAngleLabel(mode: string): string {
+    return tr(mode === "direction" ? "val.followDirection" : "val.none");
+  }
+
+  /** Translated display label for a symmetry mode. */
+  private symmetryLabel(mode: string): string {
+    if (mode === "mirror-x") {
+      return tr("val.leftRight");
+    }
+    if (mode === "mirror-y") {
+      return tr("val.upDown");
+    }
+    return tr(mode === "both" ? "val.fourWay" : "val.off");
+  }
+
+  /** Translated display label for a wrap mode. */
+  private wrapLabel(mode: string): string {
+    if (mode === "x") {
+      return tr("val.leftRight");
+    }
+    if (mode === "y") {
+      return tr("val.upDown");
+    }
+    return tr(mode === "both" ? "val.both" : "val.off");
+  }
+
+  /** Translated display label for an import-cleanup mode. */
+  private cleanupLabel(mode: string): string {
+    if (mode === "fit") {
+      return tr("setting.cleanupFit");
+    }
+    if (mode === "crop") {
+      return tr("setting.cleanupCrop");
+    }
+    if (mode === "crop+fit") {
+      return tr("setting.cleanupCropFit");
+    }
+    return tr("val.none");
+  }
+
+  /** Translated on/off word. */
+  private onOffLabel(enabled: boolean): string {
+    return tr(enabled ? "common.on" : "common.off");
   }
 
   private currentDialogBrushQuality(): number {
@@ -5240,7 +5516,7 @@ export class GnumarusShell extends LitElement {
     this.storageProjectFile = DEFAULT_STORAGE_SETTINGS.projectFile;
     this.brushQuality = DEFAULT_STORAGE_SETTINGS.brushQuality;
     this.persistStorage();
-    this.statusMessage = "Project texture storage reset to default";
+    this.statusMessage = tr("status.storageReset");
   }
 
   /** Test hook: set project texture storage (format, JXL mode/quality, PNG level, JPEG quality, brush JXL quality). */
@@ -5268,7 +5544,7 @@ export class GnumarusShell extends LitElement {
   setBrushQuality(quality: number): void {
     this.brushQuality = clampBrushQuality(quality);
     this.persistStorage();
-    this.statusMessage = `Brush tip JXL quality: ${this.brushQuality}`;
+    this.statusMessage = tr("status.brushQuality", { value: this.brushQuality });
   }
 
   private loadImportCleanup(): GnumarusImportCleanup {
@@ -5295,20 +5571,20 @@ export class GnumarusShell extends LitElement {
   setImportCleanup(mode: GnumarusImportCleanup): void {
     this.importCleanup = parseImportCleanup(mode);
     this.persistImportCleanup();
-    this.statusMessage = `Import cleanup: ${this.importCleanup}`;
+    this.statusMessage = tr("status.cleanup", { value: this.cleanupLabel(this.importCleanup) });
   }
 
   private applyImportCleanupFromDialog(): void {
     const select = this.shadowRoot?.getElementById("importCleanup") as HTMLSelectElement | null;
     this.importCleanup = parseImportCleanup(select?.value ?? DEFAULT_IMPORT_CLEANUP);
     this.persistImportCleanup();
-    this.statusMessage = `Import cleanup: ${this.importCleanup}`;
+    this.statusMessage = tr("status.cleanup", { value: this.cleanupLabel(this.importCleanup) });
   }
 
   private resetImportCleanupToDefault(): void {
     this.importCleanup = DEFAULT_IMPORT_CLEANUP;
     this.persistImportCleanup();
-    this.statusMessage = "Import cleanup reset to default";
+    this.statusMessage = tr("status.cleanupReset");
   }
 
   /**
@@ -5325,13 +5601,13 @@ export class GnumarusShell extends LitElement {
     if (this.importCleanup === "crop" || this.importCleanup === "crop+fit") {
       const cropped = this.engine.cropAllCellsToCanvas();
       if (cropped.cropped > 0) {
-        parts.push(`cropped ${cropped.cropped}`);
+        parts.push(tr("cleanup.croppedPart", { count: cropped.cropped }));
       }
     }
     if (this.importCleanup === "fit" || this.importCleanup === "crop+fit") {
       const fitted = this.engine.fitAllTexturesToSize(0);
       if (fitted.fitted > 0) {
-        parts.push(`fitted ${fitted.fitted}`);
+        parts.push(tr("cleanup.fittedPart", { count: fitted.fitted }));
       }
     }
     if (parts.length === 0) {
@@ -5374,27 +5650,27 @@ export class GnumarusShell extends LitElement {
   private applyExpandFromDialog(): void {
     this.expandStep = this.currentDialogExpandStep();
     this.persistExpand();
-    this.statusMessage = `Cell texture expand step: ${this.expandStep} pixels`;
+    this.statusMessage = tr("status.expandStep", { value: this.expandStep });
   }
 
   private resetExpandToDefault(): void {
     this.expandStep = DEFAULT_EXPAND_SETTINGS.step;
     this.persistExpand();
-    this.statusMessage = "Cell texture expand step reset to default";
+    this.statusMessage = tr("status.expandReset");
   }
 
   /** Test hook: set the cell texture expand step in pixels (1..1024, clamped). */
   setExpandStep(value: number): void {
     this.expandStep = clampExpandStep(value);
     this.persistExpand();
-    this.statusMessage = `Cell texture expand step: ${this.expandStep} pixels`;
+    this.statusMessage = tr("status.expandStep", { value: this.expandStep });
   }
 
   /** Test hook: rename a frame (trimmed 1..64 chars). */
   renameFrame(frame: number, name: string): boolean {
     if (this.engine?.renameFrame(frame, name) === true) {
       this.dirty = true;
-      this.statusMessage = "Frame renamed";
+      this.statusMessage = tr("status.frameRenamed");
       this.refreshLayers();
       return true;
     }
@@ -5476,7 +5752,7 @@ export class GnumarusShell extends LitElement {
     this.engine?.setBackgroundMode(this.backgroundMode);
     this.persistBackground();
     void this.refreshPreview();
-    this.statusMessage = "Background mode reset to default";
+    this.statusMessage = tr("status.bgModeReset");
   }
 
   private resetBackgroundColorToDefault(): void {
@@ -5484,7 +5760,7 @@ export class GnumarusShell extends LitElement {
     this.engine?.setBackgroundColor(this.backgroundColor);
     this.persistBackground();
     void this.refreshPreview();
-    this.statusMessage = "Background color reset to default";
+    this.statusMessage = tr("status.bgColorReset");
   }
 
   private resetCheckerModeToDefault(): void {
@@ -5498,7 +5774,7 @@ export class GnumarusShell extends LitElement {
     });
     this.persistChecker();
     void this.refreshPreview();
-    this.statusMessage = "Checkerboard mode reset to default";
+    this.statusMessage = tr("status.checkerModeReset");
   }
 
   private resetCheckerSizeXToDefault(): void {
@@ -5512,7 +5788,7 @@ export class GnumarusShell extends LitElement {
     });
     this.persistChecker();
     void this.refreshPreview();
-    this.statusMessage = "Checker width reset to default";
+    this.statusMessage = tr("status.checkerWidthReset");
   }
 
   private resetCheckerSizeYToDefault(): void {
@@ -5526,7 +5802,7 @@ export class GnumarusShell extends LitElement {
     });
     this.persistChecker();
     void this.refreshPreview();
-    this.statusMessage = "Checker height reset to default";
+    this.statusMessage = tr("status.checkerHeightReset");
   }
 
   private resetCheckerColorAToDefault(): void {
@@ -5540,7 +5816,7 @@ export class GnumarusShell extends LitElement {
     });
     this.persistChecker();
     void this.refreshPreview();
-    this.statusMessage = "Checker color A reset to default";
+    this.statusMessage = tr("status.checkerColorAReset");
   }
 
   private resetCheckerColorBToDefault(): void {
@@ -5554,7 +5830,7 @@ export class GnumarusShell extends LitElement {
     });
     this.persistChecker();
     void this.refreshPreview();
-    this.statusMessage = "Checker color B reset to default";
+    this.statusMessage = tr("status.checkerColorBReset");
   }
 
   /** Test and picker hook: set the pencil color from any parseable hex. */
@@ -5572,7 +5848,7 @@ export class GnumarusShell extends LitElement {
     const clamped = clampBrushSizeFloat(size);
     this.brushSize = clamped;
     this.engine?.setBrushSize(clamped);
-    this.statusMessage = `Brush size: ${clamped}`;
+    this.statusMessage = tr("status.brushSize", { value: clamped });
   }
 
   /** Test hook: set the brush shape (square/circle, defaults to circle). */
@@ -5580,7 +5856,7 @@ export class GnumarusShell extends LitElement {
     const parsed = parseBrushShape(shape);
     this.brushShape = parsed;
     this.engine?.setBrushShape(parsed);
-    this.statusMessage = `Brush shape: ${parsed}`;
+    this.statusMessage = tr("status.brushShape", { value: this.shapeLabel(parsed) });
   }
 
   /** Test hook: set the brush pressure response (none/size/opacity/size+opacity). */
@@ -5588,7 +5864,7 @@ export class GnumarusShell extends LitElement {
     const parsed = parsePressureResponse(response);
     this.pressureResponse = parsed;
     this.engine?.setPressureResponse(parsed);
-    this.statusMessage = `Pressure response: ${parsed}`;
+    this.statusMessage = tr("status.pressure", { value: this.pressureLabel(parsed) });
   }
 
   /** Test hook: set the brush tip kind (pixel/soft/image). */
@@ -5596,7 +5872,7 @@ export class GnumarusShell extends LitElement {
     const parsed = parseBrushTipKind(kind);
     this.brushTipKind = parsed;
     this.engine?.setBrushTipKind(parsed);
-    this.statusMessage = `Brush tip: ${parsed}`;
+    this.statusMessage = tr("status.brushTip", { value: this.tipKindLabel(parsed) });
   }
 
   /** Test hook: set the paint tip softness (0..100 percent, clamped). */
@@ -5604,7 +5880,7 @@ export class GnumarusShell extends LitElement {
     const clamped = clampBrushHardness(Number.isFinite(percent) ? percent / 100 : DEFAULT_BRUSH_HARDNESS);
     this.brushHardness = clamped;
     this.engine?.setBrushHardness(clamped);
-    this.statusMessage = `Tip softness: ${Math.round(clamped * 100)}%`;
+    this.statusMessage = tr("status.softness", { value: Math.round(clamped * 100) });
   }
 
   /** Test hook: set the dab spacing (5..400 percent of the diameter, clamped). */
@@ -5612,7 +5888,7 @@ export class GnumarusShell extends LitElement {
     const clamped = clampBrushSpacing(Number.isFinite(percent) ? percent / 100 : DEFAULT_BRUSH_SPACING);
     this.brushSpacing = clamped;
     this.engine?.setBrushSpacing(clamped);
-    this.statusMessage = `Tip spacing: ${Math.round(clamped * 100)}%`;
+    this.statusMessage = tr("status.spacing", { value: Math.round(clamped * 100) });
   }
 
   /**
@@ -5628,7 +5904,7 @@ export class GnumarusShell extends LitElement {
   clearPaintTip(): void {
     this.engine?.setPaintTipImage(null);
     this.paintTipName = "";
-    this.statusMessage = "Image tip cleared";
+    this.statusMessage = tr("status.imageTipCleared");
   }
 
   private openPaintTipPicker(): void {
@@ -5684,7 +5960,7 @@ export class GnumarusShell extends LitElement {
       this.installImageTip("tip", file.name, new Uint8ClampedArray(pixels), targetWidth, targetHeight);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      this.statusMessage = `Tip import failed: ${reason}`;
+      this.statusMessage = tr("status.tipImportFailed", { reason });
     }
   }
 
@@ -5721,11 +5997,11 @@ export class GnumarusShell extends LitElement {
     if (kind === "tip") {
       this.engine?.setPaintTipImage(stored);
       this.paintTipName = label;
-      this.statusMessage = `Image tip: ${label}`;
+      this.statusMessage = tr("status.imageTipName", { value: label });
     } else {
       this.engine?.setPaintDualTip(stored);
       this.paintDualName = label;
-      this.statusMessage = `Dual tip: ${label}`;
+      this.statusMessage = tr("status.dualTipName", { value: label });
     }
     void this.archiveBrushTip(fileLabel, fittedWidth, fittedHeight, new Uint8ClampedArray(pixels));
     return true;
@@ -5794,14 +6070,14 @@ export class GnumarusShell extends LitElement {
     const size = this.currentDialogBrushSize();
     this.brushSize = size;
     this.engine?.setBrushSize(size);
-    this.statusMessage = `Brush size: ${size}`;
+    this.statusMessage = tr("status.brushSize", { value: size });
   }
 
   private applyBrushShapeFromDialog(): void {
     const shape = this.currentDialogBrushShape();
     this.brushShape = shape;
     this.engine?.setBrushShape(shape);
-    this.statusMessage = `Brush shape: ${shape}`;
+    this.statusMessage = tr("status.brushShape", { value: this.shapeLabel(shape) });
   }
 
   private currentDialogBrushTipKind(): GnumarusBrushTipKind {
@@ -5813,7 +6089,7 @@ export class GnumarusShell extends LitElement {
     const kind = this.currentDialogBrushTipKind();
     this.brushTipKind = kind;
     this.engine?.setBrushTipKind(kind);
-    this.statusMessage = `Brush tip: ${kind}`;
+    this.statusMessage = tr("status.brushTip", { value: this.tipKindLabel(kind) });
   }
 
   private applyBrushHardnessFromDialog(): void {
@@ -5822,7 +6098,7 @@ export class GnumarusShell extends LitElement {
     const clamped = clampBrushHardness(Number.isFinite(raw) ? raw / 100 : DEFAULT_BRUSH_HARDNESS);
     this.brushHardness = clamped;
     this.engine?.setBrushHardness(clamped);
-    this.statusMessage = `Tip softness: ${Math.round(clamped * 100)}%`;
+    this.statusMessage = tr("status.softness", { value: Math.round(clamped * 100) });
   }
 
   private applyBrushSpacingFromDialog(): void {
@@ -5831,7 +6107,7 @@ export class GnumarusShell extends LitElement {
     const clamped = clampBrushSpacing(Number.isFinite(raw) ? raw / 100 : DEFAULT_BRUSH_SPACING);
     this.brushSpacing = clamped;
     this.engine?.setBrushSpacing(clamped);
-    this.statusMessage = `Tip spacing: ${Math.round(clamped * 100)}%`;
+    this.statusMessage = tr("status.spacing", { value: Math.round(clamped * 100) });
   }
 
   /** Test hook: set the per-dab flow (1..100 percent, clamped). */
@@ -5839,7 +6115,7 @@ export class GnumarusShell extends LitElement {
     const clamped = clampBrushFlow(Number.isFinite(percent) ? percent / 100 : DEFAULT_BRUSH_FLOW);
     this.brushFlow = clamped;
     this.engine?.setBrushFlow(clamped);
-    this.statusMessage = `Flow: ${Math.round(clamped * 100)}%`;
+    this.statusMessage = tr("status.flow", { value: Math.round(clamped * 100) });
   }
 
   private applyBrushFlowFromDialog(): void {
@@ -5848,7 +6124,7 @@ export class GnumarusShell extends LitElement {
     const clamped = clampBrushFlow(Number.isFinite(raw) ? raw / 100 : DEFAULT_BRUSH_FLOW);
     this.brushFlow = clamped;
     this.engine?.setBrushFlow(clamped);
-    this.statusMessage = `Flow: ${Math.round(clamped * 100)}%`;
+    this.statusMessage = tr("status.flow", { value: Math.round(clamped * 100) });
   }
 
   /** Test hook: set the fuzzy jitter amount (0..100 percent, clamped). */
@@ -5856,7 +6132,7 @@ export class GnumarusShell extends LitElement {
     const clamped = clampPaintFuzzy(Number.isFinite(percent) ? percent / 100 : DEFAULT_PAINT_FUZZY);
     this.paintFuzzy = clamped;
     this.engine?.setPaintFuzzy(clamped);
-    this.statusMessage = `Fuzzy: ${Math.round(clamped * 100)}%`;
+    this.statusMessage = tr("status.fuzzy", { value: Math.round(clamped * 100) });
   }
 
   private applyPaintFuzzyFromDialog(): void {
@@ -5865,7 +6141,7 @@ export class GnumarusShell extends LitElement {
     const clamped = clampPaintFuzzy(Number.isFinite(raw) ? raw / 100 : DEFAULT_PAINT_FUZZY);
     this.paintFuzzy = clamped;
     this.engine?.setPaintFuzzy(clamped);
-    this.statusMessage = `Fuzzy: ${Math.round(clamped * 100)}%`;
+    this.statusMessage = tr("status.fuzzy", { value: Math.round(clamped * 100) });
   }
 
   /** Test hook: set the paper grain strength (0..100 percent) and cell size. */
@@ -5877,7 +6153,7 @@ export class GnumarusShell extends LitElement {
     this.paintGrainStrength = strength;
     this.paintGrainScale = scale;
     this.engine?.setPaintGrain(strength, scale);
-    this.statusMessage = `Grain: ${Math.round(strength * 100)}% / ${scale}px`;
+    this.statusMessage = tr("status.grain", { value: Math.round(strength * 100), scale });
   }
 
   private applyPaintGrainFromDialog(): void {
@@ -5890,13 +6166,13 @@ export class GnumarusShell extends LitElement {
     this.paintGrainStrength = strength;
     this.paintGrainScale = scale;
     this.engine?.setPaintGrain(strength, scale);
-    this.statusMessage = `Grain: ${Math.round(strength * 100)}% / ${scale}px`;
+    this.statusMessage = tr("status.grain", { value: Math.round(strength * 100), scale });
   }
 
   /** Test hook: set the deterministic paint seed (fuzzy + grain). */
   setPaintSeed(seed: number): void {
     this.engine?.setPaintSeed(seed);
-    this.statusMessage = `Paint seed: ${this.engine?.getPaintSeed() ?? seed}`;
+    this.statusMessage = tr("status.paintSeed", { value: this.engine?.getPaintSeed() ?? seed });
   }
 
   /** Test hook: set the tilt-size dynamics amount (0..100 percent). */
@@ -5904,7 +6180,7 @@ export class GnumarusShell extends LitElement {
     const clamped = clampPaintDynamicsAmount(Number.isFinite(percent) ? percent / 100 : DEFAULT_PAINT_DYNAMICS_AMOUNT);
     this.tiltSizeAmount = clamped;
     this.engine?.setTiltSizeAmount(clamped);
-    this.statusMessage = `Tilt size: ${Math.round(clamped * 100)}%`;
+    this.statusMessage = tr("status.tiltSize", { value: Math.round(clamped * 100) });
   }
 
   private applyTiltSizeFromDialog(): void {
@@ -5913,7 +6189,7 @@ export class GnumarusShell extends LitElement {
     const clamped = clampPaintDynamicsAmount(Number.isFinite(raw) ? raw / 100 : DEFAULT_PAINT_DYNAMICS_AMOUNT);
     this.tiltSizeAmount = clamped;
     this.engine?.setTiltSizeAmount(clamped);
-    this.statusMessage = `Tilt size: ${Math.round(clamped * 100)}%`;
+    this.statusMessage = tr("status.tiltSize", { value: Math.round(clamped * 100) });
   }
 
   /** Test hook: set the speed-fade flow loss (0..100 percent). */
@@ -5921,7 +6197,7 @@ export class GnumarusShell extends LitElement {
     const clamped = clampPaintDynamicsAmount(Number.isFinite(percent) ? percent / 100 : DEFAULT_PAINT_DYNAMICS_AMOUNT);
     this.speedFadeAmount = clamped;
     this.engine?.setSpeedFadeAmount(clamped);
-    this.statusMessage = `Speed fade: ${Math.round(clamped * 100)}%`;
+    this.statusMessage = tr("status.speedFade", { value: Math.round(clamped * 100) });
   }
 
   private applySpeedFadeFromDialog(): void {
@@ -5930,7 +6206,7 @@ export class GnumarusShell extends LitElement {
     const clamped = clampPaintDynamicsAmount(Number.isFinite(raw) ? raw / 100 : DEFAULT_PAINT_DYNAMICS_AMOUNT);
     this.speedFadeAmount = clamped;
     this.engine?.setSpeedFadeAmount(clamped);
-    this.statusMessage = `Speed fade: ${Math.round(clamped * 100)}%`;
+    this.statusMessage = tr("status.speedFade", { value: Math.round(clamped * 100) });
   }
 
   /** Test hook: set the tip rotation mode (none/direction). */
@@ -5938,7 +6214,7 @@ export class GnumarusShell extends LitElement {
     const parsed = parseTipAngleMode(mode);
     this.tipAngleMode = parsed;
     this.engine?.setTipAngleMode(parsed);
-    this.statusMessage = `Tip rotation: ${parsed}`;
+    this.statusMessage = tr("status.tipRotation", { value: this.tipAngleLabel(parsed) });
   }
 
   private applyTipAngleModeFromDialog(): void {
@@ -5946,7 +6222,7 @@ export class GnumarusShell extends LitElement {
     const mode = parseTipAngleMode(select?.value ?? "none");
     this.tipAngleMode = mode;
     this.engine?.setTipAngleMode(mode);
-    this.statusMessage = `Tip rotation: ${mode}`;
+    this.statusMessage = tr("status.tipRotation", { value: this.tipAngleLabel(mode) });
   }
 
   /** Test hook: set the symmetry mode (off/mirror-x/mirror-y/both). */
@@ -5954,7 +6230,7 @@ export class GnumarusShell extends LitElement {
     const parsed = parseSymmetryMode(mode);
     this.symmetryMode = parsed;
     this.engine?.setSymmetryMode(parsed);
-    this.statusMessage = `Symmetry: ${parsed}`;
+    this.statusMessage = tr("status.symmetry", { value: this.symmetryLabel(parsed) });
   }
 
   /** Test hook: set the wrap-around painting mode (off/x/y/both). */
@@ -5962,7 +6238,7 @@ export class GnumarusShell extends LitElement {
     const parsed = parseWrapMode(mode);
     this.wrapMode = parsed;
     this.engine?.setWrapMode(parsed);
-    this.statusMessage = `Wrap: ${parsed}`;
+    this.statusMessage = tr("status.wrap", { value: this.wrapLabel(parsed) });
   }
 
   private applyWrapModeFromDialog(): void {
@@ -5970,7 +6246,7 @@ export class GnumarusShell extends LitElement {
     const mode = parseWrapMode(select?.value ?? "off");
     this.wrapMode = mode;
     this.engine?.setWrapMode(mode);
-    this.statusMessage = `Wrap: ${mode}`;
+    this.statusMessage = tr("status.wrap", { value: this.wrapLabel(mode) });
   }
 
   private applySymmetryModeFromDialog(): void {
@@ -5978,13 +6254,13 @@ export class GnumarusShell extends LitElement {
     const mode = parseSymmetryMode(select?.value ?? "off");
     this.symmetryMode = mode;
     this.engine?.setSymmetryMode(mode);
-    this.statusMessage = `Symmetry: ${mode}`;
+    this.statusMessage = tr("status.symmetry", { value: this.symmetryLabel(mode) });
   }
 
   /** Test hook: force the stroke velocity reading (null restores measurement). */
   setStrokeVelocityOverride(value: number | null): void {
     this.engine?.setStrokeVelocityOverride(value);
-    this.statusMessage = `Stroke velocity: ${value === null ? "measured" : value}`;
+    this.statusMessage = tr("status.strokeVelocity", { value: value ?? tr("status.strokeMeasured") });
   }
 
   /** Test hook: set the airbrush rate in dabs per second (0..20, 0 is off). */
@@ -5992,7 +6268,9 @@ export class GnumarusShell extends LitElement {
     const clamped = clampAirbrushRate(Number.isFinite(rate) ? rate : DEFAULT_AIRBRUSH_RATE);
     this.airbrushRate = clamped;
     this.engine?.setAirbrushRate(clamped);
-    this.statusMessage = `Airbrush: ${clamped === 0 ? "off" : `${clamped} dabs/s`}`;
+    this.statusMessage = tr("status.airbrush", {
+      value: clamped === 0 ? tr("status.airbrushOff") : tr("status.airbrushRate", { value: clamped }),
+    });
   }
 
   private applyAirbrushRateFromDialog(): void {
@@ -6001,7 +6279,9 @@ export class GnumarusShell extends LitElement {
     const clamped = clampAirbrushRate(Number.isFinite(raw) ? raw : DEFAULT_AIRBRUSH_RATE);
     this.airbrushRate = clamped;
     this.engine?.setAirbrushRate(clamped);
-    this.statusMessage = `Airbrush: ${clamped === 0 ? "off" : `${clamped} dabs/s`}`;
+    this.statusMessage = tr("status.airbrush", {
+      value: clamped === 0 ? tr("status.airbrushOff") : tr("status.airbrushRate", { value: clamped }),
+    });
   }
 
   /** Test hook: set smudge pickup rate (0..100 percent) and wetness (0..100). */
@@ -6011,7 +6291,7 @@ export class GnumarusShell extends LitElement {
     this.smudgeRate = rate;
     this.smudgeWet = wet;
     this.engine?.setSmudge(rate, wet);
-    this.statusMessage = `Smudge: ${Math.round(rate * 100)}% / wet ${Math.round(wet * 100)}%`;
+    this.statusMessage = tr("status.smudge", { value: Math.round(rate * 100), wet: Math.round(wet * 100) });
   }
 
   private applySmudgeFromDialog(): void {
@@ -6024,7 +6304,7 @@ export class GnumarusShell extends LitElement {
     this.smudgeRate = rate;
     this.smudgeWet = wet;
     this.engine?.setSmudge(rate, wet);
-    this.statusMessage = `Smudge: ${Math.round(rate * 100)}% / wet ${Math.round(wet * 100)}%`;
+    this.statusMessage = tr("status.smudge", { value: Math.round(rate * 100), wet: Math.round(wet * 100) });
   }
 
   /**
@@ -6045,14 +6325,14 @@ export class GnumarusShell extends LitElement {
     this.paintDualScale = scale;
     this.paintDualStrength = strength;
     this.engine?.setPaintDualTuning(scale, strength);
-    this.statusMessage = `Dual tip: ${Math.round(strength * 100)}% / ${Math.round(scale * 100)}%`;
+    this.statusMessage = tr("status.dualTip", { value: Math.round(strength * 100), scale: Math.round(scale * 100) });
   }
 
   /** Clear the installed dual tip. */
   clearPaintDual(): void {
     this.engine?.setPaintDualTip(null);
     this.paintDualName = "";
-    this.statusMessage = "Dual tip cleared";
+    this.statusMessage = tr("status.dualCleared");
   }
 
   /** Snapshot the current pencil state as a preset object. */
@@ -6133,7 +6413,7 @@ export class GnumarusShell extends LitElement {
     this.engine?.setSymmetryMode(this.symmetryMode);
     this.wrapMode = preset.wrapMode ?? "off";
     this.engine?.setWrapMode(this.wrapMode);
-    this.statusMessage = `Preset: ${preset.name}`;
+    this.statusMessage = tr("status.preset", { value: preset.name });
   }
 
   private allBrushPresets(): GnumarusBrushPreset[] {
@@ -6187,7 +6467,7 @@ export class GnumarusShell extends LitElement {
       this.brushPresets = [...this.brushPresets, preset];
     }
     this.persistBrushPresets();
-    this.statusMessage = `Preset saved: ${trimmed}`;
+    this.statusMessage = tr("status.presetSaved", { value: trimmed });
     return true;
   }
 
@@ -6199,7 +6479,7 @@ export class GnumarusShell extends LitElement {
     }
     this.brushPresets = this.brushPresets.filter((entry) => entry.name !== name);
     this.persistBrushPresets();
-    this.statusMessage = `Preset deleted: ${name}`;
+    this.statusMessage = tr("status.presetDeleted", { value: name });
     return true;
   }
 
@@ -6231,7 +6511,7 @@ export class GnumarusShell extends LitElement {
     const input = this.shadowRoot?.getElementById("presetName") as HTMLInputElement | null;
     const name = input?.value ?? "";
     if (!this.saveBrushPresetAs(name)) {
-      this.statusMessage = "Preset name must not be empty";
+      this.statusMessage = tr("status.presetEmpty");
       return;
     }
     const select = this.shadowRoot?.getElementById("brushPreset") as HTMLSelectElement | null;
@@ -6244,7 +6524,7 @@ export class GnumarusShell extends LitElement {
     const select = this.shadowRoot?.getElementById("brushPreset") as HTMLSelectElement | null;
     const name = select?.value ?? "";
     if (name === "" || !this.deleteBrushPreset(name)) {
-      this.statusMessage = "Only custom presets can be deleted";
+      this.statusMessage = tr("status.presetCustomOnly");
     }
   }
 
@@ -6252,7 +6532,7 @@ export class GnumarusShell extends LitElement {
     const select = this.shadowRoot?.getElementById("brushPreset") as HTMLSelectElement | null;
     const json = this.exportBrushPresetJson(select?.value ?? "");
     if (json === null) {
-      this.statusMessage = "No preset selected";
+      this.statusMessage = tr("status.presetNone");
       return;
     }
     const blob = new Blob([json], { type: "application/json" });
@@ -6262,7 +6542,7 @@ export class GnumarusShell extends LitElement {
     link.download = `${select?.value ?? "preset"}.gnumarus-brush.json`;
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    this.statusMessage = "Preset exported";
+    this.statusMessage = tr("status.presetExported");
   }
 
   private openBrushPresetPicker(): void {
@@ -6286,7 +6566,7 @@ export class GnumarusShell extends LitElement {
       }
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      this.statusMessage = `Preset import failed: ${reason}`;
+      this.statusMessage = tr("status.presetImportFailed", { reason });
     }
   }
 
@@ -6302,7 +6582,7 @@ export class GnumarusShell extends LitElement {
     this.paintDualScale = scale;
     this.paintDualStrength = strength;
     this.engine?.setPaintDualTuning(scale, strength);
-    this.statusMessage = `Dual tip: ${Math.round(strength * 100)}% / ${Math.round(scale * 100)}%`;
+    this.statusMessage = tr("status.dualTip", { value: Math.round(strength * 100), scale: Math.round(scale * 100) });
   }
 
   private openPaintDualPicker(): void {
@@ -6357,7 +6637,7 @@ export class GnumarusShell extends LitElement {
       this.installImageTip("dual", file.name, new Uint8ClampedArray(pixels), targetWidth, targetHeight);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      this.statusMessage = `Dual import failed: ${reason}`;
+      this.statusMessage = tr("status.dualImportFailed", { reason });
     }
   }
 
@@ -6366,7 +6646,7 @@ export class GnumarusShell extends LitElement {
     const response = parsePressureResponse(select?.value ?? "none");
     this.pressureResponse = response;
     this.engine?.setPressureResponse(response);
-    this.statusMessage = `Pressure response: ${response}`;
+    this.statusMessage = tr("status.pressure", { value: this.pressureLabel(response) });
   }
 
   /** Test hook: set the pressure curve mapping pressure to size gain. */
@@ -6374,7 +6654,7 @@ export class GnumarusShell extends LitElement {
     const parsed = parsePressureCurve(curve);
     this.pressureSizeCurve = parsed;
     this.engine?.setPressureSizeCurve(parsed);
-    this.statusMessage = `Size curve: ${parsed}`;
+    this.statusMessage = tr("status.sizeCurve", { value: this.curveLabel(parsed) });
   }
 
   private applyPressureSizeCurveFromDialog(): void {
@@ -6382,7 +6662,7 @@ export class GnumarusShell extends LitElement {
     const curve = parsePressureCurve(select?.value ?? "linear");
     this.pressureSizeCurve = curve;
     this.engine?.setPressureSizeCurve(curve);
-    this.statusMessage = `Size curve: ${curve}`;
+    this.statusMessage = tr("status.sizeCurve", { value: this.curveLabel(curve) });
   }
 
   /** Test hook: set the pressure curve mapping pressure to alpha gain. */
@@ -6390,7 +6670,7 @@ export class GnumarusShell extends LitElement {
     const parsed = parsePressureCurve(curve);
     this.pressureAlphaCurve = parsed;
     this.engine?.setPressureAlphaCurve(parsed);
-    this.statusMessage = `Alpha curve: ${parsed}`;
+    this.statusMessage = tr("status.alphaCurve", { value: this.curveLabel(parsed) });
   }
 
   private applyPressureAlphaCurveFromDialog(): void {
@@ -6398,7 +6678,7 @@ export class GnumarusShell extends LitElement {
     const curve = parsePressureCurve(select?.value ?? "linear");
     this.pressureAlphaCurve = curve;
     this.engine?.setPressureAlphaCurve(curve);
-    this.statusMessage = `Alpha curve: ${curve}`;
+    this.statusMessage = tr("status.alphaCurve", { value: this.curveLabel(curve) });
   }
 
   /** Test hook: enable or disable pencil anti-aliasing. */
@@ -6406,7 +6686,7 @@ export class GnumarusShell extends LitElement {
     const next = enabled === true;
     this.pencilAntialias = next;
     this.engine?.setPencilAntialias(next);
-    this.statusMessage = `Pencil anti-aliasing: ${next ? "on" : "off"}`;
+    this.statusMessage = tr("status.pencilAntialias", { value: this.onOffLabel(next) });
   }
 
   private currentDialogPencilAntialias(): boolean {
@@ -6418,7 +6698,7 @@ export class GnumarusShell extends LitElement {
     const enabled = this.currentDialogPencilAntialias();
     this.pencilAntialias = enabled;
     this.engine?.setPencilAntialias(enabled);
-    this.statusMessage = `Pencil anti-aliasing: ${enabled ? "on" : "off"}`;
+    this.statusMessage = tr("status.pencilAntialias", { value: this.onOffLabel(enabled) });
   }
 
   /** Test hook: enable or disable pencil pixel perfect (1px + no AA only). */
@@ -6426,7 +6706,7 @@ export class GnumarusShell extends LitElement {
     const next = enabled === true;
     this.pencilPixelPerfect = next;
     this.engine?.setPencilPixelPerfect(next);
-    this.statusMessage = `Pencil pixel perfect: ${next ? "on" : "off"}`;
+    this.statusMessage = tr("status.pencilPixelPerfect", { value: this.onOffLabel(next) });
   }
 
   /** Test hook: enable or disable curve pixel perfect (1px + no AA only). */
@@ -6434,7 +6714,7 @@ export class GnumarusShell extends LitElement {
     const next = enabled === true;
     this.curvePixelPerfect = next;
     this.engine?.setCurvePixelPerfect(next);
-    this.statusMessage = `Curve pixel perfect: ${next ? "on" : "off"}`;
+    this.statusMessage = tr("status.curvePixelPerfect", { value: this.onOffLabel(next) });
   }
 
   private currentDialogPencilPixelPerfect(): boolean {
@@ -6451,14 +6731,14 @@ export class GnumarusShell extends LitElement {
     const enabled = this.currentDialogPencilPixelPerfect();
     this.pencilPixelPerfect = enabled;
     this.engine?.setPencilPixelPerfect(enabled);
-    this.statusMessage = `Pencil pixel perfect: ${enabled ? "on" : "off"}`;
+    this.statusMessage = tr("status.pencilPixelPerfect", { value: this.onOffLabel(enabled) });
   }
 
   private applyCurvePixelPerfectFromDialog(): void {
     const enabled = this.currentDialogCurvePixelPerfect();
     this.curvePixelPerfect = enabled;
     this.engine?.setCurvePixelPerfect(enabled);
-    this.statusMessage = `Curve pixel perfect: ${enabled ? "on" : "off"}`;
+    this.statusMessage = tr("status.curvePixelPerfect", { value: this.onOffLabel(enabled) });
   }
 
   /** Test hook: set the brush stabilizer mode (none/rope/follow, defaults to none). */
@@ -6466,7 +6746,7 @@ export class GnumarusShell extends LitElement {
     const parsed = parseStabilizerMode(mode);
     this.stabilizerMode = parsed;
     this.engine?.setStabilizerMode(parsed);
-    this.statusMessage = `Stabilizer: ${parsed}`;
+    this.statusMessage = tr("status.stabilizer", { value: this.stabilizerLabel(parsed) });
   }
 
   /** Test hook: set the rope leash length in layer pixels (1..200, clamped). */
@@ -6474,7 +6754,7 @@ export class GnumarusShell extends LitElement {
     const clamped = clampRopeLength(length);
     this.ropeLength = clamped;
     this.engine?.setRopeLength(clamped);
-    this.statusMessage = `Rope length: ${clamped}`;
+    this.statusMessage = tr("status.ropeLength", { value: clamped });
   }
 
   /** Test hook: set the follow chase strength (typed 1..100, used as typed / 100, clamped). */
@@ -6482,7 +6762,7 @@ export class GnumarusShell extends LitElement {
     const clamped = clampFollowStrength(strength);
     this.followStrength = clamped;
     this.engine?.setFollowStrength(clamped);
-    this.statusMessage = `Follow strength: ${clamped}`;
+    this.statusMessage = tr("status.followStrength", { value: clamped });
   }
 
   private currentDialogStabilizerMode(): GnumarusStabilizerMode {
@@ -6506,21 +6786,21 @@ export class GnumarusShell extends LitElement {
     const mode = this.currentDialogStabilizerMode();
     this.stabilizerMode = mode;
     this.engine?.setStabilizerMode(mode);
-    this.statusMessage = `Stabilizer: ${mode}`;
+    this.statusMessage = tr("status.stabilizer", { value: this.stabilizerLabel(mode) });
   }
 
   private applyRopeLengthFromDialog(): void {
     const length = this.currentDialogRopeLength();
     this.ropeLength = length;
     this.engine?.setRopeLength(length);
-    this.statusMessage = `Rope length: ${length}`;
+    this.statusMessage = tr("status.ropeLength", { value: length });
   }
 
   private applyFollowStrengthFromDialog(): void {
     const strength = this.currentDialogFollowStrength();
     this.followStrength = strength;
     this.engine?.setFollowStrength(strength);
-    this.statusMessage = `Follow strength: ${strength}`;
+    this.statusMessage = tr("status.followStrength", { value: strength });
   }
 
   /** Test hook: set the shared paint blend mode (normal/copy/eraser, defaults to normal). */
@@ -6528,7 +6808,7 @@ export class GnumarusShell extends LitElement {
     const parsed = parseBlendMode(mode);
     this.blendMode = parsed;
     this.engine?.setBlendMode(parsed);
-    this.statusMessage = `Blend mode: ${parsed}`;
+    this.statusMessage = tr("status.blend", { value: this.blendLabel(parsed) });
   }
 
   private currentDialogBlendMode(): GnumarusBlendMode {
@@ -6540,7 +6820,7 @@ export class GnumarusShell extends LitElement {
     const mode = this.currentDialogBlendMode();
     this.blendMode = mode;
     this.engine?.setBlendMode(mode);
-    this.statusMessage = `Blend mode: ${mode}`;
+    this.statusMessage = tr("status.blend", { value: this.blendLabel(mode) });
   }
 
   /** Test hook: set whether strokes accumulate onto themselves while drawing. */
@@ -6548,7 +6828,7 @@ export class GnumarusShell extends LitElement {
     const next = enabled === true;
     this.accumulate = next;
     this.engine?.setAccumulate(next);
-    this.statusMessage = `Accumulate: ${next ? "on" : "off"}`;
+    this.statusMessage = tr("status.accumulate", { value: this.onOffLabel(next) });
   }
 
   private currentDialogAccumulate(): boolean {
@@ -6560,7 +6840,7 @@ export class GnumarusShell extends LitElement {
     const enabled = this.currentDialogAccumulate();
     this.accumulate = enabled;
     this.engine?.setAccumulate(enabled);
-    this.statusMessage = `Accumulate: ${enabled ? "on" : "off"}`;
+    this.statusMessage = tr("status.accumulate", { value: this.onOffLabel(enabled) });
   }
 
   /** Toggle between eraser and the previously used non-eraser blend mode. */
@@ -6570,7 +6850,7 @@ export class GnumarusShell extends LitElement {
     }
     const mode = this.engine.toggleEraserBlend();
     this.blendMode = mode;
-    this.statusMessage = `Blend mode: ${mode}`;
+    this.statusMessage = tr("status.blend", { value: this.blendLabel(mode) });
   }
 
   /** Test hook: set the line width (floats 0.1..64, clamped). */
@@ -6578,7 +6858,7 @@ export class GnumarusShell extends LitElement {
     const clamped = clampBrushSizeFloat(size);
     this.lineWidth = clamped;
     this.engine?.setLineWidth(clamped);
-    this.statusMessage = `Line width: ${clamped}`;
+    this.statusMessage = tr("status.lineWidth", { value: clamped });
   }
 
   /** Test hook: set the line shape (square/circle, defaults to circle). */
@@ -6586,7 +6866,7 @@ export class GnumarusShell extends LitElement {
     const parsed = parseBrushShape(shape);
     this.lineShape = parsed;
     this.engine?.setLineShape(parsed);
-    this.statusMessage = `Line shape: ${parsed}`;
+    this.statusMessage = tr("status.lineShape", { value: this.shapeLabel(parsed) });
   }
 
   /** Test hook: enable or disable line anti-aliasing. */
@@ -6594,7 +6874,7 @@ export class GnumarusShell extends LitElement {
     const next = enabled === true;
     this.lineAntialias = next;
     this.engine?.setLineAntialias(next);
-    this.statusMessage = `Line anti-aliasing: ${next ? "on" : "off"}`;
+    this.statusMessage = tr("status.lineAntialias", { value: this.onOffLabel(next) });
   }
 
   private currentDialogLineWidth(): number {
@@ -6617,21 +6897,21 @@ export class GnumarusShell extends LitElement {
     const size = this.currentDialogLineWidth();
     this.lineWidth = size;
     this.engine?.setLineWidth(size);
-    this.statusMessage = `Line width: ${size}`;
+    this.statusMessage = tr("status.lineWidth", { value: size });
   }
 
   private applyLineShapeFromDialog(): void {
     const shape = this.currentDialogLineShape();
     this.lineShape = shape;
     this.engine?.setLineShape(shape);
-    this.statusMessage = `Line shape: ${shape}`;
+    this.statusMessage = tr("status.lineShape", { value: this.shapeLabel(shape) });
   }
 
   private applyLineAntialiasFromDialog(): void {
     const enabled = this.currentDialogLineAntialias();
     this.lineAntialias = enabled;
     this.engine?.setLineAntialias(enabled);
-    this.statusMessage = `Line anti-aliasing: ${enabled ? "on" : "off"}`;
+    this.statusMessage = tr("status.lineAntialias", { value: this.onOffLabel(enabled) });
   }
 
   /** Test hook: set the curve width (floats 0.1..64, clamped). */
@@ -6639,7 +6919,7 @@ export class GnumarusShell extends LitElement {
     const clamped = clampBrushSizeFloat(size);
     this.curveWidth = clamped;
     this.engine?.setCurveWidth(clamped);
-    this.statusMessage = `Curve width: ${clamped}`;
+    this.statusMessage = tr("status.curveWidth", { value: clamped });
   }
 
   /** Test hook: set the curve shape (square/circle, defaults to circle). */
@@ -6647,7 +6927,7 @@ export class GnumarusShell extends LitElement {
     const parsed = parseBrushShape(shape);
     this.curveShape = parsed;
     this.engine?.setCurveShape(parsed);
-    this.statusMessage = `Curve shape: ${parsed}`;
+    this.statusMessage = tr("status.curveShape", { value: this.shapeLabel(parsed) });
   }
 
   /** Test hook: enable or disable curve anti-aliasing. */
@@ -6655,7 +6935,7 @@ export class GnumarusShell extends LitElement {
     const next = enabled === true;
     this.curveAntialias = next;
     this.engine?.setCurveAntialias(next);
-    this.statusMessage = `Curve anti-aliasing: ${next ? "on" : "off"}`;
+    this.statusMessage = tr("status.curveAntialias", { value: this.onOffLabel(next) });
   }
 
   private currentDialogCurveWidth(): number {
@@ -6678,21 +6958,21 @@ export class GnumarusShell extends LitElement {
     const size = this.currentDialogCurveWidth();
     this.curveWidth = size;
     this.engine?.setCurveWidth(size);
-    this.statusMessage = `Curve width: ${size}`;
+    this.statusMessage = tr("status.curveWidth", { value: size });
   }
 
   private applyCurveShapeFromDialog(): void {
     const shape = this.currentDialogCurveShape();
     this.curveShape = shape;
     this.engine?.setCurveShape(shape);
-    this.statusMessage = `Curve shape: ${shape}`;
+    this.statusMessage = tr("status.curveShape", { value: this.shapeLabel(shape) });
   }
 
   private applyCurveAntialiasFromDialog(): void {
     const enabled = this.currentDialogCurveAntialias();
     this.curveAntialias = enabled;
     this.engine?.setCurveAntialias(enabled);
-    this.statusMessage = `Curve anti-aliasing: ${enabled ? "on" : "off"}`;
+    this.statusMessage = tr("status.curveAntialias", { value: this.onOffLabel(enabled) });
   }
 
   /** Test and picker hook: set checker color A (opaque hex only). */
@@ -6711,7 +6991,7 @@ export class GnumarusShell extends LitElement {
     });
     this.persistChecker();
     void this.refreshPreview();
-    this.statusMessage = `Checker color A: ${six}`;
+    this.statusMessage = tr("status.checkerColorA", { value: six });
   }
 
   /** Test and picker hook: set checker color B (opaque hex only). */
@@ -6730,7 +7010,7 @@ export class GnumarusShell extends LitElement {
     });
     this.persistChecker();
     void this.refreshPreview();
-    this.statusMessage = `Checker color B: ${six}`;
+    this.statusMessage = tr("status.checkerColorB", { value: six });
   }
 
   /** Test and picker hook: set the solid background color (opaque hex only). */
@@ -6743,21 +7023,23 @@ export class GnumarusShell extends LitElement {
     this.engine?.applyBackgroundSettings({ mode: this.backgroundMode, color: this.backgroundColor });
     this.persistBackground();
     void this.refreshPreview();
-    this.statusMessage = `Canvas background: ${this.backgroundMode === "solid" ? `solid ${six}` : "checkerboard"}`;
+    this.statusMessage = tr("status.canvasBackground", {
+      value: this.backgroundMode === "solid" ? tr("status.backgroundSolid", { value: six }) : tr("status.backgroundChecker"),
+    });
   }
 
   private resetGridMinZoomToDefault(): void {
     this.gridMinZoom = DEFAULT_GRID_SETTINGS.minZoom;
     this.engine?.setGridMinZoom(this.gridMinZoom);
     this.persistGrid();
-    this.statusMessage = "Pixel grid minimum zoom reset to default";
+    this.statusMessage = tr("status.gridMinZoomReset");
   }
 
   private resetGridOpacityToDefault(): void {
     this.gridOpacity = DEFAULT_GRID_SETTINGS.opacityPercent;
     this.engine?.setGridOpacityPercent(this.gridOpacity);
     this.persistGrid();
-    this.statusMessage = "Pixel grid opacity reset to default";
+    this.statusMessage = tr("status.gridOpacityReset");
   }
 
   private currentDialogChecker(): GnumarusCheckerSettings {
@@ -6788,7 +7070,7 @@ export class GnumarusShell extends LitElement {
     this.engine?.applyCheckerSettings(settings);
     this.persistChecker();
     void this.refreshPreview();
-    this.statusMessage = `Checkerboard: ${settings.mode}-space, ${settings.sizeX}x${settings.sizeY}px`;
+    this.statusMessage = tr("status.checkerSummary", { mode: settings.mode, width: settings.sizeX, height: settings.sizeY });
   }
 
   private resetCheckerDefaults(): void {
@@ -6819,6 +7101,9 @@ export class GnumarusShell extends LitElement {
     this.persistZoom();
     this.toastDurationSec = DEFAULT_TOAST_SETTINGS.durationSec;
     this.persistToast();
+    this.locale = DEFAULT_LOCALE_SETTINGS.locale;
+    this.persistLocale();
+    this.applyActiveLocale();
     const storageSettings = { ...DEFAULT_STORAGE_SETTINGS };
     this.storageLossless = storageSettings.lossless;
     this.storageQuality = storageSettings.quality;
@@ -6828,16 +7113,16 @@ export class GnumarusShell extends LitElement {
     this.importCleanup = importSettings;
     this.persistImportCleanup();
     void this.refreshPreview();
-    this.statusMessage = "Settings reset to defaults";
+    this.statusMessage = tr("status.settingsReset");
   }
 
   private togglePreview(): void {
     this.previewOpen = !this.previewOpen;
     if (this.previewOpen) {
-      this.statusMessage = "Final preview opened";
+      this.statusMessage = tr("status.previewOpened");
       void this.refreshPreview();
     } else {
-      this.statusMessage = "Final preview closed";
+      this.statusMessage = tr("status.previewClosed");
     }
   }
 
@@ -6985,7 +7270,7 @@ export class GnumarusShell extends LitElement {
       this.activeLayerId = "";
       this.floatingActive = false;
       this.layerText = "-";
-      this.frameText = "Frame 1/1: F1";
+      this.frameText = tr("frame.label", { frame: 1, count: 1, name: "F1" });
       return;
     }
     this.layers = this.engine.getLayers();
@@ -6997,7 +7282,7 @@ export class GnumarusShell extends LitElement {
       current === undefined ? "-" : `${current.name} (${this.layers.length - index}/${this.layers.length})`;
     const frame = this.engine.getCurrentFrame();
     const count = this.engine.getFrameCount();
-    this.frameText = `Frame ${frame + 1}/${count}: ${this.engine.getFrameName(frame)}`;
+    this.frameText = tr("frame.label", { frame: frame + 1, count, name: this.engine.getFrameName(frame) });
     this.defaultFrameDuration = this.engine.getDefaultFrameDuration();
     if (this.previewOpen) {
       void this.refreshPreview();
@@ -7043,7 +7328,7 @@ export class GnumarusShell extends LitElement {
       this.selectSingleFrame(frame);
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = `Frame ${frame + 1} selected`;
+      this.statusMessage = tr("status.frameSelected", { frame: frame + 1 });
       this.showToast(this.frameToastFor(frame, this.engine.getFrameCount()));
     }
   }
@@ -7103,7 +7388,7 @@ export class GnumarusShell extends LitElement {
     this.selectSingleFrame(frame);
     this.refreshLayers();
     this.dirty = true;
-    this.statusMessage = `Frame ${frame + 1} added`;
+    this.statusMessage = tr("status.frameAdded", { frame: frame + 1 });
   }
 
   private onAddFrameBefore(frame: number): void {
@@ -7116,7 +7401,7 @@ export class GnumarusShell extends LitElement {
       this.selectSingleFrame(added);
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = `Frame ${added + 1} added`;
+      this.statusMessage = tr("status.frameAdded", { frame: added + 1 });
     }
   }
 
@@ -7130,7 +7415,7 @@ export class GnumarusShell extends LitElement {
       this.selectSingleFrame(added);
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = `Frame ${added + 1} added`;
+      this.statusMessage = tr("status.frameAdded", { frame: added + 1 });
     }
   }
 
@@ -7143,9 +7428,9 @@ export class GnumarusShell extends LitElement {
       this.selectSingleFrame(this.engine.getCurrentFrame());
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = "Frame removed";
+      this.statusMessage = tr("status.frameRemoved");
     } else {
-      this.statusMessage = "Cannot remove the last frame";
+      this.statusMessage = tr("status.frameRemoveLast");
     }
   }
 
@@ -7236,7 +7521,7 @@ export class GnumarusShell extends LitElement {
     const contents = this.sortedContents();
     return html`
       <dialog id="contentPickerDialog" @close=${(): void => this.onContentPickerClosed()}>
-        <h3>Select content</h3>
+        <h3>${tr("matrix.selectContent")}</h3>
         <div class="picker-grid" data-testid="content-picker-grid">
           <button
             class="picker-item"
@@ -7244,7 +7529,7 @@ export class GnumarusShell extends LitElement {
             @click=${(): void => this.onContentPickerSelect("none")}
           >
             <span class="picker-empty" aria-hidden="true">∅</span>
-            <span class="picker-name">No content</span>
+            <span class="picker-name">${tr("dialog.noContent")}</span>
           </button>
           <button
             class="picker-item"
@@ -7252,7 +7537,7 @@ export class GnumarusShell extends LitElement {
             @click=${(): void => this.onContentPickerSelect("new")}
           >
             <span class="picker-empty" aria-hidden="true">+</span>
-            <span class="picker-name">New content</span>
+            <span class="picker-name">${tr("dialog.newContent")}</span>
           </button>
           ${contents.map((content) => {
             const url = content.textureId === null ? null : this.thumbnailDataUrl(content.textureId);
@@ -7273,7 +7558,7 @@ export class GnumarusShell extends LitElement {
           })}
         </div>
         <div class="dialog-actions">
-          <button @click=${(): void => this.closeContentPicker()}>Cancel</button>
+          <button @click=${(): void => this.closeContentPicker()}>${tr("btn.cancel")}</button>
         </div>
       </dialog>
     `;
@@ -7283,7 +7568,7 @@ export class GnumarusShell extends LitElement {
     const textures = this.sortedTextures();
     return html`
       <dialog id="texturePickerDialog" @close=${(): void => this.onTexturePickerClosed()}>
-        <h3>Select texture</h3>
+        <h3>${tr("dialog.selectTexture")}</h3>
         <div class="picker-grid" data-testid="texture-picker-grid">
           <button
             class="picker-item"
@@ -7291,7 +7576,7 @@ export class GnumarusShell extends LitElement {
             @click=${(): void => this.onTexturePickerSelect("none")}
           >
             <span class="picker-empty" aria-hidden="true">∅</span>
-            <span class="picker-name">No texture</span>
+            <span class="picker-name">${tr("dialog.noTexture")}</span>
           </button>
           <button
             class="picker-item"
@@ -7299,7 +7584,7 @@ export class GnumarusShell extends LitElement {
             @click=${(): void => this.onTexturePickerSelect("new")}
           >
             <span class="picker-empty" aria-hidden="true">+</span>
-            <span class="picker-name">New texture</span>
+            <span class="picker-name">${tr("dialog.newTexture")}</span>
           </button>
           ${textures.map((texture) => {
             const url = this.thumbnailDataUrl(texture.id);
@@ -7320,7 +7605,7 @@ export class GnumarusShell extends LitElement {
           })}
         </div>
         <div class="dialog-actions">
-          <button @click=${(): void => this.closeTexturePicker()}>Cancel</button>
+          <button @click=${(): void => this.closeTexturePicker()}>${tr("btn.cancel")}</button>
         </div>
       </dialog>
     `;
@@ -7358,9 +7643,9 @@ export class GnumarusShell extends LitElement {
       if (this.engine.dissociateCellContent(target.layerId, target.frame)) {
         this.refreshLayers();
         this.dirty = true;
-        this.statusMessage = "Cell content dissociated";
+        this.statusMessage = tr("status.cellDissociated");
       } else {
-        this.statusMessage = "Cell is already empty";
+        this.statusMessage = tr("status.cellEmpty");
       }
       this.closeContentPicker();
       return;
@@ -7368,13 +7653,13 @@ export class GnumarusShell extends LitElement {
     if (contentId === "new") {
       const created = this.engine.createEmptyContentForCell(target.layerId, target.frame);
       if (created === null) {
-        this.statusMessage = "Failed to create content";
+        this.statusMessage = tr("status.contentCreateFailed");
         this.closeContentPicker();
         return;
       }
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = "Cell content created";
+      this.statusMessage = tr("status.contentCreated");
       this.closeContentPicker();
       void this.openTexturePicker(created);
       return;
@@ -7382,9 +7667,9 @@ export class GnumarusShell extends LitElement {
     if (this.engine.associateCellContent(target.layerId, target.frame, contentId)) {
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = "Cell content associated";
+      this.statusMessage = tr("status.contentAssociated");
     } else {
-      this.statusMessage = "Cell already uses that content";
+      this.statusMessage = tr("status.contentSame");
     }
     this.closeContentPicker();
   }
@@ -7416,7 +7701,7 @@ export class GnumarusShell extends LitElement {
       return;
     }
     if (textureId === "none") {
-      this.statusMessage = "Content left without texture";
+      this.statusMessage = tr("status.contentNoTexture");
       this.refreshLayers();
       this.closeTexturePicker();
       return;
@@ -7426,9 +7711,9 @@ export class GnumarusShell extends LitElement {
       if (this.engine.associateContentTexture(contentId, created)) {
         this.refreshLayers();
         this.dirty = true;
-        this.statusMessage = "Content associated with texture";
+        this.statusMessage = tr("status.textureAssociated");
       } else {
-        this.statusMessage = "Failed to associate texture";
+        this.statusMessage = tr("status.textureAssociateFailed");
       }
       this.closeTexturePicker();
       return;
@@ -7436,9 +7721,9 @@ export class GnumarusShell extends LitElement {
     if (this.engine.associateContentTexture(contentId, textureId)) {
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = "Content associated with texture";
+      this.statusMessage = tr("status.textureAssociated");
     } else {
-      this.statusMessage = "Content already uses that texture";
+      this.statusMessage = tr("status.textureSame");
     }
     this.closeTexturePicker();
   }
@@ -7460,7 +7745,7 @@ export class GnumarusShell extends LitElement {
     this.engine?.setDefaultFrameDuration(duration);
     this.refreshLayers();
     this.dirty = true;
-    this.statusMessage = `Default frame duration: ${duration} s`;
+    this.statusMessage = tr("status.defaultDuration", { value: duration });
   }
 
   private commitDefaultFrameDurationFromDialog(): void {
@@ -7477,7 +7762,7 @@ export class GnumarusShell extends LitElement {
     this.engine?.setDefaultFrameDuration(duration);
     this.refreshLayers();
     this.dirty = true;
-    this.statusMessage = `Default frame duration: ${duration} s`;
+    this.statusMessage = tr("status.defaultDuration", { value: duration });
   }
 
   private resetDefaultFrameDuration(): void {
@@ -7485,7 +7770,7 @@ export class GnumarusShell extends LitElement {
     this.engine?.setDefaultFrameDuration(DEFAULT_ANIMATION_FRAME_DURATION);
     this.refreshLayers();
     this.dirty = true;
-    this.statusMessage = "Default frame duration reset to default";
+    this.statusMessage = tr("status.defaultDurationReset");
   }
 
   private openFrameDurationDialog(frame: number): void {
@@ -7540,18 +7825,21 @@ export class GnumarusShell extends LitElement {
       parsed = parseNamedAnimation(text, this.engine.getFrameCount());
     } catch (error) {
       this.animationError =
-        error instanceof GnumarusNamedAnimationError ? error.message : "Invalid animation definition.";
+        error instanceof GnumarusNamedAnimationError ? error.message : tr("dialog.animInvalid");
       return;
     }
     if (!this.engine.addNamedAnimation(parsed)) {
-      this.animationError = `An animation named "${parsed.name}" already exists.`;
+      this.animationError = tr("dialog.animExists", { name: parsed.name });
       return;
     }
     this.animationInput = "";
     this.animationError = null;
     this.refreshLayers();
     this.dirty = true;
-    this.statusMessage = `Animation ${parsed.name} added (${parsed.frames.length} frame${parsed.frames.length === 1 ? "" : "s"})`;
+    this.statusMessage =
+      parsed.frames.length === 1
+        ? tr("status.animAddedOne", { name: parsed.name })
+        : tr("status.animAdded", { name: parsed.name, count: parsed.frames.length });
   }
 
   private onDeleteAnimation(name: string): void {
@@ -7573,8 +7861,8 @@ export class GnumarusShell extends LitElement {
     if (this.engine.removeNamedAnimation(name)) {
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = `Animation ${name} deleted`;
-      this.showToast(`Animation ${name} deleted`);
+      this.statusMessage = tr("status.animDeleted", { name });
+      this.showToast(tr("status.animDeleted", { name }));
     }
   }
 
@@ -7611,10 +7899,11 @@ export class GnumarusShell extends LitElement {
       this.selectSingleFrame(this.engine.getCurrentFrame());
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = `Deleted ${deleted} frame${deleted === 1 ? "" : "s"}`;
-      this.showToast(`Deleted ${deleted} frame${deleted === 1 ? "" : "s"}`);
+      this.statusMessage =
+      deleted === 1 ? tr("status.frameDeletedOne") : tr("status.framesDeleted", { count: deleted });
+      this.showToast(deleted === 1 ? tr("status.frameDeletedOne") : tr("status.framesDeleted", { count: deleted }));
     } else {
-      this.statusMessage = "Cannot remove every frame";
+      this.statusMessage = tr("status.framesDeleteAll");
     }
   }
 
@@ -7635,14 +7924,14 @@ export class GnumarusShell extends LitElement {
       if (this.engine.setActiveAnimation(null)) {
         this.refreshLayers();
         this.dirty = true;
-        this.statusMessage = "Playing all frames";
+        this.statusMessage = tr("status.playingAll");
       }
       return;
     }
     if (this.engine.setActiveAnimation(value)) {
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = `Animation ${value} selected`;
+      this.statusMessage = tr("status.animSelected", { value });
     }
   }
 
@@ -7775,15 +8064,15 @@ export class GnumarusShell extends LitElement {
     const format = findStillFormat(this.exportFormats, this.exportFormat) ?? this.exportFormats[0] ?? null;
     if (format === null) {
       this.closeExportDialog();
-      this.statusMessage = "Export failed: no image format is available";
-      this.showToast("Export failed: no image format is available");
+      this.statusMessage = tr("status.exportNoFormat");
+      this.showToast(tr("status.exportNoFormat"));
       return;
     }
     const inputs = this.engine.getFrameFlattenInputs(frame - 1);
     if (inputs === null) {
       this.closeExportDialog();
-      this.statusMessage = "Export failed: invalid frame";
-      this.showToast("Export failed: invalid frame");
+      this.statusMessage = tr("status.exportBadFrame");
+      this.showToast(tr("status.exportBadFrame"));
       return;
     }
     try {
@@ -7805,21 +8094,21 @@ export class GnumarusShell extends LitElement {
       );
       if (blob === null) {
         this.closeExportDialog();
-        this.statusMessage = `Export failed: ${format.label} encoding is not supported here`;
-        this.showToast(`Export failed: ${format.label} encoding is not supported here`);
+        this.statusMessage = tr("status.exportUnsupported", { label: format.label });
+        this.showToast(tr("status.exportUnsupported", { label: format.label }));
         return;
       }
       const fileName = `${exportBaseName(this.projectName)}-frame-${frame}.${format.ext}`;
       this.closeExportDialog();
       if (await this.saveExportBlob(blob, fileName, `${format.label} image`)) {
-        this.statusMessage = `Exported ${fileName}`;
-        this.showToast(`Exported ${fileName}`);
+        this.statusMessage = tr("status.exported", { file: fileName });
+        this.showToast(tr("status.exported", { file: fileName }));
       }
     } catch (error) {
       this.closeExportDialog();
       const reason = error instanceof Error ? error.message : String(error);
-      this.statusMessage = `Export failed: ${reason}`;
-      this.showToast(`Export failed: ${reason}`);
+      this.statusMessage = tr("status.exportFailed", { reason });
+      this.showToast(tr("status.exportFailed", { reason }));
     }
   }
 
@@ -7893,8 +8182,8 @@ export class GnumarusShell extends LitElement {
         const fileName = `${base}-${resolved.label}.gif`;
         this.closeExportDialog();
         if (await this.saveExportBlob(blob, fileName, "GIF animation")) {
-          this.statusMessage = `Exported ${fileName}`;
-          this.showToast(`Exported ${fileName}`);
+          this.statusMessage = tr("status.exported", { file: fileName });
+          this.showToast(tr("status.exported", { file: fileName }));
         }
         return;
       }
@@ -7928,8 +8217,8 @@ export class GnumarusShell extends LitElement {
           const fileName = `${base}-${resolved.label}.jxl`;
           this.closeExportDialog();
           if (await this.saveExportBlob(blob, fileName, "JXL animation")) {
-            this.statusMessage = `Exported ${fileName}`;
-            this.showToast(`Exported ${fileName}`);
+            this.statusMessage = tr("status.exported", { file: fileName });
+            this.showToast(tr("status.exported", { file: fileName }));
           }
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
@@ -7967,8 +8256,8 @@ export class GnumarusShell extends LitElement {
           const fileName = `${base}-${resolved.label}.webp`;
           this.closeExportDialog();
           if (await this.saveExportBlob(blob, fileName, "WebP animation")) {
-            this.statusMessage = `Exported ${fileName}`;
-            this.showToast(`Exported ${fileName}`);
+            this.statusMessage = tr("status.exported", { file: fileName });
+            this.showToast(tr("status.exported", { file: fileName }));
           }
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
@@ -8010,7 +8299,7 @@ export class GnumarusShell extends LitElement {
           format.mime === WEBP_MIME ? this.exportAnimatedWebpLossless : this.exportAnimatedJxlLossless,
         );
         if (blob === null) {
-          this.failAnimatedExport(`Export failed: ${format.label} encoding is not supported here`);
+          this.failAnimatedExport(tr("status.exportUnsupported", { label: format.label }));
           return;
         }
         blobs.push(blob);
@@ -8044,8 +8333,8 @@ export class GnumarusShell extends LitElement {
           }
           await writeBlobToDirectory(dir, `${frameFileStem(stem, index)}.${format.ext}`, blob);
         }
-        this.statusMessage = `Exported ${blobs.length} files to ${dir.name}`;
-        this.showToast(`Exported ${blobs.length} files to ${dir.name}`);
+        this.statusMessage = tr("status.exportedMany", { count: blobs.length, dir: dir.name });
+        this.showToast(tr("status.exportedMany", { count: blobs.length, dir: dir.name }));
       } catch (error) {
         if (!(error instanceof DOMException && error.name === "AbortError")) {
           throw error;
@@ -8060,8 +8349,8 @@ export class GnumarusShell extends LitElement {
       }
       downloadBlob(blob, `${frameFileStem(stem, index)}.${format.ext}`);
     }
-    this.statusMessage = `Exported ${blobs.length} files`;
-    this.showToast(`Exported ${blobs.length} files`);
+    this.statusMessage = tr("status.exportedManyNoDir", { count: blobs.length });
+    this.showToast(tr("status.exportedManyNoDir", { count: blobs.length }));
   }
 
   /**
@@ -8143,14 +8432,14 @@ export class GnumarusShell extends LitElement {
     };
     const format = findStillFormat(this.exportFormats, formatValue) ?? null;
     if (format === null) {
-      fail("Export failed: no image format is available");
+      fail(tr("status.exportNoFormat"));
       return;
     }
     let strips: Array<{ frames: number[] }>;
     try {
       strips = this.resolveSheetStrips();
     } catch (error) {
-      fail(error instanceof Error ? error.message : "Export failed: invalid spritesheet sources");
+      fail(error instanceof Error ? error.message : tr("status.exportBadSources"));
       return;
     }
     const base = exportBaseName(this.projectName);
@@ -8173,7 +8462,7 @@ export class GnumarusShell extends LitElement {
         for (const frame of flat) {
           const flatPixels = this.compositeSheetFrame(frame, background);
           if (flatPixels === null) {
-            fail("Export failed: invalid frame");
+            fail(tr("status.exportBadFrame"));
             return;
           }
           const blob = await this.encodeExportStill(
@@ -8185,7 +8474,7 @@ export class GnumarusShell extends LitElement {
             format.mime === WEBP_MIME ? this.exportSheetWebpLossless : this.exportSheetJxlLossless,
           );
           if (blob === null) {
-            fail(`Export failed: ${format.label} encoding is not supported here`);
+            fail(tr("status.exportUnsupported", { label: format.label }));
             return;
           }
           blobs.push(blob);
@@ -8203,7 +8492,7 @@ export class GnumarusShell extends LitElement {
       for (const frame of needed) {
         const flatPixels = this.compositeSheetFrame(frame, background);
         if (flatPixels === null) {
-          fail("Export failed: invalid frame");
+          fail(tr("status.exportBadFrame"));
           return;
         }
         pixels.set(frame, flatPixels);
@@ -8218,17 +8507,17 @@ export class GnumarusShell extends LitElement {
         format.mime === WEBP_MIME ? this.exportSheetWebpLossless : this.exportSheetJxlLossless,
       );
       if (blob === null) {
-        fail(`Export failed: ${format.label} encoding is not supported here`);
+        fail(tr("status.exportUnsupported", { label: format.label }));
         return;
       }
       const fileName = `${base}-sheet.${format.ext}`;
       this.closeExportDialog();
       if (await this.saveExportBlob(blob, fileName, `${format.label} image`)) {
-        this.statusMessage = `Exported ${fileName}`;
-        this.showToast(`Exported ${fileName}`);
+        this.statusMessage = tr("status.exported", { file: fileName });
+        this.showToast(tr("status.exported", { file: fileName }));
       }
     } catch (error) {
-      fail(error instanceof Error ? error.message : "Export failed: invalid spritesheet");
+      fail(error instanceof Error ? error.message : tr("status.exportBadSheet"));
     }
   }
 
@@ -8242,7 +8531,7 @@ export class GnumarusShell extends LitElement {
     const raw = (input?.value ?? "").trim();
     if (raw === "") {
       this.engine.setFrameDuration(target, null);
-      this.statusMessage = `Frame ${target + 1} uses the project default`;
+      this.statusMessage = tr("status.frameUsesDefault", { frame: target + 1 });
     } else {
       const value = Number(raw);
       if (!Number.isFinite(value) || value <= 0) {
@@ -8251,7 +8540,7 @@ export class GnumarusShell extends LitElement {
       }
       const duration = clampFrameDurationSec(value);
       this.engine.setFrameDuration(target, duration);
-      this.statusMessage = `Frame ${target + 1} duration: ${duration} s`;
+      this.statusMessage = tr("status.frameDuration", { frame: target + 1, value: duration });
     }
     this.refreshLayers();
     this.dirty = true;
@@ -8267,7 +8556,7 @@ export class GnumarusShell extends LitElement {
     if (this.engine.setFrameDuration(target, null)) {
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = `Frame ${target + 1} uses the project default`;
+      this.statusMessage = tr("status.frameUsesDefault", { frame: target + 1 });
     }
   }
 
@@ -8301,7 +8590,7 @@ export class GnumarusShell extends LitElement {
     }
     if (this.engine?.renameFrame(frame, name) === true) {
       this.dirty = true;
-      this.statusMessage = "Frame renamed";
+      this.statusMessage = tr("status.frameRenamed");
     }
     this.refreshLayers();
   }
@@ -8346,7 +8635,7 @@ export class GnumarusShell extends LitElement {
     }
     if (this.engine.renameFrame(target, name)) {
       this.dirty = true;
-      this.statusMessage = "Frame renamed";
+      this.statusMessage = tr("status.frameRenamed");
     }
     this.refreshLayers();
     this.closeFrameRenameDialog();
@@ -8402,7 +8691,7 @@ export class GnumarusShell extends LitElement {
     }
     if (this.engine.renameLayer(target, name)) {
       this.dirty = true;
-      this.statusMessage = "Layer renamed";
+      this.statusMessage = tr("status.layerRenamed");
     }
     this.refreshLayers();
     this.closeLayerRenameDialog();
@@ -8413,7 +8702,7 @@ export class GnumarusShell extends LitElement {
       return;
     }
     if (this.playing) {
-      this.stopPlayback("Animation stopped");
+      this.stopPlayback(tr("status.stopped"));
       return;
     }
     const activeName = this.engine.getActiveAnimationName();
@@ -8422,7 +8711,7 @@ export class GnumarusShell extends LitElement {
         ? null
         : (this.engine.getNamedAnimations().find((entry) => entry.name === activeName) ?? null);
     if (animation !== null && animation.frames.length === 0) {
-      this.statusMessage = `Animation ${animation.name} has no frames to play`;
+      this.statusMessage = tr("status.animNoFrames", { name: animation.name });
       return;
     }
     this.playing = true;
@@ -8430,7 +8719,7 @@ export class GnumarusShell extends LitElement {
     this.playbackDirection = 1;
     if (animation === null) {
       this.playbackIndex = 0;
-      this.statusMessage = `Playing from frame ${this.engine.getCurrentFrame() + 1}`;
+      this.statusMessage = tr("status.playingFrom", { frame: this.engine.getCurrentFrame() + 1 });
     } else {
       const current = this.engine.getCurrentFrame();
       const resume = animation.frames.findIndex((entry) => entry.frame === current);
@@ -8440,7 +8729,7 @@ export class GnumarusShell extends LitElement {
         this.engine.setCurrentFrame(start.frame);
         this.refreshLayers();
       }
-      this.statusMessage = `Playing animation ${animation.name} from frame ${(start?.frame ?? 0) + 1}`;
+      this.statusMessage = tr("status.playingAnimFrom", { name: animation.name, frame: (start?.frame ?? 0) + 1 });
     }
     this.schedulePlaybackTick();
   }
@@ -8520,7 +8809,7 @@ export class GnumarusShell extends LitElement {
     this.engine.addLayer();
     this.refreshLayers();
     this.dirty = true;
-    this.statusMessage = "Layer added";
+    this.statusMessage = tr("status.layerAdded");
   }
 
   private onRemoveLayer(id: string): void {
@@ -8528,10 +8817,10 @@ export class GnumarusShell extends LitElement {
       return;
     }
     if (this.engine.removeLayer(id)) {
-      this.statusMessage = "Layer deleted";
+      this.statusMessage = tr("status.layerDeleted");
       this.dirty = true;
     } else {
-      this.statusMessage = "Cannot delete the last layer";
+      this.statusMessage = tr("status.layerDeleteLast");
     }
     this.refreshLayers();
   }
@@ -8573,13 +8862,15 @@ export class GnumarusShell extends LitElement {
     if (this.engine.setLayerChannelLocked(id, channel, next)) {
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = next ? `${channel.toUpperCase()} channel locked` : `${channel.toUpperCase()} channel unlocked`;
+      this.statusMessage = next
+      ? tr("status.channelLocked", { channel: channel.toUpperCase() })
+      : tr("status.channelUnlocked", { channel: channel.toUpperCase() });
     }
   }
 
   private onMoveLayer(id: string, direction: "up" | "down"): void {
     if (this.engine?.moveLayer(id, direction) === true) {
-      this.statusMessage = `Layer moved ${direction}`;
+      this.statusMessage = direction === "up" ? tr("status.layerMovedUp") : tr("status.layerMovedDown");
       this.dirty = true;
     }
     this.refreshLayers();
@@ -8593,7 +8884,7 @@ export class GnumarusShell extends LitElement {
     if (this.engine.insertLayerAbove(id) !== null) {
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = "Layer added";
+      this.statusMessage = tr("status.layerAdded");
     }
   }
 
@@ -8605,7 +8896,7 @@ export class GnumarusShell extends LitElement {
     if (this.engine.insertLayerBelow(id) !== null) {
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = "Layer added";
+      this.statusMessage = tr("status.layerAdded");
     }
   }
 
@@ -8632,9 +8923,9 @@ export class GnumarusShell extends LitElement {
     if (this.engine?.mergeDown(id) === true) {
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = "Layers merged";
+      this.statusMessage = tr("status.layersMerged");
     } else {
-      this.statusMessage = "Nothing below to merge with";
+      this.statusMessage = tr("status.nothingBelow");
     }
   }
 
@@ -8643,9 +8934,9 @@ export class GnumarusShell extends LitElement {
     if (this.engine?.resetLayerTransform(id) === true) {
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = "Layer transform reset";
+      this.statusMessage = tr("status.transformReset");
     } else {
-      this.statusMessage = "Layer transform reset failed";
+      this.statusMessage = tr("status.transformResetFailed");
     }
   }
 
@@ -8654,7 +8945,7 @@ export class GnumarusShell extends LitElement {
     if (this.engine?.commitFloating() === true) {
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = "Floating selection merged";
+      this.statusMessage = tr("status.floatingMerged");
     }
   }
 
@@ -8666,7 +8957,7 @@ export class GnumarusShell extends LitElement {
     const textureId = this.engine.getCellTextureId(layerId, this.engine.getCurrentFrame());
     this.closeLayerMenu();
     if (textureId === null) {
-      this.statusMessage = "Nothing to fit: the layer has no texture on this frame";
+      this.statusMessage = tr("status.fitNoTextureLayer");
       return;
     }
     void this.openFitTextureDialog(textureId);
@@ -8680,7 +8971,7 @@ export class GnumarusShell extends LitElement {
     }
     const textureId = this.engine.getCellTextureId(target.layerId, target.frame);
     if (textureId === null) {
-      this.statusMessage = "Nothing to fit: the cell has no texture";
+      this.statusMessage = tr("status.fitNoTextureCell");
       return;
     }
     void this.openFitTextureDialog(textureId);
@@ -8734,8 +9025,10 @@ export class GnumarusShell extends LitElement {
       this.dirty = true;
       this.statusMessage =
         result.fitted === 0
-          ? "Nothing to fit: every texture is empty or already fits"
-          : `Fitted ${result.fitted} texture${result.fitted === 1 ? "" : "s"} to size`;
+          ? tr("status.fitAllNothing")
+          : result.fitted === 1
+            ? tr("status.fittedOne")
+            : tr("status.fittedMany", { count: result.fitted });
       this.closeFitTextureDialog();
       return;
     }
@@ -8744,9 +9037,11 @@ export class GnumarusShell extends LitElement {
       this.dirty = true;
       const fitted = this.engine.exportTextures().find((entry) => entry.id === target.textureId);
       this.statusMessage =
-        fitted === undefined ? "Texture fitted to size" : `Texture fitted to ${fitted.width} x ${fitted.height}`;
+        fitted === undefined
+          ? tr("status.fitSingle")
+          : tr("status.fitSingleDims", { width: fitted.width, height: fitted.height });
     } else {
-      this.statusMessage = "Nothing to fit: texture is empty or already fits";
+      this.statusMessage = tr("status.fitNothing");
     }
     this.closeFitTextureDialog();
   }
@@ -8759,17 +9054,22 @@ export class GnumarusShell extends LitElement {
     if (result.cropped === 0) {
       this.statusMessage =
         result.outside > 0 && result.unchanged === 0
-          ? "Cannot crop: every cell content is fully outside the canvas"
-          : "Nothing to crop: every cell already fits the canvas";
+          ? tr("status.cropAllOutside")
+          : tr("status.cropAllFits");
       return;
     }
     this.refreshLayers();
     this.dirty = true;
     const rest =
       result.unchanged > 0 || result.outside > 0
-        ? ` (${result.unchanged} unchanged${result.outside > 0 ? `, ${result.outside} outside` : ""})`
+        ? tr("status.cropRest", {
+        unchanged: result.unchanged,
+        outside: result.outside > 0 ? tr("status.cropRestOutside", { outside: result.outside }) : "",
+      })
         : "";
-    this.statusMessage = `Cropped ${result.cropped} texture${result.cropped === 1 ? "" : "s"} to canvas${rest}`;
+    this.statusMessage = result.cropped === 1
+      ? tr("status.croppedOne", { rest })
+      : tr("status.cropped", { count: result.cropped, rest });
   }
 
   /**
@@ -8783,8 +9083,8 @@ export class GnumarusShell extends LitElement {
       return;
     }
     if (this.directoryHandle === null) {
-      this.statusMessage = "Reload textures failed: the project has not been saved yet";
-      this.showToast("Reload textures failed: the project has not been saved yet");
+      this.statusMessage = tr("status.reloadUnsaved");
+      this.showToast(tr("status.reloadUnsaved"));
       return;
     }
     let files: Array<{ id: string; file: string }>;
@@ -8793,8 +9093,8 @@ export class GnumarusShell extends LitElement {
       files = project.animation.textures.map((texture) => ({ id: texture.id, file: texture.file }));
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      this.statusMessage = `Reload textures failed: ${reason}`;
-      this.showToast(`Reload textures failed: ${reason}`);
+      this.statusMessage = tr("status.reloadFailed", { reason });
+      this.showToast(tr("status.reloadFailed", { reason }));
       return;
     }
     const decoded: Array<{ textureId: string; buffer: Uint8ClampedArray }> = [];
@@ -8834,8 +9134,8 @@ export class GnumarusShell extends LitElement {
       this.dirty = true;
     }
     const summary =
-      `Reloaded ${result.applied} texture${result.applied === 1 ? "" : "s"}` +
-      (skipped > 0 ? ` (${skipped} skipped)` : "");
+      (result.applied === 1 ? tr("status.reloadedOne", { skipped: "" }) : tr("status.reloadedMany", { count: result.applied, skipped: "" })) +
+      (skipped > 0 ? tr("status.reloadSkipped", { skipped }) : "");
     this.statusMessage = summary;
     this.showToast(summary);
   }
@@ -8880,9 +9180,9 @@ export class GnumarusShell extends LitElement {
       this.statusMessage =
         fitted === undefined ? "Texture cropped to canvas" : `Texture cropped to ${fitted.width} x ${fitted.height}`;
     } else if (outcome === "outside") {
-      this.statusMessage = "Cannot crop: cell content is fully outside the canvas";
+      this.statusMessage = tr("status.cropOutside");
     } else {
-      this.statusMessage = "Nothing to crop: texture is already inside the canvas";
+      this.statusMessage = tr("status.cropInside");
     }
   }
 
@@ -8926,9 +9226,9 @@ export class GnumarusShell extends LitElement {
       this.statusMessage =
         fitted === undefined ? "Texture resized to canvas" : `Texture resized to ${fitted.width} x ${fitted.height}`;
     } else if (outcome === "outside") {
-      this.statusMessage = "Cannot resize to canvas: content is outside the canvas or too large";
+      this.statusMessage = tr("status.resizeOutside");
     } else {
-      this.statusMessage = "Nothing to resize: texture already fills the canvas";
+      this.statusMessage = tr("status.resizeFills");
     }
   }
 
@@ -8958,7 +9258,7 @@ export class GnumarusShell extends LitElement {
           ? "Texture expanded"
           : `Texture expanded to ${fitted.width} x ${fitted.height}`;
     } else {
-      this.statusMessage = "Nothing to expand: current cell has no texture";
+      this.statusMessage = tr("status.expandNoTexture");
     }
   }
 
@@ -8992,7 +9292,7 @@ export class GnumarusShell extends LitElement {
     }
     if (this.engine?.renameLayer(id, name) === true) {
       this.dirty = true;
-      this.statusMessage = "Layer renamed";
+      this.statusMessage = tr("status.layerRenamed");
     }
     this.refreshLayers();
   }
@@ -9015,7 +9315,7 @@ export class GnumarusShell extends LitElement {
     this.directoryHandle = null;
     this.projectName = "Untitled";
     this.dirty = true;
-    this.statusMessage = `New ${this.newWidth} x ${this.newHeight} canvas`;
+    this.statusMessage = tr("status.newCanvas", { width: this.newWidth, height: this.newHeight });
     this.closeNewDialog();
   }
 
@@ -9061,12 +9361,12 @@ export class GnumarusShell extends LitElement {
   private async openProject(): Promise<void> {
     this.fileMenuOpen = false;
     if (!isFileSystemAccessSupported()) {
-      this.statusMessage = "Open requires the File System Access API (Chromium)";
+      this.statusMessage = tr("status.openNeedsFs");
       return;
     }
     this.stopPlayback();
     try {
-      this.statusMessage = "Opening directory...";
+      this.statusMessage = tr("status.opening");
       const dir = await pickProjectDirectory();
       const { project, fileBlobs } = await readProjectFiles(dir);
       const textures: GnumarusTexturePixels[] = [];
@@ -9128,16 +9428,16 @@ export class GnumarusShell extends LitElement {
       if (openedCleanup !== "") {
         this.dirty = true;
       }
-      this.statusMessage = `Opened ${dir.name}${openedCleanup}`;
+      this.statusMessage = tr("status.opened", { dir: dir.name, cleanup: openedCleanup });
     } catch (error) {
-      this.statusMessage = error instanceof Error ? `Open failed: ${error.message}` : "Open failed";
+      this.statusMessage = error instanceof Error ? tr("status.openFailed", { reason: error.message }) : tr("status.openFailedPlain");
     }
   }
 
   private async importImageFile(): Promise<void> {
     this.fileMenuOpen = false;
     if (!isFilePickerSupported()) {
-      this.statusMessage = "Import requires the File System Access API (Chromium)";
+      this.statusMessage = tr("status.importNeedsFs");
       return;
     }
     this.stopPlayback();
@@ -9149,16 +9449,16 @@ export class GnumarusShell extends LitElement {
         return;
       }
       const reason = error instanceof Error ? error.message : String(error);
-      console.error(`Import failed: ${reason}`);
-      this.statusMessage = `Import failed: ${reason}`;
-      this.showToast(`Import failed: ${reason}`);
+      console.error(tr("status.importFailed", { reason }));
+      this.statusMessage = tr("status.importFailed", { reason });
+      this.showToast(tr("status.importFailed", { reason }));
       return;
     }
     if (handle === null) {
       return;
     }
     try {
-      this.statusMessage = "Importing...";
+      this.statusMessage = tr("status.importing");
       const picked = await handle.getFile();
       const bytes = new Uint8Array(await picked.arrayBuffer());
       const fileName = picked.name;
@@ -9218,18 +9518,24 @@ export class GnumarusShell extends LitElement {
       this.dirty = true;
       const animationSuffix =
         imported.namedAnimations.length === 1
-          ? ", 1 animation"
+          ? tr("import.animSuffixOne")
           : imported.namedAnimations.length > 1
-            ? `, ${imported.namedAnimations.length} animations`
+            ? tr("import.animSuffixMany", { count: imported.namedAnimations.length })
             : "";
-      const summary = `Imported ${fileName} (${imported.layers.length} layers, ${imported.frames} frames${animationSuffix})${this.applyImportCleanup()}`;
+      const summary =
+        tr("import.summaryAse", {
+          file: fileName,
+          layers: imported.layers.length,
+          frames: imported.frames,
+          animations: animationSuffix,
+        }) + this.applyImportCleanup();
       this.statusMessage = summary;
       this.showToast(summary);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      console.error(`Import failed: ${reason}`);
-      this.statusMessage = `Import failed: ${reason}`;
-      this.showToast(`Import failed: ${reason}`);
+      console.error(tr("status.importFailed", { reason }));
+      this.statusMessage = tr("status.importFailed", { reason });
+      this.showToast(tr("status.importFailed", { reason }));
     }
   }
 
@@ -9270,7 +9576,10 @@ export class GnumarusShell extends LitElement {
     this.directoryHandle = null;
     this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
     this.dirty = true;
-    const summary = `Imported ${fileName} (${psd.layers.length} layer${psd.layers.length === 1 ? "" : "s"})${this.applyImportCleanup()}`;
+    const summary =
+      (psd.layers.length === 1
+        ? tr("import.layersOne", { file: fileName })
+        : tr("import.layersMany", { file: fileName, count: psd.layers.length })) + this.applyImportCleanup();
     this.statusMessage = summary;
     this.showToast(summary);
   }
@@ -9312,7 +9621,10 @@ export class GnumarusShell extends LitElement {
     this.directoryHandle = null;
     this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
     this.dirty = true;
-    const summary = `Imported ${fileName} (${xcf.layers.length} layer${xcf.layers.length === 1 ? "" : "s"})${this.applyImportCleanup()}`;
+    const summary =
+      (xcf.layers.length === 1
+        ? tr("import.layersOne", { file: fileName })
+        : tr("import.layersMany", { file: fileName, count: xcf.layers.length })) + this.applyImportCleanup();
     this.statusMessage = summary;
     this.showToast(summary);
   }
@@ -9355,7 +9667,16 @@ export class GnumarusShell extends LitElement {
     this.directoryHandle = null;
     this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
     this.dirty = true;
-    const summary = `Imported ${fileName} (${kra.layers.length} layer${kra.layers.length === 1 ? "" : "s"}, ${kra.frames} frame${kra.frames === 1 ? "" : "s"})${this.applyImportCleanup()}`;
+    const summary =
+      tr("import.kraSummary", {
+        file: fileName,
+        layers:
+          kra.layers.length === 1
+            ? tr("import.layerOne")
+            : tr("import.layersCount", { count: kra.layers.length }),
+        frames:
+          kra.frames === 1 ? tr("import.frameOne") : tr("import.framesCount", { count: kra.frames }),
+      }) + this.applyImportCleanup();
     this.statusMessage = summary;
     this.showToast(summary);
   }
@@ -9366,11 +9687,11 @@ export class GnumarusShell extends LitElement {
       return;
     }
     if (!isFileSystemAccessSupported()) {
-      this.statusMessage = "Save requires the File System Access API (Chromium)";
+      this.statusMessage = tr("status.saveNeedsFs");
       return;
     }
     try {
-      this.statusMessage = "Saving...";
+      this.statusMessage = tr("status.saving");
       const dir = this.directoryHandle ?? (await pickProjectDirectory());
       let oldPaths = new Set<string>();
       try {
@@ -9562,9 +9883,9 @@ export class GnumarusShell extends LitElement {
       this.directoryHandle = dir;
       this.projectName = dir.name;
       this.dirty = false;
-      this.statusMessage = `Saved to ${dir.name}`;
+      this.statusMessage = tr("status.saved", { dir: dir.name });
     } catch (error) {
-      this.statusMessage = error instanceof Error ? `Save failed: ${error.message}` : "Save failed";
+      this.statusMessage = error instanceof Error ? tr("status.saveFailed", { reason: error.message }) : tr("status.saveFailedPlain");
     }
   }
 }

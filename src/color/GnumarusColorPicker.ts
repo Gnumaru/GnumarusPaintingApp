@@ -18,6 +18,32 @@ import {
   type GnumarusColorModelId,
   type GnumarusRgbaBytes,
 } from "./GnumarusColorModels";
+import { tr, type GnumarusMessageKey } from "../i18n/GnumarusI18n";
+
+/** Catalog key for each English color-model axis label. */
+export const COLOR_AXIS_KEYS: Record<string, GnumarusMessageKey> = {
+  Red: "color.red",
+  Green: "color.green",
+  Blue: "color.blue",
+  Alpha: "color.alpha",
+  Cyan: "color.cyan",
+  Magenta: "color.magenta",
+  Yellow: "color.yellow",
+  Black: "color.black",
+  Hue: "color.hue",
+  Saturation: "color.saturation",
+  Value: "color.value",
+  Lightness: "color.lightness",
+  Angle: "color.angle",
+  Ratio: "color.ratio",
+  Diagonal: "color.diagonal",
+};
+
+/** Translated axis label, falling back to the canonical English label. */
+function colorAxisLabel(label: string): string {
+  const key = COLOR_AXIS_KEYS[label];
+  return key === undefined ? label : tr(key);
+}
 
 /**
  * Custom color picker: model selector, one draggable gradient bar plus an
@@ -639,10 +665,10 @@ export class GnumarusColorPicker extends LitElement {
     return html`
       <button
         class="swatch"
-        aria-label="Pick color"
+        aria-label=${tr("color.pick")}
         aria-haspopup="dialog"
         aria-expanded=${this.open ? "true" : "false"}
-        title="Pick color (current ${hex})"
+        title=${tr("color.pickCurrent", { hex })}
         @click=${(): void => this.toggleOpen()}
       >
         <span class="swatch-inner" style=${swatchStyle}></span>
@@ -652,7 +678,7 @@ export class GnumarusColorPicker extends LitElement {
             <div
               class="popup"
               role="dialog"
-              aria-label="Color picker"
+              aria-label=${tr("color.dialog")}
               style=${this.popupPos === null
                 ? ""
                 : `left: ${this.popupPos.left}px; top: ${this.popupPos.top}px;`}
@@ -663,7 +689,7 @@ export class GnumarusColorPicker extends LitElement {
                   data-testid="hsv-ring"
                   role="slider"
                   tabindex="0"
-                  aria-label="Hue wheel"
+                  aria-label=${tr("color.hueWheel")}
                   aria-valuemin="0"
                   aria-valuemax="360"
                   aria-valuenow=${Math.round(hsv.h * 10) / 10}
@@ -677,8 +703,11 @@ export class GnumarusColorPicker extends LitElement {
                   viewBox="0 0 100 84"
                   role="slider"
                   tabindex="0"
-                  aria-label="Saturation and value triangle"
-                  aria-valuetext=${`${Math.round(hsv.s * 1000) / 10} percent saturation, ${Math.round(hsv.v * 1000) / 10} percent value`}
+                  aria-label=${tr("color.svTriangle")}
+                  aria-valuetext=${tr("color.svValue", {
+                    s: Math.round(hsv.s * 1000) / 10,
+                    v: Math.round(hsv.v * 1000) / 10,
+                  })}
                   @pointerdown=${(event: PointerEvent): void => this.onHsvTrianglePointerDown(event)}
                   @keydown=${(event: KeyboardEvent): void => this.onHsvTriangleKeyDown(event)}
                 >
@@ -708,7 +737,7 @@ export class GnumarusColorPicker extends LitElement {
                 ></div>
               </div>
               <div class="model-row">
-                <label for="modelSelect">Model</label>
+                <label for="modelSelect">${tr("color.model")}</label>
                 <select
                   id="modelSelect"
                   .value=${this.model}
@@ -726,13 +755,13 @@ export class GnumarusColorPicker extends LitElement {
                 const unit = axis.unit === "percent" ? "%" : axis.unit === "degrees" ? "°" : "";
                 return html`
                   <div class="axis-row">
-                    <span class="axis-label">${axis.label}</span>
+                    <span class="axis-label">${colorAxisLabel(axis.label)}</span>
                     <div
                       class="axis-bar"
                       role="slider"
                       tabindex="0"
                       data-testid=${`axis-bar-${axis.key}`}
-                      aria-label=${`${axis.label} (${axis.min}-${axis.max}${axis.unit === "percent" ? " percent" : axis.unit === "degrees" ? " degrees" : ""})`}
+                      aria-label=${`${colorAxisLabel(axis.label)} (${axis.min}-${axis.max}${axis.unit === "percent" ? ` ${tr("color.unitPercent")}` : axis.unit === "degrees" ? ` ${tr("color.unitDegrees")}` : ""})`}
                       aria-valuemin=${axis.min}
                       aria-valuemax=${axis.max}
                       aria-valuenow=${Math.round(current * 10) / 10}
@@ -745,7 +774,7 @@ export class GnumarusColorPicker extends LitElement {
                     <input
                       class="axis-input"
                       data-axis=${axis.key}
-                      aria-label=${axis.label}
+                      aria-label=${colorAxisLabel(axis.label)}
                       type="number"
                       min=${axis.min}
                       max=${axis.max}
@@ -759,7 +788,7 @@ export class GnumarusColorPicker extends LitElement {
                 `;
               })}
               <div class="hex-row">
-                <label for="hexInput">Hex</label>
+                <label for="hexInput">${tr("color.hex")}</label>
                 <input
                   id="hexInput"
                   data-testid="hex-input"

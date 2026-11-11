@@ -494,3 +494,9 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Right-click on a frame inside a multi-frame range opens a range menu whose only action is `Delete frames`; right-click elsewhere keeps the existing single-frame menu.
 - `Delete frames` opens a confirm dialog with the frame count and collapsed 1-based ranges (e.g. `2-7, 10, 13-17`); OK deletes via a single engine `removeFrames()` pass (cells/durations/names/named animations/floating remapped once), Cancel/close does nothing. Refuses to remove every frame.
 - Pure `formatFrameRanges()`/`normalizeFrameSet()`/`frameIndexAfterRemoval()`/`removeFramesCells()`/`removeFramesDurations()`/`removeFramesNames()` helpers + unit tests; e2e shift+click/dialog/OK/Cancel coverage.
+
+## 92. UI localization system, English + Brazilian Portuguese (implemented)
+- New `src/i18n/GnumarusI18n.ts`: typed message catalog (`en` + `pt-BR`, TS-enforced key parity), `{name}` interpolation, locale resolution (`system` follows the browser language with English fallback).
+- New locale setting (`system` default) in `src/settings/GnumarusLocaleSettings.ts` following the standard settings pattern; Settings dialog row with reset arrow; test hook; `document.documentElement.lang` follows the active locale.
+- All shell/picker UI texts, status/toast/console messages go through the catalog; shortcuts unchanged. Status messages now show translated display names for enum values (shape, blend, pressure, stabilizer, wrap, cleanup, ...); reset-button labels keep their legacy strings. Parser-technical error details (byte offsets, syntax specifics) stay English; their wrappers are translated.
+- Unit (resolution, parity, interpolation, locale settings, axis-label coverage) + e2e (locale switch to pt-BR and back) coverage.

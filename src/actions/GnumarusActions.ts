@@ -20,18 +20,22 @@ export interface GnumarusActionRequirement {
 }
 
 /** Requires a specific tool to be selected. */
-export function requireTool(toolId: string, toolLabel: string): GnumarusActionRequirement {
+export function requireTool(
+  toolId: string,
+  toolLabel: string,
+  selectedLabel = "the {tool} tool selected",
+): GnumarusActionRequirement {
   return {
     satisfiedBy: (context): boolean => context.tool === toolId,
-    describe: (): string => `the ${toolLabel} tool selected`,
+    describe: (): string => selectedLabel.split("{tool}").join(toolLabel),
   };
 }
 
 /** Requires an in-progress floating selection. */
-export function requireFloatingSelection(): GnumarusActionRequirement {
+export function requireFloatingSelection(label = "an active floating selection"): GnumarusActionRequirement {
   return {
     satisfiedBy: (context): boolean => context.hasFloatingSelection,
-    describe: (): string => "an active floating selection",
+    describe: (): string => label,
   };
 }
 
@@ -113,8 +117,16 @@ export class GnumarusActionRegistry {
 }
 
 /** User-facing failure line, e.g. `Cannot run "X": requires a and b.` */
-export function actionBlockedMessage(actionName: string, reasons: string[]): string {
-  return `Cannot run "${actionName}": requires ${reasons.join(" and ")}.`;
+export function actionBlockedMessage(
+  actionName: string,
+  reasons: string[],
+  locale: "en" | "pt-BR" = "en",
+): string {
+  const joiner = locale === "pt-BR" ? " e " : " and ";
+  if (locale === "pt-BR") {
+    return `Não é possível executar "${actionName}": requer ${reasons.join(joiner)}.`;
+  }
+  return `Cannot run "${actionName}": requires ${reasons.join(joiner)}.`;
 }
 
 function isWordStart(name: string, index: number): boolean {

@@ -210,10 +210,13 @@ export function formatNamedAnimationFrames(frames: readonly GnumarusNamedAnimati
 }
 
 /** One-line summary for the animation list: `"name": loop, N frames: ranges`. */
-export function describeNamedAnimation(animation: GnumarusNamedAnimation): string {
+export function describeNamedAnimation(
+  animation: GnumarusNamedAnimation,
+  nouns: { frame: string; frames: string } = { frame: "frame", frames: "frames" },
+): string {
   const count = new Set(animation.frames.map((entry) => entry.frame)).size;
   const ranges = formatNamedAnimationFrames(animation.frames);
-  const noun = count === 1 ? "frame" : "frames";
+  const noun = count === 1 ? nouns.frame : nouns.frames;
   return `"${animation.name}": ${animation.loop}, ${count} ${noun}${ranges === "" ? "" : `: ${ranges}`}`;
 }
 
