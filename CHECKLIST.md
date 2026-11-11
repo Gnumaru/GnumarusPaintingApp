@@ -317,3 +317,4 @@
 - [x] E2E @recent (5 boolean + outline-shape tests green); build + unit (401) clean; docs updated
 - [x] Floating boundary overlay during rectDrag (+ eligible floating)
 - [x] E2E @recent mid-drag both-visible (mask 4-run box); build + unit (401) + e2e; docs updated
+- [x] Chained-union overlay fix (rubber band hidden by released-state branch) + 3-union chain e2e

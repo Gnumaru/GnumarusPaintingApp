@@ -9641,3 +9641,31 @@ test("File > Export spritesheet without sources fails loudly", async ({ page }) 
   await dialog.locator("#exportSheetOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("select an animation");
 });
+
+test("rectangular selection chains three unions @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  const center = await layerScreenTarget(page, 32, 32);
+  await page.mouse.click(center.x, center.y);
+  await page.getByRole("button", { name: "Rectangular selection" }).click();
+  await dragRect(page, 5, 5, 7, 7);
+  expect(await getFloatingSelection(page)).toEqual({ x: 5, y: 5, width: 3, height: 3, selected: 9 });
+  await page.keyboard.down("Shift");
+  await dragRect(page, 20, 20, 22, 22);
+  expect(await getFloatingSelection(page)).toEqual({ x: 5, y: 5, width: 18, height: 18, selected: 18 });
+  // Third disjoint union: mid-drag both overlays, three outlines after.
+  const thirdFrom = await layerScreenTarget(page, 40, 40);
+  const thirdTo = await layerScreenTarget(page, 42, 42);
+  await page.mouse.move(thirdFrom.x, thirdFrom.y);
+  await page.mouse.down();
+  await page.mouse.move(thirdTo.x, thirdTo.y, { steps: 5 });
+  expect(await selectionOverlayDisplay(page)).toBe("block");
+  expect(await selectionMaskDisplay(page)).toBe("block");
+  await page.mouse.up();
+  await page.keyboard.up("Shift");
+  expect(await getFloatingSelection(page)).toEqual({ x: 5, y: 5, width: 38, height: 38, selected: 27 });
+  expect(await selectionMaskDisplay(page)).toBe("block");
+  expect(await selectionMaskMoves(page)).toBe(12);
+});

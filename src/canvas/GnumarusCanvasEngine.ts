@@ -7447,17 +7447,20 @@ export class GnumarusCanvasEngine {
     const points = overlay.map((point) => toClient(point.x, point.y)).join(" ");
     this.previewSvg.style.display = "block";
     // Non-rectangular floatings trace their true masked boundary; plain
-    // rects keep the quad polygon.
-    const boundary = this.selectionOverlayBoundaryRuns();
-    if (boundary !== null) {
-      const d = boundary.map((seg) => `M${toClient(seg.ax, seg.ay)}L${toClient(seg.bx, seg.by)}`).join(" ");
-      this.previewSelectMaskWhite.setAttribute("d", d);
-      this.previewSelectMaskWhite.style.display = "block";
-      this.previewSelectMaskBlack.setAttribute("d", d);
-      this.previewSelectMaskBlack.style.display = "block";
-      this.previewSelectWhite.style.display = "none";
-      this.previewSelectBlack.style.display = "none";
-      return;
+    // rects keep the quad polygon. While dragging, the quad always shows
+    // the rubber band (the drag block below adds the floating boundary).
+    if (this.rectDrag === null) {
+      const boundary = this.selectionOverlayBoundaryRuns();
+      if (boundary !== null) {
+        const d = boundary.map((seg) => `M${toClient(seg.ax, seg.ay)}L${toClient(seg.bx, seg.by)}`).join(" ");
+        this.previewSelectMaskWhite.setAttribute("d", d);
+        this.previewSelectMaskWhite.style.display = "block";
+        this.previewSelectMaskBlack.setAttribute("d", d);
+        this.previewSelectMaskBlack.style.display = "block";
+        this.previewSelectWhite.style.display = "none";
+        this.previewSelectBlack.style.display = "none";
+        return;
+      }
     }
     this.previewSelectMaskWhite.style.display = "none";
     this.previewSelectMaskBlack.style.display = "none";
