@@ -39,6 +39,7 @@ import {
   encodeTextArchive,
   findStaleProjectPaths,
   GNUMARUS_APP_ID,
+  GNUMARUS_MODEL3D_DEFAULT_VIEW,
   GNUMARUS_PROJECT_ARCHIVE_FILE,
   GNUMARUS_PROJECT_FILE,
   model3dFilePath,
@@ -52,6 +53,7 @@ import {
   textureFilePath,
   type GnumarusContentMeta,
   type GnumarusModel3dMeta,
+  type GnumarusModel3dView,
   type GnumarusProjectMeta,
   type GnumarusSvgMeta,
   type GnumarusTextureMeta,
@@ -649,6 +651,12 @@ export class GnumarusShell extends LitElement {
     }
     .tool-options .tool-options-empty {
       color: #9a9a9a;
+    }
+    .tool-options .tool-options-readout {
+      color: #e6e6e6;
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
     }
     .body {
       display: flex;
@@ -2062,6 +2070,18 @@ export class GnumarusShell extends LitElement {
             }}
           >
             <span class="tool-icon" aria-hidden="true">▦</span>
+          </button>
+          <button
+            class=${this.tool === "modeltransform" ? "active" : ""}
+            title=${tr("tool.modeltransformHint")}
+            aria-label=${tr("tool.modeltransform")}
+            data-testid="tool-modeltransform"
+            @click=${(): void => {
+              this.tool = "modeltransform";
+              this.engine?.setTool("modeltransform");
+            }}
+          >
+            <span class="tool-icon" aria-hidden="true">⬢</span>
           </button>
 
           ${this.renderToolDrawer("selection")}
@@ -3595,6 +3615,9 @@ export class GnumarusShell extends LitElement {
     if (tool === "tilebrush") {
       return tr("toolname.tilebrush");
     }
+    if (tool === "modeltransform") {
+      return tr("toolname.modeltransform");
+    }
     if (tool === "pencil") {
       return tr("toolname.pencil");
     }
@@ -4330,6 +4353,9 @@ export class GnumarusShell extends LitElement {
     if (this.tool === "tilebrush") {
       return this.renderTileBrushOptions();
     }
+    if (this.tool === "modeltransform") {
+      return this.renderModelTransformOptions();
+    }
     if (
       this.tool === "rectselect" ||
       this.tool === "ellipse" ||
@@ -4790,6 +4816,9 @@ export class GnumarusShell extends LitElement {
             this.statusMessage = tr("status.tilemapPaintBlocked");
           } else if (kind === "tile-rot-needs-square") {
             this.statusMessage = tr("status.tileRotNeedsSquare");
+          } else if (kind === "model3d-needs-cell") {
+            this.statusMessage = tr("status.model3dNeedsCell");
+            this.showToast(tr("status.model3dNeedsCell"));
           }
         },
         onToolSizeChanged: (kind, size): void => {
@@ -9281,6 +9310,51 @@ export class GnumarusShell extends LitElement {
     window.addEventListener("pointerup", up);
   }
 
+  /** 3D model transform options: live view readout plus reset/commit/cancel. */
+  private renderModelTransformOptions() {
+    const view = this.engine?.getModelViewForActiveCell() ?? null;
+    return html`
+      <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
+        ${view === null
+          ? html`<span class="tool-options-empty">${tr("opt.modelNoCell")}</span>`
+          : html`
+              <span class="tool-options-readout" data-testid="model-view-readout">
+                ${tr("opt.modelView", {
+                  azimuth: Math.round(view.azimuth),
+                  elevation: Math.round(view.elevation),
+                  distance: view.distance.toFixed(2),
+                })}
+              </span>
+              <button data-testid="model-view-reset" title=${tr("opt.modelResetHint")} @click=${(): void => this.commitModelViewEdit("reset")}>
+                ${tr("opt.modelReset")}
+              </button>
+              <button data-testid="model-view-commit" title=${tr("opt.modelCommitHint")} @click=${(): void => this.commitModelViewEdit("commit")}>
+                ${tr("btn.ok")}
+              </button>
+              <button data-testid="model-view-cancel" title=${tr("opt.modelCancelHint")} @click=${(): void => this.commitModelViewEdit("cancel")}>
+                ${tr("btn.cancel")}
+              </button>
+            `}
+        <span class="tool-options-empty">${tr("opt.modelHint")}</span>
+      </div>
+    `;
+  }
+
+  /** Options-bar model view action: reset to the classic view, commit, or cancel. */
+  private commitModelViewEdit(action: "reset" | "commit" | "cancel"): void {
+    if (this.engine === null) {
+      return;
+    }
+    if (action === "reset") {
+      this.engine.resetModelView();
+    } else if (action === "commit") {
+      this.engine.commitModelOrbit();
+    } else {
+      this.engine.cancelModelOrbit();
+    }
+    this.refreshLayers();
+  }
+
   private applyDefaultFrameDurationFromDialog(): void {
     const input = this.shadowRoot?.getElementById("defaultFrameDuration") as HTMLInputElement | null;
     const raw = (input?.value ?? "").trim();
@@ -10902,11 +10976,17 @@ export class GnumarusShell extends LitElement {
   private async resolveStoredModels3d(
     models: GnumarusModel3dMeta[],
     fileBlobs: Map<string, Blob>,
-  ): Promise<Array<{ id: string; name: string; ext: string; bytes: Uint8Array }>> {
-    const out: Array<{ id: string; name: string; ext: string; bytes: Uint8Array }> = [];
+  ): Promise<Array<{ id: string; name: string; ext: string; bytes: Uint8Array; view?: GnumarusModel3dView }>> {
+    const out: Array<{ id: string; name: string; ext: string; bytes: Uint8Array; view?: GnumarusModel3dView }> = [];
     for (const model of models) {
       const ext = model.file.slice(model.file.lastIndexOf(".") + 1).toLowerCase();
-      out.push({ id: model.id, name: model.name, ext, bytes: await this.decodeStoredModel3dFile(model.file, fileBlobs) });
+      out.push({
+        id: model.id,
+        name: model.name,
+        ext,
+        bytes: await this.decodeStoredModel3dFile(model.file, fileBlobs),
+        view: model.view === undefined ? undefined : { ...model.view },
+      });
     }
     return out;
   }
@@ -11699,7 +11779,12 @@ export class GnumarusShell extends LitElement {
       }
       for (const model of exported.models3d ?? []) {
         const file = model3dFilePath(model.id, model.ext);
-        models3dMeta.push({ id: model.id, name: model.name, file });
+        models3dMeta.push({
+          id: model.id,
+          name: model.name,
+          file,
+          view: model.view === undefined ? { ...GNUMARUS_MODEL3D_DEFAULT_VIEW } : { ...model.view },
+        });
         blobs.set(file, new Blob([model.bytes as Uint8Array<ArrayBuffer>], { type: "application/octet-stream" }));
       }
       for (const tilemap of exported.tilemaps ?? []) {

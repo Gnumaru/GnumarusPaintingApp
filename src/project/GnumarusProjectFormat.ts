@@ -55,6 +55,8 @@ export interface GnumarusModel3dMeta {
   name: string;
   /** External model file under 3dmodels/; models are always stored as raw files. */
   file: string;
+  /** Persisted orbit view (defaults to the classic 3/4 angle when absent). */
+  view?: GnumarusModel3dView;
 }
 
 export interface GnumarusTilemapMeta {
@@ -276,6 +278,43 @@ export function parseModel3dFilePath(file: unknown): string | null {
     return null;
   }
   return file;
+}
+
+/** Orbit view of a 3D model: azimuth/elevation in degrees, camera distance, pan in unit-box units. */
+export interface GnumarusModel3dView {
+  azimuth: number;
+  elevation: number;
+  distance: number;
+  panX: number;
+  panY: number;
+}
+
+/** Default view: classic 3/4 angle matching the original fixed render. */
+export const GNUMARUS_MODEL3D_DEFAULT_VIEW: GnumarusModel3dView = {
+  azimuth: 39.8,
+  elevation: 24.1,
+  distance: 3.43,
+  panX: 0,
+  panY: 0,
+};
+
+function finiteOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+/** Lenient view parse: out-of-range or missing fields fall back to defaults. */
+export function parseModel3dView(value: unknown): GnumarusModel3dView {
+  if (!isRecord(value)) {
+    return { ...GNUMARUS_MODEL3D_DEFAULT_VIEW };
+  }
+  const clamp = (raw: number, min: number, max: number): number => Math.min(max, Math.max(min, raw));
+  return {
+    azimuth: finiteOr(value["azimuth"], GNUMARUS_MODEL3D_DEFAULT_VIEW.azimuth),
+    elevation: clamp(finiteOr(value["elevation"], GNUMARUS_MODEL3D_DEFAULT_VIEW.elevation), -89, 89),
+    distance: clamp(finiteOr(value["distance"], GNUMARUS_MODEL3D_DEFAULT_VIEW.distance), 0.5, 50),
+    panX: clamp(finiteOr(value["panX"], 0), -10, 10),
+    panY: clamp(finiteOr(value["panY"], 0), -10, 10),
+  };
 }
 
 /** Pack one text document as a single-file ZIP (`<textId>.html` inside). */
@@ -878,7 +917,7 @@ function parseModel3dMetas(value: unknown): GnumarusModel3dMeta[] {
       throw new GnumarusProjectError("project.json has duplicate 3D model ids");
     }
     seenIds.add(id);
-    const { name, file } = entry;
+    const { name, file, view } = entry;
     const modelFile = parseModel3dFilePath(file);
     if (modelFile === null) {
       throw new GnumarusProjectError("project.json has a 3D model with an invalid file");
@@ -887,7 +926,7 @@ function parseModel3dMetas(value: unknown): GnumarusModel3dMeta[] {
       throw new GnumarusProjectError("project.json has duplicate 3D model files");
     }
     seenFiles.add(modelFile);
-    checked.push({ id, name: checkedName(name, "3D model"), file: modelFile });
+    checked.push({ id, name: checkedName(name, "3D model"), file: modelFile, view: parseModel3dView(view) });
   }
   return checked;
 }

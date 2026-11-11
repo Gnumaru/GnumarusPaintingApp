@@ -11028,3 +11028,106 @@ test("content picker shows tilemap kind badges", async ({ page }) => {
   const kinds = await page.locator('gnumarus-shell [data-testid="content-picker-kind"]').allTextContents();
   expect(kinds).toContain("Tilemap");
 });
+
+async function modelViewOf(page: import("@playwright/test").Page, modelId: string): Promise<Record<string, number> | null> {
+  return page.evaluate((id: string) => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getModelView(modelId: string): Record<string, number> | null } };
+    };
+    return root.__gnumarus?.engine?.getModelView(id) ?? null;
+  }, modelId);
+}
+
+test("3d model transform orbits, commits and reopens", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubModelPicker(page, "tri.stl", SIMPLE_STL);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("imported");
+  const modelId = await cellModel3dId(page, "layer0", 0);
+  expect(typeof modelId).toBe("string");
+  const before = await modelViewOf(page, modelId as string);
+  expect(before).not.toBeNull();
+  await page.locator('gnumarus-shell [data-testid="tool-modeltransform"]').click();
+  await expect(page.locator('gnumarus-shell [data-testid="model-view-readout"]')).toBeVisible();
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.up();
+  const during = await modelViewOf(page, modelId as string);
+  // Uncommitted drags do not touch the stored view yet.
+  expect(during).toEqual(before);
+  await expect(page.locator("gnumarus-shell")).toContainText("az ");
+  await page.locator('gnumarus-shell [data-testid="model-view-commit"]').click();
+  const committed = await modelViewOf(page, modelId as string);
+  expect(committed).not.toEqual(before);
+  expect(Math.abs((committed?.azimuth ?? 0) - (before?.azimuth ?? 0))).toBeGreaterThan(5);
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  expect(await project.writtenProject()).toContain('"view"');
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject");
+  expect(await cellModel3dId(page, "layer0", 0)).toBe(modelId);
+  const reopened = await modelViewOf(page, modelId as string);
+  expect(reopened?.azimuth).toBeCloseTo(committed?.azimuth ?? 0, 0);
+  await expect
+    .poll(async () => modelPaintedPixels(page), { timeout: 10000 })
+    .toBeGreaterThan(0);
+});
+
+test("3d model transform cancels and resets the view", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubModelPicker(page, "tri.stl", SIMPLE_STL);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("imported");
+  const modelId = await cellModel3dId(page, "layer0", 0);
+  expect(typeof modelId).toBe("string");
+  const original = await modelViewOf(page, modelId as string);
+  await page.locator('gnumarus-shell [data-testid="tool-modeltransform"]').click();
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const dragAt = async (dx: number, dy: number): Promise<void> => {
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + dx, box.y + box.height / 2 + dy, { steps: 5 });
+    await page.mouse.up();
+  };
+  await dragAt(80, 40);
+  await page.keyboard.press("Escape");
+  expect(await modelViewOf(page, modelId as string)).toEqual(original);
+  await dragAt(120, 0);
+  await page.locator('gnumarus-shell [data-testid="model-view-commit"]').click();
+  const committed = await modelViewOf(page, modelId as string);
+  expect(committed).not.toEqual(original);
+  await page.keyboard.press("r");
+  await page.locator('gnumarus-shell [data-testid="model-view-commit"]').click();
+  const reset = await modelViewOf(page, modelId as string);
+  expect(reset?.azimuth).toBeCloseTo(39.8, 0);
+  expect(reset?.elevation).toBeCloseTo(24.1, 0);
+  await page.keyboard.press("Control+z");
+  expect(await modelViewOf(page, modelId as string)).toEqual(committed);
+  await page.keyboard.press("Control+y");
+  expect(await modelViewOf(page, modelId as string)).toEqual(reset);
+});
+
+test("3d model transform requires a model cell", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.locator('gnumarus-shell [data-testid="tool-modeltransform"]').click();
+  await paintCenter(page);
+  await expect(page.locator("gnumarus-shell")).toContainText("Select a 3D model cell first");
+});

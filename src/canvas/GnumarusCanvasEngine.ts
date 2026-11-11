@@ -13,6 +13,7 @@ import {
   parseSvgDimensions,
   withSvgSize,
 } from "../vector/GnumarusSvg";
+import { GNUMARUS_MODEL3D_DEFAULT_VIEW, parseModel3dView, type GnumarusModel3dView } from "../project/GnumarusProjectFormat";
 import type { GnumarusSvgEntry } from "../vector/GnumarusSvg";
 import { wrappedTileBlits, type GnumarusTilePlacement, type GnumarusTileRotation } from "../tilemap/GnumarusTilemap";
 import { layoutTextDocument, parseTextDocument } from "../text/GnumarusTextLayout";
@@ -265,6 +266,7 @@ export type GnumarusCanvasTool =
   | "colorselect"
   | "text"
   | "tilebrush"
+  | "modeltransform"
   | "destransform"
   | "destransform3d";
 
@@ -465,7 +467,7 @@ export interface GnumarusAnimationProjectData {
   texts?: Array<{ id: string; name: string; document: GnumarusTextDocument }>;
   svgs?: Array<{ id: string; name: string; svg: string }>;
   tilemaps?: Array<{ id: string; name: string; tilesetId: string; tileWidth: number; tileHeight: number; tiles: GnumarusTilePlacement[] }>;
-  models3d?: Array<{ id: string; name: string; ext: string; bytes: Uint8Array }>;
+  models3d?: Array<{ id: string; name: string; ext: string; bytes: Uint8Array; view?: GnumarusModel3dView }>;
   contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null; svgId?: string | null; model3dId?: string | null; tilemapId?: string | null; transform: GnumarusLayerTransform }>;
   cells: Array<{ layer: string; frame: number; content: string }>;
   frames: number;
@@ -609,7 +611,7 @@ export interface GnumarusEngineOptions {
   /** Fired when the text tool requests the text editor for a cell. */
   onTextEditRequested?: (info: { layerId: string; frame: number; contentId: string; textId: string }) => void;
   /** Fired for user-facing notices that need a toast (blocked paint on derived cells). */
-  onNotice?: (kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked" | "tilemap-paint-blocked" | "tile-rot-needs-square") => void;
+  onNotice?: (kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked" | "tilemap-paint-blocked" | "tile-rot-needs-square" | "model3d-needs-cell") => void;
   /** Tile-brush click outcomes for shell status/toast display. */
   onTileBrushOutcome?: (outcome: "placed" | "erased" | "no-tileset" | "occupied" | "nothing") => void;
   checker?: GnumarusCheckerSettings;
@@ -643,6 +645,36 @@ function isWebGl2Context(gl: WebGLRenderingContext | WebGL2RenderingContext): gl
   return typeof WebGL2RenderingContext !== "undefined" && gl instanceof WebGL2RenderingContext;
 }
 
+/** Camera direction for an orbit view (unit vector, y-up). */
+function modelViewDirection(azimuth: number, elevation: number): THREE.Vector3 {
+  const az = (normalizeModelAzimuth(azimuth) * Math.PI) / 180;
+  const el = (Math.min(89, Math.max(-89, elevation)) * Math.PI) / 180;
+  return new THREE.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)).normalize();
+}
+
+/** Fixed field of view in degrees for 3D model renders and orbit math. */
+const MODEL_ORBIT_FOV_DEG = 40;
+
+/** Wrap an azimuth in degrees into [0, 360). */
+function normalizeModelAzimuth(azimuth: number): number {
+  if (!Number.isFinite(azimuth)) {
+    return 0;
+  }
+  return ((azimuth % 360) + 360) % 360;
+}
+
+/** Stable cache key for a model view (rounded to avoid float churn). */
+function modelViewKey(view: GnumarusModel3dView): string {
+  const rounded = (value: number): number => Math.round(value * 1000) / 1000;
+  return `${rounded(view.azimuth)}:${rounded(view.elevation)}:${rounded(view.distance)}:${rounded(view.panX)}:${rounded(view.panY)}`;
+}
+
+/** Pending orbit gesture: uncommitted view edits for one model. */
+interface GnumarusModelOrbit {
+  modelId: string;
+  view: GnumarusModel3dView;
+}
+
 export class GnumarusCanvasEngine {
   private readonly container: HTMLElement;
   private readonly renderer: THREE.WebGLRenderer;
@@ -672,10 +704,15 @@ export class GnumarusCanvasEngine {
   private svgPending = new Set<string>();
   private svgCounter = 1;
   private svgNameCounter = 1;
-  /** 3D model entries by id (source bytes, decoded on demand). */
-  private models3d = new Map<string, { id: string; name: string; ext: string; bytes: Uint8Array }>();
-  /** Raster cache by model id (512px offscreen renders). */
-  private modelRasters = new Map<string, { buffer: Uint8ClampedArray; width: number; height: number }>();
+  /** 3D model entries by id (source bytes + orbit view, decoded on demand). */
+  private models3d = new Map<
+    string,
+    { id: string; name: string; ext: string; bytes: Uint8Array; view: GnumarusModel3dView }
+  >();
+  /** Raster cache by model id (512px offscreen renders, keyed by orbit view). */
+  private modelRasters = new Map<string, { buffer: Uint8ClampedArray; width: number; height: number; key: string }>();
+  /** Pending orbit gesture (uncommitted model view edits), if any. */
+  private modelOrbit: GnumarusModelOrbit | null = null;
   /** Model ids with a decode already in flight. */
   private modelPending = new Set<string>();
   private modelCounter = 1;
@@ -875,6 +912,8 @@ export class GnumarusCanvasEngine {
   private colorContiguous = true;
   /** Active destructive-transform move (grab offset from the selection center). */
   private moveDrag: { grabDX: number; grabDY: number } | null = null;
+  /** Active 3D model orbit/pan drag (button + last client position), if any. */
+  private modelDrag: { button: 0 | 2; x: number; y: number } | null = null;
   /** Active corner/edge resize gesture. */
   private resizeDrag: {
     anchorBufferX: number;
@@ -1013,7 +1052,7 @@ export class GnumarusCanvasEngine {
   private readonly onTextEditRequested:
     | ((info: { layerId: string; frame: number; contentId: string; textId: string }) => void)
     | undefined;
-  private readonly onNotice: ((kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked" | "tilemap-paint-blocked" | "tile-rot-needs-square") => void) | undefined;
+  private readonly onNotice: ((kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked" | "tilemap-paint-blocked" | "tile-rot-needs-square" | "model3d-needs-cell") => void) | undefined;
   private readonly onTileBrushOutcome:
     | ((outcome: "placed" | "erased" | "no-tileset" | "occupied" | "nothing") => void)
     | undefined;
@@ -3077,13 +3116,20 @@ export class GnumarusCanvasEngine {
         content.textureId = null;
       }
     }
-    const raster = await this.decodeModel3d(ext, bytes);
+    const view = { ...GNUMARUS_MODEL3D_DEFAULT_VIEW };
+    const raster = await this.decodeModel3d(ext, bytes, view);
     if (raster === null) {
       return null;
     }
     const modelId = this.nextModelId();
-    this.models3d.set(modelId, { id: modelId, name: name === "" ? this.nextModelName() : name, ext, bytes: bytes.slice() });
-    this.modelRasters.set(modelId, raster);
+    this.models3d.set(modelId, {
+      id: modelId,
+      name: name === "" ? this.nextModelName() : name,
+      ext,
+      bytes: bytes.slice(),
+      view,
+    });
+    this.modelRasters.set(modelId, { ...raster, key: modelViewKey(view) });
     if (content !== undefined) {
       content.model3dId = modelId;
       this.syncAllLayerRenders();
@@ -3115,19 +3161,29 @@ export class GnumarusCanvasEngine {
   }
 
   /**
-   * Kick off the asynchronous 3D decode for a model entry (no-op when
-   * cached or already in flight). Refreshes the canvas when it arrives.
+   * Kick off the asynchronous 3D decode for a model entry (no-op when the
+   * cached raster matches the effective view or a decode is in flight).
+   * Refreshes the canvas when the raster arrives.
    */
   ensureModelRaster(modelId: string): void {
     const entry = this.models3d.get(modelId);
-    if (entry === undefined || this.modelRasters.has(modelId) || this.modelPending.has(modelId)) {
+    if (entry === undefined || this.modelPending.has(modelId)) {
+      return;
+    }
+    const view = this.effectiveModelView(modelId);
+    if (view === null) {
+      return;
+    }
+    const key = modelViewKey(view);
+    const cached = this.modelRasters.get(modelId);
+    if (cached !== undefined && cached.key === key) {
       return;
     }
     this.modelPending.add(modelId);
-    void this.decodeModel3d(entry.ext, entry.bytes)
+    void this.decodeModel3d(entry.ext, entry.bytes, view)
       .then((raster) => {
-        if (raster !== null) {
-          this.modelRasters.set(modelId, raster);
+        if (raster !== null && this.effectiveModelViewKey(modelId) === key) {
+          this.modelRasters.set(modelId, { ...raster, key });
           this.syncAllLayerRenders();
           this.refreshLayerStacking();
           this.render();
@@ -3137,26 +3193,47 @@ export class GnumarusCanvasEngine {
       })
       .finally(() => {
         this.modelPending.delete(modelId);
+        // A drag may have moved the view while the decode was in flight;
+        // kick off a follow-up render so the final angle is not skipped.
+        if (this.effectiveModelViewKey(modelId) !== key) {
+          this.ensureModelRaster(modelId);
+        }
       });
   }
 
+  /** Effective orbit view: the pending gesture view wins over the stored one. */
+  private effectiveModelView(modelId: string): GnumarusModel3dView | null {
+    if (this.modelOrbit !== null && this.modelOrbit.modelId === modelId) {
+      return { ...this.modelOrbit.view };
+    }
+    const entry = this.models3d.get(modelId);
+    return entry === undefined ? null : { ...entry.view };
+  }
+
+  /** Cache key of the current effective view (or null when missing). */
+  private effectiveModelViewKey(modelId: string): string | null {
+    const view = this.effectiveModelView(modelId);
+    return view === null ? null : modelViewKey(view);
+  }
+
   /**
-   * Rasterize a 3D model entry from the cache. Returns null when the async
-   * decode has not finished yet (callers should kick ensureModelRaster).
+   * Rasterize a 3D model entry from the cache (effective view). Returns null
+   * when no matching raster is cached yet (callers kick ensureModelRaster).
    */
   rasterizeModel3d(modelId: string): { buffer: Uint8ClampedArray; width: number; height: number } | null {
-    const entry = this.models3d.get(modelId);
-    if (entry === undefined) {
+    const view = this.effectiveModelView(modelId);
+    if (view === null) {
       return null;
     }
     const cached = this.modelRasters.get(modelId);
-    if (cached === undefined) {
+    if (cached === undefined || cached.key !== modelViewKey(view)) {
       return null;
     }
     return { buffer: cached.buffer, width: cached.width, height: cached.height };
   }
 
-  /** Layout-space size of a 3D model raster (fixed edge; ready or not). */
+
+/** Layout-space size of a 3D model raster (fixed edge; ready or not). */
   model3dRasterSize(modelId: string): { width: number; height: number } | null {
     const raster = this.rasterizeModel3d(modelId);
     if (raster !== null) {
@@ -3167,6 +3244,193 @@ export class GnumarusCanvasEngine {
     }
     const edge = this.modelRasterEdge();
     return { width: edge, height: edge };
+  }
+
+  /** Stored (committed) orbit view of a model entry, or null. */
+  getModelView(modelId: string): GnumarusModel3dView | null {
+    const entry = this.models3d.get(modelId);
+    return entry === undefined ? null : { ...entry.view };
+  }
+
+  /** Live orbit view for the options bar: pending gesture wins, else the stored view. */
+  getModelViewForActiveCell(): GnumarusModel3dView | null {
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return null;
+    }
+    const modelId = this.getCellModel3dId(layer.id, this.currentFrame);
+    if (modelId === null) {
+      return null;
+    }
+    if (this.modelOrbit !== null && this.modelOrbit.modelId === modelId) {
+      return { ...this.modelOrbit.view };
+    }
+    return this.getModelView(modelId);
+  }
+
+  /** True while an orbit gesture has uncommitted changes. */
+  hasUncommittedModelView(): boolean {
+    return this.modelOrbit !== null;
+  }
+
+  /**
+   * Begin (or continue) an orbit gesture on the active cell's model.
+   * Returns false when the active cell shows no 3D model.
+   */
+  startModelOrbit(): boolean {
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return false;
+    }
+    const modelId = this.getCellModel3dId(layer.id, this.currentFrame);
+    if (modelId === null) {
+      return false;
+    }
+    if (this.modelOrbit === null || this.modelOrbit.modelId !== modelId) {
+      const stored = this.getModelView(modelId);
+      if (stored === null) {
+        return false;
+      }
+      this.modelOrbit = { modelId, view: stored };
+    }
+    return true;
+  }
+
+  /** Orbit the pending view by screen pixels (azimuth follows x, elevation follows y). */
+  orbitModel(dx: number, dy: number): boolean {
+    if (this.modelOrbit === null) {
+      if (!this.startModelOrbit()) {
+        return false;
+      }
+    }
+    const orbit = this.modelOrbit;
+    if (orbit === null) {
+      return false;
+    }
+    orbit.view.azimuth = normalizeModelAzimuth(orbit.view.azimuth + dx * 0.4);
+    orbit.view.elevation = Math.min(89, Math.max(-89, orbit.view.elevation - dy * 0.4));
+    this.ensureModelRaster(orbit.modelId);
+    this.updatePreviews();
+    this.onLayersChanged?.();
+    return true;
+  }
+
+  /** Dolly the pending view (factor > 1 moves away). */
+  zoomModelOrbit(factor: number): boolean {
+    if (this.modelOrbit === null) {
+      if (!this.startModelOrbit()) {
+        return false;
+      }
+    }
+    const orbit = this.modelOrbit;
+    if (orbit === null || !(factor > 0) || !Number.isFinite(factor)) {
+      return false;
+    }
+    orbit.view.distance = Math.min(30, Math.max(1.2, orbit.view.distance * factor));
+    this.ensureModelRaster(orbit.modelId);
+    this.updatePreviews();
+    this.onLayersChanged?.();
+    return true;
+  }
+
+  /** Pan the pending view by screen pixels (grab-style). */
+  panModelOrbit(dx: number, dy: number): boolean {
+    if (this.modelOrbit === null) {
+      if (!this.startModelOrbit()) {
+        return false;
+      }
+    }
+    const orbit = this.modelOrbit;
+    if (orbit === null) {
+      return false;
+    }
+    const worldPerPixel = (2 * orbit.view.distance * Math.tan(THREE.MathUtils.degToRad(MODEL_ORBIT_FOV_DEG) / 2)) / Math.max(1, this.modelRasterEdge());
+    orbit.view.panX = Math.min(10, Math.max(-10, orbit.view.panX - dx * worldPerPixel));
+    orbit.view.panY = Math.min(10, Math.max(-10, orbit.view.panY - dy * worldPerPixel));
+    this.ensureModelRaster(orbit.modelId);
+    this.updatePreviews();
+    this.onLayersChanged?.();
+    return true;
+  }
+
+  /** Reset the pending (or stored) view to the classic 3/4 angle. */
+  resetModelView(): boolean {
+    if (!this.startModelOrbit()) {
+      return false;
+    }
+    const orbit = this.modelOrbit;
+    if (orbit === null) {
+      return false;
+    }
+    orbit.view = { ...GNUMARUS_MODEL3D_DEFAULT_VIEW };
+    this.ensureModelRaster(orbit.modelId);
+    this.updatePreviews();
+    this.onLayersChanged?.();
+    return true;
+  }
+
+  /**
+   * Commit the pending orbit view to the model entry (single undoable
+   * history entry) and refresh. No-op without pending changes.
+   */
+  commitModelOrbit(): boolean {
+    const orbit = this.modelOrbit;
+    if (orbit === null) {
+      return false;
+    }
+    const entry = this.models3d.get(orbit.modelId);
+    if (entry === undefined) {
+      this.modelOrbit = null;
+      return false;
+    }
+    const before = { ...entry.view };
+    if (modelViewKey(before) === modelViewKey(orbit.view)) {
+      this.modelOrbit = null;
+      return false;
+    }
+    entry.view = { ...orbit.view };
+    this.modelOrbit = null;
+    this.ensureModelRaster(orbit.modelId);
+    this.history.push({ type: "model3d-view", view: { modelId: orbit.modelId, before, after: { ...entry.view } } });
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return true;
+  }
+
+  /** Discard the pending orbit view and re-render the stored one. */
+  cancelModelOrbit(): boolean {
+    const orbit = this.modelOrbit;
+    if (orbit === null) {
+      return false;
+    }
+    this.modelOrbit = null;
+    this.ensureModelRaster(orbit.modelId);
+    this.updatePreviews();
+    this.onLayersChanged?.();
+    return true;
+  }
+
+  /** Undo/redo target: replace a model's stored view and re-render it. */
+  private applyModelViewForHistory(modelId: string, view: GnumarusModel3dView): boolean {
+    const entry = this.models3d.get(modelId);
+    if (entry === undefined) {
+      return false;
+    }
+    if (this.modelOrbit !== null && this.modelOrbit.modelId === modelId) {
+      this.modelOrbit = null;
+    }
+    entry.view = { ...view };
+    this.ensureModelRaster(modelId);
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    return true;
   }
 
   private nextTilemapId(): string {
@@ -3783,6 +4047,7 @@ export class GnumarusCanvasEngine {
   private async decodeModel3d(
     ext: string,
     bytes: Uint8Array,
+    view: GnumarusModel3dView,
   ): Promise<{ buffer: Uint8ClampedArray; width: number; height: number } | null> {
     const renderer = this.ensureModelRenderer();
     if (renderer === null || bytes.length === 0) {
@@ -3817,10 +4082,10 @@ export class GnumarusCanvasEngine {
       key.position.set(2, 3, 4);
       scene.add(key);
       scene.add(group);
-      const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 100);
-      const distance = (1 / Math.tan(THREE.MathUtils.degToRad(20))) * 1.25;
-      camera.position.set(1, 0.7, 1.2).normalize().multiplyScalar(distance);
-      camera.lookAt(0, 0, 0);
+      const camera = new THREE.PerspectiveCamera(MODEL_ORBIT_FOV_DEG, 1, 0.01, 100);
+      const direction = modelViewDirection(view.azimuth, view.elevation);
+      camera.position.copy(direction).multiplyScalar(Math.max(0.5, view.distance));
+      camera.lookAt(view.panX, view.panY, 0);
       renderer.clear();
       renderer.render(scene, camera);
       const canvas = document.createElement("canvas");
@@ -3962,6 +4227,7 @@ export class GnumarusCanvasEngine {
         name: model.name,
         ext: model.ext,
         bytes: model.bytes,
+        view: { ...model.view },
       })),
       tilemaps: [...this.tilemaps.values()].map((tilemap) => ({
         id: tilemap.id,
@@ -5304,7 +5570,7 @@ export class GnumarusCanvasEngine {
       textures: GnumarusTexturePixels[];
       texts?: Array<{ id: string; name: string; document: GnumarusTextDocument }>;
       svgs?: Array<{ id: string; name: string; svg: string }>;
-      models3d?: Array<{ id: string; name: string; ext: string; bytes: Uint8Array }>;
+      models3d?: Array<{ id: string; name: string; ext: string; bytes: Uint8Array; view?: GnumarusModel3dView }>;
       tilemaps?: Array<{ id: string; name: string; tilesetId: string; tileWidth: number; tileHeight: number; tiles: GnumarusTilePlacement[] }>;
       contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null; svgId?: string | null; model3dId?: string | null; tilemapId?: string | null; transform: GnumarusLayerTransform }>;
       cells: Array<{ layer: string; frame: number; content: string }>;
@@ -5435,7 +5701,13 @@ export class GnumarusCanvasEngine {
         throw new Error(`3D model ${model.id} has invalid data.`);
       }
       model3dIds.add(model.id);
-      this.models3d.set(model.id, { id: model.id, name: model.name, ext: model.ext, bytes: new Uint8Array(model.bytes) });
+      this.models3d.set(model.id, {
+        id: model.id,
+        name: model.name,
+        ext: model.ext,
+        bytes: new Uint8Array(model.bytes),
+        view: parseModel3dView((model as { view?: unknown }).view),
+      });
       this.ensureModelRaster(model.id);
     }
     this.tilemaps.clear();
@@ -10387,6 +10659,10 @@ export class GnumarusCanvasEngine {
   }
 
   setTool(tool: GnumarusCanvasTool): void {
+    if (this.tool === "modeltransform" && tool !== "modeltransform") {
+      this.commitModelOrbit();
+      this.modelDrag = null;
+    }
     if (this.tempEyedropper && tool !== "eyedropper") {
       // Manual tool change cancels the Ctrl-held temporary eyedropper.
       this.tempEyedropper = false;
@@ -10487,6 +10763,7 @@ export class GnumarusCanvasEngine {
       (contentId, textureId) => this.setContentTextureForHistory(contentId, textureId),
       (textId, document) => this.applyTextForHistory(textId, document),
       (tilemapId, tiles) => this.applyTilemapForHistory(tilemapId, tiles),
+      (modelId, view) => this.applyModelViewForHistory(modelId, view),
     );
     if (!applied) {
       return false;
@@ -10516,6 +10793,7 @@ export class GnumarusCanvasEngine {
       (contentId, textureId) => this.setContentTextureForHistory(contentId, textureId),
       (textId, document) => this.applyTextForHistory(textId, document),
       (tilemapId, tiles) => this.applyTilemapForHistory(tilemapId, tiles),
+      (modelId, view) => this.applyModelViewForHistory(modelId, view),
     );
     if (!applied) {
       return false;
@@ -11280,7 +11558,8 @@ export class GnumarusCanvasEngine {
         this.commitPolyLasso(event);
         return;
       }
-      if (event.button !== 0 && !(event.button === 2 && this.tool === "tilebrush")) {
+      const isRightButton = (event.button as number) === 2;
+      if (event.button !== 0 && !(isRightButton && (this.tool === "tilebrush" || this.tool === "modeltransform"))) {
         return;
       }
       if (
@@ -11496,6 +11775,30 @@ export class GnumarusCanvasEngine {
             textId: created.textId,
           });
         }
+        this.updatePreviews();
+        return;
+      }
+      if (this.tool === "modeltransform") {
+        // Left-drag orbits the model, right-drag pans it. Requires a 3D
+        // model in the active cell; other buttons are ignored.
+        if (event.button !== 0 && event.button !== 2) {
+          return;
+        }
+        const layer = this.activeLayer();
+        if (layer === null) {
+          return;
+        }
+        if (this.getCellModel3dId(layer.id, this.currentFrame) === null) {
+          this.onNotice?.("model3d-needs-cell");
+          return;
+        }
+        if (!this.startModelOrbit()) {
+          this.onNotice?.("model3d-needs-cell");
+          return;
+        }
+        this.modelDrag = { button: event.button === 2 ? 2 : 0, x: event.clientX, y: event.clientY };
+        this.lastMouseClient = { x: event.clientX, y: event.clientY };
+        canvas.setPointerCapture(event.pointerId);
         this.updatePreviews();
         return;
       }
@@ -11964,6 +12267,20 @@ export class GnumarusCanvasEngine {
         }
         return;
       }
+      if (this.modelDrag !== null) {
+        const drag = this.modelDrag;
+        const dx = event.clientX - drag.x;
+        const dy = event.clientY - drag.y;
+        drag.x = event.clientX;
+        drag.y = event.clientY;
+        this.lastMouseClient = { x: event.clientX, y: event.clientY };
+        if (drag.button === 2) {
+          this.panModelOrbit(dx, dy);
+        } else if (dx !== 0 || dy !== 0) {
+          this.orbitModel(dx, dy);
+        }
+        return;
+      }
       if (this.sizeDrag !== null) {
         // Horizontal movement only: right grows, left shrinks, vertical is ignored.
         const size = clampBrushSizeFloat(
@@ -12097,6 +12414,9 @@ export class GnumarusCanvasEngine {
           }
         }
         return;
+      }
+      if (this.modelDrag !== null) {
+        this.modelDrag = null;
       }
       if (this.layerCenterTap !== null) {
         const layerId = this.layerCenterTap.layerId;
@@ -12284,6 +12604,14 @@ export class GnumarusCanvasEngine {
           }
           return;
         }
+        if (this.tool === "modeltransform") {
+          const layer = this.activeLayer();
+          const modelId = layer === null ? null : this.getCellModel3dId(layer.id, this.currentFrame);
+          if (modelId !== null && this.startModelOrbit()) {
+            this.zoomModelOrbit(Math.exp(-event.deltaY * 0.0015));
+            return;
+          }
+        }
         this.zoomAtPoint(event.clientX, event.clientY, event.deltaY < 0 ? 1.25 : 0.8);
       },
       { passive: false },
@@ -12365,6 +12693,16 @@ export class GnumarusCanvasEngine {
               this.flipTileBrush("v");
               return;
             }
+          }
+        }
+        if (this.tool === "modeltransform" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+          // R resets the orbit view; it takes precedence over the
+          // rectselect tool shortcut below.
+          if (event.key === "r" || event.key === "R") {
+            this.resetModelView();
+            this.updatePreviews();
+            this.onLayersChanged?.();
+            return;
           }
         }
         if (event.key === "b" || event.key === "B") {
@@ -12471,6 +12809,11 @@ export class GnumarusCanvasEngine {
           this.updatePreviews();
           return;
         }
+        if (event.key === "Escape" && this.tool === "modeltransform" && this.hasUncommittedModelView()) {
+          this.cancelModelOrbit();
+          this.updatePreviews();
+          return;
+        }
         if (
           (event.key === "Escape" && this.tool === "rectselect" && this.rectDrag !== null) ||
           (event.key === "Escape" && this.tool === "ellipse" && this.ellipseDrag !== null) ||
@@ -12481,6 +12824,12 @@ export class GnumarusCanvasEngine {
           this.ellipseDrag = null;
           this.lassoPath = null;
           this.polyLassoPath = null;
+          this.updatePreviews();
+          return;
+        }
+        if ((event.key === "Enter" || event.key === "Return") && this.tool === "modeltransform" && this.hasUncommittedModelView()) {
+          event.preventDefault();
+          this.commitModelOrbit();
           this.updatePreviews();
           return;
         }

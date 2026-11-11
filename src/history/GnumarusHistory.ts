@@ -2,6 +2,7 @@ import type { GnumarusChannelLock } from "../canvas/GnumarusPixelBuffer";
 import type { GnumarusLayerTransform } from "../canvas/GnumarusViewportMath";
 import type { GnumarusTextDocument } from "../text/GnumarusText";
 import type { GnumarusTilePlacement } from "../tilemap/GnumarusTilemap";
+import type { GnumarusModel3dView } from "../project/GnumarusProjectFormat";
 
 export interface GnumarusImageDiff {
   x: number;
@@ -158,6 +159,12 @@ export interface GnumarusTilemapRecord {
   after: GnumarusTilePlacement[];
 }
 
+export interface GnumarusModelViewRecord {
+  modelId: string;
+  before: GnumarusModel3dView;
+  after: GnumarusModel3dView;
+}
+
 export type GnumarusHistoryEntry =
   | { type: "stroke"; layerId: string; diff: GnumarusImageDiff }
   | { type: "merge"; merge: GnumarusMergeRecord }
@@ -166,7 +173,8 @@ export type GnumarusHistoryEntry =
   | { type: "fitBatch"; fits: GnumarusFitRecord[] }
   | { type: "reloadBatch"; reloads: GnumarusReloadRecord[] }
   | { type: "text"; text: GnumarusTextRecord }
-  | { type: "tilemap"; tilemap: GnumarusTilemapRecord };
+  | { type: "tilemap"; tilemap: GnumarusTilemapRecord }
+  | { type: "model3d-view"; view: GnumarusModelViewRecord };
 
 export interface GnumarusHistoryLayer {
   buffer: Uint8ClampedArray;
@@ -227,6 +235,7 @@ export class GnumarusHistory {
     setContentTexture?: (contentId: string, textureId: string | null) => boolean,
     applyText?: (textId: string, document: GnumarusTextDocument) => boolean,
     applyTilemap?: (tilemapId: string, tiles: GnumarusTilePlacement[]) => boolean,
+    applyModelView?: (modelId: string, view: GnumarusModel3dView) => boolean,
   ): boolean {
     for (;;) {
       const entry = this.undoStack.pop();
@@ -336,6 +345,13 @@ export class GnumarusHistory {
         this.redoStack.push(entry);
         return true;
       }
+      if (entry.type === "model3d-view") {
+        if (applyModelView === undefined || !applyModelView(entry.view.modelId, entry.view.before)) {
+          continue;
+        }
+        this.redoStack.push(entry);
+        return true;
+      }
       const needsAssociate = !entry.merge.removedLayer;
       if (needsAssociate && associateCell === undefined) {
         continue;
@@ -396,6 +412,7 @@ export class GnumarusHistory {
     setContentTexture?: (contentId: string, textureId: string | null) => boolean,
     applyText?: (textId: string, document: GnumarusTextDocument) => boolean,
     applyTilemap?: (tilemapId: string, tiles: GnumarusTilePlacement[]) => boolean,
+    applyModelView?: (modelId: string, view: GnumarusModel3dView) => boolean,
   ): boolean {
     for (;;) {
       const entry = this.redoStack.pop();
@@ -492,6 +509,13 @@ export class GnumarusHistory {
       }
       if (entry.type === "tilemap") {
         if (applyTilemap === undefined || !applyTilemap(entry.tilemap.tilemapId, entry.tilemap.after)) {
+          continue;
+        }
+        this.undoStack.push(entry);
+        return true;
+      }
+      if (entry.type === "model3d-view") {
+        if (applyModelView === undefined || !applyModelView(entry.view.modelId, entry.view.after)) {
           continue;
         }
         this.undoStack.push(entry);

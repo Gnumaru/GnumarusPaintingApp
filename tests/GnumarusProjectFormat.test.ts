@@ -648,7 +648,14 @@ describe("GnumarusProjectFormat", () => {
       transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
     });
     const parsed = parseProject(serializeProject(project));
-    expect(parsed.animation.models3d).toEqual([{ id: "model1", name: "M1", file: "3dmodels/model1.glb" }]);
+    expect(parsed.animation.models3d).toEqual([
+      {
+        id: "model1",
+        name: "M1",
+        file: "3dmodels/model1.glb",
+        view: { azimuth: 39.8, elevation: 24.1, distance: 3.43, panX: 0, panY: 0 },
+      },
+    ]);
     expect(parsed.animation.contents[1]).toMatchObject({ model3dId: "model1" });
     expect(collectProjectFileReferences(parsed)).toContain("3dmodels/model1.glb");
     const badExt = createDefaultProject(8, 8);
