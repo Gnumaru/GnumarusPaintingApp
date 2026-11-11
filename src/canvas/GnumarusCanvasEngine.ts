@@ -104,6 +104,7 @@ import {
   intersectSelectionRects,
   isEmptySelectionRect,
   normalizeSelectionRect,
+  selectionMaskBoundaryRuns,
   unionSelectionBox,
   type GnumarusSelectionRect,
 } from "./GnumarusSelectionBoolean";
@@ -249,6 +250,8 @@ export interface GnumarusFloatingSelection {
    * bits back into the layer.
    */
   mask: Uint8Array;
+  /** True when every mask bit is set (plain rectangular selection). */
+  maskFull: boolean;
   /** Center in home texture pixels (floats, unbounded). */
   cx: number;
   cy: number;
@@ -716,6 +719,9 @@ export class GnumarusCanvasEngine {
   private readonly previewStabilizerLine: SVGLineElement;
   private readonly previewSelectWhite: SVGPolygonElement;
   private readonly previewSelectBlack: SVGPolygonElement;
+  /** Marching ants tracing the true masked boundary (non-rect selections). */
+  private readonly previewSelectMaskWhite: SVGPathElement;
+  private readonly previewSelectMaskBlack: SVGPathElement;
   private readonly selectionHandles: Array<{ id: GnumarusSelectionHandleId; group: SVGGElement }> = [];
   /** 3D gizmo ring halves (front solid, back dashed) per rotation axis. */
   private readonly rot3dRings: Record<"x" | "y" | "z", { front: SVGPathElement; back: SVGPathElement }>;
@@ -1013,6 +1019,29 @@ export class GnumarusCanvasEngine {
     };
     this.previewSelectWhite = makeSelectionAnts("selection-rect", "#ffffff", "-20");
     this.previewSelectBlack = makeSelectionAnts(null, "#000000", "-10");
+    const makeSelectionAntsPath = (testId: string | null, stroke: string, dashOffset: string): SVGPathElement => {
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      if (testId !== null) {
+        path.setAttribute("data-testid", testId);
+      }
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", stroke);
+      path.setAttribute("stroke-width", "1.5");
+      path.setAttribute("stroke-dasharray", "6 4");
+      path.setAttribute("opacity", "0.95");
+      const march = document.createElementNS("http://www.w3.org/2000/svg", "animate");
+      march.setAttribute("attributeName", "stroke-dashoffset");
+      march.setAttribute("from", "0");
+      march.setAttribute("to", dashOffset);
+      march.setAttribute("dur", "1s");
+      march.setAttribute("repeatCount", "indefinite");
+      path.appendChild(march);
+      path.style.display = "none";
+      this.previewSvg.appendChild(path);
+      return path;
+    };
+    this.previewSelectMaskWhite = makeSelectionAntsPath("selection-mask", "#ffffff", "-20");
+    this.previewSelectMaskBlack = makeSelectionAntsPath(null, "#000000", "-10");
     const svgNamespace = "http://www.w3.org/2000/svg";
     const appendShape = (group: SVGGElement, tag: string, attributes: Record<string, string>): SVGElement => {
       const shape = document.createElementNS(svgNamespace, tag) as SVGElement;
@@ -6404,6 +6433,7 @@ export class GnumarusCanvasEngine {
       width,
       height,
       mask: new Uint8Array(width * height).fill(255),
+      maskFull: true,
       cx: minX + width / 2,
       cy: minY + height / 2,
       rotation: 0,
@@ -6718,6 +6748,7 @@ export class GnumarusCanvasEngine {
       width,
       height,
       mask,
+      maskFull: countSelectionMask(mask) === width * height,
       cx: minX + width / 2,
       cy: minY + height / 2,
       rotation: 0,
@@ -7328,6 +7359,29 @@ export class GnumarusCanvasEngine {
     return null;
   }
 
+  /**
+   * True masked boundary of the active floating selection in home texture
+   * pixels, for the marching-ants path overlay. Null for plain rectangular
+   * selections (the quad polygon covers those), rubber bands, layer boxes,
+   * or hidden floatings.
+   */
+  private selectionOverlayBoundaryRuns(): Array<{ ax: number; ay: number; bx: number; by: number }> | null {
+    const floating = this.floating;
+    if (floating === null || !floating.active || !this.floatingHomeVisible() || floating.maskFull) {
+      return null;
+    }
+    const placement = this.floatingPlacement(floating);
+    const runs = selectionMaskBoundaryRuns(floating.mask, floating.width, floating.height);
+    if (runs.length === 0) {
+      return null;
+    }
+    return runs.map((run) => {
+      const a = forwardSelectionPoint(placement, run.ax, run.ay);
+      const b = forwardSelectionPoint(placement, run.bx, run.by);
+      return { ax: a.x, ay: a.y, bx: b.x, by: b.y };
+    });
+  }
+
   /** Hide every selection anchor group. */
   private hideSelectionHandles(): void {
     for (const handle of this.selectionHandles) {
@@ -7366,6 +7420,8 @@ export class GnumarusCanvasEngine {
     if (overlay === null || layer === null || layer.width < 1 || layer.height < 1) {
       this.previewSelectWhite.style.display = "none";
       this.previewSelectBlack.style.display = "none";
+      this.previewSelectMaskWhite.style.display = "none";
+      this.previewSelectMaskBlack.style.display = "none";
       this.hideSelectionHandles();
       return;
     }
@@ -7373,6 +7429,8 @@ export class GnumarusCanvasEngine {
     if (rect.width <= 0 || rect.height <= 0) {
       this.previewSelectWhite.style.display = "none";
       this.previewSelectBlack.style.display = "none";
+      this.previewSelectMaskWhite.style.display = "none";
+      this.previewSelectMaskBlack.style.display = "none";
       this.hideSelectionHandles();
       return;
     }
@@ -7388,6 +7446,21 @@ export class GnumarusCanvasEngine {
     };
     const points = overlay.map((point) => toClient(point.x, point.y)).join(" ");
     this.previewSvg.style.display = "block";
+    // Non-rectangular floatings trace their true masked boundary; plain
+    // rects keep the quad polygon.
+    const boundary = this.selectionOverlayBoundaryRuns();
+    if (boundary !== null) {
+      const d = boundary.map((seg) => `M${toClient(seg.ax, seg.ay)}L${toClient(seg.bx, seg.by)}`).join(" ");
+      this.previewSelectMaskWhite.setAttribute("d", d);
+      this.previewSelectMaskWhite.style.display = "block";
+      this.previewSelectMaskBlack.setAttribute("d", d);
+      this.previewSelectMaskBlack.style.display = "block";
+      this.previewSelectWhite.style.display = "none";
+      this.previewSelectBlack.style.display = "none";
+      return;
+    }
+    this.previewSelectMaskWhite.style.display = "none";
+    this.previewSelectMaskBlack.style.display = "none";
     this.previewSelectWhite.setAttribute("points", points);
     this.previewSelectWhite.style.display = "block";
     this.previewSelectBlack.setAttribute("points", points);
@@ -7462,7 +7535,8 @@ export class GnumarusCanvasEngine {
   private hidePreviewSvgIfIdle(): void {
     if (
       this.previewStabilizerLine.style.display !== "block" &&
-      this.previewSelectWhite.style.display !== "block"
+      this.previewSelectWhite.style.display !== "block" &&
+      this.previewSelectMaskWhite.style.display !== "block"
     ) {
       this.previewSvg.style.display = "none";
     }
@@ -7504,6 +7578,8 @@ export class GnumarusCanvasEngine {
     this.previewStabilizerLine.style.display = "none";
     this.previewSelectWhite.style.display = "none";
     this.previewSelectBlack.style.display = "none";
+    this.previewSelectMaskWhite.style.display = "none";
+    this.previewSelectMaskBlack.style.display = "none";
     this.hideSelectionHandles();
     this.hideRot3dGizmo();
     for (const marker of this.previewMarkers) {
@@ -7638,6 +7714,8 @@ export class GnumarusCanvasEngine {
     this.previewStabilizerLine.style.display = "none";
     this.previewSelectWhite.style.display = "none";
     this.previewSelectBlack.style.display = "none";
+    this.previewSelectMaskWhite.style.display = "none";
+    this.previewSelectMaskBlack.style.display = "none";
     this.hideSelectionHandles();
     this.hideRot3dGizmo();
     for (const marker of this.previewMarkers) {

@@ -67,8 +67,7 @@ export function unionSelectionBox(a: GnumarusSelectionRect, b: GnumarusSelection
 }
 
 /** Count set mask bytes. */
-export function countSelectionMask(mask: Uint8Array): number {
-  let count = 0;
+export function countSelectionMask(mask: Uint8Array): number {  let count = 0;
   for (let i = 0; i < mask.length; i += 1) {
     if ((mask[i] ?? 0) !== 0) {
       count += 1;
@@ -110,4 +109,88 @@ export function selectionMaskBox(mask: Uint8Array, width: number, height: number
   }
   const box = { minX, minY, maxX, maxY };
   return isEmptySelectionRect(box) ? null : box;
+}
+
+/** One axis-aligned boundary run in buffer-local pixel coords. */
+export interface GnumarusSelectionBoundaryRun {
+  ax: number;
+  ay: number;
+  bx: number;
+  by: number;
+}
+
+/**
+ * Boundary runs of a selection mask in buffer-local pixel coords: for every
+ * set pixel, the sides facing unset pixels (or the mask edge), merged into
+ * maximal horizontal/vertical runs. Donut holes produce their own runs;
+ * disjoint regions stay disjoint.
+ */
+export function selectionMaskBoundaryRuns(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+): GnumarusSelectionBoundaryRun[] {
+  const runs: GnumarusSelectionBoundaryRun[] = [];
+  if (mask.length !== width * height || width < 1 || height < 1) {
+    return runs;
+  }
+  const set = (x: number, y: number): boolean => {
+    if (x < 0 || y < 0 || x >= width || y >= height) {
+      return false;
+    }
+    return (mask[y * width + x] ?? 0) !== 0;
+  };
+  // Horizontal edges: one run per grid line segment run.
+  for (let y = 0; y <= height; y += 1) {
+    let runX0 = -1;
+    const flush = (x: number): void => {
+      if (runX0 >= 0) {
+        runs.push({ ax: runX0, ay: y, bx: x, by: y });
+        runX0 = -1;
+      }
+    };
+    for (let x = 0; x <= width; x += 1) {
+      // Edge between row y-1 and row y at column x.
+      if (set(x, y - 1) !== set(x, y)) {
+        if (runX0 < 0) {
+          runX0 = x;
+        }
+      } else {
+        flush(x);
+      }
+    }
+    flush(width + 1);
+  }
+  // Vertical edges.
+  for (let x = 0; x <= width; x += 1) {
+    let runY0 = -1;
+    const flush = (y: number): void => {
+      if (runY0 >= 0) {
+        runs.push({ ax: x, ay: runY0, bx: x, by: y });
+        runY0 = -1;
+      }
+    };
+    for (let y = 0; y <= height; y += 1) {
+      // Edge between column x-1 and column x at row y.
+      if (set(x - 1, y) !== set(x, y)) {
+        if (runY0 < 0) {
+          runY0 = y;
+        }
+      } else {
+        flush(y);
+      }
+    }
+    flush(height + 1);
+  }
+  return runs;
+}
+
+/**
+ * Boundary runs formatted as an SVG path (`M..L..` subpaths, buffer-local
+ * pixel coords).
+ */
+export function selectionMaskBoundaryPath(mask: Uint8Array, width: number, height: number): string {
+  return selectionMaskBoundaryRuns(mask, width, height)
+    .map((run) => `M${run.ax},${run.ay}L${run.bx},${run.by}`)
+    .join(" ");
 }

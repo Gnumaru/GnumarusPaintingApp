@@ -5,6 +5,7 @@ import {
   intersectSelectionRects,
   isEmptySelectionRect,
   normalizeSelectionRect,
+  selectionMaskBoundaryPath,
   selectionMaskBox,
   unionSelectionBox,
 } from "../src/canvas/GnumarusSelectionBoolean";
@@ -57,5 +58,46 @@ describe("GnumarusSelectionBoolean", () => {
     expect(countSelectionMask(mask)).toBe(2);
     expect(selectionMaskBox(mask, 4, 4)).toEqual({ minX: 1, minY: 1, maxX: 4, maxY: 3 });
     expect(selectionMaskBox(new Uint8Array(3), 4, 4)).toBeNull();
+  });
+});
+
+describe("selectionMaskBoundaryPath", () => {
+  it("emits an empty path for empty or invalid masks", () => {
+    expect(selectionMaskBoundaryPath(new Uint8Array(16), 4, 4)).toBe("");
+    expect(selectionMaskBoundaryPath(new Uint8Array(3), 4, 4)).toBe("");
+  });
+
+  it("traces a single pixel as four unit edges", () => {
+    expect(selectionMaskBoundaryPath(new Uint8Array([255]), 1, 1)).toBe("M0,0L1,0 M0,1L1,1 M0,0L0,1 M1,0L1,1");
+  });
+
+  it("merges box sides into one run per side", () => {
+    const mask = new Uint8Array(3 * 3).fill(255);
+    expect(selectionMaskBoundaryPath(mask, 3, 3)).toBe("M0,0L3,0 M0,3L3,3 M0,0L0,3 M3,0L3,3");
+  });
+
+  it("keeps disjoint regions disjoint", () => {
+    const mask = new Uint8Array(5 * 5);
+    mask[0] = 255;
+    mask[4 * 5 + 4] = 255;
+    const path = selectionMaskBoundaryPath(mask, 5, 5);
+    expect(path.match(/M/g)?.length ?? 0).toBe(8);
+    expect(path).toContain("M0,0L1,0");
+    expect(path).toContain("M4,4L5,4");
+  });
+
+  it("traces holes and L shapes with exact runs", () => {
+    // L tromino: 6 runs.
+    const l = new Uint8Array([255, 255, 255, 0]);
+    const lPath = selectionMaskBoundaryPath(l, 2, 2);
+    expect(lPath.match(/M/g)?.length ?? 0).toBe(6);
+    expect(lPath).toContain("M0,0L2,0");
+    // 5x5 box with the center pixel missing: outer rect plus hole rect.
+    const donut = new Uint8Array(5 * 5).fill(255);
+    donut[2 * 5 + 2] = 0;
+    const donutPath = selectionMaskBoundaryPath(donut, 5, 5);
+    expect(donutPath.match(/M/g)?.length ?? 0).toBe(8);
+    expect(donutPath).toContain("M0,0L5,0");
+    expect(donutPath).toContain("M2,2L3,2");
   });
 });

@@ -314,4 +314,4 @@
 - [x] Selection boolean pure helpers + unit tests (5 passed)
 - [x] Engine floating mask + merge gating + combine ops + pointer wiring + eyedropper guard + test hook
 - [x] UI hints (toolbar title, shortcuts entry, rectselect options label, en + pt-BR)
-- [x] E2E @recent (5 boolean tests green); build + unit (396) clean; docs updated
+- [x] E2E @recent (5 boolean + outline-shape tests green); build + unit (401) clean; docs updated

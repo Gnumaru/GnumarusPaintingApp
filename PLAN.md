@@ -505,5 +505,5 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Modifiers on rectselect left-drag release: plain = replace (status quo), Shift = union (add), Ctrl+Shift (or Cmd+Shift) = intersect (keep overlap; empty clears the selection), Alt+Shift = subtract (no overlap = no-op).
 - Floating selections gain a `mask` (bbox bytes, 0/255); merge copies only masked pixels; boolean ops rebuild one layer-aligned floating via nearest sampling (same quality as merge), single history entry; intersect-empty restores pixels via commit; disjoint subtract is a no-op.
 - Ops combine with the active floating on the same cell/texture (any placement, nearest-mapped); otherwise fall back to plain cut. Ctrl no longer summons the temporary eyedropper while rectselect is active.
-- Rubber band still shows the drag rect; ants show the result bbox. Shortcuts modal + toolbar hint + rectselect options hint document the modifiers (en + pt-BR).
+- Rubber band still shows the drag rect; ants trace the true masked boundary (bbox quad only for plain rects). Shortcuts modal + toolbar hint + rectselect options hint document the modifiers (en + pt-BR).
 - Pure rect/mask helpers in `GnumarusSelectionBoolean.ts` + unit tests; e2e @recent (union/intersect/subtract/empty-clear/no-op) via layer pixels + floating hook.

@@ -5841,6 +5841,23 @@ async function selectionOverlayDisplay(page: import("@playwright/test").Page): P
   });
 }
 
+async function selectionMaskDisplay(page: import("@playwright/test").Page): Promise<string> {
+  return page.evaluate(() => {
+    const root = document.querySelector("gnumarus-shell")?.shadowRoot;
+    const path = root?.getElementById("canvasHost")?.querySelector('[data-testid="selection-mask"]') as SVGPathElement | null;
+    return path?.style.display ?? "missing";
+  });
+}
+
+async function selectionMaskMoves(page: import("@playwright/test").Page): Promise<number> {
+  return page.evaluate(() => {
+    const root = document.querySelector("gnumarus-shell")?.shadowRoot;
+    const path = root?.getElementById("canvasHost")?.querySelector('[data-testid="selection-mask"]') as SVGPathElement | null;
+    const d = path?.getAttribute("d") ?? "";
+    return d.split("M").length - 1;
+  });
+}
+
 async function floatingRect(page: import("@playwright/test").Page): Promise<{
   x: number;
   y: number;
@@ -5926,6 +5943,10 @@ test("rectangular selection shift-drag adds to the selection @recent", async ({ 
   expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 13, height: 13, selected: 18 });
   expect(await readPixel(page, 21, 21)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   expect(await readPixel(page, 15, 15)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  // Two disjoint boxes trace two outlines, not one bbox outline.
+  expect(await selectionOverlayDisplay(page)).toBe("none");
+  expect(await selectionMaskDisplay(page)).toBe("block");
+  expect(await selectionMaskMoves(page)).toBe(8);
 });
 
 test("rectangular selection ctrl-shift-drag intersects the selection @recent", async ({ page }) => {
@@ -5947,6 +5968,9 @@ test("rectangular selection ctrl-shift-drag intersects the selection @recent", a
   expect(await readPixel(page, 12, 12)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 17, 17)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   expect(await readPixel(page, 30, 30)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  // Full-mask result keeps the quad polygon overlay.
+  expect(await selectionOverlayDisplay(page)).toBe("block");
+  expect(await selectionMaskDisplay(page)).toBe("none");
 });
 
 test("rectangular selection ctrl-shift-drag with no overlap clears the selection @recent", async ({ page }) => {
@@ -5986,6 +6010,9 @@ test("rectangular selection alt-shift-drag subtracts from the selection @recent"
   expect(await readPixel(page, 12, 12)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   expect(await readPixel(page, 17, 17)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 30, 30)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  // The notch is traced: outline rendering switches to the mask path.
+  expect(await selectionOverlayDisplay(page)).toBe("none");
+  expect(await selectionMaskDisplay(page)).toBe("block");
 });
 
 test("rectangular selection alt-shift-drag with no overlap changes nothing @recent", async ({ page }) => {
