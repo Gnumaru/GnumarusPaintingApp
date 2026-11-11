@@ -337,3 +337,8 @@
 - [x] Text storage setting (`project`/`html`/`htmlZip`, default `project`) + format `file` refs + archive helpers + unit tests (settings + format, 428 passed)
 - [x] Save/open wiring (raw + zip blobs, decode, stale cleanup) + Settings UI + i18n (en + pt-BR)
 - [x] E2E @recent (4 new: raw/zip reopen, stale switch, corrupt zip); build + unit (428) + recent (37/37) green; docs updated
+- [x] @recent tags removed from all 37 e2e tests (single full suite; `test:e2e` runs everything, `:full` kept as alias); docs updated
+- [x] Text storage `project` value renamed to `embedded` (parse migrates legacy, i18n key renamed, unit + e2e updated)
+- [x] Vector module (dims/unsupported/sanitize/size-inject pure helpers) + format `svgs` refs (exclusivity, archive round-trip, validation) + `svgStorage` setting + unit tests (436 passed)
+- [x] Engine svg pool + async `<img>` derived rasters + guards + picker/menu/action/import + save/open + Settings UI + i18n (en + pt-BR)
+- [x] E2E full suite incl. 8 new svg tests (import/render, occupied-cell, filter warning, invalid doc, svgz decode, invalid archive, compressed/raw/embedded round-trips + stale); build + unit (436) + e2e (268/268) green; docs updated

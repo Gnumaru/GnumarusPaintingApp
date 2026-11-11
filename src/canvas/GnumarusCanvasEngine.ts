@@ -7,6 +7,13 @@ import {
   type GnumarusTextEntry,
 } from "../text/GnumarusText";
 import { sanitizeTextHtml } from "../text/GnumarusTextSanitize";
+import {
+  GNUMARUS_SVG_DEFAULT_SIZE,
+  GNUMARUS_SVG_MAX_DIMENSION,
+  parseSvgDimensions,
+  withSvgSize,
+} from "../vector/GnumarusSvg";
+import type { GnumarusSvgEntry } from "../vector/GnumarusSvg";
 import { layoutTextDocument, parseTextDocument } from "../text/GnumarusTextLayout";
 import { rasterizeLaidOutText } from "../text/GnumarusTextRaster";
 import {
@@ -388,6 +395,8 @@ interface GnumarusCellContent {
   textureId: string | null;
   /** Rich-text entry shown instead of a texture; mutually exclusive with textureId. */
   textId: string | null;
+  /** Vector graphic shown instead of a texture or text; mutually exclusive with both. */
+  svgId: string | null;
   transform: GnumarusLayerTransform;
 }
 
@@ -416,6 +425,7 @@ export interface GnumarusAnimationMatrixView {
     name: string;
     textureId: string | null;
     textId: string | null;
+    svgId: string | null;
     width: number;
     height: number;
     transform: GnumarusLayerTransform;
@@ -433,7 +443,8 @@ export interface GnumarusAnimationProjectData {
   }>;
   textures: GnumarusTexturePixels[];
   texts?: Array<{ id: string; name: string; document: GnumarusTextDocument }>;
-  contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null; transform: GnumarusLayerTransform }>;
+  svgs?: Array<{ id: string; name: string; svg: string }>;
+  contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null; svgId?: string | null; transform: GnumarusLayerTransform }>;
   cells: Array<{ layer: string; frame: number; content: string }>;
   frames: number;
   currentFrame: number;
@@ -575,8 +586,8 @@ export interface GnumarusEngineOptions {
   onTransformChanged?: () => void;
   /** Fired when the text tool requests the text editor for a cell. */
   onTextEditRequested?: (info: { layerId: string; frame: number; contentId: string; textId: string }) => void;
-  /** Fired for user-facing notices that need a toast (e.g. blocked paint on text). */
-  onNotice?: (kind: "text-paint-blocked") => void;
+  /** Fired for user-facing notices that need a toast (blocked paint on derived cells). */
+  onNotice?: (kind: "text-paint-blocked" | "vector-paint-blocked") => void;
   checker?: GnumarusCheckerSettings;
   gridMinZoom?: number;
   gridOpacityPercent?: number;
@@ -629,6 +640,14 @@ export class GnumarusCanvasEngine {
   private textRasters = new Map<string, { buffer: Uint8ClampedArray; width: number; height: number; html: string }>();
   private textCounter = 1;
   private textNameCounter = 1;
+  /** Vector graphic entries by id (source SVG strings). */
+  private svgs = new Map<string, GnumarusSvgEntry>();
+  /** Raster cache by vector id, decoded asynchronously from the SVG source. */
+  private svgRasters = new Map<string, { buffer: Uint8ClampedArray; width: number; height: number; svg: string }>();
+  /** Vector ids with a decode already in flight (never awaited, refresh on arrival). */
+  private svgPending = new Set<string>();
+  private svgCounter = 1;
+  private svgNameCounter = 1;
   private frameCount = 1;
   private currentFrame = 0;
   private frameDurations = new Map<number, number>();
@@ -936,7 +955,7 @@ export class GnumarusCanvasEngine {
   private readonly onTextEditRequested:
     | ((info: { layerId: string; frame: number; contentId: string; textId: string }) => void)
     | undefined;
-  private readonly onNotice: ((kind: "text-paint-blocked") => void) | undefined;
+  private readonly onNotice: ((kind: "text-paint-blocked" | "vector-paint-blocked") => void) | undefined;
 
   constructor(container: HTMLElement, options: GnumarusEngineOptions) {
     this.container = container;
@@ -1380,6 +1399,7 @@ export class GnumarusCanvasEngine {
       name: "C1",
       textureId: "layer0",
       textId: null,
+      svgId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(animationCellKey("layer0", 0), "content1");
@@ -1393,6 +1413,11 @@ export class GnumarusCanvasEngine {
     this.textNameCounter = 1;
     this.texts.clear();
     this.textRasters.clear();
+    this.svgCounter = 1;
+    this.svgNameCounter = 1;
+    this.svgs.clear();
+    this.svgRasters.clear();
+    this.svgPending.clear();
     this.resetSymmetryCenter();
     this.syncAllLayerRenders();
 
@@ -1521,6 +1546,16 @@ export class GnumarusCanvasEngine {
           textures.set(derivedId, { width: raster.width, height: raster.height, buffer: raster.buffer });
           textureId = derivedId;
         }
+      } else if (content.svgId !== null) {
+        const raster = this.rasterizeSvg(content.svgId);
+        if (raster === null) {
+          this.ensureSvgRaster(content.svgId);
+          textureId = null;
+        } else {
+          const derivedId = `svg:${content.svgId}`;
+          textures.set(derivedId, { width: raster.width, height: raster.height, buffer: raster.buffer });
+          textureId = derivedId;
+        }
       }
       contents.set(id, { textureId, transform: content.transform });
     }
@@ -1640,6 +1675,10 @@ export class GnumarusCanvasEngine {
         return { width: 0, height: 0 };
       }
       return size;
+    }
+    if (content.svgId !== null) {
+      const size = this.svgRasterSize(content.svgId);
+      return size === null ? { width: 0, height: 0 } : size;
     }
     if (content.textureId === null) {
       return { width: 0, height: 0 };
@@ -2041,26 +2080,58 @@ export class GnumarusCanvasEngine {
     return this.texts.has(content.textId) ? content.textId : null;
   }
 
-  /** True when the active cell at the current frame shows a text content. */
-  private activeCellHasText(): boolean {
+  /** Vector id of a cell's content, or null (read-only: never creates anything). */
+  getCellSvgId(layerId: string, frame: number): string | null {
+    const contentId = this.cells.get(animationCellKey(layerId, frame));
+    if (contentId === undefined) {
+      return null;
+    }
+    const content = this.contents.get(contentId);
+    if (content === undefined || content.svgId === null) {
+      return null;
+    }
+    return this.svgs.has(content.svgId) ? content.svgId : null;
+  }
+
+  /** True when the cell has no content or its content renders nothing (empty or fully transparent). */
+  isCellContentEmpty(layerId: string, frame: number): boolean {
+    const contentId = this.cells.get(animationCellKey(layerId, frame));
+    if (contentId === undefined) {
+      return true;
+    }
+    const content = this.contents.get(contentId);
+    if (content === undefined) {
+      return true;
+    }
+    if (content.textId !== null || content.svgId !== null) {
+      return false;
+    }
+    if (content.textureId === null) {
+      return true;
+    }
+    return this.isTextureBlank(content.textureId);
+  }
+
+  /**
+   * Paint-guard for derived cells: pixel tools cannot paint rasterized
+   * text or vector graphics (rasters are derived and re-generated from
+   * the source document). Notifies the shell once per blocked gesture
+   * so it can toast (text suggests rasterizing).
+   */
+  private denyPaintOnDerived(): boolean {
     const layer = this.activeLayer();
     if (layer === null) {
       return false;
     }
-    return this.getCellTextId(layer.id, this.currentFrame) !== null;
-  }
-
-  /**
-   * Paint-guard for text cells: pixel tools cannot paint rasterized text
-   * (the raster is derived and re-generated on edit). Notifies the shell
-   * once per blocked gesture so it can toast + suggest rasterizing.
-   */
-  private denyPaintOnText(): boolean {
-    if (!this.activeCellHasText()) {
-      return false;
+    if (this.getCellTextId(layer.id, this.currentFrame) !== null) {
+      this.onNotice?.("text-paint-blocked");
+      return true;
     }
-    this.onNotice?.("text-paint-blocked");
-    return true;
+    if (this.getCellSvgId(layer.id, this.currentFrame) !== null) {
+      this.onNotice?.("vector-paint-blocked");
+      return true;
+    }
+    return false;
   }
 
   getAnimationMatrix(): GnumarusAnimationMatrixView {
@@ -2092,6 +2163,7 @@ export class GnumarusCanvasEngine {
           name: content.name,
           textureId: content.textureId,
           textId: content.textId,
+          svgId: content.svgId,
           width: size.width,
           height: size.height,
           transform: { ...content.transform },
@@ -2128,6 +2200,7 @@ export class GnumarusCanvasEngine {
       name: `C${this.contentCounter - 1}`,
       textureId,
       textId: null,
+      svgId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(animationCellKey(layerId, frame), contentId);
@@ -2154,6 +2227,7 @@ export class GnumarusCanvasEngine {
       name: `C${this.contentCounter - 1}`,
       textureId: null,
       textId: null,
+      svgId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(animationCellKey(layerId, frame), contentId);
@@ -2244,7 +2318,7 @@ export class GnumarusCanvasEngine {
     if (content.textureId === textureId) {
       return false;
     }
-    if (content.textId !== null) {
+    if (content.textId !== null || content.svgId !== null) {
       return false;
     }
     if (content.textId !== null) {
@@ -2304,7 +2378,7 @@ export class GnumarusCanvasEngine {
     if (content.textId === textId) {
       return false;
     }
-    if (content.textureId !== null) {
+    if (content.textureId !== null || content.svgId !== null) {
       return false;
     }
     content.textId = textId;
@@ -2334,6 +2408,7 @@ export class GnumarusCanvasEngine {
       name: `C${this.contentCounter - 1}`,
       textureId: null,
       textId,
+      svgId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(animationCellKey(layerId, frame), contentId);
@@ -2363,6 +2438,7 @@ export class GnumarusCanvasEngine {
       name: `C${this.contentCounter - 1}`,
       textureId: null,
       textId,
+      svgId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(animationCellKey(layerId, frame), contentId);
@@ -2499,6 +2575,7 @@ export class GnumarusCanvasEngine {
       name: `C${this.contentCounter - 1}`,
       textureId,
       textId: null,
+      svgId: null,
       transform: { ...content.transform },
     });
     this.cells.set(key, bakedId);
@@ -2571,6 +2648,209 @@ export class GnumarusCanvasEngine {
     };
   }
 
+  private nextSvgId(): string {
+    return `svg${this.svgCounter++}`;
+  }
+
+  private nextSvgName(): string {
+    return `V${this.svgNameCounter++}`;
+  }
+
+  /** All vector entries (for pickers), sorted by name. */
+  getSvgEntries(): GnumarusSvgEntry[] {
+    return [...this.svgs.values()]
+      .map((entry) => ({ id: entry.id, name: entry.name, svg: entry.svg }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  /** Current SVG source of a vector entry, or null. */
+  getSvgDocument(svgId: string): { svg: string } | null {
+    const entry = this.svgs.get(svgId);
+    return entry === undefined ? null : { svg: entry.svg };
+  }
+
+  /** Create a vector entry (no history; structural like text creation). */
+  createSvgEntry(svg: string, name?: string): string {
+    const id = this.nextSvgId();
+    this.svgs.set(id, { id, name: name ?? this.nextSvgName(), svg });
+    return id;
+  }
+
+  /** True when a texture buffer is fully transparent. */
+  private isTextureBlank(textureId: string): boolean {
+    const texture = this.textures.get(textureId);
+    if (texture === undefined) {
+      return true;
+    }
+    for (let index = 3; index < texture.buffer.length; index += 4) {
+      if (texture.buffer[index] !== 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Resolve a cell for an SVG import: reuse the cell's empty content (a
+   * blank texture is detached, dropped when unshared), or create a fresh
+   * vector content. Non-empty contents are refused (callers show the
+   * occupied-cell error), so imports never destroy work.
+   */
+  ensureSvgContent(layerId: string, frame: number, svg: string, name?: string): { contentId: string; svgId: string } | null {
+    if (this.findLayer(layerId) === null) {
+      return null;
+    }
+    if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
+      return null;
+    }
+    const key = animationCellKey(layerId, frame);
+    const contentId = this.cells.get(key);
+    const content = contentId === undefined ? undefined : this.contents.get(contentId);
+    if (content !== undefined) {
+      if (content.textId !== null || content.svgId !== null) {
+        return null;
+      }
+      if (content.textureId !== null) {
+        if (!this.isTextureBlank(content.textureId)) {
+          return null;
+        }
+        let shared = false;
+        for (const other of this.contents.values()) {
+          if (other !== content && other.textureId === content.textureId) {
+            shared = true;
+            break;
+          }
+        }
+        if (!shared) {
+          this.textures.delete(content.textureId);
+        }
+        content.textureId = null;
+      }
+      const svgId = this.createSvgEntry(svg, name);
+      content.svgId = svgId;
+      this.ensureSvgRaster(svgId);
+      this.syncAllLayerRenders();
+      this.refreshLayerStacking();
+      this.render();
+      this.onPixelsChanged();
+      this.onLayersChanged?.();
+      return { contentId: content.id, svgId };
+    }
+    const svgId = this.createSvgEntry(svg, name);
+    const createdId = this.nextContentId();
+    this.contents.set(createdId, {
+      id: createdId,
+      name: `C${this.contentCounter - 1}`,
+      textureId: null,
+      textId: null,
+      svgId,
+      transform: { ...IDENTITY_LAYER_TRANSFORM },
+    });
+    this.cells.set(key, createdId);
+    this.ensureSvgRaster(svgId);
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return { contentId: createdId, svgId };
+  }
+
+  /**
+   * Kick off the asynchronous raster decode for a vector entry (no-op when
+   * cached or already in flight). Refreshes the canvas when it arrives.
+   */
+  ensureSvgRaster(svgId: string): void {
+    const entry = this.svgs.get(svgId);
+    if (entry === undefined || this.svgRasters.has(svgId) || this.svgPending.has(svgId)) {
+      return;
+    }
+    this.svgPending.add(svgId);
+    void this.decodeSvgRaster(svgId, entry.svg).finally(() => {
+      this.svgPending.delete(svgId);
+    });
+  }
+
+  private async decodeSvgRaster(svgId: string, svg: string): Promise<void> {
+    // NOTE: <img> decoding (not createImageBitmap, which rejects SVG in
+    // headless Chromium) with an object URL; external resources never load.
+    let url = "";
+    try {
+      const dims = parseSvgDimensions(svg) ?? {
+        width: GNUMARUS_SVG_DEFAULT_SIZE,
+        height: GNUMARUS_SVG_DEFAULT_SIZE,
+      };
+      const width = Math.min(GNUMARUS_SVG_MAX_DIMENSION, Math.max(1, dims.width));
+      const height = Math.min(GNUMARUS_SVG_MAX_DIMENSION, Math.max(1, dims.height));
+      const sized = withSvgSize(svg, width, height);
+      url = URL.createObjectURL(new Blob([sized], { type: "image/svg+xml" }));
+      const image = new Image();
+      await new Promise<void>((resolve, reject) => {
+        image.onload = (): void => resolve();
+        image.onerror = (): void => reject(new Error("undecodable"));
+        image.src = url;
+      });
+      const naturalWidth = Math.max(1, image.naturalWidth || width);
+      const naturalHeight = Math.max(1, image.naturalHeight || height);
+      const canvas = document.createElement("canvas");
+      canvas.width = naturalWidth;
+      canvas.height = naturalHeight;
+      const context = canvas.getContext("2d");
+      if (context === null) {
+        return;
+      }
+      context.drawImage(image, 0, 0);
+      const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+      this.svgRasters.set(svgId, {
+        buffer: new Uint8ClampedArray(imageData.data),
+        width: canvas.width,
+        height: canvas.height,
+        svg,
+      });
+      this.syncAllLayerRenders();
+      this.refreshLayerStacking();
+      this.render();
+      this.onPixelsChanged();
+      this.onLayersChanged?.();
+    } catch {
+      // Undecodable SVGs keep their source (openable/savable) but render nothing.
+    } finally {
+      if (url !== "") {
+        URL.revokeObjectURL(url);
+      }
+    }
+  }
+
+  /**
+   * Rasterize a vector entry from the cache. Returns null when the async
+   * decode has not finished yet (callers should kick ensureSvgRaster).
+   */
+  rasterizeSvg(svgId: string): { buffer: Uint8ClampedArray; width: number; height: number } | null {
+    const entry = this.svgs.get(svgId);
+    if (entry === undefined) {
+      return null;
+    }
+    const cached = this.svgRasters.get(svgId);
+    if (cached !== undefined && cached.svg === entry.svg) {
+      return { buffer: cached.buffer, width: cached.width, height: cached.height };
+    }
+    return null;
+  }
+
+  /** Raster (or intrinsic) size of a vector entry in layout pixels. */
+  svgRasterSize(svgId: string): { width: number; height: number } | null {
+    const raster = this.rasterizeSvg(svgId);
+    if (raster !== null) {
+      return { width: raster.width, height: raster.height };
+    }
+    const entry = this.svgs.get(svgId);
+    if (entry === undefined) {
+      return null;
+    }
+    return parseSvgDimensions(entry.svg);
+  }
+
   /**
    * Ensure the cell has content backed by a texture, creating both as needed.
    * Painting and transforming an empty cell materialize it so the canvas
@@ -2597,6 +2877,7 @@ export class GnumarusCanvasEngine {
       name: `C${this.contentCounter - 1}`,
       textureId: null,
       textId: null,
+      svgId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     };
     this.contents.set(createdId, created);
@@ -2618,14 +2899,15 @@ export class GnumarusCanvasEngine {
         name: `C${this.contentCounter - 1}`,
         textureId: null,
         textId: null,
+        svgId: null,
         transform: { ...IDENTITY_LAYER_TRANSFORM },
       };
       this.contents.set(createdId, content);
       this.cells.set(key, createdId);
       contentId = createdId;
     }
-    if (content.textId !== null) {
-      // Text contents have no paintable texture (derived raster instead);
+    if (content.textId !== null || content.svgId !== null) {
+      // Derived contents (text/vector) have no paintable texture;
       // callers needing only the content/transform must use ensureCellContentOnly.
       return null;
     }
@@ -2675,11 +2957,17 @@ export class GnumarusCanvasEngine {
         name: text.name,
         document: { ...text.document },
       })),
+      svgs: [...this.svgs.values()].map((vector) => ({
+        id: vector.id,
+        name: vector.name,
+        svg: vector.svg,
+      })),
       contents: [...this.contents.values()].map((content) => ({
         id: content.id,
         name: content.name,
         textureId: content.textureId,
         textId: content.textId,
+        svgId: content.svgId,
         transform: { ...content.transform },
       })),
       cells: [...this.cells.entries()].map(([key, content]) => {
@@ -3955,6 +4243,7 @@ export class GnumarusCanvasEngine {
         name: `C${this.contentCounter - 1}`,
         textureId: input.id,
         textId: null,
+        svgId: null,
         transform: {
           ...input.transform,
           rotation: normalizeRotation(input.transform.rotation),
@@ -4001,7 +4290,8 @@ export class GnumarusCanvasEngine {
       }>;
       textures: GnumarusTexturePixels[];
       texts?: Array<{ id: string; name: string; document: GnumarusTextDocument }>;
-      contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null; transform: GnumarusLayerTransform }>;
+      svgs?: Array<{ id: string; name: string; svg: string }>;
+      contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null; svgId?: string | null; transform: GnumarusLayerTransform }>;
       cells: Array<{ layer: string; frame: number; content: string }>;
       frames: number;
       currentFrame: number;
@@ -4073,6 +4363,9 @@ export class GnumarusCanvasEngine {
     }
     this.texts.clear();
     this.textRasters.clear();
+    this.svgs.clear();
+    this.svgRasters.clear();
+    this.svgPending.clear();
     const textIds = new Set<string>();
     for (const text of data.texts ?? []) {
       if (typeof text.id !== "string" || text.id === "" || typeof text.name !== "string" || text.name === "") {
@@ -4091,12 +4384,33 @@ export class GnumarusCanvasEngine {
         document: { html: sanitizeTextHtml(text.document.html) },
       });
     }
+    this.svgs.clear();
+    this.svgRasters.clear();
+    this.svgPending.clear();
+    const svgIds = new Set<string>();
+    for (const vector of data.svgs ?? []) {
+      if (typeof vector.id !== "string" || vector.id === "" || typeof vector.name !== "string" || vector.name === "") {
+        throw new Error("Project has an invalid vector graphic entry.");
+      }
+      if (svgIds.has(vector.id)) {
+        throw new Error(`Project has a duplicate vector graphic id: ${vector.id}.`);
+      }
+      if (typeof vector.svg !== "string" || vector.svg.length === 0) {
+        throw new Error(`Vector graphic ${vector.id} has an invalid document.`);
+      }
+      svgIds.add(vector.id);
+      this.svgs.set(vector.id, { id: vector.id, name: vector.name, svg: vector.svg });
+      this.ensureSvgRaster(vector.id);
+    }
     for (const content of data.contents) {
       if (content.textId !== null && content.textId !== undefined && !textIds.has(content.textId)) {
         throw new Error(`Content references a missing text: ${content.id}`);
       }
-      if (content.textId != null && content.textureId != null) {
-        throw new Error(`Content has both a texture and a text: ${content.id}`);
+      if (content.svgId !== null && content.svgId !== undefined && !svgIds.has(content.svgId)) {
+        throw new Error(`Content references a missing vector graphic: ${content.id}`);
+      }
+      if ([content.textureId, content.textId, content.svgId].filter((ref) => ref != null).length > 1) {
+        throw new Error(`Content has more than one texture, text or vector graphic: ${content.id}`);
       }
     }
     for (const content of data.contents) {
@@ -4105,6 +4419,7 @@ export class GnumarusCanvasEngine {
         name: content.name,
         textureId: content.textureId,
         textId: content.textId ?? null,
+        svgId: content.svgId ?? null,
         transform: { ...content.transform, rotation: normalizeRotation(content.transform.rotation) },
       });
     }
@@ -4191,6 +4506,20 @@ export class GnumarusCanvasEngine {
     this.textureNameCounter = Math.max(maxTextureName, data.textures.length + 1, 1);
     this.textCounter = Math.max(maxText, (data.texts ?? []).length + 1, 1);
     this.textNameCounter = Math.max(maxTextName, (data.texts ?? []).length + 1, 1);
+    let maxSvg = 0;
+    let maxSvgName = 0;
+    for (const vector of data.svgs ?? []) {
+      const idMatch = /^svg(\d+)$/.exec(vector.id);
+      if (idMatch?.[1] !== undefined) {
+        maxSvg = Math.max(maxSvg, Number.parseInt(idMatch[1], 10) + 1);
+      }
+      const nameMatch = /^V(\d+)$/.exec(vector.name);
+      if (nameMatch?.[1] !== undefined) {
+        maxSvgName = Math.max(maxSvgName, Number.parseInt(nameMatch[1], 10) + 1);
+      }
+    }
+    this.svgCounter = Math.max(maxSvg, (data.svgs ?? []).length + 1, 1);
+    this.svgNameCounter = Math.max(maxSvgName, (data.svgs ?? []).length + 1, 1);
     const top = this.layers[this.layers.length - 1];
     if (top !== undefined) {
       this.activeLayerId = top.id;
@@ -4271,6 +4600,7 @@ export class GnumarusCanvasEngine {
       name: "C1",
       textureId: "layer0",
       textId: null,
+      svgId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(animationCellKey("layer0", 0), "content1");
@@ -4282,6 +4612,11 @@ export class GnumarusCanvasEngine {
     this.textNameCounter = 1;
     this.texts.clear();
     this.textRasters.clear();
+    this.svgCounter = 1;
+    this.svgNameCounter = 1;
+    this.svgs.clear();
+    this.svgRasters.clear();
+    this.svgPending.clear();
     this.frameCount = 1;
     this.currentFrame = 0;
     this.frameNames = [defaultFrameName(0)];
@@ -8639,7 +8974,7 @@ export class GnumarusCanvasEngine {
     if (layer === null) {
       return false;
     }
-    if (this.denyPaintOnText()) {
+    if (this.denyPaintOnDerived()) {
       return false;
     }
     const ensured = this.ensureCellContent(layer.id, this.currentFrame);
@@ -9801,7 +10136,7 @@ export class GnumarusCanvasEngine {
         if (layer === null) {
           return;
         }
-        if (this.denyPaintOnText()) {
+        if (this.denyPaintOnDerived()) {
           return;
         }
 
@@ -9829,7 +10164,7 @@ export class GnumarusCanvasEngine {
         if (layer === null) {
           return;
         }
-        if (this.denyPaintOnText()) {
+        if (this.denyPaintOnDerived()) {
           return;
         }
         const pixel = this.toImagePixel(event.clientX, event.clientY);
@@ -9848,7 +10183,7 @@ export class GnumarusCanvasEngine {
         if (layer === null) {
           return;
         }
-        if (this.denyPaintOnText()) {
+        if (this.denyPaintOnDerived()) {
           return;
         }
         const pixel = this.toImagePixel(event.clientX, event.clientY);
@@ -9867,7 +10202,7 @@ export class GnumarusCanvasEngine {
         if (layer === null) {
           return;
         }
-        if (this.denyPaintOnText()) {
+        if (this.denyPaintOnDerived()) {
           return;
         }
         const start = this.clientToLayerImageFloat(event.clientX, event.clientY);
@@ -9889,7 +10224,7 @@ export class GnumarusCanvasEngine {
         if (layer === null) {
           return;
         }
-        if (this.denyPaintOnText()) {
+        if (this.denyPaintOnDerived()) {
           return;
         }
         const point = this.clientToLayerImageFloat(event.clientX, event.clientY);
@@ -9942,7 +10277,7 @@ export class GnumarusCanvasEngine {
         if (layer === null) {
           return;
         }
-        if (this.denyPaintOnText()) {
+        if (this.denyPaintOnDerived()) {
           return;
         }
 
@@ -9997,7 +10332,7 @@ export class GnumarusCanvasEngine {
           return;
         }
         if (this.curvePhase === "idle") {
-          if (this.denyPaintOnText()) {
+          if (this.denyPaintOnDerived()) {
             return;
           }
           const ensured = this.ensureCellContent(layer.id, this.currentFrame);
@@ -10061,7 +10396,7 @@ export class GnumarusCanvasEngine {
         if (layer === null) {
           return;
         }
-        if (this.denyPaintOnText()) {
+        if (this.denyPaintOnDerived()) {
           return;
         }
         const cursor = this.clientToLayerImageFloat(event.clientX, event.clientY);
@@ -10089,7 +10424,7 @@ export class GnumarusCanvasEngine {
       if (layer === null) {
         return;
       }
-      if (this.denyPaintOnText()) {
+      if (this.denyPaintOnDerived()) {
         return;
       }
       const ensured = this.ensureCellContent(layer.id, this.currentFrame);
@@ -10885,7 +11220,7 @@ export class GnumarusCanvasEngine {
         }
         if (event.key === "Delete") {
           event.preventDefault();
-          if (this.denyPaintOnText()) {
+          if (this.denyPaintOnDerived()) {
             return;
           }
           this.clearCurrentCellTexture();

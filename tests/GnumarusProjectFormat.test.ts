@@ -13,6 +13,11 @@ import {
   parseTextFilePath,
   serializeProject,
   staleTextureCandidates,
+  decodeSvgFile,
+  encodeSvgArchive,
+  parseSvgFilePath,
+  svgArchivePath,
+  svgFilePath,
   textArchivePath,
   textFilePath,
   textureAlphaCompanion,
@@ -38,6 +43,7 @@ describe("GnumarusProjectFormat", () => {
         name: "C1",
         textureId: "layer0",
         textId: null,
+        svgId: null,
         transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
       },
     ]);
@@ -96,6 +102,7 @@ describe("GnumarusProjectFormat", () => {
     expect(parsed.animation.contents[0]).toMatchObject({
       textureId: "layer0",
       textId: null,
+      svgId: null,
       transform: { x: 1, y: 2, rotation: 0.5, flipX: true, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
     });
     expect(parsed.layers[0]).toMatchObject({ opacity: 0.5, lockedChannels: { r: true, g: false, b: false, a: false } });
@@ -110,6 +117,7 @@ describe("GnumarusProjectFormat", () => {
       name: "Content 2",
       textureId: null,
       textId: null,
+      svgId: null,
       transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
     });
     project.animation.cells.push(
@@ -405,6 +413,7 @@ describe("GnumarusProjectFormat", () => {
       name: "C2",
       textureId: null,
       textId: "text1",
+      svgId: null,
       transform: { x: 5, y: 5, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
     });
     project.animation.cells.push({ layer: "layer0", frame: 1, content: "content2" });
@@ -533,5 +542,67 @@ describe("GnumarusProjectFormat", () => {
     duplicate.animation.texts.push({ id: "t1", name: "A", file: "texts/shared.html" });
     duplicate.animation.texts.push({ id: "t2", name: "B", file: "texts/shared.html" });
     expect(() => parseProject(serializeProject(duplicate))).toThrow(GnumarusProjectError);
+  });
+
+  it("maps vector graphics to external files and back", () => {
+    expect(svgFilePath("vec1")).toBe("svgs/vec1.svg");
+    expect(svgArchivePath("vec1")).toBe("svgs/vec1.zip");
+    expect(parseSvgFilePath("svgs/vec1.svg")).toBe("svgs/vec1.svg");
+    expect(parseSvgFilePath("svgs/my-vec_2.zip")).toBe("svgs/my-vec_2.zip");
+    expect(parseSvgFilePath("svgs/vec1.html")).toBeNull();
+    expect(parseSvgFilePath("svgs/../vec1.svg")).toBeNull();
+    expect(parseSvgFilePath("texts/vec1.svg")).toBeNull();
+    expect(parseSvgFilePath(undefined)).toBeNull();
+  });
+
+  it("round-trips single-file vector archives", () => {
+    const svg = '<svg width="10" height="10"><rect width="10" height="10"/></svg>';
+    const bytes = encodeSvgArchive("vec1", svg);
+    expect(decodeSvgFile("svgs/vec1.zip", bytes)).toBe(svg);
+    expect(decodeSvgFile("svgs/vec1.svg", new TextEncoder().encode(svg))).toBe(svg);
+    expect(() => decodeSvgFile("svgs/vec1.zip", new Uint8Array([1, 2, 3]))).toThrow(GnumarusProjectError);
+    expect(() =>
+      decodeSvgFile("svgs/vec1.zip", zipSync({ "other.svg": new TextEncoder().encode(svg) }, { level: 9 })),
+    ).toThrow(GnumarusProjectError);
+    expect(() => decodeSvgFile("texts/vec1.svg", bytes)).toThrow(GnumarusProjectError);
+  });
+
+  it("parses external vector references and rejects bad ones", () => {
+    const project = createDefaultProject(8, 8);
+    project.animation.svgs.push({ id: "vec1", name: "V1", document: { svg: "<svg></svg>" } });
+    project.animation.svgs.push({ id: "vec2", name: "V2", file: "svgs/vec2.zip" });
+    project.animation.contents.push({
+      id: "content2",
+      name: "C2",
+      textureId: null,
+      textId: null,
+      svgId: "vec1",
+      transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
+    });
+    const parsed = parseProject(serializeProject(project));
+    expect(parsed.animation.svgs).toEqual([
+      { id: "vec1", name: "V1", document: { svg: "<svg></svg>" } },
+      { id: "vec2", name: "V2", file: "svgs/vec2.zip" },
+    ]);
+    expect(parsed.animation.contents[1]).toMatchObject({ svgId: "vec1" });
+    expect(collectProjectFileReferences(parsed)).toContain("svgs/vec2.zip");
+    const both = createDefaultProject(8, 8);
+    both.animation.svgs.push({ id: "v", name: "V", document: { svg: "<svg></svg>" }, file: "svgs/v.svg" } as never);
+    expect(() => parseProject(serializeProject(both))).toThrow(GnumarusProjectError);
+    const neither = createDefaultProject(8, 8);
+    neither.animation.svgs.push({ id: "v", name: "V" } as never);
+    expect(() => parseProject(serializeProject(neither))).toThrow(GnumarusProjectError);
+    const duplicate = createDefaultProject(8, 8);
+    duplicate.animation.svgs.push({ id: "v1", name: "A", file: "svgs/shared.svg" });
+    duplicate.animation.svgs.push({ id: "v2", name: "B", file: "svgs/shared.svg" });
+    expect(() => parseProject(serializeProject(duplicate))).toThrow(GnumarusProjectError);
+    const unknown = createDefaultProject(8, 8);
+    unknown.animation.contents[0] = { ...unknown.animation.contents[0], svgId: "missing" };
+    expect(() => parseProject(serializeProject(unknown))).toThrow(GnumarusProjectError);
+    const dual = createDefaultProject(8, 8);
+    dual.animation.texts.push({ id: "t", name: "T", document: { html: "<div>x</div>" } });
+    dual.animation.contents[0] = { ...dual.animation.contents[0], textId: "t", svgId: "v" };
+    dual.animation.svgs.push({ id: "v", name: "V", document: { svg: "<svg></svg>" } });
+    expect(() => parseProject(serializeProject(dual))).toThrow(GnumarusProjectError);
   });
 });

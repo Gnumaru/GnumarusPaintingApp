@@ -35,6 +35,15 @@ export interface GnumarusTextMeta {
   file?: string;
 }
 
+export interface GnumarusSvgMeta {
+  id: string;
+  name: string;
+  /** Inline SVG document (embedded storage); mutually exclusive with file. */
+  document?: { svg: string };
+  /** External file under svgs/ (raw .svg or single-file .zip); mutually exclusive with document. */
+  file?: string;
+}
+
 export interface GnumarusContentMeta {
   id: string;
   name: string;
@@ -42,6 +51,8 @@ export interface GnumarusContentMeta {
   textureId: string | null;
   /** Rich text shown instead of a texture; mutually exclusive with textureId. */
   textId: string | null;
+  /** Vector graphic shown instead of a texture or text; mutually exclusive with both. */
+  svgId: string | null;
   transform: GnumarusLayerTransform;
 }
 
@@ -84,6 +95,7 @@ export interface GnumarusAnimationMeta {
   activeAnimation: string | null;
   textures: GnumarusTextureMeta[];
   texts: GnumarusTextMeta[];
+  svgs: GnumarusSvgMeta[];
   contents: GnumarusContentMeta[];
   cells: GnumarusMatrixCellRef[];
 }
@@ -149,6 +161,58 @@ export function parseTextFilePath(file: unknown): string | null {
   return match === null ? null : file;
 }
 
+/** Raw SVG file for one vector entry (`raw` svg storage mode). */
+export function svgFilePath(svgId: string): string {
+  return `svgs/${svgId}.svg`;
+}
+
+/** Single-file ZIP holding one vector entry (`compressed` svg storage mode). */
+export function svgArchivePath(svgId: string): string {
+  return `svgs/${svgId}.zip`;
+}
+
+/** Valid external vector file: `svgs/<stem>.svg` or `svgs/<stem>.zip` (no traversal). */
+export function parseSvgFilePath(file: unknown): string | null {
+  if (typeof file !== "string") {
+    return null;
+  }
+  const match = /^svgs\/([A-Za-z0-9_-]+)\.(svg|zip)$/.exec(file);
+  return match === null ? null : file;
+}
+
+/** Pack one SVG document as a single-file ZIP (`<svgId>.svg` inside). */
+export function encodeSvgArchive(svgId: string, svg: string): Uint8Array {
+  return zipSync({ [`${svgId}.svg`]: new TextEncoder().encode(svg) }, { level: 9 });
+}
+
+/**
+ * Decode an external vector file to its SVG string. Raw `.svg` decodes
+ * directly; `.zip` must hold exactly the matching `<stem>.svg` entry.
+ * Throws GnumarusProjectError on corrupt archives or mismatched entries.
+ */
+export function decodeSvgFile(file: string, bytes: Uint8Array): string {
+  const valid = parseSvgFilePath(file);
+  if (valid === null) {
+    throw new GnumarusProjectError(`project.json has a vector graphic with an invalid file: ${file}`);
+  }
+  if (file.endsWith(".svg")) {
+    return new TextDecoder().decode(bytes);
+  }
+  let entries: Record<string, Uint8Array>;
+  try {
+    entries = unzipSync(bytes) as Record<string, Uint8Array>;
+  } catch {
+    throw new GnumarusProjectError(`vector file is not a valid archive: ${file}`);
+  }
+  const stem = file.slice("svgs/".length, -".zip".length);
+  const expected = `${stem}.svg`;
+  const names = Object.keys(entries);
+  if (names.length !== 1 || names[0] !== expected || entries[expected] === undefined) {
+    throw new GnumarusProjectError(`vector archive has no ${expected} inside: ${file}`);
+  }
+  return new TextDecoder().decode(entries[expected] as Uint8Array);
+}
+
 /** Pack one text document as a single-file ZIP (`<textId>.html` inside). */
 export function encodeTextArchive(textId: string, html: string): Uint8Array {
   return zipSync({ [`${textId}.html`]: new TextEncoder().encode(html) }, { level: 9 });
@@ -207,12 +271,14 @@ export function createDefaultProject(width: number, height: number): GnumarusPro
       activeAnimation: null,
       textures: [{ id: "layer0", name: "t1", width, height, file: textureFilePath("layer0") }],
       texts: [],
+      svgs: [],
       contents: [
         {
           id: "content1",
           name: "C1",
           textureId: "layer0",
           textId: null,
+          svgId: null,
           transform: { ...IDENTITY_LAYER_TRANSFORM },
         },
       ],
@@ -280,6 +346,11 @@ export function collectProjectFileReferences(project: GnumarusProjectMeta): Set<
   for (const text of project.animation.texts) {
     if (text.file !== undefined) {
       out.add(text.file);
+    }
+  }
+  for (const vector of project.animation.svgs) {
+    if (vector.file !== undefined) {
+      out.add(vector.file);
     }
   }
   for (const layer of project.layers) {
@@ -366,7 +437,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
   if (!isRecord(value)) {
     throw new GnumarusProjectError("project.json has an invalid animation section");
   }
-  const { frames, currentFrame, defaultFrameDuration, frameDurations, frameNames, namedAnimations, activeAnimation, textures, texts, contents, cells } = value;
+  const { frames, currentFrame, defaultFrameDuration, frameDurations, frameNames, namedAnimations, activeAnimation, textures, texts, svgs, contents, cells } = value;
   if (!Number.isInteger(frames) || (frames as number) < 1) {
     throw new GnumarusProjectError("project.json has an invalid frame count");
   }
@@ -410,6 +481,8 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
   }
   const checkedTexts = parseTextMetas(texts);
   const textIds = new Set(checkedTexts.map((entry) => entry.id));
+  const checkedSvgs = parseSvgMetas(svgs);
+  const svgIds = new Set(checkedSvgs.map((entry) => entry.id));
   if (!Array.isArray(contents)) {
     throw new GnumarusProjectError("project.json has invalid contents");
   }
@@ -424,7 +497,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
       throw new GnumarusProjectError("project.json has duplicate content ids");
     }
     contentIds.add(id);
-    const { name, textureId, textId, transform } = entry;
+    const { name, textureId, textId, svgId, transform } = entry;
     if (textureId !== null && textureId !== undefined && typeof textureId !== "string") {
       throw new GnumarusProjectError("project.json has a content with an invalid texture reference");
     }
@@ -439,14 +512,23 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
     if (resolvedText !== null && !textIds.has(resolvedText)) {
       throw new GnumarusProjectError("project.json has a content with an unknown text");
     }
-    if (resolvedTexture !== null && resolvedText !== null) {
-      throw new GnumarusProjectError("project.json has a content with both a texture and a text");
+    if (svgId !== null && svgId !== undefined && typeof svgId !== "string") {
+      throw new GnumarusProjectError("project.json has a content with an invalid vector reference");
+    }
+    const resolvedSvg = svgId === undefined ? null : (svgId as string | null);
+    if (resolvedSvg !== null && !svgIds.has(resolvedSvg)) {
+      throw new GnumarusProjectError("project.json has a content with an unknown vector graphic");
+    }
+    const linkedKinds = [resolvedTexture, resolvedText, resolvedSvg].filter((ref) => ref !== null).length;
+    if (linkedKinds > 1) {
+      throw new GnumarusProjectError("project.json has a content with more than one texture, text or vector graphic");
     }
     checkedContents.push({
       id,
       name: checkedName(name, "content"),
       textureId: resolvedTexture,
       textId: resolvedText,
+      svgId: resolvedSvg,
       transform: parseLayerTransform(transform),
     });
   }
@@ -534,6 +616,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
     activeAnimation: parseActiveAnimationName(activeAnimation, checkedAnimations),
     textures: checkedTextures,
     texts: checkedTexts,
+    svgs: checkedSvgs,
     contents: checkedContents,
     cells: checkedCells,
   };
@@ -576,6 +659,49 @@ function parseTextMetas(value: unknown): GnumarusTextMeta[] {
         id,
         name: checkedName(name, "text"),
         document: { html: sanitizeTextHtml((document as { html: string }).html) },
+      });
+    }
+  }
+  return checked;
+}
+
+/** Strict vector list (absent in legacy files means none). File contents load separately. */
+function parseSvgMetas(value: unknown): GnumarusSvgMeta[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new GnumarusProjectError("project.json has invalid vector graphics");
+  }
+  const checked: GnumarusSvgMeta[] = [];
+  const seenIds = new Set<string>();
+  const seenFiles = new Set<string>();
+  for (const entry of value) {
+    if (!isRecord(entry)) {
+      throw new GnumarusProjectError("project.json has an invalid vector graphic");
+    }
+    const id = checkedId(entry.id, "vector graphic");
+    if (seenIds.has(id)) {
+      throw new GnumarusProjectError("project.json has duplicate vector graphic ids");
+    }
+    seenIds.add(id);
+    const { name, document, file } = entry;
+    const hasDocument = isRecord(document) && typeof document.svg === "string" && (document.svg as string).length > 0;
+    const svgFile = parseSvgFilePath(file);
+    if ((hasDocument ? 1 : 0) + (svgFile === null ? 0 : 1) !== 1) {
+      throw new GnumarusProjectError("project.json has a vector graphic with an invalid document");
+    }
+    if (svgFile !== null) {
+      if (seenFiles.has(svgFile)) {
+        throw new GnumarusProjectError("project.json has duplicate vector graphic files");
+      }
+      seenFiles.add(svgFile);
+      checked.push({ id, name: checkedName(name, "vector graphic"), file: svgFile });
+    } else {
+      checked.push({
+        id,
+        name: checkedName(name, "vector graphic"),
+        document: { svg: (document as { svg: string }).svg },
       });
     }
   }
@@ -672,6 +798,7 @@ function migrateLegacyLayersToAnimation(
       name: `C${index + 1}`,
       textureId: layer.id,
       textId: null,
+      svgId: null,
       transform: layer.transform !== undefined ? { ...layer.transform } : { ...IDENTITY_LAYER_TRANSFORM },
     });
     cells.push({ layer: layer.id, frame: 0, content: contentId });
@@ -686,6 +813,7 @@ function migrateLegacyLayersToAnimation(
     activeAnimation: null,
     textures,
     texts: [],
+    svgs: [],
     contents,
     cells,
   };

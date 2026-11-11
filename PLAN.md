@@ -368,10 +368,10 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Animation modal rows show `"name": loop, N frames: 1,2,5-8` (new pure `describeNamedAnimation`, runs collapse at 3+); deleting asks in a confirm modal ("Are you sure?", Yes/No).
 - Unit tests for the summary formatter, animated shim round-trip (first-frame decode) and invalid inputs; E2E for JXL still/animated/sheet exports (signature + shim decode), menu renames, palette list, new modal display and delete confirm/cancel.
 
-## 68. Split E2E runs: recent only by default, full on demand (implemented)
-- Playwright tests for recent work carry the `@recent` tag in their titles (7 tests: 4 brush-pressure pencil responses size/opacity/none/both, plus minimum-zoom setting, matrix gear order, tiny-viewport statusbar).
-- `npm run test:e2e` runs only `--grep @recent` (~25 s); `npm run test:e2e:full` runs the whole suite (~6 min, regressions, on explicit request).
-- Convention: tag new E2E tests with `@recent` when they land; move the tag to the next batch when a newer one arrives (untag tests whose feature is no longer "recent").
+## 68. Split E2E runs: recent only by default, full on demand (retired)
+- Playwright tests for recent work used to carry the `@recent` tag in their titles; `npm run test:e2e` ran only `--grep @recent` while `test:e2e:full` ran the whole suite.
+- Convention retired: all 37 `@recent` tags were removed, so the full suite is the only list. `npm run test:e2e` now runs `playwright test` (everything); `test:e2e:full` remains as an alias.
+- Convention: add new E2E tests untagged; they run in the single suite.
 
 ## 69. Texture naming tN, circle default brush, JXL project storage (implemented)
 - Texture display names become lowercase `t1`, `t2`, ... (counter from 1) instead of `T1`: engine `nextTextureName`, project-format defaults, all four importers, legacy `T`/`Texture N` still parsed for the counter. Texture files switch from id-based (`textures/layer0.png`) to positional `textures/t1.jxl` stems recorded in `project.json` (loader already reads the `file` field, so old projects keep loading).
@@ -542,9 +542,17 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - i18n en+pt-BR; unit (sanitizer idempotence, html->runs, layout with stub metrics, format/migration) + e2e @recent (create/edit/share/undo/reopen/export/paint-block/rasterize).
 - Verified: `npm run build` clean, 425 unit tests green, 33/33 `@recent` e2e green (Chromium), full suite untouched per policy.
 
-## 100. Text storage setting: project file vs external HTML (implemented)
-- New `textStorage` storage setting (default `project`): `project` keeps texts inline in project.json exactly as today; `html` writes one `texts/<id>.html` file per text; `htmlZip` writes one `texts/<id>.zip` per text containing a single `<id>.html`.
+## 100. Text storage setting: embedded vs external HTML (implemented)
+- New `textStorage` storage setting (default `embedded`): `embedded` keeps texts inline in project.json exactly as before (legacy stored value `project` migrates); `html` writes one `texts/<id>.html` file per text; `htmlZip` writes one `texts/<id>.zip` per text containing a single `<id>.html`.
 - Format: `GnumarusTextMeta` gets optional `file` (mutually exclusive with inline `document`, path restricted to `texts/<stem>.html|.zip`); `collectProjectFileReferences` includes text files so stale mode-switch leftovers are deleted by the generic stale-path pass; open sniffs per file (extension), so mixed projects open.
 - Settings UI row + reset + persist (same localStorage key), i18n en+pt-BR.
 - Unit (settings parse/serialize, archive encode/decode incl. corrupt, format validation) + e2e @recent (raw save/reopen, zip save/reopen, mode-switch stale cleanup, corrupt zip error).
 - Verified: `npm run build` clean, 428 unit tests green, 37/37 `@recent` e2e green (Chromium), full suite untouched per policy.
+
+## 101. Vector-graphics cell contents via SVG import (implemented)
+- New `svgs` pool beside `textures`/`texts` (`GnumarusSvgEntry { id, name, svg }`); contents gain `svgId` (mutually exclusive with `textureId`/`textId` — triple-exclusivity validated in format and engine load); no vector editing tools in v1.
+- Import only: File > Import SVG menu item + `import-svg` palette action; refuses with an error toast unless the active cell is empty or holds an empty content (blank textures are reused, dropped when unshared); file picker (FS API) for `.svg`/`.svgz` (svgz gunzipped, DOMParser-validated, scripts stripped, unsupported features — filters, path effects, foreign objects, scripts, SMIL, external refs — still imported with a warning toast naming them); rasterized to the cell via async `<img>`-decode derived-raster cache (intrinsic size, 4096 cap; `createImageBitmap` rejects SVG headless), painted into render/export/transform/3D/preview/thumbs like text.
+- Paint/bucket/line/curve/selection/Delete blocked on vector cells with their own toast (no rasterize action in v1).
+- SVG storage setting (`raw`/`compressed`/`embedded`, default `compressed`): `svgs/*.svg`, single-file `svgs/*.zip`, or inline strings; format mirrors text refs; stale cleanup via generic pass; Settings row + shared storage reset + persist; i18n en+pt-BR.
+- Text `project` storage value renamed to `embedded` (legacy stored value migrates; i18n key renamed).
+- Verified: `npm run build` clean, 436 unit tests green, 268/268 full-suite e2e green (Chromium; 8 new svg tests), single suite (all 37 `@recent` tags removed; `test:e2e` now runs everything).

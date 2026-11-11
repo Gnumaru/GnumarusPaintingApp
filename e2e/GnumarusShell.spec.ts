@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { unzipSync, zipSync } from "fflate";
+import { gzipSync, unzipSync, zipSync } from "fflate";
 import { imageToScreenPixel, layerPixelToScreen } from "../src/canvas/GnumarusViewportMath";
 
 interface GnumarusPixel {
@@ -1812,7 +1812,7 @@ test("frames can be removed but never the last one", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Remove frame" })).toBeDisabled();
 });
 
-test("Shift+click selects a frame range with bulk delete @recent", async ({ page }) => {
+test("Shift+click selects a frame range with bulk delete", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
@@ -5475,7 +5475,7 @@ test("Help menu lists every keyboard shortcut in a modal", async ({ page }) => {
   await expect(dialog).toBeHidden();
 });
 
-test("Help menu Source code opens the GitHub project page @recent", async ({ page }) => {
+test("Help menu Source code opens the GitHub project page", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.getByRole("button", { name: "Help" }).click();
@@ -5489,7 +5489,7 @@ test("Help menu Source code opens the GitHub project page @recent", async ({ pag
   await popup.close();
 });
 
-test("language setting translates the interface to Brazilian Portuguese @recent", async ({ page }) => {
+test("language setting translates the interface to Brazilian Portuguese", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await expect(page.getByRole("button", { name: "File", exact: true })).toBeVisible();
@@ -5929,7 +5929,7 @@ async function engineBrushSize(page: import("@playwright/test").Page): Promise<n
   });
 }
 
-test("wheel alone zooms, wheel with modifiers does not @recent", async ({ page }) => {
+test("wheel alone zooms, wheel with modifiers does not", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const canvas = page.locator("gnumarus-shell canvas");
@@ -5948,7 +5948,7 @@ test("wheel alone zooms, wheel with modifiers does not @recent", async ({ page }
   expect((await getViewState(page)).zoom).toBe(afterPlain);
 });
 
-test("ctrl+wheel resizes the brush in whole steps @recent", async ({ page }) => {
+test("ctrl+wheel resizes the brush in whole steps", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   expect(await engineBrushSize(page)).toBe(1);
@@ -5968,7 +5968,7 @@ test("ctrl+wheel resizes the brush in whole steps @recent", async ({ page }) => 
   expect(await engineBrushSize(page)).toBe(1);
 });
 
-test("polygonal lasso commits on Enter @recent", async ({ page }) => {
+test("polygonal lasso commits on Enter", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -5988,7 +5988,7 @@ test("polygonal lasso commits on Enter @recent", async ({ page }) => {
   expect(await readPixel(page, 28, 28)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
-test("polygonal lasso commits on right-click and combines with shift @recent", async ({ page }) => {
+test("polygonal lasso commits on right-click and combines with shift", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -6057,7 +6057,7 @@ async function selectTool(page: import("@playwright/test").Page, name: string): 
     .click();
 }
 
-test("selection drawer swaps the front tool on flyout pick @recent", async ({ page }) => {
+test("selection drawer swaps the front tool on flyout pick", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const drawer = page.locator('gnumarus-shell [data-testid="selection-drawer"]');
@@ -6072,7 +6072,7 @@ test("selection drawer swaps the front tool on flyout pick @recent", async ({ pa
   await expect(drawer.getByRole("button", { name: "Rectangular selection" })).toBeVisible();
 });
 
-test("paint drawer swaps line and curve through the flyout @recent", async ({ page }) => {
+test("paint drawer swaps line and curve through the flyout", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const drawer = page.locator('gnumarus-shell [data-testid="paint-drawer"]');
@@ -6087,7 +6087,7 @@ test("paint drawer swaps line and curve through the flyout @recent", async ({ pa
   await expect(page.locator("gnumarus-shell")).toContainText("Curve tool");
 });
 
-test("destructive and transform drawers swap their front tools @recent", async ({ page }) => {
+test("destructive and transform drawers swap their front tools", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const destructive = page.locator('gnumarus-shell [data-testid="destructive-drawer"]');
@@ -6104,7 +6104,7 @@ test("destructive and transform drawers swap their front tools @recent", async (
   await expect(page.locator("gnumarus-shell")).toContainText("Non-destructive cell 3D rotation tool");
 });
 
-test("elliptical selection cuts an ellipse @recent", async ({ page }) => {
+test("elliptical selection cuts an ellipse", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -6126,7 +6126,7 @@ test("elliptical selection cuts an ellipse @recent", async ({ page }) => {
   expect(await readPixel(page, 10, 10)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
-test("lasso selection cuts a freehand shape @recent", async ({ page }) => {
+test("lasso selection cuts a freehand shape", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -6157,7 +6157,7 @@ test("lasso selection cuts a freehand shape @recent", async ({ page }) => {
   expect(await readPixel(page, 28, 28)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
-test("color selection cuts the contiguous region @recent", async ({ page }) => {
+test("color selection cuts the contiguous region", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await paintDot(page, "#ff0000", 32, 32);
@@ -6171,7 +6171,7 @@ test("color selection cuts the contiguous region @recent", async ({ page }) => {
   expect(await readPixel(page, 40, 40)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
 });
 
-test("color selection matches the whole texture when not contiguous @recent", async ({ page }) => {
+test("color selection matches the whole texture when not contiguous", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await paintDot(page, "#ff0000", 32, 32);
@@ -6186,7 +6186,7 @@ test("color selection matches the whole texture when not contiguous @recent", as
   expect(await readPixel(page, 40, 40)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
 });
 
-test("color selection threshold gates near matches @recent", async ({ page }) => {
+test("color selection threshold gates near matches", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -6209,7 +6209,7 @@ test("color selection threshold gates near matches @recent", async ({ page }) =>
   expect(await getFloatingSelection(page)).toEqual({ x: 0, y: 0, width: 64, height: 64, selected: 4096 });
 });
 
-test("boolean ops combine ellipse with rectangle @recent", async ({ page }) => {
+test("boolean ops combine ellipse with rectangle", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await paintDot(page, "#ff0000", 32, 32);
@@ -6225,7 +6225,7 @@ test("boolean ops combine ellipse with rectangle @recent", async ({ page }) => {
   expect(await readPixel(page, 21, 21)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
 });
 
-test("rectangular selection shift-drag adds to the selection @recent", async ({ page }) => {
+test("rectangular selection shift-drag adds to the selection", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -6257,7 +6257,7 @@ test("rectangular selection shift-drag adds to the selection @recent", async ({ 
   expect(await selectionMaskMoves(page)).toBe(8);
 });
 
-test("rectangular selection ctrl-shift-drag intersects the selection @recent", async ({ page }) => {
+test("rectangular selection ctrl-shift-drag intersects the selection", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -6281,7 +6281,7 @@ test("rectangular selection ctrl-shift-drag intersects the selection @recent", a
   expect(await selectionMaskDisplay(page)).toBe("none");
 });
 
-test("rectangular selection ctrl-shift-drag with no overlap clears the selection @recent", async ({ page }) => {
+test("rectangular selection ctrl-shift-drag with no overlap clears the selection", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -6300,7 +6300,7 @@ test("rectangular selection ctrl-shift-drag with no overlap clears the selection
   expect(await readPixel(page, 11, 11)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
-test("rectangular selection alt-shift-drag subtracts from the selection @recent", async ({ page }) => {
+test("rectangular selection alt-shift-drag subtracts from the selection", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -6323,7 +6323,7 @@ test("rectangular selection alt-shift-drag subtracts from the selection @recent"
   expect(await selectionMaskDisplay(page)).toBe("block");
 });
 
-test("rectangular selection alt-shift-drag with no overlap changes nothing @recent", async ({ page }) => {
+test("rectangular selection alt-shift-drag with no overlap changes nothing", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -9135,7 +9135,7 @@ test("project textures save as JPEG with a grayscale alpha companion", async ({ 
   expect(restored?.a ?? 0).toBeGreaterThan(200);
 });
 
-test("project meta saves zipped by default and reopens @recent", async ({ page }) => {
+test("project meta saves zipped by default and reopens", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.evaluate(() => {
@@ -9159,7 +9159,7 @@ test("project meta saves zipped by default and reopens @recent", async ({ page }
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
-test("project meta plain mode writes project.json and removes project.gpa @recent", async ({ page }) => {
+test("project meta plain mode writes project.json and removes project.gpa", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.evaluate(() => {
@@ -9200,7 +9200,7 @@ test("project meta plain mode writes project.json and removes project.gpa @recen
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
-test("changing texture storage removes stale texture files @recent", async ({ page }) => {
+test("changing texture storage removes stale texture files", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.evaluate(() => {
@@ -9242,7 +9242,7 @@ test("changing texture storage removes stale texture files @recent", async ({ pa
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
-test("corrupt project.gpa fails to open with a clear error @recent", async ({ page }) => {
+test("corrupt project.gpa fails to open with a clear error", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell");
   const project = await stubProjectDirectory(page);
@@ -9941,7 +9941,7 @@ test("File > Export spritesheet without sources fails loudly", async ({ page }) 
   await expect(page.locator("gnumarus-shell")).toContainText("select an animation");
 });
 
-test("rectangular selection chains three unions @recent", async ({ page }) => {
+test("rectangular selection chains three unions", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -10029,7 +10029,7 @@ async function createDefaultText(page: import("@playwright/test").Page): Promise
   return textId as string;
 }
 
-test("text tool creates a text cell and renders it @recent", async ({ page }) => {
+test("text tool creates a text cell and renders it", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.locator('gnumarus-shell [data-testid="tool-text"]').click();
@@ -10049,7 +10049,7 @@ test("text tool creates a text cell and renders it @recent", async ({ page }) =>
   expect(await textPaintedPixels(page)).toBeGreaterThan(0);
 });
 
-test("text edit undo and redo restore the document @recent", async ({ page }) => {
+test("text edit undo and redo restore the document", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const textId = await createDefaultText(page);
@@ -10068,7 +10068,7 @@ test("text edit undo and redo restore the document @recent", async ({ page }) =>
   expect(await textHtml(page, textId)).toContain("Abc");
 });
 
-test("text entries can be shared across cells @recent", async ({ page }) => {
+test("text entries can be shared across cells", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const textId = await createDefaultText(page);
@@ -10084,7 +10084,7 @@ test("text entries can be shared across cells @recent", async ({ page }) => {
   expect(await cellTextId(page, "layer0", 1)).toBe(textId);
 });
 
-test("painting a text cell toasts that rasterizing is needed @recent", async ({ page }) => {
+test("painting a text cell toasts that rasterizing is needed", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await createDefaultText(page);
@@ -10096,7 +10096,7 @@ test("painting a text cell toasts that rasterizing is needed @recent", async ({ 
   expect(await textPaintedPixels(page)).toBe(before);
 });
 
-test("rasterize text bakes a paintable texture content @recent", async ({ page }) => {
+test("rasterize text bakes a paintable texture content", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await createDefaultText(page);
@@ -10132,7 +10132,7 @@ test("rasterize text bakes a paintable texture content @recent", async ({ page }
   expect(redCount).toBeGreaterThan(0);
 });
 
-test("text survives save and reopen @recent", async ({ page }) => {
+test("text survives save and reopen", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.locator('gnumarus-shell [data-testid="tool-text"]').click();
@@ -10195,7 +10195,7 @@ test("text survives save and reopen @recent", async ({ page }) => {
   expect(painted).toBeGreaterThan(0);
 });
 
-test("content picker offers new text with kind badges @recent", async ({ page }) => {
+test("content picker offers new text with kind badges", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
@@ -10251,7 +10251,7 @@ async function createHelloText(page: import("@playwright/test").Page): Promise<s
   return textId as string;
 }
 
-test("text storage html saves raw files and reopens @recent", async ({ page }) => {
+test("text storage html saves raw files and reopens", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const textId = await createHelloText(page);
@@ -10279,7 +10279,7 @@ test("text storage html saves raw files and reopens @recent", async ({ page }) =
   expect(await textPaintedPixels(page)).toBeGreaterThan(0);
 });
 
-test("text storage htmlZip saves archives and reopens @recent", async ({ page }) => {
+test("text storage htmlZip saves archives and reopens", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const textId = await createHelloText(page);
@@ -10302,7 +10302,7 @@ test("text storage htmlZip saves archives and reopens @recent", async ({ page })
   expect(await textPaintedPixels(page)).toBeGreaterThan(0);
 });
 
-test("switching text storage removes stale text files @recent", async ({ page }) => {
+test("switching text storage removes stale text files", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const textId = await createHelloText(page);
@@ -10312,7 +10312,7 @@ test("switching text storage removes stale text files @recent", async ({ page })
   await page.getByRole("button", { name: "Save Project" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   expect(Object.keys(await project.writtenBlobs())).toContain(`texts/${textId}.html`);
-  await setTextStorage(page, "project");
+  await setTextStorage(page, "embedded");
   await page.getByRole("button", { name: "File" }).click();
   await page.getByRole("button", { name: "Save Project" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
@@ -10331,7 +10331,7 @@ test("switching text storage removes stale text files @recent", async ({ page })
   expect(await textHtml(page, textId)).toContain("Hello");
 });
 
-test("corrupt text archive fails to open with a clear error @recent", async ({ page }) => {
+test("corrupt text archive fails to open with a clear error", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const textId = await createHelloText(page);
@@ -10346,4 +10346,172 @@ test("corrupt text archive fails to open with a clear error @recent", async ({ p
   await expect(page.locator("gnumarus-shell")).toContainText(
     `Open failed: text file is not a valid archive: texts/${textId}.zip`,
   );
+});
+
+async function stubSvgPicker(page: import("@playwright/test").Page, fileName: string, data: string | number[]): Promise<void> {
+  await page.evaluate(
+    ([name, payload]: [string, string | number[]]) => {
+      const root = window as unknown as {
+        showOpenFilePicker?: () => Promise<Array<{ getFile(): Promise<File> }>>;
+      };
+      const bytes = typeof payload === "string" ? new TextEncoder().encode(payload) : new Uint8Array(payload);
+      root.showOpenFilePicker = async () => [
+        {
+          getFile: async () => new File([bytes], name, { type: "image/svg+xml" }),
+        },
+      ];
+    },
+    [fileName, data] as [string, string | number[]],
+  );
+}
+
+async function setSvgStorage(page: import("@playwright/test").Page, mode: string): Promise<void> {
+  await page.evaluate((which: string) => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setSvgStorage(storage: string): void } };
+    };
+    root.__gnumarus?.shell?.setSvgStorage(which);
+  }, mode);
+}
+
+async function cellSvgId(page: import("@playwright/test").Page, layerId: string, frame: number): Promise<string | null> {
+  return page.evaluate(([layer, targetFrame]: [string, number]) => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getCellSvgId(layerId: string, frame: number): string | null } };
+    };
+    return root.__gnumarus?.engine?.getCellSvgId(layer, targetFrame) ?? null;
+  }, [layerId, frame] as [string, number]);
+}
+
+const SIMPLE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#ff0000"/></svg>';
+const FILTER_SVG = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="64" height="64"><defs><filter id="b"><feGaussianBlur stdDeviation="2"/></filter><inkscape:path-effect effect="rough"/></defs><rect width="64" height="64" fill="#00ff00" filter="url(#b)"/></svg>';
+
+test("import svg renders into an empty cell", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubSvgPicker(page, "red.svg", SIMPLE_SVG);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import SVG" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText('Vector graphic "red" imported');
+  const svgId = await cellSvgId(page, "layer0", 0);
+  expect(typeof svgId).toBe("string");
+  await expect
+    .poll(async () => textPaintedPixels(page), { timeout: 5000 })
+    .toBeGreaterThan(0);
+});
+
+test("import svg refuses an occupied cell", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
+  await stubSvgPicker(page, "red.svg", SIMPLE_SVG);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import SVG" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("already has content");
+  expect(await cellSvgId(page, "layer0", 0)).toBeNull();
+});
+
+test("import svg warns about filters but still imports", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubSvgPicker(page, "fx.svg", FILTER_SVG);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import SVG" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("ignored: filters, path effects");
+  const svgId = await cellSvgId(page, "layer0", 0);
+  expect(typeof svgId).toBe("string");
+  await expect
+    .poll(async () => textPaintedPixels(page), { timeout: 5000 })
+    .toBeGreaterThan(0);
+});
+
+test("import svg rejects invalid documents", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubSvgPicker(page, "bad.svg", "not xml at all <>>");
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import SVG" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("not a valid SVG document");
+  expect(await cellSvgId(page, "layer0", 0)).toBeNull();
+});
+
+test("import svgz gunzips before decoding", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubSvgPicker(page, "zipped.svgz", Array.from(gzipSync(new TextEncoder().encode(SIMPLE_SVG))));
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import SVG" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText('Vector graphic "zipped" imported');
+  expect(typeof (await cellSvgId(page, "layer0", 0))).toBe("string");
+});
+
+test("import svg rejects invalid archives", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubSvgPicker(page, "bad.svgz", [1, 2, 3, 4]);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import SVG" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("not a valid SVG archive");
+  expect(await cellSvgId(page, "layer0", 0)).toBeNull();
+});
+
+test("vector storage compressed saves archives and reopens", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubSvgPicker(page, "red.svg", SIMPLE_SVG);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import SVG" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("imported");
+  const svgId = await cellSvgId(page, "layer0", 0);
+  expect(typeof svgId).toBe("string");
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  expect(Object.keys(await project.writtenBlobs()).sort()).toEqual(
+    ["project.gpa", `svgs/${svgId}.zip`].sort(),
+  );
+  const saved = await project.writtenProject();
+  expect(saved).toContain(`"file": "svgs/${svgId}.zip"`);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject");
+  expect(await cellSvgId(page, "layer0", 0)).toBe(svgId);
+  await expect
+    .poll(async () => textPaintedPixels(page), { timeout: 5000 })
+    .toBeGreaterThan(0);
+});
+
+test("vector storage raw and embedded round-trip with stale cleanup", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubSvgPicker(page, "red.svg", SIMPLE_SVG);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import SVG" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("imported");
+  const svgId = await cellSvgId(page, "layer0", 0);
+  expect(typeof svgId).toBe("string");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const settingsDialog = page.locator("gnumarus-shell dialog#settingsDialog");
+  await expect(settingsDialog).toBeVisible();
+  await settingsDialog.locator("select#storageSvgStorage").selectOption("raw");
+  await settingsDialog.getByRole("button", { name: "Close" }).click();
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  expect(Object.keys(await project.writtenBlobs())).toContain(`svgs/${svgId}.svg`);
+  await setSvgStorage(page, "embedded");
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  const files = Object.keys(await project.writtenBlobs());
+  expect(files).not.toContain(`svgs/${svgId}.svg`);
+  const saved = await project.writtenProject();
+  expect(saved).not.toContain(`"file": "svgs/${svgId}.svg"`);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject");
+  expect(await cellSvgId(page, "layer0", 0)).toBe(svgId);
 });

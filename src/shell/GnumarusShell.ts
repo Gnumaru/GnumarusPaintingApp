@@ -6,6 +6,11 @@ import {
   type GnumarusLayerInfo,
 } from "../canvas/GnumarusCanvasEngine";
 import { sanitizeTextHtml } from "../text/GnumarusTextSanitize";
+import { gunzipSync } from "fflate";
+import {
+  detectUnsupportedSvgFeatures,
+  sanitizeSvg,
+} from "../vector/GnumarusSvg";
 import {
   downloadBlob,
   isFilePickerSupported,
@@ -13,6 +18,7 @@ import {
   isFileSystemAccessSupported,
   pickImportFile,
   pickProjectDirectory,
+  pickSvgFile,
   pickSaveFile,
   readFileBytes,
   readOldProjectFileReferences,
@@ -25,8 +31,10 @@ import {
   type GnumarusDirectoryHandle,
 } from "../project/GnumarusFileSystem";
 import {
+  decodeSvgFile,
   decodeTextFile,
   encodeProjectArchive,
+  encodeSvgArchive,
   encodeTextArchive,
   findStaleProjectPaths,
   GNUMARUS_APP_ID,
@@ -34,11 +42,14 @@ import {
   GNUMARUS_PROJECT_FILE,
   serializeProject,
   staleTextureCandidates,
+  svgArchivePath,
+  svgFilePath,
   textArchivePath,
   textFilePath,
   textureFilePath,
   type GnumarusContentMeta,
   type GnumarusProjectMeta,
+  type GnumarusSvgMeta,
   type GnumarusTextureMeta,
   type GnumarusTextMeta,
 } from "../project/GnumarusProjectFormat";
@@ -113,11 +124,13 @@ import {
   parseProjectFileFormat,
   parseStorageFormat,
   parseStorageSettings,
+  parseSvgStorage,
   parseTextStorage,
   serializeStorageSettings,
   type GnumarusProjectFileFormat,
   type GnumarusStorageFormat,
   type GnumarusStorageSettings,
+  type GnumarusSvgStorage,
   type GnumarusTextStorage,
 } from "../settings/GnumarusStorageSettings";
 import {
@@ -1445,6 +1458,7 @@ export class GnumarusShell extends LitElement {
     storageJpegQuality: { type: Number },
     storageProjectFile: { type: String },
     storageTextStorage: { type: String },
+    storageSvgStorage: { type: String },
     brushQuality: { type: Number },
     importCleanup: { type: String },
     expandStep: { type: Number },
@@ -1607,6 +1621,7 @@ export class GnumarusShell extends LitElement {
   declare storageJpegQuality: number;
   declare storageProjectFile: GnumarusProjectFileFormat;
   declare storageTextStorage: GnumarusTextStorage;
+  declare storageSvgStorage: GnumarusSvgStorage;
   declare brushQuality: number;
   declare importCleanup: GnumarusImportCleanup;
   declare expandStep: number;
@@ -1775,6 +1790,7 @@ export class GnumarusShell extends LitElement {
     this.storageJpegQuality = DEFAULT_STORAGE_SETTINGS.jpgQuality;
     this.storageProjectFile = DEFAULT_STORAGE_SETTINGS.projectFile;
     this.storageTextStorage = DEFAULT_STORAGE_SETTINGS.textStorage;
+    this.storageSvgStorage = DEFAULT_STORAGE_SETTINGS.svgStorage;
     this.brushQuality = DEFAULT_STORAGE_SETTINGS.brushQuality;
     this.importCleanup = DEFAULT_IMPORT_CLEANUP;
     this.expandStep = DEFAULT_EXPAND_SETTINGS.step;
@@ -1842,6 +1858,7 @@ export class GnumarusShell extends LitElement {
                   <button @click=${(): void => void this.runAction("open-project")}>${tr("menu.openProject")}</button>
                   <button title=${tr("menu.saveTitle")} @click=${(): void => void this.runAction("save-project")}>${tr("menu.saveProject")}</button>
                   <button @click=${(): void => void this.runAction("import")}>${tr("menu.import")}</button>
+                  <button @click=${(): void => void this.runAction("import-svg")}>${tr("menu.importSvg")}</button>
                   <button @click=${(): void => void this.runAction("export")}>${tr("menu.export")}</button>
                 </div>
               `
@@ -2873,9 +2890,22 @@ export class GnumarusShell extends LitElement {
               .value=${this.storageTextStorage}
               @change=${(): void => this.applyStorageFromDialog()}
             >
-              <option value="project">${tr("setting.textStorageProject")}</option>
+              <option value="embedded">${tr("setting.textStorageEmbedded")}</option>
               <option value="html">${tr("setting.textStorageHtml")}</option>
               <option value="htmlZip">${tr("setting.textStorageHtmlZip")}</option>
+            </select>
+          </label>
+        </div>
+        <div class="setting-row">
+          <label>${tr("setting.svgStorage")}
+            <select
+              id="storageSvgStorage"
+              .value=${this.storageSvgStorage}
+              @change=${(): void => this.applyStorageFromDialog()}
+            >
+              <option value="raw">${tr("setting.svgStorageRaw")}</option>
+              <option value="compressed">${tr("setting.svgStorageCompressed")}</option>
+              <option value="embedded">${tr("setting.svgStorageEmbedded")}</option>
             </select>
           </label>
         </div>
@@ -4596,6 +4626,7 @@ export class GnumarusShell extends LitElement {
     this.storageQuality = storedStorage.quality;
     this.storageProjectFile = storedStorage.projectFile;
     this.storageTextStorage = storedStorage.textStorage;
+    this.storageSvgStorage = storedStorage.svgStorage;
     this.storageFormat = storedStorage.format;
     this.storagePngLevel = storedStorage.pngLevel;
     this.storageJpegQuality = storedStorage.jpgQuality;
@@ -4660,6 +4691,8 @@ export class GnumarusShell extends LitElement {
         onNotice: (kind): void => {
           if (kind === "text-paint-blocked") {
             this.statusMessage = tr("status.textPaintBlocked");
+          } else if (kind === "vector-paint-blocked") {
+            this.statusMessage = tr("status.vectorPaintBlocked");
           }
         },
         onToolSizeChanged: (kind, size): void => {
@@ -5199,6 +5232,14 @@ export class GnumarusShell extends LitElement {
       },
     });
     this.actionRegistry.register({
+      id: "import-svg",
+      name: tr("menu.importSvg"),
+      requirements: [],
+      run: (): void => {
+        void this.importSvgFile();
+      },
+    });
+    this.actionRegistry.register({
       id: "export",
       name: tr("menu.export"),
       requirements: [],
@@ -5700,6 +5741,7 @@ export class GnumarusShell extends LitElement {
           brushQuality: this.brushQuality,
           projectFile: this.storageProjectFile,
           textStorage: this.storageTextStorage,
+          svgStorage: this.storageSvgStorage,
         }),
       );
     } catch {
@@ -5716,7 +5758,8 @@ export class GnumarusShell extends LitElement {
       this.storageJpegQuality === DEFAULT_STORAGE_SETTINGS.jpgQuality &&
       this.brushQuality === DEFAULT_STORAGE_SETTINGS.brushQuality &&
       this.storageProjectFile === DEFAULT_STORAGE_SETTINGS.projectFile &&
-      this.storageTextStorage === DEFAULT_STORAGE_SETTINGS.textStorage
+      this.storageTextStorage === DEFAULT_STORAGE_SETTINGS.textStorage &&
+      this.storageSvgStorage === DEFAULT_STORAGE_SETTINGS.svgStorage
     );
   }
 
@@ -5728,6 +5771,11 @@ export class GnumarusShell extends LitElement {
   private currentDialogTextStorage(): GnumarusTextStorage {
     const input = this.shadowRoot?.getElementById("storageTextStorage") as HTMLSelectElement | null;
     return parseTextStorage(input?.value ?? this.storageTextStorage);
+  }
+
+  private currentDialogSvgStorage(): GnumarusSvgStorage {
+    const input = this.shadowRoot?.getElementById("storageSvgStorage") as HTMLSelectElement | null;
+    return parseSvgStorage(input?.value ?? this.storageSvgStorage);
   }
 
   private currentDialogStorageFormat(): GnumarusStorageFormat {
@@ -5892,6 +5940,7 @@ export class GnumarusShell extends LitElement {
   private applyStorageFromDialog(): void {
     this.storageProjectFile = this.currentDialogProjectFile();
     this.storageTextStorage = this.currentDialogTextStorage();
+    this.storageSvgStorage = this.currentDialogSvgStorage();
     this.storageFormat = this.currentDialogStorageFormat();
     this.storageLossless = this.currentDialogStorageLossless();
     this.storageQuality = this.currentDialogStorageQuality();
@@ -5910,9 +5959,17 @@ export class GnumarusShell extends LitElement {
     this.storageJpegQuality = DEFAULT_STORAGE_SETTINGS.jpgQuality;
     this.storageProjectFile = DEFAULT_STORAGE_SETTINGS.projectFile;
     this.storageTextStorage = DEFAULT_STORAGE_SETTINGS.textStorage;
+    this.storageSvgStorage = DEFAULT_STORAGE_SETTINGS.svgStorage;
     this.brushQuality = DEFAULT_STORAGE_SETTINGS.brushQuality;
     this.persistStorage();
     this.statusMessage = tr("status.storageReset");
+  }
+
+  /** Test hook: set the vector graphic storage mode (raw/compressed/embedded). */
+  setSvgStorage(svgStorage: string): void {
+    this.storageSvgStorage = parseSvgStorage(svgStorage);
+    this.persistStorage();
+    this.statusMessage = this.storageStatusMessage();
   }
 
   /** Test hook: set project texture storage (format, JXL mode/quality, PNG level, JPEG quality, brush JXL quality, text storage). */
@@ -5925,9 +5982,11 @@ export class GnumarusShell extends LitElement {
     brushQuality = DEFAULT_STORAGE_SETTINGS.brushQuality,
     projectFile: GnumarusProjectFileFormat = DEFAULT_STORAGE_SETTINGS.projectFile,
     textStorage: GnumarusTextStorage = DEFAULT_STORAGE_SETTINGS.textStorage,
+    svgStorage: GnumarusSvgStorage = DEFAULT_STORAGE_SETTINGS.svgStorage,
   ): void {
     this.storageProjectFile = parseProjectFileFormat(projectFile);
     this.storageTextStorage = parseTextStorage(textStorage);
+    this.storageSvgStorage = parseSvgStorage(svgStorage);
     this.storageFormat = parseStorageFormat(format);
     this.storageLossless = lossless;
     this.storageQuality = clampStorageQuality(quality);
@@ -7887,6 +7946,7 @@ export class GnumarusShell extends LitElement {
     name: string;
     textureId: string | null;
     textId: string | null;
+    svgId: string | null;
     width: number;
     height: number;
   }> {
@@ -7970,6 +8030,45 @@ export class GnumarusShell extends LitElement {
     }
   }
 
+  /** Rasterize a vector entry into a picker thumbnail data URL (sync cache only). */
+  private svgThumbnailDataUrl(svgId: string): string | null {
+    if (this.engine === null) {
+      return null;
+    }
+    const raster = this.engine.rasterizeSvg(svgId);
+    if (raster === null || raster.width < 1 || raster.height < 1) {
+      return null;
+    }
+    try {
+      const maxSide = 128;
+      const scale = Math.min(1, maxSide / Math.max(raster.width, raster.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(raster.width * scale));
+      canvas.height = Math.max(1, Math.round(raster.height * scale));
+      const ctx = canvas.getContext("2d");
+      if (ctx === null) {
+        return null;
+      }
+      const image = new ImageData(new Uint8ClampedArray(raster.buffer), raster.width, raster.height);
+      if (scale >= 1) {
+        ctx.putImageData(image, 0, 0);
+      } else {
+        const full = document.createElement("canvas");
+        full.width = raster.width;
+        full.height = raster.height;
+        const fullCtx = full.getContext("2d");
+        if (fullCtx === null) {
+          return null;
+        }
+        fullCtx.putImageData(image, 0, 0);
+        ctx.drawImage(full, 0, 0, canvas.width, canvas.height);
+      }
+      return canvas.toDataURL();
+    } catch {
+      return null;
+    }
+  }
+
   private renderContentPickerDialog() {
     const contents = this.sortedContents();
     return html`
@@ -8004,15 +8103,19 @@ export class GnumarusShell extends LitElement {
             const url =
               content.textId !== null
                 ? this.textThumbnailDataUrl(content.textId)
-                : content.textureId === null
-                  ? null
-                  : this.thumbnailDataUrl(content.textureId);
+                : content.svgId !== null
+                  ? this.svgThumbnailDataUrl(content.svgId)
+                  : content.textureId === null
+                    ? null
+                    : this.thumbnailDataUrl(content.textureId);
             const kind =
               content.textId !== null
                 ? tr("dialog.kindText")
-                : content.textureId !== null
-                  ? tr("dialog.kindTexture")
-                  : tr("dialog.kindEmpty");
+                : content.svgId !== null
+                  ? tr("dialog.kindVector")
+                  : content.textureId !== null
+                    ? tr("dialog.kindTexture")
+                    : tr("dialog.kindEmpty");
             return html`
               <button
                 class="picker-item"
@@ -10235,6 +10338,39 @@ export class GnumarusShell extends LitElement {
    * single-file `.zip`, sniffed by extension). Throws on missing or
    * corrupt files.
    */
+  /**
+   * Decode one external vector file from the loaded blobs (raw `.svg` or
+   * single-file `.zip`, sniffed by extension). Throws on missing or
+   * corrupt files.
+   */
+  private async decodeStoredSvgFile(file: string, fileBlobs: Map<string, Blob>): Promise<string> {
+    const blob = fileBlobs.get(file);
+    if (blob === undefined) {
+      throw new Error(`Missing vector file: ${file}`);
+    }
+    return decodeSvgFile(file, new Uint8Array(await blob.arrayBuffer()));
+  }
+
+  /**
+   * Resolve stored vectors to engine documents: inline sources pass
+   * through, external `svgs/` files decode from the loaded blobs.
+   */
+  private async resolveStoredSvgs(
+    vectors: GnumarusSvgMeta[],
+    fileBlobs: Map<string, Blob>,
+  ): Promise<Array<{ id: string; name: string; svg: string }>> {
+    const out: Array<{ id: string; name: string; svg: string }> = [];
+    for (const vector of vectors) {
+      if (vector.document !== undefined) {
+        out.push({ id: vector.id, name: vector.name, svg: vector.document.svg });
+        continue;
+      }
+      const file = vector.file as string;
+      out.push({ id: vector.id, name: vector.name, svg: await this.decodeStoredSvgFile(file, fileBlobs) });
+    }
+    return out;
+  }
+
   private async decodeStoredTextFile(file: string, fileBlobs: Map<string, Blob>): Promise<string> {
     const blob = fileBlobs.get(file);
     if (blob === undefined) {
@@ -10341,11 +10477,13 @@ export class GnumarusShell extends LitElement {
         })),
         textures,
         texts: await this.resolveStoredTexts(project.animation.texts, fileBlobs),
+        svgs: await this.resolveStoredSvgs(project.animation.svgs, fileBlobs),
         contents: project.animation.contents.map((content) => ({
           id: content.id,
           name: content.name,
           textureId: content.textureId,
           textId: content.textId,
+          svgId: content.svgId,
           transform: { ...content.transform },
         })),
         cells: project.animation.cells.map((cell) => ({ ...cell })),
@@ -10374,6 +10512,102 @@ export class GnumarusShell extends LitElement {
     } catch (error) {
       this.statusMessage = error instanceof Error ? tr("status.openFailed", { reason: error.message }) : tr("status.openFailedPlain");
     }
+  }
+
+  /**
+   * Import an SVG vector graphic into the current cell. Only empty cells
+   * (or cells holding an empty content) accept the import; anything else
+   * shows an error toast so existing work is never destroyed. Unsupported
+   * content (filters, path effects, foreign objects, scripts, SMIL,
+   * external references) is dropped with a warning toast naming it.
+   */
+  private async importSvgFile(): Promise<void> {
+    this.fileMenuOpen = false;
+    if (this.engine === null) {
+      return;
+    }
+    if (!isFilePickerSupported()) {
+      this.statusMessage = tr("status.importNeedsFs");
+      return;
+    }
+    this.stopPlayback();
+    const layerId = this.engine.getActiveLayerId();
+    const frame = this.engine.getCurrentFrame();
+    if (!this.engine.isCellContentEmpty(layerId, frame)) {
+      this.statusMessage = tr("status.svgCellOccupied");
+      this.showToast(tr("status.svgCellOccupied"));
+      return;
+    }
+    let handle;
+    try {
+      handle = await pickSvgFile();
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
+      const reason = error instanceof Error ? error.message : String(error);
+      this.statusMessage = tr("status.importFailed", { reason });
+      this.showToast(tr("status.importFailed", { reason }));
+      return;
+    }
+    if (handle === null) {
+      this.statusMessage = tr("status.importNeedsFs");
+      return;
+    }
+    const fileName = await this.svgPickerFileName(handle);
+    const raw = new Uint8Array(await (await handle.getFile()).arrayBuffer());
+    let text: string;
+    try {
+      text = fileName.toLowerCase().endsWith(".svgz")
+        ? new TextDecoder().decode(gunzipSync(raw))
+        : new TextDecoder().decode(raw);
+    } catch {
+      this.statusMessage = tr("status.svgArchiveInvalid");
+      this.showToast(tr("status.svgArchiveInvalid"));
+      return;
+    }
+    const parsed = new DOMParser().parseFromString(text, "image/svg+xml");
+    if (
+      parsed.getElementsByTagName("parsererror").length > 0 ||
+      parsed.documentElement?.tagName.toLowerCase() !== "svg"
+    ) {
+      this.statusMessage = tr("status.svgInvalid");
+      this.showToast(tr("status.svgInvalid"));
+      return;
+    }
+    const unsupported = detectUnsupportedSvgFeatures(text);
+    const svg = sanitizeSvg(text);
+    const name = fileName.replace(/\.(svg|svgz)$/i, "").slice(0, 64) || "Vector";
+    const created = this.engine.ensureSvgContent(layerId, frame, svg, name);
+    if (created === null) {
+      this.statusMessage = tr("status.svgCellOccupied");
+      this.showToast(tr("status.svgCellOccupied"));
+      return;
+    }
+    this.refreshLayers();
+    this.dirty = true;
+    if (unsupported.length > 0) {
+      this.statusMessage = tr("status.svgImportedWithWarnings", { name, features: unsupported.join(", ") });
+    } else {
+      this.statusMessage = tr("status.svgImported", { name });
+    }
+    this.showToast(this.statusMessage);
+  }
+
+  /**
+   * Picked-file name for a handle. Real handles expose it via getFile();
+   * the lookup stays defensive so test stubs keep working.
+   */
+  private async svgPickerFileName(handle: { getFile(): Promise<{ name?: unknown }> }): Promise<string> {
+    try {
+      const file = await handle.getFile();
+      if (typeof file.name === "string" && file.name !== "") {
+        return file.name;
+      }
+    } catch {
+      // Fall through to the default name.
+    }
+    return "vector.svg";
   }
 
   private async importImageFile(): Promise<void> {
@@ -10767,9 +11001,11 @@ export class GnumarusShell extends LitElement {
         name: content.name,
         textureId: content.textureId,
         textId: content.textId ?? null,
+        svgId: content.svgId ?? null,
         transform: { ...content.transform },
       }));
       const textsMeta: GnumarusTextMeta[] = [];
+      const svgsMeta: GnumarusSvgMeta[] = [];
       for (const text of exported.texts ?? []) {
         if (this.storageTextStorage === "html") {
           const file = textFilePath(text.id);
@@ -10786,6 +11022,24 @@ export class GnumarusShell extends LitElement {
           );
         } else {
           textsMeta.push({ id: text.id, name: text.name, document: { ...text.document } });
+        }
+      }
+      for (const vector of exported.svgs ?? []) {
+        if (this.storageSvgStorage === "raw") {
+          const file = svgFilePath(vector.id);
+          svgsMeta.push({ id: vector.id, name: vector.name, file });
+          blobs.set(file, new Blob([vector.svg], { type: "image/svg+xml" }));
+        } else if (this.storageSvgStorage === "compressed") {
+          const file = svgArchivePath(vector.id);
+          svgsMeta.push({ id: vector.id, name: vector.name, file });
+          blobs.set(
+            file,
+            new Blob([encodeSvgArchive(vector.id, vector.svg) as Uint8Array<ArrayBuffer>], {
+              type: "application/zip",
+            }),
+          );
+        } else {
+          svgsMeta.push({ id: vector.id, name: vector.name, document: { svg: vector.svg } });
         }
       }
       const meta: GnumarusProjectMeta = {
@@ -10814,6 +11068,7 @@ export class GnumarusShell extends LitElement {
           activeAnimation: exported.activeAnimation,
           textures: texturesMeta,
           texts: textsMeta,
+          svgs: svgsMeta,
           contents: contentsMeta,
           cells: exported.cells.map((cell) => ({ ...cell })),
         },

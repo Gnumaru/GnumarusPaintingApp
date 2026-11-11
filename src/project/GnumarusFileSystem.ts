@@ -100,6 +100,30 @@ export async function pickImportFile(): Promise<GnumarusFileHandle | null> {
 }
 
 /**
+ * Open the operating system file dialog to pick an SVG vector graphic
+ * (plain `.svg` or gzipped `.svgz`). Returns null when the dialog API is
+ * missing; throws AbortError when the user cancels (silent for callers).
+ */
+export async function pickSvgFile(): Promise<GnumarusFileHandle | null> {
+  const showPicker = pickerWindow().showOpenFilePicker;
+  if (showPicker === undefined) {
+    return null;
+  }
+  const handles = await showPicker.call(window, {
+    multiple: false,
+    types: [
+      {
+        description: "SVG vector graphics",
+        accept: {
+          "image/svg+xml": [".svg", ".svgz"],
+        },
+      },
+    ],
+  });
+  return handles[0] ?? null;
+}
+
+/**
  * Save one blob through the OS save dialog. Returns the written handle, or
  * null when the API is missing (callers fall back to a plain download).
  * Throws AbortError when the user cancels (callers treat it as silent).
@@ -303,6 +327,14 @@ export async function readProjectFiles(root: GnumarusDirectoryHandle): Promise<{
     const handle = await resolveFile(root, text.file, false);
     const buffer = await (await handle.getFile()).arrayBuffer();
     fileBlobs.set(text.file, new Blob([buffer], { type: "text/html" }));
+  }
+  for (const vector of project.animation.svgs) {
+    if (vector.file === undefined || fileBlobs.has(vector.file)) {
+      continue;
+    }
+    const handle = await resolveFile(root, vector.file, false);
+    const buffer = await (await handle.getFile()).arrayBuffer();
+    fileBlobs.set(vector.file, new Blob([buffer], { type: "image/svg+xml" }));
   }
   for (const layer of project.layers) {
     for (const cell of layer.cells ?? []) {
