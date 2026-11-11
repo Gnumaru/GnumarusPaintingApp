@@ -353,4 +353,4 @@
 - [x] E2E (5 new: create+place, transform+reset, erase+undo, save/reopen, picker badge); build + unit (448) + e2e (283/283) green; docs updated
 - [x] 3D model view (orbit/zoom/pan/reset) + live raster + commit/cancel + history + format persistence + unit tests (452 passed)
 - [x] Tool UI (button/options/readout/drag/keys) + i18n en+pt-BR
-- [x] E2E (orbit/commit/cancel/undo/reopen); build + unit + e2e (302/302) green; docs updated
+- [x] E2E (orbit/commit/cancel/undo/reopen); build + unit green; targeted e2e green; full suite pending (user interrupted, to run later); docs updated
