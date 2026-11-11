@@ -6,12 +6,22 @@
  * alpha companion). `projectFile` selects the project data file itself:
  * zipped JSON (default) or plain JSON. Loading sniffs `.gpa`/`.json` and
  * `.jxl`/`.webp`/`.jpg`/`.png` per file, so these settings only affect
- * future saves.
+ * future saves. `textStorage` selects where rich text documents are saved:
+ * inline in the project data file (default), raw `.html` files, or
+ * single-file `.zip` archives; loading sniffs each text reference.
  */
 export type GnumarusStorageFormat = "jxl" | "webp" | "jpg" | "png";
 
 /** Project data file: zipped JSON archive (default) or plain JSON text. */
 export type GnumarusProjectFileFormat = "gpa" | "json";
+
+/**
+ * Where rich text documents are stored on save: inline in the project data
+ * file (default), one raw `.html` file per text under `texts/`, or one
+ * single-file `.zip` per text under `texts/`. Loading sniffs each text
+ * reference, so this setting only affects future saves.
+ */
+export type GnumarusTextStorage = "project" | "html" | "htmlZip";
 
 export interface GnumarusStorageSettings {
   /** Texture container format, default JXL. */
@@ -28,6 +38,8 @@ export interface GnumarusStorageSettings {
   brushQuality: number;
   /** Project data file format, default zipped JSON. */
   projectFile: GnumarusProjectFileFormat;
+  /** Rich text storage, default inline in the project data file. */
+  textStorage: GnumarusTextStorage;
 }
 
 export const DEFAULT_STORAGE_SETTINGS: GnumarusStorageSettings = {
@@ -38,6 +50,7 @@ export const DEFAULT_STORAGE_SETTINGS: GnumarusStorageSettings = {
   jpgQuality: 95,
   brushQuality: 90,
   projectFile: "gpa",
+  textStorage: "project",
 };
 
 export const STORAGE_SETTINGS_STORAGE_KEY = "gnumarus.settings.storage.v1";
@@ -98,6 +111,13 @@ export function parseProjectFileFormat(value: unknown): GnumarusProjectFileForma
   return value === "json" ? "json" : "gpa";
 }
 
+export function parseTextStorage(value: unknown): GnumarusTextStorage {
+  if (value === "html" || value === "htmlZip") {
+    return value;
+  }
+  return "project";
+}
+
 export function parseStorageSettings(jsonText: string): GnumarusStorageSettings {
   let parsed: unknown;
   try {
@@ -108,7 +128,7 @@ export function parseStorageSettings(jsonText: string): GnumarusStorageSettings 
   if (!isRecord(parsed)) {
     throw new GnumarusStorageSettingsError("storage settings root must be an object");
   }
-  const { format, lossless, quality, pngLevel, jpgQuality, brushQuality, projectFile } = parsed;
+  const { format, lossless, quality, pngLevel, jpgQuality, brushQuality, projectFile, textStorage } = parsed;
   if (typeof lossless !== "boolean" || typeof quality !== "number") {
     throw new GnumarusStorageSettingsError("storage settings have invalid fields");
   }
@@ -122,6 +142,7 @@ export function parseStorageSettings(jsonText: string): GnumarusStorageSettings 
     brushQuality:
       typeof brushQuality === "number" ? clampBrushQuality(brushQuality) : DEFAULT_STORAGE_SETTINGS.brushQuality,
     projectFile: parseProjectFileFormat(projectFile),
+    textStorage: parseTextStorage(textStorage),
   };
 }
 
@@ -135,6 +156,7 @@ export function serializeStorageSettings(settings: GnumarusStorageSettings): str
       jpgQuality: clampStorageJpgQuality(settings.jpgQuality),
       brushQuality: clampBrushQuality(settings.brushQuality),
       projectFile: parseProjectFileFormat(settings.projectFile),
+      textStorage: parseTextStorage(settings.textStorage),
     },
     null,
     2,

@@ -29,7 +29,10 @@ export interface GnumarusTextureMeta {
 export interface GnumarusTextMeta {
   id: string;
   name: string;
-  document: GnumarusTextDocument;
+  /** Inline document (project-file text storage); mutually exclusive with file. */
+  document?: GnumarusTextDocument;
+  /** External file under texts/ (raw .html or single-file .zip); mutually exclusive with document. */
+  file?: string;
 }
 
 export interface GnumarusContentMeta {
@@ -127,6 +130,58 @@ export function textureFilePath(textureId: string, ext = "png"): string {
   return `textures/${textureId}.${ext}`;
 }
 
+/** Raw HTML file for one text entry (`html` text storage mode). */
+export function textFilePath(textId: string): string {
+  return `texts/${textId}.html`;
+}
+
+/** Single-file ZIP holding one text entry (`htmlZip` text storage mode). */
+export function textArchivePath(textId: string): string {
+  return `texts/${textId}.zip`;
+}
+
+/** Valid external text file: `texts/<stem>.html` or `texts/<stem>.zip` (no traversal). */
+export function parseTextFilePath(file: unknown): string | null {
+  if (typeof file !== "string") {
+    return null;
+  }
+  const match = /^texts\/([A-Za-z0-9_-]+)\.(html|zip)$/.exec(file);
+  return match === null ? null : file;
+}
+
+/** Pack one text document as a single-file ZIP (`<textId>.html` inside). */
+export function encodeTextArchive(textId: string, html: string): Uint8Array {
+  return zipSync({ [`${textId}.html`]: new TextEncoder().encode(html) }, { level: 9 });
+}
+
+/**
+ * Decode an external text file to its HTML string. Raw `.html` decodes
+ * directly; `.zip` must hold exactly the matching `<stem>.html` entry.
+ * Throws GnumarusProjectError on corrupt archives or mismatched entries.
+ */
+export function decodeTextFile(file: string, bytes: Uint8Array): string {
+  const valid = parseTextFilePath(file);
+  if (valid === null) {
+    throw new GnumarusProjectError(`project.json has a text with an invalid file: ${file}`);
+  }
+  if (file.endsWith(".html")) {
+    return new TextDecoder().decode(bytes);
+  }
+  let entries: Record<string, Uint8Array>;
+  try {
+    entries = unzipSync(bytes) as Record<string, Uint8Array>;
+  } catch {
+    throw new GnumarusProjectError(`text file is not a valid archive: ${file}`);
+  }
+  const stem = file.slice("texts/".length, -".zip".length);
+  const expected = `${stem}.html`;
+  const names = Object.keys(entries);
+  if (names.length !== 1 || names[0] !== expected || entries[expected] === undefined) {
+    throw new GnumarusProjectError(`text archive has no ${expected} inside: ${file}`);
+  }
+  return new TextDecoder().decode(entries[expected] as Uint8Array);
+}
+
 export function createDefaultProject(width: number, height: number): GnumarusProjectMeta {
   return {
     app: GNUMARUS_APP_ID,
@@ -211,7 +266,7 @@ export function textureAlphaCompanion(file: string): string | null {
 
 /**
  * Every file path referenced by a project: texture files, their JPEG alpha
- * companions, and legacy per-cell files.
+ * companions, external text files, and legacy per-cell files.
  */
 export function collectProjectFileReferences(project: GnumarusProjectMeta): Set<string> {
   const out = new Set<string>();
@@ -220,6 +275,11 @@ export function collectProjectFileReferences(project: GnumarusProjectMeta): Set<
     const companion = textureAlphaCompanion(texture.file);
     if (companion !== null) {
       out.add(companion);
+    }
+  }
+  for (const text of project.animation.texts) {
+    if (text.file !== undefined) {
+      out.add(text.file);
     }
   }
   for (const layer of project.layers) {
@@ -489,6 +549,7 @@ function parseTextMetas(value: unknown): GnumarusTextMeta[] {
   }
   const checked: GnumarusTextMeta[] = [];
   const seenIds = new Set<string>();
+  const seenFiles = new Set<string>();
   for (const entry of value) {
     if (!isRecord(entry)) {
       throw new GnumarusProjectError("project.json has an invalid text");
@@ -498,11 +559,25 @@ function parseTextMetas(value: unknown): GnumarusTextMeta[] {
       throw new GnumarusProjectError("project.json has duplicate text ids");
     }
     seenIds.add(id);
-    const { name, document } = entry;
-    if (!isRecord(document) || typeof document.html !== "string") {
+    const { name, document, file } = entry;
+    const hasDocument = isRecord(document) && typeof document.html === "string";
+    const textFile = parseTextFilePath(file);
+    if ((hasDocument ? 1 : 0) + (textFile === null ? 0 : 1) !== 1) {
       throw new GnumarusProjectError("project.json has a text with an invalid document");
     }
-    checked.push({ id, name: checkedName(name, "text"), document: { html: sanitizeTextHtml(document.html) } });
+    if (textFile !== null) {
+      if (seenFiles.has(textFile)) {
+        throw new GnumarusProjectError("project.json has duplicate text files");
+      }
+      seenFiles.add(textFile);
+      checked.push({ id, name: checkedName(name, "text"), file: textFile });
+    } else {
+      checked.push({
+        id,
+        name: checkedName(name, "text"),
+        document: { html: sanitizeTextHtml((document as { html: string }).html) },
+      });
+    }
   }
   return checked;
 }

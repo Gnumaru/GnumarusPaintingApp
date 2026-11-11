@@ -5,11 +5,16 @@ import {
   collectProjectFileReferences,
   createDefaultProject,
   decodeProjectArchive,
+  decodeTextFile,
   encodeProjectArchive,
+  encodeTextArchive,
   findStaleProjectPaths,
   parseProject,
+  parseTextFilePath,
   serializeProject,
   staleTextureCandidates,
+  textArchivePath,
+  textFilePath,
   textureAlphaCompanion,
   textureFilePath,
   GNUMARUS_APP_ID,
@@ -467,5 +472,66 @@ describe("GnumarusProjectFormat", () => {
     });
     const parsed = parseProject(serializeProject(project));
     expect(parsed.animation.texts).toEqual([{ id: "text1", name: "T1", document: { html: "<div>x</div>" } }]);
+  });
+
+  it("maps text entries to external files and back", () => {
+    expect(textFilePath("text1")).toBe("texts/text1.html");
+    expect(textArchivePath("text1")).toBe("texts/text1.zip");
+    expect(parseTextFilePath("texts/text1.html")).toBe("texts/text1.html");
+    expect(parseTextFilePath("texts/my-text_2.zip")).toBe("texts/my-text_2.zip");
+    expect(parseTextFilePath("texts/text1.png")).toBeNull();
+    expect(parseTextFilePath("textures/t1.jxl")).toBeNull();
+    expect(parseTextFilePath("texts/../../evil.html")).toBeNull();
+    expect(parseTextFilePath("texts/.html")).toBeNull();
+    expect(parseTextFilePath(undefined)).toBeNull();
+  });
+
+  it("round-trips single-file text archives", () => {
+    const html = "<div>Hello <b>bold</b></div>";
+    const bytes = encodeTextArchive("text1", html);
+    expect(decodeTextFile("texts/text1.zip", bytes)).toBe(html);
+    expect(decodeTextFile("texts/text1.html", new TextEncoder().encode(html))).toBe(html);
+    expect(() => decodeTextFile("texts/text1.zip", new Uint8Array([1, 2, 3]))).toThrow(GnumarusProjectError);
+    expect(() =>
+      decodeTextFile("texts/text1.zip", zipSync({ "other.html": new TextEncoder().encode(html) }, { level: 9 })),
+    ).toThrow(GnumarusProjectError);
+    expect(() =>
+      decodeTextFile(
+        "texts/text1.zip",
+        zipSync(
+          { "text1.html": new TextEncoder().encode(html), "extra.html": new TextEncoder().encode("x") },
+          { level: 9 },
+        ),
+      ),
+    ).toThrow(GnumarusProjectError);
+    expect(() => decodeTextFile("textures/t1.jxl", bytes)).toThrow(GnumarusProjectError);
+  });
+
+  it("parses external text references and rejects bad ones", () => {
+    const project = createDefaultProject(8, 8);
+    project.animation.texts.push({ id: "text1", name: "T1", file: "texts/text1.html" });
+    project.animation.texts.push({ id: "text2", name: "T2", file: "texts/text2.zip" });
+    const parsed = parseProject(serializeProject(project));
+    expect(parsed.animation.texts).toEqual([
+      { id: "text1", name: "T1", file: "texts/text1.html" },
+      { id: "text2", name: "T2", file: "texts/text2.zip" },
+    ]);
+    expect(collectProjectFileReferences(parsed)).toContain("texts/text1.html");
+    expect(collectProjectFileReferences(parsed)).toContain("texts/text2.zip");
+    const both = createDefaultProject(8, 8);
+    both.animation.texts.push({ id: "t", name: "T", document: { html: "<div>x</div>" }, file: "texts/t.html" } as never);
+    expect(() => parseProject(serializeProject(both))).toThrow(GnumarusProjectError);
+    const neither = createDefaultProject(8, 8);
+    neither.animation.texts.push({ id: "t", name: "T" } as never);
+    expect(() => parseProject(serializeProject(neither))).toThrow(GnumarusProjectError);
+    for (const bad of ["texts/t.png", "texts/../t.html", "other/t.html", "texts/t.html/"]) {
+      const invalid = createDefaultProject(8, 8);
+      invalid.animation.texts.push({ id: "t", name: "T", file: bad });
+      expect(() => parseProject(serializeProject(invalid))).toThrow(GnumarusProjectError);
+    }
+    const duplicate = createDefaultProject(8, 8);
+    duplicate.animation.texts.push({ id: "t1", name: "A", file: "texts/shared.html" });
+    duplicate.animation.texts.push({ id: "t2", name: "B", file: "texts/shared.html" });
+    expect(() => parseProject(serializeProject(duplicate))).toThrow(GnumarusProjectError);
   });
 });

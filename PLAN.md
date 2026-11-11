@@ -541,3 +541,10 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Select-content modal: New text + kind badges; matrix thumbnails via raster.
 - i18n en+pt-BR; unit (sanitizer idempotence, html->runs, layout with stub metrics, format/migration) + e2e @recent (create/edit/share/undo/reopen/export/paint-block/rasterize).
 - Verified: `npm run build` clean, 425 unit tests green, 33/33 `@recent` e2e green (Chromium), full suite untouched per policy.
+
+## 100. Text storage setting: project file vs external HTML (implemented)
+- New `textStorage` storage setting (default `project`): `project` keeps texts inline in project.json exactly as today; `html` writes one `texts/<id>.html` file per text; `htmlZip` writes one `texts/<id>.zip` per text containing a single `<id>.html`.
+- Format: `GnumarusTextMeta` gets optional `file` (mutually exclusive with inline `document`, path restricted to `texts/<stem>.html|.zip`); `collectProjectFileReferences` includes text files so stale mode-switch leftovers are deleted by the generic stale-path pass; open sniffs per file (extension), so mixed projects open.
+- Settings UI row + reset + persist (same localStorage key), i18n en+pt-BR.
+- Unit (settings parse/serialize, archive encode/decode incl. corrupt, format validation) + e2e @recent (raw save/reopen, zip save/reopen, mode-switch stale cleanup, corrupt zip error).
+- Verified: `npm run build` clean, 428 unit tests green, 37/37 `@recent` e2e green (Chromium), full suite untouched per policy.

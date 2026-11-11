@@ -334,3 +334,6 @@
 - [x] Engine text pool + derived rasters + render integration + guards + history
 - [x] Text tool + editor dialog + select modal + rasterize action + i18n (en + pt-BR)
 - [x] E2E @recent (7 new: create/render, edit/undo/redo, share, paint-block, rasterize, save/reopen/export, picker badges); build + unit (425) + recent (33/33) green; docs updated
+- [x] Text storage setting (`project`/`html`/`htmlZip`, default `project`) + format `file` refs + archive helpers + unit tests (settings + format, 428 passed)
+- [x] Save/open wiring (raw + zip blobs, decode, stale cleanup) + Settings UI + i18n (en + pt-BR)
+- [x] E2E @recent (4 new: raw/zip reopen, stale switch, corrupt zip); build + unit (428) + recent (37/37) green; docs updated

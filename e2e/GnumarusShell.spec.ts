@@ -10214,3 +10214,136 @@ test("content picker offers new text with kind badges @recent", async ({ page })
   expect(kinds).toContain("Text");
   expect(kinds).toContain("Texture");
 });
+
+async function setTextStorage(page: import("@playwright/test").Page, mode: string): Promise<void> {
+  await page.evaluate((which: string) => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        shell?: {
+          setProjectStorage(
+            lossless: boolean,
+            quality: number,
+            format?: string,
+            pngLevel?: number,
+            jpgQuality?: number,
+            brushQuality?: number,
+            projectFile?: string,
+            textStorage?: string,
+          ): void;
+        };
+      };
+    };
+    root.__gnumarus?.shell?.setProjectStorage(true, 50, "jxl", 9, 95, 90, "gpa", which);
+  }, mode);
+}
+
+async function createHelloText(page: import("@playwright/test").Page): Promise<string> {
+  await page.locator('gnumarus-shell [data-testid="tool-text"]').click();
+  await paintCenter(page);
+  const area = page.locator('gnumarus-shell [data-testid="text-editor-area"]');
+  await area.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("Hello");
+  await page.locator('gnumarus-shell [data-testid="text-ok"]').click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Text updated");
+  const textId = await cellTextId(page, "layer0", 0);
+  expect(typeof textId).toBe("string");
+  return textId as string;
+}
+
+test("text storage html saves raw files and reopens @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const textId = await createHelloText(page);
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#settingsDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator("select#storageTextStorage").selectOption("html");
+  await dialog.getByRole("button", { name: "Close" }).click();
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  expect(Object.keys(await project.writtenBlobs()).sort()).toEqual(
+    ["project.gpa", `texts/${textId}.html`, "textures/t1.jxl"].sort(),
+  );
+  const saved = await project.writtenProject();
+  expect(saved).toContain(`"file": "texts/${textId}.html"`);
+  expect(saved).not.toContain('"document"');
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject");
+  expect(await cellTextId(page, "layer0", 0)).toBe(textId);
+  expect(await textHtml(page, textId)).toContain("Hello");
+  expect(await textPaintedPixels(page)).toBeGreaterThan(0);
+});
+
+test("text storage htmlZip saves archives and reopens @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const textId = await createHelloText(page);
+  await setTextStorage(page, "htmlZip");
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  expect(Object.keys(await project.writtenBlobs()).sort()).toEqual(
+    ["project.gpa", `texts/${textId}.zip`, "textures/t1.jxl"].sort(),
+  );
+  const saved = await project.writtenProject();
+  expect(saved).toContain(`"file": "texts/${textId}.zip"`);
+  expect(saved).not.toContain('"document"');
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject");
+  expect(await cellTextId(page, "layer0", 0)).toBe(textId);
+  expect(await textHtml(page, textId)).toContain("Hello");
+  expect(await textPaintedPixels(page)).toBeGreaterThan(0);
+});
+
+test("switching text storage removes stale text files @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const textId = await createHelloText(page);
+  await setTextStorage(page, "html");
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  expect(Object.keys(await project.writtenBlobs())).toContain(`texts/${textId}.html`);
+  await setTextStorage(page, "project");
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  expect(Object.keys(await project.writtenBlobs())).not.toContain(`texts/${textId}.html`);
+  expect(await project.writtenProject()).toContain('"document"');
+  await setTextStorage(page, "htmlZip");
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  const files = Object.keys(await project.writtenBlobs());
+  expect(files).toContain(`texts/${textId}.zip`);
+  expect(files).not.toContain(`texts/${textId}.html`);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject");
+  expect(await textHtml(page, textId)).toContain("Hello");
+});
+
+test("corrupt text archive fails to open with a clear error @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const textId = await createHelloText(page);
+  await setTextStorage(page, "htmlZip");
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  await project.seedFile(`texts/${textId}.zip`, [1, 2, 3, 4]);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText(
+    `Open failed: text file is not a valid archive: texts/${textId}.zip`,
+  );
+});

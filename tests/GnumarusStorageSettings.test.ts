@@ -11,13 +11,14 @@ import {
   GNUMARUS_MIN_STORAGE_QUALITY,
   parseStorageFormat,
   parseProjectFileFormat,
+  parseTextStorage,
   parseStorageSettings,
   serializeStorageSettings,
   GnumarusStorageSettingsError,
 } from "../src/settings/GnumarusStorageSettings";
 
 describe("GnumarusStorageSettings", () => {
-  it("defaults to JXL lossless with PNG level 9, JPEG quality 95, brush JXL quality 90 and zipped project file", () => {
+  it("defaults to JXL lossless with PNG level 9, JPEG quality 95, brush JXL quality 90, zipped project file and inline text storage", () => {
     expect(DEFAULT_STORAGE_SETTINGS).toEqual({
       format: "jxl",
       lossless: true,
@@ -26,6 +27,7 @@ describe("GnumarusStorageSettings", () => {
       jpgQuality: 95,
       brushQuality: 90,
       projectFile: "gpa",
+      textStorage: "project",
     });
     expect(GNUMARUS_MIN_STORAGE_QUALITY).toBe(0);
     expect(GNUMARUS_MAX_STORAGE_QUALITY).toBe(100);
@@ -56,6 +58,7 @@ describe("GnumarusStorageSettings", () => {
       jpgQuality: 95,
       brushQuality: 90,
       projectFile: "gpa",
+      textStorage: "project",
     });
     expect(
       parseStorageSettings(JSON.stringify({ lossless: false, quality: 75, projectFile: "json" })),
@@ -67,6 +70,7 @@ describe("GnumarusStorageSettings", () => {
       jpgQuality: 95,
       brushQuality: 90,
       projectFile: "json",
+      textStorage: "project",
     });
     expect(
       parseStorageSettings(JSON.stringify({ lossless: false, quality: 75, projectFile: "rar" })),
@@ -78,10 +82,20 @@ describe("GnumarusStorageSettings", () => {
       jpgQuality: 95,
       brushQuality: 90,
       projectFile: "gpa",
+      textStorage: "project",
     });
     expect(
       parseStorageSettings(JSON.stringify({ format: "png", lossless: true, quality: 50, pngLevel: 3, jpgQuality: 80 })),
-    ).toEqual({ format: "png", lossless: true, quality: 50, pngLevel: 3, jpgQuality: 80, brushQuality: 90, projectFile: "gpa" });
+    ).toEqual({ format: "png", lossless: true, quality: 50, pngLevel: 3, jpgQuality: 80, brushQuality: 90, projectFile: "gpa", textStorage: "project" });
+    expect(
+      parseStorageSettings(JSON.stringify({ lossless: true, quality: 50, textStorage: "html" })),
+    ).toEqual({ format: "jxl", lossless: true, quality: 50, pngLevel: 9, jpgQuality: 95, brushQuality: 90, projectFile: "gpa", textStorage: "html" });
+    expect(
+      parseStorageSettings(JSON.stringify({ lossless: true, quality: 50, textStorage: "htmlZip" })),
+    ).toEqual({ format: "jxl", lossless: true, quality: 50, pngLevel: 9, jpgQuality: 95, brushQuality: 90, projectFile: "gpa", textStorage: "htmlZip" });
+    expect(
+      parseStorageSettings(JSON.stringify({ lossless: true, quality: 50, textStorage: "bogus" })),
+    ).toEqual({ format: "jxl", lossless: true, quality: 50, pngLevel: 9, jpgQuality: 95, brushQuality: 90, projectFile: "gpa", textStorage: "project" });
   });
 
   it("parses formats with a JXL fallback and clamps levels", () => {
@@ -95,6 +109,11 @@ describe("GnumarusStorageSettings", () => {
     expect(parseProjectFileFormat("json")).toBe("json");
     expect(parseProjectFileFormat("zip")).toBe("gpa");
     expect(parseProjectFileFormat(undefined)).toBe("gpa");
+    expect(parseTextStorage("project")).toBe("project");
+    expect(parseTextStorage("html")).toBe("html");
+    expect(parseTextStorage("htmlZip")).toBe("htmlZip");
+    expect(parseTextStorage("zip")).toBe("project");
+    expect(parseTextStorage(undefined)).toBe("project");
     expect(clampStoragePngLevel(4)).toBe(4);
     expect(clampStoragePngLevel(4.9)).toBe(4);
     expect(clampStoragePngLevel(-1)).toBe(0);
@@ -114,6 +133,7 @@ describe("GnumarusStorageSettings", () => {
       jpgQuality: 95,
       brushQuality: 90,
       projectFile: "gpa",
+      textStorage: "project",
     });
     expect(parseStorageSettings(JSON.stringify({ lossless: false, quality: -1 }))).toEqual({
       format: "jxl",
@@ -123,6 +143,7 @@ describe("GnumarusStorageSettings", () => {
       jpgQuality: 95,
       brushQuality: 90,
       projectFile: "gpa",
+      textStorage: "project",
     });
     expect(parseStorageSettings(JSON.stringify({ lossless: true, quality: 50, brushQuality: 250 }))).toEqual({
       format: "jxl",
@@ -132,6 +153,7 @@ describe("GnumarusStorageSettings", () => {
       jpgQuality: 95,
       brushQuality: 100,
       projectFile: "gpa",
+      textStorage: "project",
     });
   });
 

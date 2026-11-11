@@ -296,6 +296,14 @@ export async function readProjectFiles(root: GnumarusDirectoryHandle): Promise<{
     const buffer = await (await handle.getFile()).arrayBuffer();
     fileBlobs.set(texture.file, new Blob([buffer], { type: "image/png" }));
   }
+  for (const text of project.animation.texts) {
+    if (text.file === undefined || fileBlobs.has(text.file)) {
+      continue;
+    }
+    const handle = await resolveFile(root, text.file, false);
+    const buffer = await (await handle.getFile()).arrayBuffer();
+    fileBlobs.set(text.file, new Blob([buffer], { type: "text/html" }));
+  }
   for (const layer of project.layers) {
     for (const cell of layer.cells ?? []) {
       if (fileBlobs.has(cell.file)) {

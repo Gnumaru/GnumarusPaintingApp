@@ -25,17 +25,22 @@ import {
   type GnumarusDirectoryHandle,
 } from "../project/GnumarusFileSystem";
 import {
+  decodeTextFile,
   encodeProjectArchive,
+  encodeTextArchive,
   findStaleProjectPaths,
   GNUMARUS_APP_ID,
   GNUMARUS_PROJECT_ARCHIVE_FILE,
   GNUMARUS_PROJECT_FILE,
   serializeProject,
   staleTextureCandidates,
+  textArchivePath,
+  textFilePath,
   textureFilePath,
   type GnumarusContentMeta,
   type GnumarusProjectMeta,
   type GnumarusTextureMeta,
+  type GnumarusTextMeta,
 } from "../project/GnumarusProjectFormat";
 import {
   CHECKER_SETTINGS_STORAGE_KEY,
@@ -108,10 +113,12 @@ import {
   parseProjectFileFormat,
   parseStorageFormat,
   parseStorageSettings,
+  parseTextStorage,
   serializeStorageSettings,
   type GnumarusProjectFileFormat,
   type GnumarusStorageFormat,
   type GnumarusStorageSettings,
+  type GnumarusTextStorage,
 } from "../settings/GnumarusStorageSettings";
 import {
   DEFAULT_IMPORT_CLEANUP,
@@ -1437,6 +1444,7 @@ export class GnumarusShell extends LitElement {
     storagePngLevel: { type: Number },
     storageJpegQuality: { type: Number },
     storageProjectFile: { type: String },
+    storageTextStorage: { type: String },
     brushQuality: { type: Number },
     importCleanup: { type: String },
     expandStep: { type: Number },
@@ -1598,6 +1606,7 @@ export class GnumarusShell extends LitElement {
   declare storagePngLevel: number;
   declare storageJpegQuality: number;
   declare storageProjectFile: GnumarusProjectFileFormat;
+  declare storageTextStorage: GnumarusTextStorage;
   declare brushQuality: number;
   declare importCleanup: GnumarusImportCleanup;
   declare expandStep: number;
@@ -1765,6 +1774,7 @@ export class GnumarusShell extends LitElement {
     this.storagePngLevel = DEFAULT_STORAGE_SETTINGS.pngLevel;
     this.storageJpegQuality = DEFAULT_STORAGE_SETTINGS.jpgQuality;
     this.storageProjectFile = DEFAULT_STORAGE_SETTINGS.projectFile;
+    this.storageTextStorage = DEFAULT_STORAGE_SETTINGS.textStorage;
     this.brushQuality = DEFAULT_STORAGE_SETTINGS.brushQuality;
     this.importCleanup = DEFAULT_IMPORT_CLEANUP;
     this.expandStep = DEFAULT_EXPAND_SETTINGS.step;
@@ -2853,6 +2863,19 @@ export class GnumarusShell extends LitElement {
             >
               <option value="gpa">${tr("setting.projectFileGpa")}</option>
               <option value="json">${tr("setting.projectFileJson")}</option>
+            </select>
+          </label>
+        </div>
+        <div class="setting-row">
+          <label>${tr("setting.textStorage")}
+            <select
+              id="storageTextStorage"
+              .value=${this.storageTextStorage}
+              @change=${(): void => this.applyStorageFromDialog()}
+            >
+              <option value="project">${tr("setting.textStorageProject")}</option>
+              <option value="html">${tr("setting.textStorageHtml")}</option>
+              <option value="htmlZip">${tr("setting.textStorageHtmlZip")}</option>
             </select>
           </label>
         </div>
@@ -4572,6 +4595,7 @@ export class GnumarusShell extends LitElement {
     this.storageLossless = storedStorage.lossless;
     this.storageQuality = storedStorage.quality;
     this.storageProjectFile = storedStorage.projectFile;
+    this.storageTextStorage = storedStorage.textStorage;
     this.storageFormat = storedStorage.format;
     this.storagePngLevel = storedStorage.pngLevel;
     this.storageJpegQuality = storedStorage.jpgQuality;
@@ -5675,6 +5699,7 @@ export class GnumarusShell extends LitElement {
           jpgQuality: this.storageJpegQuality,
           brushQuality: this.brushQuality,
           projectFile: this.storageProjectFile,
+          textStorage: this.storageTextStorage,
         }),
       );
     } catch {
@@ -5690,13 +5715,19 @@ export class GnumarusShell extends LitElement {
       this.storagePngLevel === DEFAULT_STORAGE_SETTINGS.pngLevel &&
       this.storageJpegQuality === DEFAULT_STORAGE_SETTINGS.jpgQuality &&
       this.brushQuality === DEFAULT_STORAGE_SETTINGS.brushQuality &&
-      this.storageProjectFile === DEFAULT_STORAGE_SETTINGS.projectFile
+      this.storageProjectFile === DEFAULT_STORAGE_SETTINGS.projectFile &&
+      this.storageTextStorage === DEFAULT_STORAGE_SETTINGS.textStorage
     );
   }
 
   private currentDialogProjectFile(): GnumarusProjectFileFormat {
     const input = this.shadowRoot?.getElementById("storageProjectFile") as HTMLSelectElement | null;
     return parseProjectFileFormat(input?.value ?? this.storageProjectFile);
+  }
+
+  private currentDialogTextStorage(): GnumarusTextStorage {
+    const input = this.shadowRoot?.getElementById("storageTextStorage") as HTMLSelectElement | null;
+    return parseTextStorage(input?.value ?? this.storageTextStorage);
   }
 
   private currentDialogStorageFormat(): GnumarusStorageFormat {
@@ -5860,6 +5891,7 @@ export class GnumarusShell extends LitElement {
 
   private applyStorageFromDialog(): void {
     this.storageProjectFile = this.currentDialogProjectFile();
+    this.storageTextStorage = this.currentDialogTextStorage();
     this.storageFormat = this.currentDialogStorageFormat();
     this.storageLossless = this.currentDialogStorageLossless();
     this.storageQuality = this.currentDialogStorageQuality();
@@ -5877,12 +5909,13 @@ export class GnumarusShell extends LitElement {
     this.storagePngLevel = DEFAULT_STORAGE_SETTINGS.pngLevel;
     this.storageJpegQuality = DEFAULT_STORAGE_SETTINGS.jpgQuality;
     this.storageProjectFile = DEFAULT_STORAGE_SETTINGS.projectFile;
+    this.storageTextStorage = DEFAULT_STORAGE_SETTINGS.textStorage;
     this.brushQuality = DEFAULT_STORAGE_SETTINGS.brushQuality;
     this.persistStorage();
     this.statusMessage = tr("status.storageReset");
   }
 
-  /** Test hook: set project texture storage (format, JXL mode/quality, PNG level, JPEG quality, brush JXL quality). */
+  /** Test hook: set project texture storage (format, JXL mode/quality, PNG level, JPEG quality, brush JXL quality, text storage). */
   setProjectStorage(
     lossless: boolean,
     quality: number,
@@ -5891,8 +5924,10 @@ export class GnumarusShell extends LitElement {
     jpgQuality = DEFAULT_STORAGE_SETTINGS.jpgQuality,
     brushQuality = DEFAULT_STORAGE_SETTINGS.brushQuality,
     projectFile: GnumarusProjectFileFormat = DEFAULT_STORAGE_SETTINGS.projectFile,
+    textStorage: GnumarusTextStorage = DEFAULT_STORAGE_SETTINGS.textStorage,
   ): void {
     this.storageProjectFile = parseProjectFileFormat(projectFile);
+    this.storageTextStorage = parseTextStorage(textStorage);
     this.storageFormat = parseStorageFormat(format);
     this.storageLossless = lossless;
     this.storageQuality = clampStorageQuality(quality);
@@ -10195,6 +10230,40 @@ export class GnumarusShell extends LitElement {
    * PNG directly, JPEG by recombining the color file with its grayscale
    * `.alpha.jpg` companion (a missing companion means opaque).
    */
+  /**
+   * Decode one external text file from the loaded blobs (raw `.html` or
+   * single-file `.zip`, sniffed by extension). Throws on missing or
+   * corrupt files.
+   */
+  private async decodeStoredTextFile(file: string, fileBlobs: Map<string, Blob>): Promise<string> {
+    const blob = fileBlobs.get(file);
+    if (blob === undefined) {
+      throw new Error(`Missing text file: ${file}`);
+    }
+    return decodeTextFile(file, new Uint8Array(await blob.arrayBuffer()));
+  }
+
+  /**
+   * Resolve stored texts to engine documents: inline documents pass
+   * through, external `texts/` files decode from the loaded blobs.
+   * The engine sanitizes every document on load.
+   */
+  private async resolveStoredTexts(
+    texts: GnumarusTextMeta[],
+    fileBlobs: Map<string, Blob>,
+  ): Promise<Array<{ id: string; name: string; document: { html: string } }>> {
+    const out: Array<{ id: string; name: string; document: { html: string } }> = [];
+    for (const text of texts) {
+      if (text.document !== undefined) {
+        out.push({ id: text.id, name: text.name, document: { ...text.document } });
+        continue;
+      }
+      const file = text.file as string;
+      out.push({ id: text.id, name: text.name, document: { html: await this.decodeStoredTextFile(file, fileBlobs) } });
+    }
+    return out;
+  }
+
   private async decodeStoredTextureBytes(
     dir: GnumarusDirectoryHandle,
     file: string,
@@ -10271,11 +10340,7 @@ export class GnumarusShell extends LitElement {
           lockedChannels: { ...layer.lockedChannels },
         })),
         textures,
-        texts: project.animation.texts.map((text) => ({
-          id: text.id,
-          name: text.name,
-          document: { ...text.document },
-        })),
+        texts: await this.resolveStoredTexts(project.animation.texts, fileBlobs),
         contents: project.animation.contents.map((content) => ({
           id: content.id,
           name: content.name,
@@ -10704,6 +10769,25 @@ export class GnumarusShell extends LitElement {
         textId: content.textId ?? null,
         transform: { ...content.transform },
       }));
+      const textsMeta: GnumarusTextMeta[] = [];
+      for (const text of exported.texts ?? []) {
+        if (this.storageTextStorage === "html") {
+          const file = textFilePath(text.id);
+          textsMeta.push({ id: text.id, name: text.name, file });
+          blobs.set(file, new Blob([text.document.html], { type: "text/html" }));
+        } else if (this.storageTextStorage === "htmlZip") {
+          const file = textArchivePath(text.id);
+          textsMeta.push({ id: text.id, name: text.name, file });
+          blobs.set(
+            file,
+            new Blob([encodeTextArchive(text.id, text.document.html) as Uint8Array<ArrayBuffer>], {
+              type: "application/zip",
+            }),
+          );
+        } else {
+          textsMeta.push({ id: text.id, name: text.name, document: { ...text.document } });
+        }
+      }
       const meta: GnumarusProjectMeta = {
         app: GNUMARUS_APP_ID,
         version: 3,
@@ -10729,11 +10813,7 @@ export class GnumarusShell extends LitElement {
           })),
           activeAnimation: exported.activeAnimation,
           textures: texturesMeta,
-          texts: (exported.texts ?? []).map((text) => ({
-            id: text.id,
-            name: text.name,
-            document: { ...text.document },
-          })),
+          texts: textsMeta,
           contents: contentsMeta,
           cells: exported.cells.map((cell) => ({ ...cell })),
         },
