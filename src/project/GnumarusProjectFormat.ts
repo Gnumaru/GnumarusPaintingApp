@@ -1,5 +1,11 @@
 import { unzipSync, zipSync } from "fflate";
 import { sanitizeTextHtml } from "../text/GnumarusTextSanitize";
+import {
+  GNUMARUS_TILE_MAX_DIMENSION,
+  GNUMARUS_TILE_MIN_DIMENSION,
+  isValidTilePlacement,
+  type GnumarusTilePlacement,
+} from "../tilemap/GnumarusTilemap";
 import type { GnumarusTextDocument } from "../text/GnumarusText";
 import type { GnumarusLayerTransform } from "../canvas/GnumarusViewportMath";
 import { IDENTITY_LAYER_TRANSFORM } from "../canvas/GnumarusViewportMath";
@@ -51,6 +57,18 @@ export interface GnumarusModel3dMeta {
   file: string;
 }
 
+export interface GnumarusTilemapMeta {
+  id: string;
+  name: string;
+  /** Tileset texture id (any project texture). */
+  tilesetId: string;
+  /** Tile width/height in pixels (1..1024, not necessarily square). */
+  tileWidth: number;
+  tileHeight: number;
+  /** Sparse placements; grid origin is the top-left corner. */
+  tiles: GnumarusTilePlacement[];
+}
+
 export interface GnumarusContentMeta {
   id: string;
   name: string;
@@ -62,6 +80,8 @@ export interface GnumarusContentMeta {
   svgId: string | null;
   /** 3D model shown instead of a texture, text or vector; mutually exclusive with all. */
   model3dId: string | null;
+  /** Tilemap shown instead of a texture, text, vector or 3D model; mutually exclusive with all. */
+  tilemapId: string | null;
   transform: GnumarusLayerTransform;
 }
 
@@ -106,6 +126,7 @@ export interface GnumarusAnimationMeta {
   texts: GnumarusTextMeta[];
   svgs: GnumarusSvgMeta[];
   models3d: GnumarusModel3dMeta[];
+  tilemaps: GnumarusTilemapMeta[];
   contents: GnumarusContentMeta[];
   cells: GnumarusMatrixCellRef[];
 }
@@ -317,6 +338,7 @@ export function createDefaultProject(width: number, height: number): GnumarusPro
       texts: [],
       svgs: [],
       models3d: [],
+      tilemaps: [],
       contents: [
         {
           id: "content1",
@@ -325,6 +347,7 @@ export function createDefaultProject(width: number, height: number): GnumarusPro
           textId: null,
           svgId: null,
           model3dId: null,
+          tilemapId: null,
           transform: { ...IDENTITY_LAYER_TRANSFORM },
         },
       ],
@@ -486,7 +509,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
   if (!isRecord(value)) {
     throw new GnumarusProjectError("project.json has an invalid animation section");
   }
-  const { frames, currentFrame, defaultFrameDuration, frameDurations, frameNames, namedAnimations, activeAnimation, textures, texts, svgs, models3d, contents, cells } = value;
+  const { frames, currentFrame, defaultFrameDuration, frameDurations, frameNames, namedAnimations, activeAnimation, textures, texts, svgs, models3d, tilemaps, contents, cells } = value;
   if (!Number.isInteger(frames) || (frames as number) < 1) {
     throw new GnumarusProjectError("project.json has an invalid frame count");
   }
@@ -534,6 +557,8 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
   const svgIds = new Set(checkedSvgs.map((entry) => entry.id));
   const checkedModels3d = parseModel3dMetas(models3d);
   const model3dIds = new Set(checkedModels3d.map((entry) => entry.id));
+  const checkedTilemaps = parseTilemapMetas(tilemaps, textureIds);
+  const tilemapIds = new Set(checkedTilemaps.map((entry) => entry.id));
   if (!Array.isArray(contents)) {
     throw new GnumarusProjectError("project.json has invalid contents");
   }
@@ -548,7 +573,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
       throw new GnumarusProjectError("project.json has duplicate content ids");
     }
     contentIds.add(id);
-    const { name, textureId, textId, svgId, model3dId, transform } = entry;
+    const { name, textureId, textId, svgId, model3dId, tilemapId, transform } = entry;
     if (textureId !== null && textureId !== undefined && typeof textureId !== "string") {
       throw new GnumarusProjectError("project.json has a content with an invalid texture reference");
     }
@@ -577,9 +602,16 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
     if (resolvedModel3d !== null && !model3dIds.has(resolvedModel3d)) {
       throw new GnumarusProjectError("project.json has a content with an unknown 3D model");
     }
-    const linkedKinds = [resolvedTexture, resolvedText, resolvedSvg, resolvedModel3d].filter((ref) => ref !== null).length;
+    if (tilemapId !== null && tilemapId !== undefined && typeof tilemapId !== "string") {
+      throw new GnumarusProjectError("project.json has a content with an invalid tilemap reference");
+    }
+    const resolvedTilemap = tilemapId === undefined ? null : (tilemapId as string | null);
+    if (resolvedTilemap !== null && !tilemapIds.has(resolvedTilemap)) {
+      throw new GnumarusProjectError("project.json has a content with an unknown tilemap");
+    }
+    const linkedKinds = [resolvedTexture, resolvedText, resolvedSvg, resolvedModel3d, resolvedTilemap].filter((ref) => ref !== null).length;
     if (linkedKinds > 1) {
-      throw new GnumarusProjectError("project.json has a content with more than one texture, text, vector graphic or 3D model");
+      throw new GnumarusProjectError("project.json has a content with more than one texture, text, vector graphic, 3D model or tilemap");
     }
     checkedContents.push({
       id,
@@ -588,6 +620,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
       textId: resolvedText,
       svgId: resolvedSvg,
       model3dId: resolvedModel3d,
+      tilemapId: resolvedTilemap,
       transform: parseLayerTransform(transform),
     });
   }
@@ -677,6 +710,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
     texts: checkedTexts,
     svgs: checkedSvgs,
     models3d: checkedModels3d,
+    tilemaps: checkedTilemaps,
     contents: checkedContents,
     cells: checkedCells,
   };
@@ -764,6 +798,62 @@ function parseSvgMetas(value: unknown): GnumarusSvgMeta[] {
         document: { svg: (document as { svg: string }).svg },
       });
     }
+  }
+  return checked;
+}
+
+/** Strict tilemap list (absent in legacy files means none). Inline; validated strictly. */
+function parseTilemapMetas(value: unknown, textureIds: Set<string>): GnumarusTilemapMeta[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new GnumarusProjectError("project.json has invalid tilemaps");
+  }
+  const checked: GnumarusTilemapMeta[] = [];
+  const seenIds = new Set<string>();
+  for (const entry of value) {
+    if (!isRecord(entry)) {
+      throw new GnumarusProjectError("project.json has an invalid tilemap");
+    }
+    const id = checkedId(entry.id, "tilemap");
+    if (seenIds.has(id)) {
+      throw new GnumarusProjectError("project.json has duplicate tilemap ids");
+    }
+    seenIds.add(id);
+    const { name, tilesetId, tileWidth, tileHeight, tiles } = entry;
+    if (typeof tilesetId !== "string" || !textureIds.has(tilesetId)) {
+      throw new GnumarusProjectError("project.json has a tilemap with an unknown tileset");
+    }
+    if (
+      typeof tileWidth !== "number" ||
+      !Number.isInteger(tileWidth) ||
+      tileWidth < GNUMARUS_TILE_MIN_DIMENSION ||
+      tileWidth > GNUMARUS_TILE_MAX_DIMENSION ||
+      typeof tileHeight !== "number" ||
+      !Number.isInteger(tileHeight) ||
+      tileHeight < GNUMARUS_TILE_MIN_DIMENSION ||
+      tileHeight > GNUMARUS_TILE_MAX_DIMENSION
+    ) {
+      throw new GnumarusProjectError("project.json has a tilemap with invalid tile dimensions");
+    }
+    if (!Array.isArray(tiles)) {
+      throw new GnumarusProjectError("project.json has a tilemap with invalid tiles");
+    }
+    const checkedTiles: GnumarusTilePlacement[] = [];
+    const seenCells = new Set<string>();
+    for (const placement of tiles) {
+      if (!isValidTilePlacement(placement)) {
+        throw new GnumarusProjectError("project.json has a tilemap with an invalid tile");
+      }
+      const key = `${placement.x},${placement.y}`;
+      if (seenCells.has(key)) {
+        throw new GnumarusProjectError("project.json has a tilemap with duplicate tiles");
+      }
+      seenCells.add(key);
+      checkedTiles.push({ ...placement });
+    }
+    checked.push({ id, name: checkedName(name, "tilemap"), tilesetId, tileWidth, tileHeight, tiles: checkedTiles });
   }
   return checked;
 }
@@ -894,6 +984,7 @@ function migrateLegacyLayersToAnimation(
       textId: null,
       svgId: null,
       model3dId: null,
+      tilemapId: null,
       transform: layer.transform !== undefined ? { ...layer.transform } : { ...IDENTITY_LAYER_TRANSFORM },
     });
     cells.push({ layer: layer.id, frame: 0, content: contentId });
@@ -910,6 +1001,7 @@ function migrateLegacyLayersToAnimation(
     texts: [],
     svgs: [],
     models3d: [],
+    tilemaps: [],
     contents,
     cells,
   };

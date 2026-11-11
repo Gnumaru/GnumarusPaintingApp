@@ -348,3 +348,6 @@
 - [x] 3D model pool (`models3d`, `model3dId`, 4-way exclusivity) + format refs + ext allowlist + unit tests (441 passed)
 - [x] Engine async three.js raster + guards + picker/menu/action/import + save/open + UI + i18n (en + pt-BR)
 - [x] E2E (5 new: stl render, occupied/extension/corrupt refusals, raw round-trip); build + unit (441) + e2e (278/278) green; docs updated
+- [x] Tilemap pool (`tilemaps`, `tilemapId`, 5-way exclusivity) + wrap-blit helper + format validation + history entry + unit tests (448 passed)
+- [x] Engine sync raster/resolve/guards/tile-brush tool (pointer/R/H/V/preview/undo) + shell (button/options/tiles window/tileset picker/i18n en+pt-BR)
+- [x] E2E (5 new: create+place, transform+reset, erase+undo, save/reopen, picker badge); build + unit (448) + e2e (283/283) green; docs updated

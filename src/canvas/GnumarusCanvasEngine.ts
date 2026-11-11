@@ -14,6 +14,7 @@ import {
   withSvgSize,
 } from "../vector/GnumarusSvg";
 import type { GnumarusSvgEntry } from "../vector/GnumarusSvg";
+import { wrappedTileBlits, type GnumarusTilePlacement, type GnumarusTileRotation } from "../tilemap/GnumarusTilemap";
 import { layoutTextDocument, parseTextDocument } from "../text/GnumarusTextLayout";
 import { rasterizeLaidOutText } from "../text/GnumarusTextRaster";
 import {
@@ -263,6 +264,7 @@ export type GnumarusCanvasTool =
   | "polylasso"
   | "colorselect"
   | "text"
+  | "tilebrush"
   | "destransform"
   | "destransform3d";
 
@@ -389,6 +391,18 @@ interface GnumarusTextureEntry {
 }
 
 /** Shareable cell content: optional texture or rich text plus per-cell transform settings. */
+/** Runtime tilemap entry: tileset plus grid placements plus tile size. */
+interface GnumarusTilemapEntry {
+  id: string;
+  name: string;
+  tilesetId: string;
+  tileWidth: number;
+  tileHeight: number;
+  tiles: GnumarusTilePlacement[];
+  /** Bumped on every edit; raster cache keys include it. */
+  revision: number;
+}
+
 interface GnumarusCellContent {
   id: string;
   name: string;
@@ -399,6 +413,8 @@ interface GnumarusCellContent {
   svgId: string | null;
   /** 3D model shown instead of a texture, text or vector; mutually exclusive with all. */
   model3dId: string | null;
+  /** Tilemap shown instead of a texture, text, vector or 3D model; mutually exclusive with all. */
+  tilemapId: string | null;
   transform: GnumarusLayerTransform;
 }
 
@@ -429,6 +445,7 @@ export interface GnumarusAnimationMatrixView {
     textId: string | null;
     svgId: string | null;
     model3dId: string | null;
+    tilemapId: string | null;
     width: number;
     height: number;
     transform: GnumarusLayerTransform;
@@ -447,8 +464,9 @@ export interface GnumarusAnimationProjectData {
   textures: GnumarusTexturePixels[];
   texts?: Array<{ id: string; name: string; document: GnumarusTextDocument }>;
   svgs?: Array<{ id: string; name: string; svg: string }>;
+  tilemaps?: Array<{ id: string; name: string; tilesetId: string; tileWidth: number; tileHeight: number; tiles: GnumarusTilePlacement[] }>;
   models3d?: Array<{ id: string; name: string; ext: string; bytes: Uint8Array }>;
-  contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null; svgId?: string | null; model3dId?: string | null; transform: GnumarusLayerTransform }>;
+  contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null; svgId?: string | null; model3dId?: string | null; tilemapId?: string | null; transform: GnumarusLayerTransform }>;
   cells: Array<{ layer: string; frame: number; content: string }>;
   frames: number;
   currentFrame: number;
@@ -591,7 +609,9 @@ export interface GnumarusEngineOptions {
   /** Fired when the text tool requests the text editor for a cell. */
   onTextEditRequested?: (info: { layerId: string; frame: number; contentId: string; textId: string }) => void;
   /** Fired for user-facing notices that need a toast (blocked paint on derived cells). */
-  onNotice?: (kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked") => void;
+  onNotice?: (kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked" | "tilemap-paint-blocked" | "tile-rot-needs-square") => void;
+  /** Tile-brush click outcomes for shell status/toast display. */
+  onTileBrushOutcome?: (outcome: "placed" | "erased" | "no-tileset" | "occupied" | "nothing") => void;
   checker?: GnumarusCheckerSettings;
   gridMinZoom?: number;
   gridOpacityPercent?: number;
@@ -660,6 +680,25 @@ export class GnumarusCanvasEngine {
   private modelPending = new Set<string>();
   private modelCounter = 1;
   private modelNameCounter = 1;
+  /** Tilemap entries by id (tileset + grid placements). */
+  private tilemaps = new Map<string, GnumarusTilemapEntry>();
+  /** Raster cache by tilemap id (project-sized, keyed by content revision). */
+  private tileRasters = new Map<string, { buffer: Uint8ClampedArray; width: number; height: number; key: string }>();
+  private tilemapCounter = 1;
+  private tilemapNameCounter = 1;
+  /** Bumps on every pixel mutation; tile raster cache keys include it. */
+  private pixelsVersion = 0;
+  /** Tile-brush tool state (session-only). */
+  private tileBrush: {
+    tilesetId: string | null;
+    tx: number;
+    ty: number;
+    flipH: boolean;
+    flipV: boolean;
+    rot: GnumarusTileRotation;
+    stageW: number;
+    stageH: number;
+  } = { tilesetId: null, tx: 0, ty: 0, flipH: false, flipV: false, rot: 0, stageW: 16, stageH: 16 };
   /** Shared offscreen renderer for 3D model thumbnails (lazy). */
   private modelRenderer: THREE.WebGLRenderer | null = null;
   private frameCount = 1;
@@ -781,6 +820,11 @@ export class GnumarusCanvasEngine {
   private curveDragCurrent: { x: number; y: number; clientX: number; clientY: number } | null = null;
   private lastMouseClient: { x: number; y: number } | null = null;
   private readonly previewTip: HTMLDivElement;
+  /** Tile-brush cursor preview (tile image, positioned over the target grid cell). */
+  private readonly tileTip: HTMLDivElement;
+  private readonly tileTipImage: HTMLImageElement;
+  /** Cache key of the tile preview image (avoids re-encoding unchanged picks). */
+  private tileTipKey = "";
   private readonly previewStabilizer: HTMLDivElement;
   private readonly previewSvg: SVGSVGElement;
   private readonly previewLine: SVGLineElement;
@@ -969,7 +1013,10 @@ export class GnumarusCanvasEngine {
   private readonly onTextEditRequested:
     | ((info: { layerId: string; frame: number; contentId: string; textId: string }) => void)
     | undefined;
-  private readonly onNotice: ((kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked") => void) | undefined;
+  private readonly onNotice: ((kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked" | "tilemap-paint-blocked" | "tile-rot-needs-square") => void) | undefined;
+  private readonly onTileBrushOutcome:
+    | ((outcome: "placed" | "erased" | "no-tileset" | "occupied" | "nothing") => void)
+    | undefined;
 
   constructor(container: HTMLElement, options: GnumarusEngineOptions) {
     this.container = container;
@@ -982,6 +1029,7 @@ export class GnumarusCanvasEngine {
     this.onTransformChanged = options.onTransformChanged;
     this.onTextEditRequested = options.onTextEditRequested;
     this.onNotice = options.onNotice;
+    this.onTileBrushOutcome = options.onTileBrushOutcome;
     const initialChecker = options.checker ?? DEFAULT_CHECKER_SETTINGS;
     this.checkerMode = initialChecker.mode;
     this.checkerSizeX = clampCheckerSize(initialChecker.sizeX);
@@ -1036,6 +1084,20 @@ export class GnumarusCanvasEngine {
     this.previewTip.style.boxSizing = "border-box";
     this.previewTip.style.zIndex = "5";
     container.appendChild(this.previewTip);
+    this.tileTip = document.createElement("div");
+    this.tileTip.setAttribute("data-testid", "tile-preview");
+    this.tileTip.style.position = "absolute";
+    this.tileTip.style.pointerEvents = "none";
+    this.tileTip.style.display = "none";
+    this.tileTip.style.boxSizing = "border-box";
+    this.tileTip.style.zIndex = "5";
+    this.tileTipImage = document.createElement("img");
+    this.tileTipImage.style.display = "block";
+    this.tileTipImage.style.width = "100%";
+    this.tileTipImage.style.height = "100%";
+    this.tileTipImage.style.imageRendering = "pixelated";
+    this.tileTip.appendChild(this.tileTipImage);
+    container.appendChild(this.tileTip);
     this.previewStabilizer = document.createElement("div");
     this.previewStabilizer.setAttribute("data-testid", "stabilizer-preview");
     this.previewStabilizer.style.position = "absolute";
@@ -1414,6 +1476,7 @@ export class GnumarusCanvasEngine {
       textureId: "layer0",
       textId: null,
       svgId: null,
+      tilemapId: null,
       model3dId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
@@ -1440,6 +1503,10 @@ export class GnumarusCanvasEngine {
     this.modelPending.clear();
     this.modelRenderer?.dispose();
     this.modelRenderer = null;
+    this.tilemapCounter = 1;
+    this.tilemapNameCounter = 1;
+    this.tilemaps.clear();
+    this.tileRasters.clear();
     this.resetSymmetryCenter();
     this.syncAllLayerRenders();
 
@@ -1588,6 +1655,15 @@ export class GnumarusCanvasEngine {
           textures.set(derivedId, { width: raster.width, height: raster.height, buffer: raster.buffer });
           textureId = derivedId;
         }
+      } else if (content.tilemapId !== null) {
+        const raster = this.rasterizeTilemap(content.tilemapId);
+        if (raster === null) {
+          textureId = null;
+        } else {
+          const derivedId = `tilemap:${content.tilemapId}`;
+          textures.set(derivedId, { width: raster.width, height: raster.height, buffer: raster.buffer });
+          textureId = derivedId;
+        }
       }
       contents.set(id, { textureId, transform: content.transform });
     }
@@ -1714,6 +1790,10 @@ export class GnumarusCanvasEngine {
     }
     if (content.model3dId !== null) {
       const size = this.model3dRasterSize(content.model3dId);
+      return size === null ? { width: 0, height: 0 } : size;
+    }
+    if (content.tilemapId !== null) {
+      const size = this.tilemapRasterSize(content.tilemapId);
       return size === null ? { width: 0, height: 0 } : size;
     }
     if (content.textureId === null) {
@@ -2184,6 +2264,10 @@ export class GnumarusCanvasEngine {
       this.onNotice?.("model3d-paint-blocked");
       return true;
     }
+    if (this.getCellTilemapId(layer.id, this.currentFrame) !== null) {
+      this.onNotice?.("tilemap-paint-blocked");
+      return true;
+    }
     return false;
   }
 
@@ -2218,6 +2302,7 @@ export class GnumarusCanvasEngine {
           textId: content.textId,
           svgId: content.svgId,
           model3dId: content.model3dId,
+          tilemapId: content.tilemapId,
           width: size.width,
           height: size.height,
           transform: { ...content.transform },
@@ -2255,6 +2340,7 @@ export class GnumarusCanvasEngine {
       textureId,
       textId: null,
       svgId: null,
+      tilemapId: null,
       model3dId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
@@ -2283,6 +2369,7 @@ export class GnumarusCanvasEngine {
       textureId: null,
       textId: null,
       svgId: null,
+      tilemapId: null,
       model3dId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
@@ -2462,6 +2549,7 @@ export class GnumarusCanvasEngine {
       textureId: null,
       textId,
       svgId: null,
+      tilemapId: null,
       model3dId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
@@ -2493,6 +2581,7 @@ export class GnumarusCanvasEngine {
       textureId: null,
       textId,
       svgId: null,
+      tilemapId: null,
       model3dId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
@@ -2631,6 +2720,7 @@ export class GnumarusCanvasEngine {
       textureId,
       textId: null,
       svgId: null,
+      tilemapId: null,
       model3dId: null,
       transform: { ...content.transform },
     });
@@ -2816,6 +2906,7 @@ export class GnumarusCanvasEngine {
       textId: null,
       svgId,
       model3dId: null,
+      tilemapId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(key, createdId);
@@ -3009,6 +3100,7 @@ export class GnumarusCanvasEngine {
       textureId: null,
       textId: null,
       svgId: null,
+      tilemapId: null,
       model3dId: modelId,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
@@ -3075,6 +3167,500 @@ export class GnumarusCanvasEngine {
     }
     const edge = this.modelRasterEdge();
     return { width: edge, height: edge };
+  }
+
+  private nextTilemapId(): string {
+    return `tilemap${this.tilemapCounter++}`;
+  }
+
+  private nextTilemapName(): string {
+    return `TM${this.tilemapNameCounter++}`;
+  }
+
+  /** All tilemap entries (for debugging/inspection), sorted by name. */
+  getTilemapEntries(): GnumarusTilemapEntry[] {
+    return [...this.tilemaps.values()].sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  /** Tilemap id of a cell's content, or null (read-only: never creates anything). */
+  getCellTilemapId(layerId: string, frame: number): string | null {
+    const contentId = this.cells.get(animationCellKey(layerId, frame));
+    if (contentId === undefined) {
+      return null;
+    }
+    const content = this.contents.get(contentId);
+    if (content === undefined || content.tilemapId === null) {
+      return null;
+    }
+    return this.tilemaps.has(content.tilemapId) ? content.tilemapId : null;
+  }
+
+  /** Current tile-brush tool state for the options bar and preview. */
+  getTileBrush(): {
+    tilesetId: string | null;
+    tx: number;
+    ty: number;
+    flipH: boolean;
+    flipV: boolean;
+    rot: GnumarusTileRotation;
+    stageW: number;
+    stageH: number;
+  } {
+    return { ...this.tileBrush };
+  }
+
+  /**
+   * Effective tileset for the tile window/preview/placement: the active
+   * tilemap cell's tileset wins, otherwise the tool-staged one.
+   */
+  getTileBrushTilesetId(): string | null {
+    const layer = this.activeLayer();
+    if (layer !== null) {
+      const contentId = this.cells.get(animationCellKey(layer.id, this.currentFrame));
+      const content = contentId === undefined ? undefined : this.contents.get(contentId);
+      if (content?.tilemapId !== undefined && content?.tilemapId !== null) {
+        const tilemap = this.tilemaps.get(content.tilemapId);
+        if (tilemap !== undefined) {
+          return tilemap.tilesetId;
+        }
+      }
+    }
+    return this.tileBrush.tilesetId;
+  }
+
+  /** Effective tile size: active tilemap's, else the staged tool default. */
+  getTileBrushTileSize(): { w: number; h: number } {
+    const layer = this.activeLayer();
+    if (layer !== null) {
+      const contentId = this.cells.get(animationCellKey(layer.id, this.currentFrame));
+      const content = contentId === undefined ? undefined : this.contents.get(contentId);
+      if (content?.tilemapId !== undefined && content?.tilemapId !== null) {
+        const tilemap = this.tilemaps.get(content.tilemapId);
+        if (tilemap !== undefined) {
+          return { w: tilemap.tileWidth, h: tilemap.tileHeight };
+        }
+      }
+    }
+    return { w: this.tileBrush.stageW, h: this.tileBrush.stageH };
+  }
+
+  /** Point the tile brush at a tileset (resets tile + transform). */
+  setTileBrushTileset(tilesetId: string | null): void {
+    if (tilesetId !== null && !this.textures.has(tilesetId)) {
+      return;
+    }
+    this.tileBrush.tilesetId = tilesetId;
+    this.tileBrush.tx = 0;
+    this.tileBrush.ty = 0;
+    this.tileBrush.flipH = false;
+    this.tileBrush.flipV = false;
+    this.tileBrush.rot = 0;
+    this.updatePreviews();
+    this.onLayersChanged?.();
+  }
+
+  /** Point the tile brush at one tileset cell (resets transform). */
+  setTileBrushTile(tx: number, ty: number): void {
+    this.tileBrush.tx = Math.max(0, Math.floor(tx));
+    this.tileBrush.ty = Math.max(0, Math.floor(ty));
+    this.tileBrush.flipH = false;
+    this.tileBrush.flipV = false;
+    this.tileBrush.rot = 0;
+    this.updatePreviews();
+    this.onLayersChanged?.();
+  }
+
+  /** Rotate the preview tile 90 degrees clockwise (square tiles only). */
+  rotateTileBrush(): boolean {
+    const { w, h } = this.getTileBrushTileSize();
+    if (w !== h) {
+      this.onNotice?.("tile-rot-needs-square");
+      return false;
+    }
+    const order: GnumarusTileRotation[] = [0, 90, 180, 270];
+    this.tileBrush.rot = order[(order.indexOf(this.tileBrush.rot) + 1) % order.length] as GnumarusTileRotation;
+    this.updatePreviews();
+    return true;
+  }
+
+  /** Flip the preview tile horizontally or vertically. */
+  flipTileBrush(axis: "h" | "v"): void {
+    if (axis === "h") {
+      this.tileBrush.flipH = !this.tileBrush.flipH;
+    } else {
+      this.tileBrush.flipV = !this.tileBrush.flipV;
+    }
+    this.updatePreviews();
+  }
+
+  /** Stage the tool tile size (applies to the active tilemap too, when any). */
+  setTileBrushSize(w: number, h: number): void {
+    const tw = Math.min(1024, Math.max(1, Math.floor(w)));
+    const th = Math.min(1024, Math.max(1, Math.floor(h)));
+    if (!Number.isFinite(tw) || !Number.isFinite(th)) {
+      return;
+    }
+    this.tileBrush.stageW = tw;
+    this.tileBrush.stageH = th;
+    const layer = this.activeLayer();
+    if (layer !== null) {
+      const contentId = this.cells.get(animationCellKey(layer.id, this.currentFrame));
+      const content = contentId === undefined ? undefined : this.contents.get(contentId);
+      const tilemap = content?.tilemapId === undefined || content?.tilemapId === null ? undefined : this.tilemaps.get(content.tilemapId);
+      if (tilemap !== undefined && (tilemap.tileWidth !== tw || tilemap.tileHeight !== th)) {
+        tilemap.tileWidth = tw;
+        tilemap.tileHeight = th;
+        tilemap.revision += 1;
+        this.tileRasters.delete(tilemap.id);
+        this.syncAllLayerRenders();
+        this.refreshLayerStacking();
+        this.render();
+        this.onPixelsChanged();
+        this.onLayersChanged?.();
+      }
+    }
+    this.updatePreviews();
+  }
+
+  /** Retarget a tilemap at another tileset (keeps placements, bumps revision). */
+  setTilemapTileset(layerId: string, frame: number, tilesetId: string): boolean {
+    const contentId = this.cells.get(animationCellKey(layerId, frame));
+    const content = contentId === undefined ? undefined : this.contents.get(contentId);
+    const tilemap = content?.tilemapId === undefined || content?.tilemapId === null ? undefined : this.tilemaps.get(content.tilemapId);
+    if (tilemap === undefined || !this.textures.has(tilesetId) || tilemap.tilesetId === tilesetId) {
+      return false;
+    }
+    tilemap.tilesetId = tilesetId;
+    tilemap.revision += 1;
+    this.tileRasters.delete(tilemap.id);
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    return true;
+  }
+
+  /**
+   * Project pixel under a client point (no layer needed, so tilemaps work
+   * on empty cells). Null only for a missing or degenerate view.
+   */
+  private toProjectPixel(clientX: number, clientY: number): { x: number; y: number } | null {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const project = screenToProject(
+      clientX,
+      clientY,
+      { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      this.viewTransform(),
+    );
+    if (project === null) {
+      return null;
+    }
+    return { x: Math.floor(project.x), y: Math.floor(project.y) };
+  }
+
+  /**
+   * Grid cell under a client point for the given tile size. The viewport
+   * project space is centered, so shift by half the project size to get a
+   * top-left grid origin matching the layer-space raster. May be negative
+   * or off-canvas. Null when unmappable.
+   */
+  tileGridAt(clientX: number, clientY: number, tw: number, th: number): { x: number; y: number } | null {
+    const pixel = this.toProjectPixel(clientX, clientY);
+    if (pixel === null || !(tw >= 1) || !(th >= 1)) {
+      return null;
+    }
+    return {
+      x: Math.floor((pixel.x + this.imageWidth / 2) / tw),
+      y: Math.floor((pixel.y + this.imageHeight / 2) / th),
+    };
+  }
+
+  /**
+   * Create a tilemap content for an empty cell (textureless content reused,
+   * blank textures detached like SVG imports). Returns null when the cell
+   * already carries anything renderable.
+   */
+  private ensureTilemapForPlacement(layerId: string, frame: number, tilesetId: string, tw: number, th: number): GnumarusTilemapEntry | null {
+    const key = animationCellKey(layerId, frame);
+    const contentId = this.cells.get(key);
+    const content = contentId === undefined ? undefined : this.contents.get(contentId);
+    if (content !== undefined) {
+      if (content.textureId !== null) {
+        if (!this.isTextureBlank(content.textureId)) {
+          return null;
+        }
+        let shared = false;
+        for (const other of this.contents.values()) {
+          if (other !== content && other.textureId === content.textureId) {
+            shared = true;
+            break;
+          }
+        }
+        if (!shared) {
+          this.textures.delete(content.textureId);
+        }
+        content.textureId = null;
+      }
+      if (content.textId !== null || content.svgId !== null || content.model3dId !== null || content.tilemapId !== null) {
+        return null;
+      }
+      const tilemapId = this.nextTilemapId();
+      this.tilemaps.set(tilemapId, {
+        id: tilemapId,
+        name: this.nextTilemapName(),
+        tilesetId,
+        tileWidth: tw,
+        tileHeight: th,
+        tiles: [],
+        revision: 1,
+      });
+      content.tilemapId = tilemapId;
+      const created = this.tilemaps.get(tilemapId);
+      if (created === undefined) {
+        return null;
+      }
+      return created;
+    }
+    const tilemapId = this.nextTilemapId();
+    this.tilemaps.set(tilemapId, {
+      id: tilemapId,
+      name: this.nextTilemapName(),
+      tilesetId,
+      tileWidth: tw,
+      tileHeight: th,
+      tiles: [],
+      revision: 1,
+    });
+    const createdId = this.nextContentId();
+    this.contents.set(createdId, {
+      id: createdId,
+      name: `C${this.contentCounter - 1}`,
+      textureId: null,
+      textId: null,
+      svgId: null,
+      model3dId: null,
+      tilemapId,
+      transform: { ...IDENTITY_LAYER_TRANSFORM },
+    });
+    this.cells.set(key, createdId);
+    const created = this.tilemaps.get(tilemapId);
+    if (created === undefined) {
+      return null;
+    }
+    return created;
+  }
+
+  private cloneTileTiles(tiles: GnumarusTilePlacement[]): GnumarusTilePlacement[] {
+    return tiles.map((tile) => ({ ...tile }));
+  }
+
+  /** Undo/redo target: replace a tilemap's placements and refresh. */
+  private applyTilemapForHistory(tilemapId: string, tiles: GnumarusTilePlacement[]): boolean {
+    const tilemap = this.tilemaps.get(tilemapId);
+    if (tilemap === undefined) {
+      return false;
+    }
+    tilemap.tiles = this.cloneTileTiles(tiles);
+    tilemap.revision += 1;
+    this.tileRasters.delete(tilemapId);
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    return true;
+  }
+
+  /**
+   * Tile-brush click: left button places, right button erases. Returns a
+   * status for the shell toast: placed / erased / no-tileset / occupied /
+   * nothing.
+   */
+  tileBrushClick(clientX: number, clientY: number, button: 0 | 2): "placed" | "erased" | "no-tileset" | "occupied" | "nothing" {
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return "nothing";
+    }
+    const frame = this.currentFrame;
+    const key = animationCellKey(layer.id, frame);
+    const contentId = this.cells.get(key);
+    const content = contentId === undefined ? undefined : this.contents.get(contentId);
+    const tilemap = content?.tilemapId === undefined || content?.tilemapId === null ? undefined : this.tilemaps.get(content.tilemapId);
+    if (content !== undefined && tilemap === undefined) {
+      if (
+        content.textureId !== null ||
+        content.textId !== null ||
+        content.svgId !== null ||
+        content.model3dId !== null
+      ) {
+        return "occupied";
+      }
+    }
+    if (tilemap !== undefined) {
+      const grid = this.tileGridAt(clientX, clientY, tilemap.tileWidth, tilemap.tileHeight);
+      if (grid === null) {
+        return "nothing";
+      }
+      const index = tilemap.tiles.findIndex((tile) => tile.x === grid.x && tile.y === grid.y);
+      if (button === 2) {
+        if (index < 0) {
+          return "nothing";
+        }
+        const before = this.cloneTileTiles(tilemap.tiles);
+        tilemap.tiles.splice(index, 1);
+        tilemap.revision += 1;
+        this.tileRasters.delete(tilemap.id);
+        this.history.push({ type: "tilemap", tilemap: { tilemapId: tilemap.id, before, after: this.cloneTileTiles(tilemap.tiles) } });
+        this.syncAllLayerRenders();
+        this.refreshLayerStacking();
+        this.render();
+        this.onPixelsChanged();
+        this.onLayersChanged?.();
+        this.emitStats();
+        return "erased";
+      }
+      if (this.tileBrush.tilesetId === null) {
+        return "no-tileset";
+      }
+      const before = this.cloneTileTiles(tilemap.tiles);
+      const placement: GnumarusTilePlacement = {
+        x: grid.x,
+        y: grid.y,
+        tx: this.tileBrush.tx,
+        ty: this.tileBrush.ty,
+        flipH: this.tileBrush.flipH,
+        flipV: this.tileBrush.flipV,
+        rot: tilemap.tileWidth === tilemap.tileHeight ? this.tileBrush.rot : 0,
+      };
+      if (index >= 0) {
+        tilemap.tiles[index] = placement;
+      } else {
+        tilemap.tiles.push(placement);
+      }
+      tilemap.revision += 1;
+      this.tileRasters.delete(tilemap.id);
+      this.history.push({ type: "tilemap", tilemap: { tilemapId: tilemap.id, before, after: this.cloneTileTiles(tilemap.tiles) } });
+      this.syncAllLayerRenders();
+      this.refreshLayerStacking();
+      this.render();
+      this.onPixelsChanged();
+      this.onLayersChanged?.();
+      this.emitStats();
+      return "placed";
+    }
+    if (button === 2) {
+      return "nothing";
+    }
+    const staged = this.tileBrush.tilesetId;
+    if (staged === null || !this.textures.has(staged)) {
+      return "no-tileset";
+    }
+    const created = this.ensureTilemapForPlacement(layer.id, frame, staged, this.tileBrush.stageW, this.tileBrush.stageH);
+    if (created === null) {
+      return "occupied";
+    }
+    const grid = this.tileGridAt(clientX, clientY, created.tileWidth, created.tileHeight);
+    if (grid === null) {
+      return "nothing";
+    }
+    const before = this.cloneTileTiles(created.tiles);
+    created.tiles.push({
+      x: grid.x,
+      y: grid.y,
+      tx: this.tileBrush.tx,
+      ty: this.tileBrush.ty,
+      flipH: this.tileBrush.flipH,
+      flipV: this.tileBrush.flipV,
+      rot: created.tileWidth === created.tileHeight ? this.tileBrush.rot : 0,
+    });
+    created.revision += 1;
+    this.history.push({ type: "tilemap", tilemap: { tilemapId: created.id, before, after: this.cloneTileTiles(created.tiles) } });
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return "placed";
+  }
+
+  /**
+   * Rasterize a tilemap into a project-sized buffer: tiles sampled from
+   * the tileset texture with wrap-around, per-tile flip/rotation. Cached
+   * by content revision + pixel version. Null for missing tilesets.
+   */
+  rasterizeTilemap(tilemapId: string): { buffer: Uint8ClampedArray; width: number; height: number } | null {
+    const tilemap = this.tilemaps.get(tilemapId);
+    if (tilemap === undefined) {
+      return null;
+    }
+    const texture = this.textures.get(tilemap.tilesetId);
+    if (texture === undefined) {
+      return null;
+    }
+    const key = `${tilemap.revision}:${this.pixelsVersion}:${texture.width}x${texture.height}`;
+    const cached = this.tileRasters.get(tilemapId);
+    if (cached !== undefined && cached.key === key) {
+      return { buffer: cached.buffer, width: cached.width, height: cached.height };
+    }
+    const width = Math.max(1, this.imageWidth);
+    const height = Math.max(1, this.imageHeight);
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (context === null) {
+      return null;
+    }
+    context.imageSmoothingEnabled = false;
+    if (tilemap.tiles.length > 0) {
+      const source = document.createElement("canvas");
+      source.width = Math.max(1, texture.width);
+      source.height = Math.max(1, texture.height);
+      const sourceCtx = source.getContext("2d");
+      if (sourceCtx === null) {
+        return null;
+      }
+      sourceCtx.putImageData(new ImageData(new Uint8ClampedArray(texture.buffer), texture.width, texture.height), 0, 0);
+      const tw = tilemap.tileWidth;
+      const th = tilemap.tileHeight;
+      const scratch = document.createElement("canvas");
+      scratch.width = tw;
+      scratch.height = th;
+      const scratchCtx = scratch.getContext("2d");
+      if (scratchCtx === null) {
+        return null;
+      }
+      scratchCtx.imageSmoothingEnabled = false;
+      for (const tile of tilemap.tiles) {
+        scratchCtx.clearRect(0, 0, tw, th);
+        for (const blit of wrappedTileBlits(tile.tx * tw, tile.ty * th, tw, th, texture.width, texture.height)) {
+          scratchCtx.drawImage(source, blit.sx, blit.sy, blit.w, blit.h, blit.dx, blit.dy, blit.w, blit.h);
+        }
+        context.save();
+        context.translate(tile.x * tw + tw / 2, tile.y * th + th / 2);
+        if (tile.rot !== 0) {
+          context.rotate((tile.rot * Math.PI) / 180);
+        }
+        context.scale(tile.flipH ? -1 : 1, tile.flipV ? -1 : 1);
+        context.drawImage(scratch, -tw / 2, -th / 2);
+        context.restore();
+      }
+    }
+    const image = context.getImageData(0, 0, width, height);
+    const raster = { buffer: new Uint8ClampedArray(image.data), width, height, key };
+    this.tileRasters.set(tilemapId, raster);
+    return { buffer: raster.buffer, width: raster.width, height: raster.height };
+  }
+
+  /** Layout-space size of a tilemap raster (always project-sized). */
+  tilemapRasterSize(tilemapId: string): { width: number; height: number } | null {
+    const raster = this.rasterizeTilemap(tilemapId);
+    if (raster === null) {
+      return null;
+    }
+    return { width: raster.width, height: raster.height };
   }
 
   /** Lazily created offscreen renderer for 3D model thumbnails. */
@@ -3283,6 +3869,7 @@ export class GnumarusCanvasEngine {
       textureId: null,
       textId: null,
       svgId: null,
+      tilemapId: null,
       model3dId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     };
@@ -3306,6 +3893,7 @@ export class GnumarusCanvasEngine {
         textureId: null,
         textId: null,
         svgId: null,
+        tilemapId: null,
         model3dId: null,
         transform: { ...IDENTITY_LAYER_TRANSFORM },
       };
@@ -3313,8 +3901,8 @@ export class GnumarusCanvasEngine {
       this.cells.set(key, createdId);
       contentId = createdId;
     }
-    if (content.textId !== null || content.svgId !== null || content.model3dId !== null) {
-      // Derived contents (text/vector/3D) have no paintable texture;
+    if (content.textId !== null || content.svgId !== null || content.model3dId !== null || content.tilemapId !== null) {
+      // Derived contents (text/vector/3D/tilemap) have no paintable texture;
       // callers needing only the content/transform must use ensureCellContentOnly.
       return null;
     }
@@ -3375,6 +3963,14 @@ export class GnumarusCanvasEngine {
         ext: model.ext,
         bytes: model.bytes,
       })),
+      tilemaps: [...this.tilemaps.values()].map((tilemap) => ({
+        id: tilemap.id,
+        name: tilemap.name,
+        tilesetId: tilemap.tilesetId,
+        tileWidth: tilemap.tileWidth,
+        tileHeight: tilemap.tileHeight,
+        tiles: this.cloneTileTiles(tilemap.tiles),
+      })),
       contents: [...this.contents.values()].map((content) => ({
         id: content.id,
         name: content.name,
@@ -3382,6 +3978,7 @@ export class GnumarusCanvasEngine {
         textId: content.textId,
         svgId: content.svgId,
         model3dId: content.model3dId,
+        tilemapId: content.tilemapId,
         transform: { ...content.transform },
       })),
       cells: [...this.cells.entries()].map(([key, content]) => {
@@ -4658,6 +5255,7 @@ export class GnumarusCanvasEngine {
         textureId: input.id,
         textId: null,
         svgId: null,
+        tilemapId: null,
         model3dId: null,
         transform: {
           ...input.transform,
@@ -4706,8 +5304,9 @@ export class GnumarusCanvasEngine {
       textures: GnumarusTexturePixels[];
       texts?: Array<{ id: string; name: string; document: GnumarusTextDocument }>;
       svgs?: Array<{ id: string; name: string; svg: string }>;
-  models3d?: Array<{ id: string; name: string; ext: string; bytes: Uint8Array }>;
-      contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null; svgId?: string | null; model3dId?: string | null; transform: GnumarusLayerTransform }>;
+      models3d?: Array<{ id: string; name: string; ext: string; bytes: Uint8Array }>;
+      tilemaps?: Array<{ id: string; name: string; tilesetId: string; tileWidth: number; tileHeight: number; tiles: GnumarusTilePlacement[] }>;
+      contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null; svgId?: string | null; model3dId?: string | null; tilemapId?: string | null; transform: GnumarusLayerTransform }>;
       cells: Array<{ layer: string; frame: number; content: string }>;
       frames: number;
       currentFrame: number;
@@ -4839,6 +5438,45 @@ export class GnumarusCanvasEngine {
       this.models3d.set(model.id, { id: model.id, name: model.name, ext: model.ext, bytes: new Uint8Array(model.bytes) });
       this.ensureModelRaster(model.id);
     }
+    this.tilemaps.clear();
+    this.tileRasters.clear();
+    const tilemapIds = new Set<string>();
+    for (const tilemap of data.tilemaps ?? []) {
+      if (typeof tilemap.id !== "string" || tilemap.id === "" || typeof tilemap.name !== "string" || tilemap.name === "") {
+        throw new Error("Project has an invalid tilemap entry.");
+      }
+      if (tilemapIds.has(tilemap.id)) {
+        throw new Error(`Project has a duplicate tilemap id: ${tilemap.id}.`);
+      }
+      if (typeof tilemap.tilesetId !== "string" || !textureIds.has(tilemap.tilesetId)) {
+        throw new Error(`Tilemap ${tilemap.id} has an unknown tileset.`);
+      }
+      if (
+        typeof tilemap.tileWidth !== "number" ||
+        !Number.isInteger(tilemap.tileWidth) ||
+        tilemap.tileWidth < 1 ||
+        tilemap.tileWidth > 1024 ||
+        typeof tilemap.tileHeight !== "number" ||
+        !Number.isInteger(tilemap.tileHeight) ||
+        tilemap.tileHeight < 1 ||
+        tilemap.tileHeight > 1024
+      ) {
+        throw new Error(`Tilemap ${tilemap.id} has invalid tile dimensions.`);
+      }
+      if (!Array.isArray(tilemap.tiles)) {
+        throw new Error(`Tilemap ${tilemap.id} has invalid tiles.`);
+      }
+      tilemapIds.add(tilemap.id);
+      this.tilemaps.set(tilemap.id, {
+        id: tilemap.id,
+        name: tilemap.name,
+        tilesetId: tilemap.tilesetId,
+        tileWidth: tilemap.tileWidth,
+        tileHeight: tilemap.tileHeight,
+        tiles: tilemap.tiles.map((tile) => ({ ...tile })),
+        revision: 1,
+      });
+    }
     for (const content of data.contents) {
       if (content.textId !== null && content.textId !== undefined && !textIds.has(content.textId)) {
         throw new Error(`Content references a missing text: ${content.id}`);
@@ -4849,7 +5487,10 @@ export class GnumarusCanvasEngine {
       if (content.model3dId !== null && content.model3dId !== undefined && !model3dIds.has(content.model3dId)) {
         throw new Error(`Content references a missing 3D model: ${content.id}`);
       }
-      if ([content.textureId, content.textId, content.svgId, content.model3dId].filter((ref) => ref != null).length > 1) {
+      if (content.tilemapId !== null && content.tilemapId !== undefined && !tilemapIds.has(content.tilemapId)) {
+        throw new Error(`Content references a missing tilemap: ${content.id}`);
+      }
+      if ([content.textureId, content.textId, content.svgId, content.model3dId, content.tilemapId].filter((ref) => ref != null).length > 1) {
         throw new Error(`Content has more than one texture, text, vector graphic or 3D model: ${content.id}`);
       }
     }
@@ -4861,6 +5502,7 @@ export class GnumarusCanvasEngine {
         textId: content.textId ?? null,
         svgId: content.svgId ?? null,
         model3dId: content.model3dId ?? null,
+        tilemapId: content.tilemapId ?? null,
         transform: { ...content.transform, rotation: normalizeRotation(content.transform.rotation) },
       });
     }
@@ -4975,6 +5617,20 @@ export class GnumarusCanvasEngine {
     }
     this.modelCounter = Math.max(maxModel, (data.models3d ?? []).length + 1, 1);
     this.modelNameCounter = Math.max(maxModelName, (data.models3d ?? []).length + 1, 1);
+    let maxTilemap = 0;
+    let maxTilemapName = 0;
+    for (const tilemap of data.tilemaps ?? []) {
+      const idMatch = /^tilemap(\d+)$/.exec(tilemap.id);
+      if (idMatch?.[1] !== undefined) {
+        maxTilemap = Math.max(maxTilemap, Number.parseInt(idMatch[1], 10) + 1);
+      }
+      const nameMatch = /^TM(\d+)$/.exec(tilemap.name);
+      if (nameMatch?.[1] !== undefined) {
+        maxTilemapName = Math.max(maxTilemapName, Number.parseInt(nameMatch[1], 10) + 1);
+      }
+    }
+    this.tilemapCounter = Math.max(maxTilemap, (data.tilemaps ?? []).length + 1, 1);
+    this.tilemapNameCounter = Math.max(maxTilemapName, (data.tilemaps ?? []).length + 1, 1);
     const top = this.layers[this.layers.length - 1];
     if (top !== undefined) {
       this.activeLayerId = top.id;
@@ -5056,6 +5712,7 @@ export class GnumarusCanvasEngine {
       textureId: "layer0",
       textId: null,
       svgId: null,
+      tilemapId: null,
       model3dId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
@@ -5080,6 +5737,10 @@ export class GnumarusCanvasEngine {
     this.modelPending.clear();
     this.modelRenderer?.dispose();
     this.modelRenderer = null;
+    this.tilemapCounter = 1;
+    this.tilemapNameCounter = 1;
+    this.tilemaps.clear();
+    this.tileRasters.clear();
     this.frameCount = 1;
     this.currentFrame = 0;
     this.frameNames = [defaultFrameName(0)];
@@ -6414,6 +7075,7 @@ export class GnumarusCanvasEngine {
    * floating selection is discarded since its redo chain is gone.
    */
   private pushHistory(entry: GnumarusHistoryEntry): void {
+    this.pixelsVersion += 1;
     const evicted = this.history.push(entry);
     if (this.floating !== null) {
       this.floating.cutDepth = Math.max(0, this.floating.cutDepth - evicted);
@@ -8996,6 +9658,104 @@ export class GnumarusCanvasEngine {
   }
 
   /** Refresh the brush tip and line/curve overlays for the last mouse position. */
+  /**
+   * Tile-brush cursor preview: baked image of the selected tile with its
+   * transform, positioned over the grid cell under the cursor. Null when
+   * the tool is inactive, the pointer left, or no tileset is selected.
+   */
+  private updateTilePreview(mouse: { x: number; y: number } | null): void {
+    if (this.tool !== "tilebrush" || mouse === null) {
+      this.tileTip.style.display = "none";
+      return;
+    }
+    const tilesetId = this.getTileBrushTilesetId();
+    const texture = tilesetId === null ? undefined : this.textures.get(tilesetId);
+    if (tilesetId === null || texture === undefined) {
+      this.tileTip.style.display = "none";
+      return;
+    }
+    const { w: tw, h: th } = this.getTileBrushTileSize();
+    const cell = this.tileGridAt(mouse.x, mouse.y, tw, th);
+    if (cell === null) {
+      this.tileTip.style.display = "none";
+      return;
+    }
+    const { tx, ty, flipH, flipV, rot } = this.tileBrush;
+    const key = `${tilesetId}:${tx},${ty}:${tw}x${th}:${flipH ? 1 : 0}${flipV ? 1 : 0}:${rot}`;
+    if (this.tileTipKey !== key) {
+      const url = this.bakeTilePreview(texture, tx, ty, tw, th, flipH, flipV, rot);
+      if (url === null) {
+        this.tileTip.style.display = "none";
+        return;
+      }
+      this.tileTipImage.src = url;
+      this.tileTipKey = key;
+    }
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const width = tw * this.zoom;
+    const height = th * this.zoom;
+    this.tileTip.style.display = "block";
+    this.tileTip.style.left = `${mouse.x - rect.left - width / 2}px`;
+    this.tileTip.style.top = `${mouse.y - rect.top - height / 2}px`;
+    this.tileTip.style.width = `${Math.max(1, width)}px`;
+    this.tileTip.style.height = `${Math.max(1, height)}px`;
+  }
+
+  /** Bake one transformed tile into a data URL for the cursor preview. */
+  private bakeTilePreview(
+    texture: { buffer: Uint8ClampedArray; width: number; height: number },
+    tx: number,
+    ty: number,
+    tw: number,
+    th: number,
+    flipH: boolean,
+    flipV: boolean,
+    rot: GnumarusTileRotation,
+  ): string | null {
+    try {
+      const source = document.createElement("canvas");
+      source.width = Math.max(1, texture.width);
+      source.height = Math.max(1, texture.height);
+      const sourceCtx = source.getContext("2d");
+      if (sourceCtx === null) {
+        return null;
+      }
+      sourceCtx.putImageData(
+        new ImageData(new Uint8ClampedArray(texture.buffer), texture.width, texture.height),
+        0,
+        0,
+      );
+      const tile = document.createElement("canvas");
+      tile.width = Math.max(1, tw);
+      tile.height = Math.max(1, th);
+      const tileCtx = tile.getContext("2d");
+      if (tileCtx === null) {
+        return null;
+      }
+      tileCtx.imageSmoothingEnabled = false;
+      for (const blit of wrappedTileBlits(tx * tw, ty * th, tw, th, texture.width, texture.height)) {
+        tileCtx.drawImage(source, blit.sx, blit.sy, blit.w, blit.h, blit.dx, blit.dy, blit.w, blit.h);
+      }
+      const out = document.createElement("canvas");
+      out.width = Math.max(1, tw);
+      out.height = Math.max(1, th);
+      const outCtx = out.getContext("2d");
+      if (outCtx === null) {
+        return null;
+      }
+      outCtx.imageSmoothingEnabled = false;
+      outCtx.translate(tw / 2, th / 2);
+      if (rot !== 0) {
+        outCtx.rotate((rot * Math.PI) / 180);
+      }
+      outCtx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+      outCtx.drawImage(tile, -tw / 2, -th / 2);
+      return out.toDataURL();
+    } catch {
+      return null;
+    }
+  }
+
   private updatePreviews(): void {
     if (this.disposed) {
       return;
@@ -9023,6 +9783,7 @@ export class GnumarusCanvasEngine {
       this.previewTip.style.top = `${mouse.y - rect.top - size / 2}px`;
       this.previewTip.style.borderRadius = tipShape === "circle" ? "50%" : "0";
     }
+    this.updateTilePreview(mouse);
     this.previewLine.removeAttribute("display");
     this.previewLine.style.display = "none";
     this.previewCurve.style.display = "none";
@@ -9725,10 +10486,12 @@ export class GnumarusCanvasEngine {
       (layerId, frame) => this.dissociateCellForHistory(layerId, frame),
       (contentId, textureId) => this.setContentTextureForHistory(contentId, textureId),
       (textId, document) => this.applyTextForHistory(textId, document),
+      (tilemapId, tiles) => this.applyTilemapForHistory(tilemapId, tiles),
     );
     if (!applied) {
       return false;
     }
+    this.pixelsVersion += 1;
     this.syncFloatingWithHistory();
     this.markLayersDirty();
     this.refreshLayerStacking();
@@ -9752,10 +10515,12 @@ export class GnumarusCanvasEngine {
       (layerId, frame, contentId) => this.associateCellForHistory(layerId, frame, contentId),
       (contentId, textureId) => this.setContentTextureForHistory(contentId, textureId),
       (textId, document) => this.applyTextForHistory(textId, document),
+      (tilemapId, tiles) => this.applyTilemapForHistory(tilemapId, tiles),
     );
     if (!applied) {
       return false;
     }
+    this.pixelsVersion += 1;
     this.syncFloatingWithHistory();
     this.markLayersDirty();
     this.refreshLayerStacking();
@@ -10515,7 +11280,7 @@ export class GnumarusCanvasEngine {
         this.commitPolyLasso(event);
         return;
       }
-      if (event.button !== 0) {
+      if (event.button !== 0 && !(event.button === 2 && this.tool === "tilebrush")) {
         return;
       }
       if (
@@ -10731,6 +11496,23 @@ export class GnumarusCanvasEngine {
             textId: created.textId,
           });
         }
+        this.updatePreviews();
+        return;
+      }
+      if (this.tool === "tilebrush") {
+        // Left-click places the selected tile, right-click erases the tile
+        // under the cursor. Other buttons are ignored.
+        const pressed: 0 | 2 = (event.button as number) === 2 ? 2 : 0;
+        if (pressed !== 0 && pressed !== 2) {
+          return;
+        }
+        const layer = this.activeLayer();
+        if (layer === null) {
+          return;
+        }
+        this.lastMouseClient = { x: event.clientX, y: event.clientY };
+        const outcome = this.tileBrushClick(event.clientX, event.clientY, pressed);
+        this.onTileBrushOutcome?.(outcome);
         this.updatePreviews();
         return;
       }
@@ -11564,7 +12346,28 @@ export class GnumarusCanvasEngine {
         ) {
           this.commitPolyLasso(event);
           return;
-        }        if (event.key === "b" || event.key === "B") {
+        }
+        if (this.tool === "tilebrush") {
+          // Tile-brush transform keys (plain key, no modifiers) take
+          // precedence over the tool shortcuts below.
+          if (!event.ctrlKey && !event.metaKey && !event.altKey) {
+            if (event.key === "r" || event.key === "R") {
+              if (!this.rotateTileBrush()) {
+                this.onNotice?.("tile-rot-needs-square");
+              }
+              return;
+            }
+            if (event.key === "h" || event.key === "H") {
+              this.flipTileBrush("h");
+              return;
+            }
+            if (event.key === "v" || event.key === "V") {
+              this.flipTileBrush("v");
+              return;
+            }
+          }
+        }
+        if (event.key === "b" || event.key === "B") {
           this.setTool("pencil");
           return;
         }

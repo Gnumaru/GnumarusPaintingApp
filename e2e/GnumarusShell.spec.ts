@@ -10882,3 +10882,149 @@ test("3d models save as raw files and reopen", async ({ page }) => {
     .poll(async () => modelPaintedPixels(page), { timeout: 10000 })
     .toBeGreaterThan(0);
 });
+
+async function tilemapTiles(page: import("@playwright/test").Page): Promise<Array<Record<string, number | boolean>> | null> {
+  return page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getTilemapEntries(): Array<{ tiles: Array<Record<string, number | boolean>> }> } };
+    };
+    return root.__gnumarus?.engine?.getTilemapEntries()[0]?.tiles ?? null;
+  });
+}
+
+async function tileBrushState(page: import("@playwright/test").Page): Promise<Record<string, number | boolean | string | null> | null> {
+  return page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getTileBrush(): Record<string, number | boolean | string | null> } };
+    };
+    return root.__gnumarus?.engine?.getTileBrush() ?? null;
+  });
+}
+
+test("tile brush creates a tilemap and places a tile", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await paintCenter(page);
+  await page.locator('gnumarus-shell [data-testid="tool-tilebrush"]').click();
+  await paintCenter(page);
+  await expect(page.locator("gnumarus-shell")).toContainText("already has content");
+  expect(await tilemapTiles(page)).toBeNull();
+  await page.getByRole("button", { name: "Add frame", exact: true }).click();
+  await page.locator('gnumarus-shell [data-testid="anim-frame"][data-frame="1"]').click();
+  await paintCenter(page);
+  await expect(page.locator("gnumarus-shell")).toContainText("Select a tileset first");
+  expect(await tilemapTiles(page)).toBeNull();
+  await page.locator('gnumarus-shell [data-testid="tile-tileset"]').click();
+  await page.locator('gnumarus-shell [data-testid="texture-picker-item"]').first().click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Tileset:");
+  await page.locator('gnumarus-shell [data-testid="tile-window-toggle"]').click();
+  await expect(page.locator('gnumarus-shell [data-testid="tile-window"]')).toBeVisible();
+  await page.locator('gnumarus-shell [data-testid="tile-cell"][data-tx="2"][data-ty="2"]').click();
+  await paintCenter(page);
+  const tiles = await tilemapTiles(page);
+  expect(tiles).toHaveLength(1);
+  expect(tiles?.[0]).toMatchObject({ x: 2, y: 2, tx: 2, ty: 2, flipH: false, flipV: false, rot: 0 });
+  await expect
+    .poll(async () => textPaintedPixels(page), { timeout: 5000 })
+    .toBeGreaterThan(0);
+});
+
+test("tile brush transforms tiles and resets on tile change", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await paintCenter(page);
+  await page.getByRole("button", { name: "Add frame", exact: true }).click();
+  await page.locator('gnumarus-shell [data-testid="anim-frame"][data-frame="1"]').click();
+  await page.locator('gnumarus-shell [data-testid="tool-tilebrush"]').click();
+  await page.locator('gnumarus-shell [data-testid="tile-tileset"]').click();
+  await page.locator('gnumarus-shell [data-testid="texture-picker-item"]').first().click();
+  await page.keyboard.press("h");
+  await page.keyboard.press("r");
+  expect(await tileBrushState(page)).toMatchObject({ flipH: true, rot: 90 });
+  await paintCenter(page);
+  expect(await tilemapTiles(page)).toEqual([
+    { x: 2, y: 2, tx: 0, ty: 0, flipH: true, flipV: false, rot: 90 },
+  ]);
+  await page.locator('gnumarus-shell [data-testid="tile-window-toggle"]').click();
+  await page.locator('gnumarus-shell [data-testid="tile-cell"][data-tx="1"][data-ty="0"]').click();
+  expect(await tileBrushState(page)).toMatchObject({ tx: 1, ty: 0, flipH: false, flipV: false, rot: 0 });
+});
+
+test("tile brush erases with right-click and supports undo", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await paintCenter(page);
+  await page.getByRole("button", { name: "Add frame", exact: true }).click();
+  await page.locator('gnumarus-shell [data-testid="anim-frame"][data-frame="1"]').click();
+  await page.locator('gnumarus-shell [data-testid="tool-tilebrush"]').click();
+  await page.locator('gnumarus-shell [data-testid="tile-tileset"]').click();
+  await page.locator('gnumarus-shell [data-testid="texture-picker-item"]').first().click();
+  await paintCenter(page);
+  expect(await tilemapTiles(page)).toHaveLength(1);
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "right" });
+  await expect(page.locator("gnumarus-shell")).toContainText("Tile erased");
+  expect(await tilemapTiles(page)).toEqual([]);
+  await page.keyboard.press("Control+z");
+  expect(await tilemapTiles(page)).toHaveLength(1);
+  await page.keyboard.press("Control+y");
+  expect(await tilemapTiles(page)).toEqual([]);
+});
+
+test("tilemaps save and reopen with placements", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await paintCenter(page);
+  await page.getByRole("button", { name: "Add frame", exact: true }).click();
+  await page.locator('gnumarus-shell [data-testid="anim-frame"][data-frame="1"]').click();
+  await page.locator('gnumarus-shell [data-testid="tool-tilebrush"]').click();
+  await page.locator('gnumarus-shell [data-testid="tile-tileset"]').click();
+  await page.locator('gnumarus-shell [data-testid="texture-picker-item"]').first().click();
+  await paintCenter(page);
+  expect(await tilemapTiles(page)).toHaveLength(1);
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  const saved = await project.writtenProject();
+  expect(saved).toContain('"tilemaps"');
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject");
+  expect(await tilemapTiles(page)).toHaveLength(1);
+  await expect
+    .poll(async () => textPaintedPixels(page), { timeout: 5000 })
+    .toBeGreaterThan(0);
+});
+
+test("content picker shows tilemap kind badges", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await paintCenter(page);
+  await page.getByRole("button", { name: "Add frame", exact: true }).click();
+  await page.locator('gnumarus-shell [data-testid="anim-frame"][data-frame="1"]').click();
+  await page.locator('gnumarus-shell [data-testid="tool-tilebrush"]').click();
+  await page.locator('gnumarus-shell [data-testid="tile-tileset"]').click();
+  await page.locator('gnumarus-shell [data-testid="texture-picker-item"]').first().click();
+  await paintCenter(page);
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  const cell = matrix.locator('[data-testid="anim-cell"][data-matrix-frame="1"]');
+  await cell.click({ button: "right" });
+  await page.getByRole("button", { name: "Select content" }).click();
+  const kinds = await page.locator('gnumarus-shell [data-testid="content-picker-kind"]').allTextContents();
+  expect(kinds).toContain("Tilemap");
+});

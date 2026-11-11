@@ -48,6 +48,7 @@ describe("GnumarusProjectFormat", () => {
         textId: null,
         svgId: null,
         model3dId: null,
+        tilemapId: null,
         transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
       },
     ]);
@@ -108,6 +109,7 @@ describe("GnumarusProjectFormat", () => {
       textId: null,
       svgId: null,
       model3dId: null,
+      tilemapId: null,
       transform: { x: 1, y: 2, rotation: 0.5, flipX: true, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
     });
     expect(parsed.layers[0]).toMatchObject({ opacity: 0.5, lockedChannels: { r: true, g: false, b: false, a: false } });
@@ -124,6 +126,7 @@ describe("GnumarusProjectFormat", () => {
       textId: null,
       svgId: null,
       model3dId: null,
+      tilemapId: null,
       transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
     });
     project.animation.cells.push(
@@ -421,6 +424,7 @@ describe("GnumarusProjectFormat", () => {
       textId: "text1",
       svgId: null,
       model3dId: null,
+      tilemapId: null,
       transform: { x: 5, y: 5, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
     });
     project.animation.cells.push({ layer: "layer0", frame: 1, content: "content2" });
@@ -585,6 +589,7 @@ describe("GnumarusProjectFormat", () => {
       textId: null,
       svgId: "vec1",
       model3dId: null,
+      tilemapId: null,
       transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
     });
     const parsed = parseProject(serializeProject(project));
@@ -639,6 +644,7 @@ describe("GnumarusProjectFormat", () => {
       textId: null,
       svgId: null,
       model3dId: "model1",
+      tilemapId: null,
       transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
     });
     const parsed = parseProject(serializeProject(project));
@@ -659,6 +665,103 @@ describe("GnumarusProjectFormat", () => {
     dual.animation.texts.push({ id: "t", name: "T", document: { html: "<div>x</div>" } });
     dual.animation.contents[0] = { ...dual.animation.contents[0], textId: "t", model3dId: "v" };
     dual.animation.models3d.push({ id: "v", name: "V", file: "3dmodels/v.stl" });
+    expect(() => parseProject(serializeProject(dual))).toThrow(GnumarusProjectError);
+  });
+
+  it("parses tilemaps and rejects bad ones", () => {
+    const project = createDefaultProject(8, 8);
+    project.animation.tilemaps.push({
+      id: "tm1",
+      name: "TM1",
+      tilesetId: "layer0",
+      tileWidth: 16,
+      tileHeight: 16,
+      tiles: [{ x: 0, y: 0, tx: 1, ty: 2, flipH: true, flipV: false, rot: 90 }],
+    });
+    project.animation.contents.push({
+      id: "content2",
+      name: "C2",
+      textureId: null,
+      textId: null,
+      svgId: null,
+      model3dId: null,
+      tilemapId: "tm1",
+      transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
+    });
+    const parsed = parseProject(serializeProject(project));
+    expect(parsed.animation.tilemaps).toEqual([
+      {
+        id: "tm1",
+        name: "TM1",
+        tilesetId: "layer0",
+        tileWidth: 16,
+        tileHeight: 16,
+        tiles: [{ x: 0, y: 0, tx: 1, ty: 2, flipH: true, flipV: false, rot: 90 }],
+      },
+    ]);
+    expect(parsed.animation.contents[1]).toMatchObject({ tilemapId: "tm1" });
+    const missingTileset = createDefaultProject(8, 8);
+    missingTileset.animation.tilemaps.push({
+      id: "t",
+      name: "T",
+      tilesetId: "nope",
+      tileWidth: 16,
+      tileHeight: 16,
+      tiles: [],
+    });
+    expect(() => parseProject(serializeProject(missingTileset))).toThrow(GnumarusProjectError);
+    const badDims = createDefaultProject(8, 8);
+    badDims.animation.tilemaps.push({
+      id: "t",
+      name: "T",
+      tilesetId: "layer0",
+      tileWidth: 0,
+      tileHeight: 16,
+      tiles: [],
+    });
+    expect(() => parseProject(serializeProject(badDims))).toThrow(GnumarusProjectError);
+    const badTile = createDefaultProject(8, 8);
+    badTile.animation.tilemaps.push({
+      id: "t",
+      name: "T",
+      tilesetId: "layer0",
+      tileWidth: 16,
+      tileHeight: 16,
+      tiles: [{ x: 0, y: 0, tx: 0, ty: 0, flipH: false, flipV: false, rot: 45 }],
+    } as never);
+    expect(() => parseProject(serializeProject(badTile))).toThrow(GnumarusProjectError);
+    const duplicate = createDefaultProject(8, 8);
+    duplicate.animation.tilemaps.push({
+      id: "t",
+      name: "A",
+      tilesetId: "layer0",
+      tileWidth: 16,
+      tileHeight: 16,
+      tiles: [{ x: 0, y: 0, tx: 0, ty: 0, flipH: false, flipV: false, rot: 0 }],
+    });
+    duplicate.animation.tilemaps.push({
+      id: "t",
+      name: "B",
+      tilesetId: "layer0",
+      tileWidth: 16,
+      tileHeight: 16,
+      tiles: [],
+    });
+    expect(() => parseProject(serializeProject(duplicate))).toThrow(GnumarusProjectError);
+    const unknown = createDefaultProject(8, 8);
+    unknown.animation.contents[0] = { ...unknown.animation.contents[0], tilemapId: "missing" };
+    expect(() => parseProject(serializeProject(unknown))).toThrow(GnumarusProjectError);
+    const dual = createDefaultProject(8, 8);
+    dual.animation.tilemaps.push({
+      id: "t",
+      name: "T",
+      tilesetId: "layer0",
+      tileWidth: 8,
+      tileHeight: 8,
+      tiles: [],
+    });
+    dual.animation.contents[0] = { ...dual.animation.contents[0], textId: "t", tilemapId: "t" };
+    dual.animation.texts.push({ id: "t", name: "T", document: { html: "<div>x</div>" } });
     expect(() => parseProject(serializeProject(dual))).toThrow(GnumarusProjectError);
   });
 });

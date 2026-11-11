@@ -56,6 +56,7 @@ import {
   type GnumarusSvgMeta,
   type GnumarusTextureMeta,
   type GnumarusTextMeta,
+  type GnumarusTilemapMeta,
 } from "../project/GnumarusProjectFormat";
 import {
   CHECKER_SETTINGS_STORAGE_KEY,
@@ -399,6 +400,9 @@ function gnumarusShortcuts(): GnumarusShortcutSection[] {
         { keys: "P", action: tr("sc.toolPolylasso") },
         { keys: "W", action: tr("sc.toolColorselect") },
         { keys: "X", action: tr("sc.toolText") },
+        { keys: "R (tile brush)", action: tr("sc.tileRotate") },
+        { keys: "H (tile brush)", action: tr("sc.tileFlipH") },
+        { keys: "V (tile brush)", action: tr("sc.tileFlipV") },
         { keys: "Shift / Ctrl+Shift / Alt+Shift + drag", action: tr("sc.rectselectModifiers") },
         { keys: "Right-click a drawer button", action: tr("sc.drawerFlyout") },
         { keys: "V", action: tr("sc.toolDestransform") },
@@ -1300,6 +1304,40 @@ export class GnumarusShell extends LitElement {
       text-transform: uppercase;
       letter-spacing: 0.04em;
     }
+    .tile-window-body {
+      flex: 1 1 auto;
+      overflow: auto;
+      padding: 8px;
+    }
+    .tile-window-empty {
+      color: #9a9a9a;
+      font-size: 12px;
+      text-align: center;
+    }
+    .tile-grid {
+      display: grid;
+      gap: 2px;
+      justify-content: start;
+      align-content: start;
+    }
+    .tile-cell {
+      padding: 0;
+      border: 1px solid #555;
+      border-radius: 0;
+      background-color: transparent;
+      background-repeat: no-repeat;
+      image-rendering: pixelated;
+      cursor: pointer;
+      min-width: 0;
+      min-height: 0;
+    }
+    .tile-cell:hover {
+      border-color: #0e639c;
+    }
+    .tile-cell.active {
+      outline: 2px solid #0e639c;
+      outline-offset: -2px;
+    }
     .picker-empty-note {
       grid-column: 1 / -1;
       color: #9a9a9a;
@@ -1424,6 +1462,10 @@ export class GnumarusShell extends LitElement {
     matrixMenu: { type: Object },
     contentPickerTarget: { type: Object },
     texturePickerContentId: { type: String },
+    texturePickerTileset: { type: Boolean },
+    tileWindowOpen: { type: Boolean },
+    tileWindowX: { type: Number },
+    tileWindowY: { type: Number },
     textPickerTarget: { type: Object },
     textEditor: { type: Object },
     textEditorColor: { type: String },
@@ -1581,6 +1623,10 @@ export class GnumarusShell extends LitElement {
     | null;
   declare contentPickerTarget: { layerId: string; frame: number } | null;
   declare texturePickerContentId: string | null;
+  declare texturePickerTileset: boolean;
+  declare tileWindowOpen: boolean;
+  declare tileWindowX: number;
+  declare tileWindowY: number;
   declare textPickerTarget: { layerId: string; frame: number } | null;
   declare textEditor: {
     layerId: string;
@@ -1755,10 +1801,14 @@ export class GnumarusShell extends LitElement {
     this.matrixMenu = null;
     this.contentPickerTarget = null;
     this.texturePickerContentId = null;
+    this.texturePickerTileset = false;
     this.textPickerTarget = null;
     this.textEditor = null;
     this.savedTextRange = null;
     this.textEditorColor = "#000000";
+    this.tileWindowOpen = false;
+    this.tileWindowX = 280;
+    this.tileWindowY = 120;
     this.fitTextureTarget = null;
     this.fitThreshold = 0;
     this.checkerColorA = DEFAULT_CHECKER_SETTINGS.colorA;
@@ -2000,6 +2050,18 @@ export class GnumarusShell extends LitElement {
             }}
           >
             <span class="tool-icon tool-text-glyph" aria-hidden="true">T</span>
+          </button>
+          <button
+            class=${this.tool === "tilebrush" ? "active" : ""}
+            title=${tr("tool.tilebrushHint")}
+            aria-label=${tr("tool.tilebrush")}
+            data-testid="tool-tilebrush"
+            @click=${(): void => {
+              this.tool = "tilebrush";
+              this.engine?.setTool("tilebrush");
+            }}
+          >
+            <span class="tool-icon" aria-hidden="true">▦</span>
           </button>
 
           ${this.renderToolDrawer("selection")}
@@ -3469,7 +3531,8 @@ export class GnumarusShell extends LitElement {
         </div>
       </dialog>
       ${this.contentPickerTarget !== null ? this.renderContentPickerDialog() : html``}
-      ${this.texturePickerContentId !== null ? this.renderTexturePickerDialog() : html``}
+      ${this.texturePickerContentId !== null || this.texturePickerTileset ? this.renderTexturePickerDialog() : html``}
+      ${this.tileWindowOpen && this.tool === "tilebrush" ? this.renderTileWindow() : html``}
       ${this.textPickerTarget !== null ? this.renderTextPickerDialog() : html``}
       ${this.textEditor !== null ? this.renderTextEditorDialog() : html``}
     `;
@@ -3528,6 +3591,9 @@ export class GnumarusShell extends LitElement {
     }
     if (tool === "text") {
       return tr("toolname.text");
+    }
+    if (tool === "tilebrush") {
+      return tr("toolname.tilebrush");
     }
     if (tool === "pencil") {
       return tr("toolname.pencil");
@@ -4261,6 +4327,9 @@ export class GnumarusShell extends LitElement {
         </div>
       `;
     }
+    if (this.tool === "tilebrush") {
+      return this.renderTileBrushOptions();
+    }
     if (
       this.tool === "rectselect" ||
       this.tool === "ellipse" ||
@@ -4699,6 +4768,17 @@ export class GnumarusShell extends LitElement {
         onTextEditRequested: (info): void => {
           this.openTextEditor(info.layerId, info.frame, info.contentId, info.textId);
         },
+        onTileBrushOutcome: (outcome): void => {
+          if (outcome === "erased") {
+            this.statusMessage = tr("status.tileErased");
+          } else if (outcome === "no-tileset") {
+            this.statusMessage = tr("status.tileNeedsTileset");
+            this.showToast(tr("status.tileNeedsTileset"));
+          } else if (outcome === "occupied") {
+            this.statusMessage = tr("status.tileCellOccupied");
+            this.showToast(tr("status.tileCellOccupied"));
+          }
+        },
         onNotice: (kind): void => {
           if (kind === "text-paint-blocked") {
             this.statusMessage = tr("status.textPaintBlocked");
@@ -4706,6 +4786,10 @@ export class GnumarusShell extends LitElement {
             this.statusMessage = tr("status.vectorPaintBlocked");
           } else if (kind === "model3d-paint-blocked") {
             this.statusMessage = tr("status.model3dPaintBlocked");
+          } else if (kind === "tilemap-paint-blocked") {
+            this.statusMessage = tr("status.tilemapPaintBlocked");
+          } else if (kind === "tile-rot-needs-square") {
+            this.statusMessage = tr("status.tileRotNeedsSquare");
           }
         },
         onToolSizeChanged: (kind, size): void => {
@@ -7969,6 +8053,7 @@ export class GnumarusShell extends LitElement {
     textId: string | null;
     svgId: string | null;
     model3dId: string | null;
+    tilemapId: string | null;
     width: number;
     height: number;
   }> {
@@ -8130,6 +8215,47 @@ export class GnumarusShell extends LitElement {
     }
   }
 
+  /** Rasterize a tilemap entry into a picker thumbnail data URL (sync cache only). */
+  private tilemapThumbnailDataUrl(tilemapId: string): string | null {
+    if (this.engine === null) {
+      return null;
+    }
+    const raster = this.engine.rasterizeTilemap(tilemapId);
+    if (raster === null || raster.width < 1 || raster.height < 1) {
+      return null;
+    }
+    try {
+      const maxSide = 128;
+      const scale = Math.min(1, maxSide / Math.max(raster.width, raster.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(raster.width * scale));
+      canvas.height = Math.max(1, Math.round(raster.height * scale));
+      const ctx = canvas.getContext("2d");
+      if (ctx === null) {
+        return null;
+      }
+      ctx.imageSmoothingEnabled = false;
+      const image = new ImageData(new Uint8ClampedArray(raster.buffer), raster.width, raster.height);
+      if (scale >= 1) {
+        ctx.putImageData(image, 0, 0);
+      } else {
+        const full = document.createElement("canvas");
+        full.width = raster.width;
+        full.height = raster.height;
+        const fullCtx = full.getContext("2d");
+        if (fullCtx === null) {
+          return null;
+        }
+        fullCtx.putImageData(image, 0, 0);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(full, 0, 0, canvas.width, canvas.height);
+      }
+      return canvas.toDataURL();
+    } catch {
+      return null;
+    }
+  }
+
   private renderContentPickerDialog() {
     const contents = this.sortedContents();
     return html`
@@ -8168,9 +8294,11 @@ export class GnumarusShell extends LitElement {
                   ? this.svgThumbnailDataUrl(content.svgId)
                   : content.model3dId !== null
                     ? this.model3dThumbnailDataUrl(content.model3dId)
-                    : content.textureId === null
-                      ? null
-                      : this.thumbnailDataUrl(content.textureId);
+                    : content.tilemapId !== null
+                      ? this.tilemapThumbnailDataUrl(content.tilemapId)
+                      : content.textureId === null
+                        ? null
+                        : this.thumbnailDataUrl(content.textureId);
             const kind =
               content.textId !== null
                 ? tr("dialog.kindText")
@@ -8178,9 +8306,11 @@ export class GnumarusShell extends LitElement {
                   ? tr("dialog.kindVector")
                   : content.model3dId !== null
                     ? tr("dialog.kindModel3d")
-                    : content.textureId !== null
-                      ? tr("dialog.kindTexture")
-                      : tr("dialog.kindEmpty");
+                    : content.tilemapId !== null
+                      ? tr("dialog.kindTilemap")
+                      : content.textureId !== null
+                        ? tr("dialog.kindTexture")
+                        : tr("dialog.kindEmpty");
             return html`
               <button
                 class="picker-item"
@@ -8209,7 +8339,7 @@ export class GnumarusShell extends LitElement {
     const textures = this.sortedTextures();
     return html`
       <dialog id="texturePickerDialog" @close=${(): void => this.onTexturePickerClosed()}>
-        <h3>${tr("dialog.selectTexture")}</h3>
+        <h3>${this.texturePickerTileset ? tr("dialog.selectTileset") : tr("dialog.selectTexture")}</h3>
         <div class="picker-grid" data-testid="texture-picker-grid">
           <button
             class="picker-item"
@@ -8341,15 +8471,56 @@ export class GnumarusShell extends LitElement {
 
   private onTexturePickerClosed(): void {
     this.texturePickerContentId = null;
+    this.texturePickerTileset = false;
   }
 
   private closeTexturePicker(): void {
     const dialog = this.shadowRoot?.getElementById("texturePickerDialog") as HTMLDialogElement | null;
     dialog?.close();
     this.texturePickerContentId = null;
+    this.texturePickerTileset = false;
+  }
+
+  /** Tileset picker assignment: tool staging plus the active tilemap cell (kept in sync). */
+  private onTilesetPickerSelect(textureId: string): void {
+    if (this.engine === null) {
+      this.closeTexturePicker();
+      return;
+    }
+    if (textureId === "none") {
+      this.engine.setTileBrushTileset(null);
+      this.refreshLayers();
+      this.statusMessage = tr("status.tileNoTileset");
+      this.closeTexturePicker();
+      return;
+    }
+    let resolved = textureId;
+    if (textureId === "new") {
+      resolved = this.engine.createEmptyTexture();
+      this.refreshLayers();
+    }
+    this.engine.setTileBrushTileset(resolved);
+    const layer = this.engine.getActiveLayerId();
+    const frame = this.engine.getCurrentFrame();
+    const contentId = this.engine.getCellContentId(layer, frame);
+    if (contentId !== null) {
+      this.engine.setTilemapTileset(layer, frame, resolved);
+    }
+    this.refreshLayers();
+    this.dirty = true;
+    const entry =
+      this.engine === null
+        ? undefined
+        : this.engine.getAnimationMatrix().textures.find((item) => item.id === resolved);
+    this.statusMessage = tr("status.tileTileset", { name: entry?.name ?? resolved });
+    this.closeTexturePicker();
   }
 
   private onTexturePickerSelect(textureId: string): void {
+    if (this.texturePickerTileset) {
+      this.onTilesetPickerSelect(textureId);
+      return;
+    }
     const contentId = this.texturePickerContentId;
     if (contentId === null || this.engine === null) {
       this.closeTexturePicker();
@@ -8928,6 +9099,186 @@ export class GnumarusShell extends LitElement {
       this.engine.previewTextEdit(editor.textId, editor.beforeHtml);
       this.refreshLayers();
     }
+  }
+
+  /** Tile-brush tool options: tileset picker, tile size, tiles window toggle, hints. */
+  private renderTileBrushOptions() {
+    const brush = this.engine?.getTileBrush() ?? null;
+    const size = this.engine?.getTileBrushTileSize() ?? { w: 16, h: 16 };
+    const tilesetEntry =
+      this.engine === null
+        ? undefined
+        : (this.engine.getAnimationMatrix().textures.find((entry) => entry.id === brush?.tilesetId) ?? undefined);
+    const tilesetName = tilesetEntry === null || tilesetEntry === undefined ? tr("dialog.noTexture") : tilesetEntry.name;
+    return html`
+      <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
+        <label>${tr("opt.tileset")}
+          <button data-testid="tile-tileset" title=${tr("dialog.selectTileset")} @click=${(): void => void this.openTexturePickerForTileset()}>
+            ${tilesetName}
+          </button>
+        </label>
+        <label title=${tr("opt.tileWidth")}>${tr("opt.tileWidth")}
+          <input
+            type="number"
+            data-testid="tile-width"
+            min="1"
+            max="1024"
+            step="1"
+            .value=${String(size.w)}
+            @change=${(): void => this.applyTileSizeFromDialog()}
+          />
+        </label>
+        <label title=${tr("opt.tileHeight")}>${tr("opt.tileHeight")}
+          <input
+            type="number"
+            data-testid="tile-height"
+            min="1"
+            max="1024"
+            step="1"
+            .value=${String(size.h)}
+            @change=${(): void => this.applyTileSizeFromDialog()}
+          />
+        </label>
+        <button
+          data-testid="tile-window-toggle"
+          class=${this.tileWindowOpen ? "active" : ""}
+          title=${tr("opt.tilesHint")}
+          @click=${(): void => {
+            this.tileWindowOpen = !this.tileWindowOpen;
+          }}
+        >
+          ${tr("opt.tiles")}
+        </button>
+        <span class="tool-options-empty">${tr("opt.tileHint")}</span>
+      </div>
+    `;
+  }
+
+  private applyTileSizeFromDialog(): void {
+    if (this.engine === null) {
+      return;
+    }
+    const widthInput = this.shadowRoot?.querySelector('[data-testid="tile-width"]') as HTMLInputElement | null;
+    const heightInput = this.shadowRoot?.querySelector('[data-testid="tile-height"]') as HTMLInputElement | null;
+    const w = Math.min(1024, Math.max(1, Math.round(Number(widthInput?.value) || 0)));
+    const h = Math.min(1024, Math.max(1, Math.round(Number(heightInput?.value) || 0)));
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w < 1 || h < 1) {
+      return;
+    }
+    this.engine.setTileBrushSize(w, h);
+    this.refreshLayers();
+    this.dirty = true;
+    this.statusMessage = tr("status.tileSize", { w, h });
+  }
+
+  /** Open the texture picker assigning the tile-brush tileset (not a content texture). */
+  private async openTexturePickerForTileset(): Promise<void> {
+    if (this.engine === null) {
+      return;
+    }
+    this.texturePickerTileset = true;
+    this.texturePickerContentId = null;
+    await this.updateComplete;
+    const dialog = this.shadowRoot?.getElementById("texturePickerDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+  }
+
+  /** Floating tiles window: pick tiles from the effective tileset grid. */
+  private renderTileWindow() {
+    const tilesetId = this.engine?.getTileBrushTilesetId() ?? null;
+    const size = this.engine?.getTileBrushTileSize() ?? { w: 16, h: 16 };
+    const brush = this.engine?.getTileBrush() ?? null;
+    const entry =
+      this.engine === null || tilesetId === null
+        ? null
+        : (this.engine.exportTextures().find((item) => item.id === tilesetId) ?? null);
+    const columns = entry === null ? 0 : Math.max(1, Math.floor(entry.width / Math.max(1, size.w)));
+    const rows = entry === null ? 0 : Math.max(1, Math.floor(entry.height / Math.max(1, size.h)));
+    const thumb = tilesetId === null ? null : this.thumbnailDataUrl(tilesetId);
+    const previewScale = Math.max(1, Math.ceil(32 / Math.max(size.w, size.h)));
+    const cells: Array<{ tx: number; ty: number }> = [];
+    for (let ty = 0; ty < rows; ty += 1) {
+      for (let tx = 0; tx < columns; tx += 1) {
+        cells.push({ tx, ty });
+      }
+    }
+    return html`
+      <div class="preview-window" style="left: ${this.tileWindowX}px; top: ${this.tileWindowY}px;" data-testid="tile-window">
+        <div class="preview-header" @pointerdown=${(event: PointerEvent): void => this.onTileWindowDragStart(event)}>
+          <span>${tr("dialog.tilesTitle")}</span>
+          <span class="spacer"></span>
+          <button
+            aria-label=${tr("btn.close")}
+            title=${tr("btn.close")}
+            @click=${(): void => {
+              this.tileWindowOpen = false;
+            }}
+          >
+            ×
+          </button>
+        </div>
+        <div class="tile-window-body" data-testid="tile-window-grid">
+          ${entry === null || thumb === null
+            ? html`
+                <p class="tile-window-empty">${tr("status.tileNoTileset")}</p>
+                <button @click=${(): void => void this.openTexturePickerForTileset()}>${tr("dialog.selectTileset")}</button>
+              `
+            : html`
+                <div
+                  class="tile-grid"
+                  style="grid-template-columns: repeat(${columns}, ${size.w * previewScale}px);"
+                >
+                  ${cells.map(
+                    (cell) => html`
+                      <button
+                        class="tile-cell ${brush !== null && brush.tx === cell.tx && brush.ty === cell.ty ? "active" : ""}"
+                        data-testid="tile-cell"
+                        data-tx=${cell.tx}
+                        data-ty=${cell.ty}
+                        title="[${cell.tx}, ${cell.ty}]"
+                        style="width: ${size.w * previewScale}px; height: ${size.h * previewScale}px; background-image: url('${thumb}'); background-size: ${entry.width * previewScale}px ${entry.height * previewScale}px; background-position: ${-cell.tx * size.w * previewScale}px ${-cell.ty * size.h * previewScale}px;"
+                        @click=${(): void => this.onTileCellPick(cell.tx, cell.ty)}
+                      ></button>
+                    `,
+                  )}
+                </div>
+              `}
+        </div>
+      </div>
+    `;
+  }
+
+  private onTileCellPick(tx: number, ty: number): void {
+    if (this.engine === null) {
+      return;
+    }
+    this.engine.setTileBrushTile(tx, ty);
+    this.refreshLayers();
+    this.dirty = true;
+  }
+
+  private tileWindowDragState: { startX: number; startY: number; originX: number; originY: number } | null = null;
+
+  private onTileWindowDragStart(event: PointerEvent): void {
+    const target = event.target as HTMLElement | null;
+    if (target !== null && target.closest("button") !== null) {
+      return;
+    }
+    this.tileWindowDragState = { startX: event.clientX, startY: event.clientY, originX: this.tileWindowX, originY: this.tileWindowY };
+    const move = (moveEvent: PointerEvent): void => {
+      if (this.tileWindowDragState === null) {
+        return;
+      }
+      this.tileWindowX = Math.max(0, this.tileWindowDragState.originX + (moveEvent.clientX - this.tileWindowDragState.startX));
+      this.tileWindowY = Math.max(0, this.tileWindowDragState.originY + (moveEvent.clientY - this.tileWindowDragState.startY));
+    };
+    const up = (): void => {
+      this.tileWindowDragState = null;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
   }
 
   private applyDefaultFrameDurationFromDialog(): void {
@@ -10701,6 +11052,14 @@ export class GnumarusShell extends LitElement {
         texts: await this.resolveStoredTexts(project.animation.texts, fileBlobs),
         svgs: await this.resolveStoredSvgs(project.animation.svgs, fileBlobs),
         models3d: await this.resolveStoredModels3d(project.animation.models3d, fileBlobs),
+        tilemaps: project.animation.tilemaps.map((tilemap) => ({
+          id: tilemap.id,
+          name: tilemap.name,
+          tilesetId: tilemap.tilesetId,
+          tileWidth: tilemap.tileWidth,
+          tileHeight: tilemap.tileHeight,
+          tiles: tilemap.tiles.map((tile) => ({ ...tile })),
+        })),
         contents: project.animation.contents.map((content) => ({
           id: content.id,
           name: content.name,
@@ -10708,6 +11067,7 @@ export class GnumarusShell extends LitElement {
           textId: content.textId,
           svgId: content.svgId,
           model3dId: content.model3dId,
+          tilemapId: content.tilemapId,
           transform: { ...content.transform },
         })),
         cells: project.animation.cells.map((cell) => ({ ...cell })),
@@ -11294,11 +11654,13 @@ export class GnumarusShell extends LitElement {
         textId: content.textId ?? null,
         svgId: content.svgId ?? null,
         model3dId: content.model3dId ?? null,
+        tilemapId: content.tilemapId ?? null,
         transform: { ...content.transform },
       }));
       const textsMeta: GnumarusTextMeta[] = [];
       const svgsMeta: GnumarusSvgMeta[] = [];
       const models3dMeta: GnumarusModel3dMeta[] = [];
+      const tilemapsMeta: GnumarusTilemapMeta[] = [];
       for (const text of exported.texts ?? []) {
         if (this.storageTextStorage === "html") {
           const file = textFilePath(text.id);
@@ -11340,6 +11702,16 @@ export class GnumarusShell extends LitElement {
         models3dMeta.push({ id: model.id, name: model.name, file });
         blobs.set(file, new Blob([model.bytes as Uint8Array<ArrayBuffer>], { type: "application/octet-stream" }));
       }
+      for (const tilemap of exported.tilemaps ?? []) {
+        tilemapsMeta.push({
+          id: tilemap.id,
+          name: tilemap.name,
+          tilesetId: tilemap.tilesetId,
+          tileWidth: tilemap.tileWidth,
+          tileHeight: tilemap.tileHeight,
+          tiles: tilemap.tiles.map((tile) => ({ ...tile })),
+        });
+      }
       const meta: GnumarusProjectMeta = {
         app: GNUMARUS_APP_ID,
         version: 3,
@@ -11368,6 +11740,7 @@ export class GnumarusShell extends LitElement {
           texts: textsMeta,
           svgs: svgsMeta,
           models3d: models3dMeta,
+          tilemaps: tilemapsMeta,
           contents: contentsMeta,
           cells: exported.cells.map((cell) => ({ ...cell })),
         },
