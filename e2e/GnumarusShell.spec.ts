@@ -3739,9 +3739,11 @@ test("brush and line previews follow the mouse", async ({ page }) => {
   );
   await page.mouse.click(target.x, target.y);
   await page.mouse.move(target.x + 40, target.y);
-  await expect.poll(() => previewState().then((state) => state.line)).toBe("block");
+  // The rubber line is a pixel raster now, not an SVG overlay.
+  await expect.poll(() => shapePreviewVisible(page)).toBe(true);
   await page.keyboard.press("Escape");
-  await expect.poll(() => previewState().then((state) => state.line)).toBe("none");
+  await expect.poll(() => shapePreviewVisible(page)).toBe(false);
+  expect(await paintedPixelCount(page)).toBe(0);
 });
 
 test("pencil anti-aliasing smooths diagonal edges", async ({ page }) => {
@@ -3899,13 +3901,10 @@ test("curve tool draws cubic beziers with two control clicks", async ({ page }) 
       const root = window as unknown as { __gnumarus?: { engine?: { getCurvePhase(): string } } };
       return root.__gnumarus?.engine?.getCurvePhase() ?? "missing";
     });
-  const previewVisible = (): Promise<{ svg: string; path: string }> =>
+  const rasterVisible = (): Promise<boolean> =>
     page.evaluate(() => {
-      const root = document.querySelector("gnumarus-shell")?.shadowRoot;
-      const host = root?.getElementById("canvasHost") ?? null;
-      const svg = host?.querySelector('[data-testid="line-preview"]') as SVGSVGElement | null;
-      const path = host?.querySelector('[data-testid="curve-preview"]') as SVGPathElement | null;
-      return { svg: svg?.style.display ?? "missing", path: path?.style.display ?? "missing" };
+      const root = window as unknown as { __gnumarus?: { engine?: { isShapePreviewVisible(): boolean } } };
+      return root.__gnumarus?.engine?.isShapePreviewVisible() ?? false;
     });
   const canvas = page.locator("gnumarus-shell canvas");
   const box = await canvas.boundingBox();
@@ -3932,14 +3931,14 @@ test("curve tool draws cubic beziers with two control clicks", async ({ page }) 
   await page.mouse.move(end.x, end.y, { steps: 8 });
   await page.mouse.up();
   expect(await phaseOf()).toBe("awaitC1");
-  expect((await previewVisible()).path).toBe("block");
+  expect(await rasterVisible()).toBe(true);
   const c1 = await toScreen(2, 1);
   await page.mouse.click(c1.x, c1.y);
   expect(await phaseOf()).toBe("awaitC2");
   const c2 = await toScreen(5, 6);
   await page.mouse.click(c2.x, c2.y);
   expect(await phaseOf()).toBe("idle");
-  expect((await previewVisible()).svg).toBe("none");
+  expect(await rasterVisible()).toBe(false);
   expect(await readPixel(page, 1, 4)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 6, 4)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   const apex = [await readPixel(page, 3, 3), await readPixel(page, 4, 3)];
@@ -4051,7 +4050,7 @@ test("brush and line widths accept floats with AA-dependent rounding", async ({ 
     });
   await page.locator("gnumarus-shell input#lineWidth").fill("1.5");
   expect(await lineOf()).toBeCloseTo(1.5, 5);
-  await expect(page.locator("gnumarus-shell")).toContainText("Line width: 1.5");
+  await expect(page.locator("gnumarus-shell")).toContainText("Line width: 1 – 1.5");
 });
 
 test("hsv triangle and hue ring edit the color in any model", async ({ page }) => {
@@ -12776,4 +12775,231 @@ test("animation matrix resizes by dragging its top edge @recent", async ({ page 
   // The matrix stays functional after resizing.
   await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
   expect((await getMatrix(page)).currentFrame).toBe(0);
+});
+
+async function shapePreviewVisible(page: import("@playwright/test").Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { isShapePreviewVisible(): boolean } } };
+    return root.__gnumarus?.engine?.isShapePreviewVisible() ?? false;
+  });
+}
+
+async function shapePreviewPixels(page: import("@playwright/test").Page): Promise<{
+  width: number;
+  height: number;
+  buffer: number[];
+} | null> {
+  return page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getShapePreviewPixels(): { width: number; height: number; buffer: number[] } | null } };
+    };
+    return root.__gnumarus?.engine?.getShapePreviewPixels() ?? null;
+  });
+}
+
+async function readBox(
+  page: import("@playwright/test").Page,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+): Promise<number[]> {
+  return page.evaluate(([ax, ay, bx, by]: number[]) => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { readPixel(x: number, y: number): { r: number; g: number; b: number; a: number } | null } };
+    };
+    const engine = root.__gnumarus?.engine;
+    if (engine === undefined) {
+      throw new Error("engine is unavailable");
+    }
+    const out: number[] = [];
+    for (let y = ay; y <= by; y += 1) {
+      for (let x = ax; x <= bx; x += 1) {
+        const pixel = engine.readPixel(x, y);
+        out.push(pixel?.r ?? -1, pixel?.g ?? -1, pixel?.b ?? -1, pixel?.a ?? -1);
+      }
+    }
+    return out;
+  }, [x0, y0, x1, y1] as [number, number, number, number]);
+}
+
+function sliceBox(
+  buffer: number[],
+  width: number,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+): number[] {
+  const out: number[] = [];
+  for (let y = y0; y <= y1; y += 1) {
+    for (let x = x0; x <= x1; x += 1) {
+      const at = (y * width + x) * 4;
+      out.push(buffer[at] ?? -1, buffer[at + 1] ?? -1, buffer[at + 2] ?? -1, buffer[at + 3] ?? -1);
+    }
+  }
+  return out;
+}
+
+test("raster preview matches the committed rectangle @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.keyboard.press("d");
+  const a = await layerToScreen(page, 20, 20);
+  const b = await layerToScreen(page, 35, 30);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 5 });
+  await expect.poll(() => shapePreviewVisible(page)).toBe(true);
+  const preview = await shapePreviewPixels(page);
+  if (preview === null) {
+    throw new Error("shape preview is missing mid-drag");
+  }
+  expect(preview.width).toBe(64);
+  expect(preview.height).toBe(64);
+  await page.mouse.up();
+  expect(await readBox(page, 20, 20, 35, 30)).toEqual(sliceBox(preview.buffer, preview.width, 20, 20, 35, 30));
+  await expect.poll(() => shapePreviewVisible(page)).toBe(false);
+});
+
+test("raster preview matches the committed ellipse fill @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.keyboard.press("h");
+  await page.locator("gnumarus-shell input#shapeFilled").click();
+  const a = await layerToScreen(page, 18, 18);
+  const b = await layerToScreen(page, 46, 46);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 5 });
+  await expect.poll(() => shapePreviewVisible(page)).toBe(true);
+  const preview = await shapePreviewPixels(page);
+  if (preview === null) {
+    throw new Error("shape preview is missing mid-drag");
+  }
+  await page.mouse.up();
+  expect(await readBox(page, 0, 0, 63, 63)).toEqual(preview.buffer);
+  await expect.poll(() => shapePreviewVisible(page)).toBe(false);
+});
+
+test("raster preview matches the committed line @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await selectTool(page, "Line");
+  const a = await layerToScreen(page, 10, 32);
+  const b = await layerToScreen(page, 50, 32);
+  await page.mouse.click(a.x, a.y);
+  await page.mouse.move(b.x, b.y);
+  await expect.poll(() => shapePreviewVisible(page)).toBe(true);
+  const preview = await shapePreviewPixels(page);
+  if (preview === null) {
+    throw new Error("shape preview is missing with an armed line");
+  }
+  await page.mouse.click(b.x, b.y);
+  expect(await readBox(page, 0, 0, 63, 63)).toEqual(preview.buffer);
+  await expect.poll(() => shapePreviewVisible(page)).toBe(false);
+});
+
+test("raster preview matches the committed polygon @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.keyboard.press("j");
+  const v0 = await layerToScreen(page, 20, 20);
+  const v1 = await layerToScreen(page, 44, 20);
+  const v2 = await layerToScreen(page, 44, 44);
+  await page.mouse.click(v0.x, v0.y);
+  await page.mouse.click(v1.x, v1.y);
+  await page.mouse.click(v2.x, v2.y);
+  // Park the rubber vertex exactly on the first vertex so the preview shows
+  // the closed shape the commit will paint.
+  await page.mouse.move(v0.x, v0.y);
+  await expect.poll(() => shapePreviewVisible(page)).toBe(true);
+  const preview = await shapePreviewPixels(page);
+  if (preview === null) {
+    throw new Error("shape preview is missing with placed vertices");
+  }
+  await page.keyboard.press("Enter");
+  expect(await readBox(page, 0, 0, 63, 63)).toEqual(preview.buffer);
+  await expect.poll(() => shapePreviewVisible(page)).toBe(false);
+});
+
+test("raster preview matches the committed curve @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await selectTool(page, "Curve");
+  const p0 = await layerToScreen(page, 20, 32);
+  const p3 = await layerToScreen(page, 44, 32);
+  await page.mouse.move(p0.x, p0.y);
+  await page.mouse.down();
+  await page.mouse.move(p3.x, p3.y, { steps: 5 });
+  await page.mouse.up();
+  const c1 = await layerToScreen(page, 32, 20);
+  await page.mouse.click(c1.x, c1.y);
+  const c2 = await layerToScreen(page, 32, 44);
+  await page.mouse.move(c2.x, c2.y);
+  await expect.poll(() => shapePreviewVisible(page)).toBe(true);
+  const preview = await shapePreviewPixels(page);
+  if (preview === null) {
+    throw new Error("shape preview is missing before the second control click");
+  }
+  await page.mouse.click(c2.x, c2.y);
+  expect(await readBox(page, 0, 0, 63, 63)).toEqual(preview.buffer);
+  await expect.poll(() => shapePreviewVisible(page)).toBe(false);
+});
+
+test("raster preview matches the committed gradient @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.keyboard.press("k");
+  const a = await layerToScreen(page, 0, 32);
+  const b = await layerToScreen(page, 63, 32);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 5 });
+  await expect.poll(() => shapePreviewVisible(page)).toBe(true);
+  const preview = await shapePreviewPixels(page);
+  if (preview === null) {
+    throw new Error("shape preview is missing mid-drag");
+  }
+  await page.mouse.up();
+  expect(await readBox(page, 0, 0, 63, 63)).toEqual(preview.buffer);
+  await expect.poll(() => shapePreviewVisible(page)).toBe(false);
+});
+
+test("shape preview clears on Escape without painting @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.keyboard.press("d");
+  const a = await layerToScreen(page, 20, 20);
+  const b = await layerToScreen(page, 35, 30);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 5 });
+  await expect.poll(() => shapePreviewVisible(page)).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect.poll(() => shapePreviewVisible(page)).toBe(false);
+  await page.mouse.up();
+  expect(await paintedPixelCount(page)).toBe(0);
+});
+
+test("shape preview hides when switching tools mid-drag @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.keyboard.press("d");
+  const a = await layerToScreen(page, 20, 20);
+  const b = await layerToScreen(page, 35, 30);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 5 });
+  await expect.poll(() => shapePreviewVisible(page)).toBe(true);
+  await page.keyboard.press("b");
+  await expect.poll(() => shapePreviewVisible(page)).toBe(false);
+  await page.mouse.up();
+  expect(await paintedPixelCount(page)).toBe(0);
 });

@@ -17,13 +17,15 @@ import { GNUMARUS_MODEL3D_DEFAULT_VIEW, parseModel3dView, type GnumarusModel3dVi
 import type { GnumarusSvgEntry } from "../vector/GnumarusSvg";
 import { wrappedTileBlits, type GnumarusTilePlacement, type GnumarusTileRotation } from "../tilemap/GnumarusTilemap";
 import {
-  bayerThreshold,
-  ellipseOutlinePoints,
-  fillEllipseRows,
-  fillPolygonRows,
-  fillRectRows,
-  gradientLinearT,
-  gradientRadialT,
+  paintCurveStroke,
+  paintEllipseFilled,
+  paintEllipseOutline,
+  paintGradient,
+  paintLineSegment,
+  paintPolygon,
+  paintRectFilled,
+  paintRectOutline,
+  type GnumarusShapeStyle,
 } from "../shapes/GnumarusShapes";
 import {
   blurAverageColor,
@@ -45,8 +47,6 @@ import {
   clampLayerDim,
   compositePixelOver,
   createPixelBuffer,
-  drawCubicBezier,
-  drawCubicBezierCoverage,
   drawBrushStamp,
   drawLineSegment,
   findAlphaBoundingBox,
@@ -55,7 +55,6 @@ import {
   floodFill,
   getPixel,
   normalizePointerPressure,
-  blendPixelCoverage,
   parseBrushShape,
   parsePressureResponse,
   pressureSizeInRange,
@@ -76,7 +75,6 @@ import {
 import {
   GnumarusPixelPerfectStroke,
   walkBresenhamLinePixels,
-  walkCubicBezierPixels,
 } from "./GnumarusPixelPerfect";
 import {
   airbrushDabsDue,
@@ -1003,6 +1001,19 @@ export class GnumarusCanvasEngine {
   private onionPlanes: Array<{ mesh: THREE.Mesh; texture: THREE.DataTexture | null }> = [];
   /** Stroke-start dab center for aligned clone offsets. */
   private retouchStart: { x: number; y: number } | null = null;
+  /** Live raster preview of the pending shape/line/curve/gradient gesture. */
+  private shapePreview: {
+    width: number;
+    height: number;
+    buffer: Uint8ClampedArray;
+    zeros: Uint8ClampedArray;
+    texture: THREE.DataTexture;
+    material: THREE.ShaderMaterial;
+    mesh: THREE.Mesh;
+    blending: number;
+  } | null = null;
+  /** Cache key of the last painted preview (avoids re-rasterizing). */
+  private shapePreviewKey: string | null = null;
   private curveP0: { x: number; y: number; clientX: number; clientY: number } | null = null;
   private curveP3: { x: number; y: number; clientX: number; clientY: number } | null = null;
   private curveC1: { x: number; y: number; clientX: number; clientY: number } | null = null;
@@ -1018,16 +1029,8 @@ export class GnumarusCanvasEngine {
   private readonly cloneTip: HTMLDivElement;
   private readonly previewStabilizer: HTMLDivElement;
   private readonly previewSvg: SVGSVGElement;
-  private readonly previewLine: SVGLineElement;
-  private readonly previewCurve: SVGPathElement;
-  /** Live drag outline for the rectangle shape tool. */
+  /** Live drag outline for the crop tool (the rectangle crop box). */
   private readonly previewShapeRect: SVGRectElement;
-  /** Live drag outline for the ellipse shape tool. */
-  private readonly previewShapeEllipse: SVGEllipseElement;
-  /** Live vertex path for the polygon shape tool. */
-  private readonly previewShapePoly: SVGPolylineElement;
-  /** Live drag axis for the gradient tool. */
-  private readonly previewGradient: SVGLineElement;
   /** Rubber-band ellipse for the ellipse selection tool. */
   private readonly previewSelectEllipse: SVGEllipseElement;
   /** Freehand path preview for the lasso selection tool. */
@@ -1340,30 +1343,10 @@ export class GnumarusCanvasEngine {
     this.previewSvg.style.display = "none";
     this.previewSvg.style.zIndex = "6";
     this.previewSvg.style.overflow = "visible";
-    this.previewLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    this.previewLine.setAttribute("fill", "none");
-    this.previewLine.setAttribute("opacity", "0.9");
-    this.previewSvg.appendChild(this.previewLine);
     this.previewShapeRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
     this.previewShapeRect.setAttribute("fill", "none");
     this.previewShapeRect.setAttribute("opacity", "0.9");
     this.previewSvg.appendChild(this.previewShapeRect);
-    this.previewShapeEllipse = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
-    this.previewShapeEllipse.setAttribute("fill", "none");
-    this.previewShapeEllipse.setAttribute("opacity", "0.9");
-    this.previewSvg.appendChild(this.previewShapeEllipse);
-    this.previewShapePoly = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
-    this.previewShapePoly.setAttribute("fill", "none");
-    this.previewShapePoly.setAttribute("opacity", "0.9");
-    this.previewSvg.appendChild(this.previewShapePoly);
-    this.previewGradient = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    this.previewGradient.setAttribute("opacity", "0.9");
-    this.previewSvg.appendChild(this.previewGradient);
-    this.previewCurve = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    this.previewCurve.setAttribute("data-testid", "curve-preview");
-    this.previewCurve.setAttribute("fill", "none");
-    this.previewCurve.setAttribute("opacity", "0.9");
-    this.previewSvg.appendChild(this.previewCurve);
     this.previewSelectEllipse = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
     this.previewSelectEllipse.setAttribute("data-testid", "ellipse-preview");
     this.previewSelectEllipse.setAttribute("fill", "none");
@@ -7048,6 +7031,7 @@ export class GnumarusCanvasEngine {
     this.stabilizerTarget = null;
     this.stopFollowLoop();
     this.resetPencilPixelPerfect();
+    this.disposeShapePreview();
     this.hidePreviews();
     this.frameDurations.clear();
     this.defaultFrameDuration = GNUMARUS_DEFAULT_FRAME_DURATION_SEC;
@@ -8748,59 +8732,6 @@ export class GnumarusCanvasEngine {
       this.blendMode,
       this.wrapMode,
     );
-  }
-
-  /**
-   * Paint one pixel-perfect cubic commit in rasterizer order. Walks the same
-   * flattened candidate sequence `drawCubicBezier` would rasterize (aliased,
-   * width 1) and paints only pixels passing a fresh per-commit filter, so
-   * joints stay 1px thin while self-intersections still paint. Handles both
-   * accumulate (per-pixel `setPixel`) and mask (union bits + one repaint).
-   */
-  private paintPixelPerfectCurve(
-    tex: { buffer: Uint8ClampedArray; width: number; height: number },
-    locked: GnumarusChannelLock,
-    base: Uint8ClampedArray,
-    p0: { x: number; y: number },
-    c1: { x: number; y: number },
-    c2: { x: number; y: number },
-    p3: { x: number; y: number },
-  ): void {
-    const stroke = new GnumarusPixelPerfectStroke();
-    if (!this.accumulate) {
-      const mask = new Uint8Array(tex.width * tex.height);
-      walkCubicBezierPixels({ p0, c1, c2, p3 }, (x: number, y: number): void => {
-        if (!stroke.add(x, y)) {
-          return;
-        }
-        for (const removed of stroke.drainRemoved()) {
-          if (removed.x >= 0 && removed.y >= 0 && removed.x < tex.width && removed.y < tex.height) {
-            mask[removed.y * tex.width + removed.x] = 0;
-          }
-        }
-        if (x < 0 || y < 0 || x >= tex.width || y >= tex.height) {
-          return;
-        }
-        mask[y * tex.width + x] = 255;
-      });
-      this.repaintFromMask(tex, base, mask, locked, this.color);
-      return;
-    }
-    walkCubicBezierPixels({ p0, c1, c2, p3 }, (x: number, y: number): void => {
-      if (!stroke.add(x, y)) {
-        return;
-      }
-      for (const removed of stroke.drainRemoved()) {
-        if (removed.x >= 0 && removed.y >= 0 && removed.x < tex.width && removed.y < tex.height) {
-          const at = (removed.y * tex.width + removed.x) * 4;
-          tex.buffer[at] = base[at]!;
-          tex.buffer[at + 1] = base[at + 1]!;
-          tex.buffer[at + 2] = base[at + 2]!;
-          tex.buffer[at + 3] = base[at + 3]!;
-        }
-      }
-      setPixel(tex.buffer, tex.width, tex.height, x, y, this.color, locked, this.blendMode);
-    });
   }
 
   /**
@@ -11099,40 +11030,11 @@ export class GnumarusCanvasEngine {
     }
     const tex = ensured.texture;
     const base = tex.buffer.slice();
-    if (this.accumulate) {
-      drawLineSegment(
-        tex.buffer,
-        tex.width,
-        tex.height,
-        this.lineAnchor.x,
-        this.lineAnchor.y,
-        x,
-        y,
-        this.lineWidth,
-        this.lineShape,
-        this.lineAntialias,
-        this.color,
-        layer.lockedChannels,
-        this.blendMode,
-        this.wrapMode,
-      );
-    } else {
-      const mask = new Uint8Array(tex.width * tex.height);
-      stampSegmentCoverage(
-        mask,
-        tex.width,
-        tex.height,
-        this.lineAnchor.x,
-        this.lineAnchor.y,
-        x,
-        y,
-        this.lineWidth,
-        this.lineShape,
-        this.lineAntialias,
-        this.wrapMode,
-      );
-      this.repaintFromMask(tex, base, mask, layer.lockedChannels, this.color);
-    }
+    paintLineSegment(
+      tex, base,
+      this.shapeStyleFor(this.lineWidth, this.lineShape, this.lineAntialias, layer.lockedChannels, false),
+      this.lineAnchor.x, this.lineAnchor.y, x, y,
+    );
     this.lineAnchor = null;
     const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
     if (diff === null) {
@@ -11153,6 +11055,33 @@ export class GnumarusCanvasEngine {
     this.emitStats();
     this.updatePreviews();
     return true;
+  }
+
+  /**
+   * Snapshot the current shape-tool settings into one style record shared by
+   * the live preview and the real commit, so both rasterize identically.
+   */
+  private shapeStyleFor(
+    width: number,
+    tip: GnumarusBrushShape,
+    antialias: boolean,
+    locked: GnumarusChannelLock,
+    filled: boolean,
+  ): GnumarusShapeStyle {
+    return {
+      color: { ...this.color },
+      locked,
+      blend: this.blendMode,
+      wrap: this.wrapMode,
+      width,
+      tip,
+      antialias,
+      filled,
+      dither: this.gradientDither,
+      radial: this.gradientMode === "radial",
+      accumulate: this.accumulate,
+      pixelPerfect: this.curvePixelPerfectActive(),
+    };
   }
 
   /**
@@ -11193,20 +11122,6 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
-  /** Fill every scanline row with the paint color honoring locks and blend. */
-  private fillShapeRows(
-    tex: { buffer: Uint8ClampedArray; width: number; height: number },
-    rows: Array<{ y: number; x0: number; x1: number }>,
-    locked: GnumarusChannelLock,
-  ): void {
-    for (const row of rows) {
-      const y = Math.round(row.y);
-      for (let x = Math.round(row.x0); x <= Math.round(row.x1); x += 1) {
-        blendPixelCoverage(tex.buffer, tex.width, tex.height, x, y, this.color, 1, locked, this.blendMode, this.wrapMode);
-      }
-    }
-  }
-
   /** Commit a rectangle (outline or filled) from a drag box. */
   commitShapeRect(x0: number, y0: number, x1: number, y1: number): boolean {
     const layer = this.activeLayer();
@@ -11214,26 +11129,14 @@ export class GnumarusCanvasEngine {
       return false;
     }
     const locked = layer.lockedChannels;
+    const style = this.shapeStyleFor(this.shapeWidth, "square", this.shapeAntialias, locked, this.shapeFilled);
     if (this.shapeFilled) {
       return this.commitShapePaint((tex) => {
-        this.fillShapeRows(tex, fillRectRows(Math.round(x0), Math.round(y0), Math.round(x1), Math.round(y1)), locked);
+        paintRectFilled(tex, style, x0, y0, x1, y1);
       });
     }
     return this.commitShapePaint((tex) => {
-      const corners = [
-        { x: Math.round(x0), y: Math.round(y0) },
-        { x: Math.round(x1), y: Math.round(y0) },
-        { x: Math.round(x1), y: Math.round(y1) },
-        { x: Math.round(x0), y: Math.round(y1) },
-      ];
-      for (let i = 0; i < corners.length; i += 1) {
-        const a = corners[i] as { x: number; y: number };
-        const b = corners[(i + 1) % corners.length] as { x: number; y: number };
-        drawLineSegment(
-          tex.buffer, tex.width, tex.height, a.x, a.y, b.x, b.y,
-          this.shapeWidth, "square", this.shapeAntialias, this.color, locked, this.blendMode, this.wrapMode,
-        );
-      }
+      paintRectOutline(tex, style, x0, y0, x1, y1);
     });
   }
 
@@ -11244,25 +11147,14 @@ export class GnumarusCanvasEngine {
       return false;
     }
     const locked = layer.lockedChannels;
-    const cx = (x0 + x1) / 2;
-    const cy = (y0 + y1) / 2;
-    const rx = Math.abs(x1 - x0) / 2;
-    const ry = Math.abs(y1 - y0) / 2;
+    const style = this.shapeStyleFor(this.shapeWidth, "square", this.shapeAntialias, locked, this.shapeFilled);
     if (this.shapeFilled) {
       return this.commitShapePaint((tex) => {
-        this.fillShapeRows(tex, fillEllipseRows(cx, cy, rx, ry), locked);
+        paintEllipseFilled(tex, style, x0, y0, x1, y1);
       });
     }
     return this.commitShapePaint((tex) => {
-      const points = ellipseOutlinePoints(cx, cy, Math.max(rx, 0.5), Math.max(ry, 0.5));
-      for (let i = 0; i < points.length; i += 1) {
-        const a = points[i] as { x: number; y: number };
-        const b = points[(i + 1) % points.length] as { x: number; y: number };
-        drawLineSegment(
-          tex.buffer, tex.width, tex.height, Math.round(a.x), Math.round(a.y), Math.round(b.x), Math.round(b.y),
-          this.shapeWidth, "square", this.shapeAntialias, this.color, locked, this.blendMode, this.wrapMode,
-        );
-      }
+      paintEllipseOutline(tex, style, x0, y0, x1, y1);
     });
   }
 
@@ -11273,19 +11165,9 @@ export class GnumarusCanvasEngine {
       return false;
     }
     const locked = layer.lockedChannels;
-    const rounded = points.map((point) => ({ x: Math.round(point.x), y: Math.round(point.y) }));
+    const style = this.shapeStyleFor(this.shapeWidth, "square", this.shapeAntialias, locked, this.shapeFilled);
     return this.commitShapePaint((tex) => {
-      if (this.shapeFilled) {
-        this.fillShapeRows(tex, fillPolygonRows(rounded), locked);
-      }
-      for (let i = 0; i < rounded.length; i += 1) {
-        const a = rounded[i] as { x: number; y: number };
-        const b = rounded[(i + 1) % rounded.length] as { x: number; y: number };
-        drawLineSegment(
-          tex.buffer, tex.width, tex.height, a.x, a.y, b.x, b.y,
-          this.shapeWidth, "square", this.shapeAntialias, this.color, locked, this.blendMode, this.wrapMode,
-        );
-      }
+      paintPolygon(tex, style, points);
     });
   }
 
@@ -11296,40 +11178,9 @@ export class GnumarusCanvasEngine {
       return false;
     }
     const locked = layer.lockedChannels;
-    const radial = this.gradientMode === "radial";
-    const radius = Math.hypot(bx - ax, by - ay);
-    const minX = Math.floor(radial ? ax - radius : Math.min(ax, bx));
-    const maxX = Math.ceil(radial ? ax + radius : Math.max(ax, bx));
-    const minY = Math.floor(radial ? ay - radius : Math.min(ay, by));
-    const maxY = Math.ceil(radial ? ay + radius : Math.max(ay, by));
-    if (!(maxX >= minX) || !(maxY >= minY)) {
-      return false;
-    }
-    const rows: Array<{ y: number; x0: number; x1: number }> = [];
-    for (let y = minY; y <= maxY; y += 1) {
-      rows.push({ y, x0: minX, x1: maxX });
-    }
+    const style = this.shapeStyleFor(this.shapeWidth, "square", this.shapeAntialias, locked, false);
     return this.commitShapePaint((tex) => {
-      for (const row of rows) {
-        for (let x = row.x0; x <= row.x1; x += 1) {
-          const t = radial
-            ? gradientRadialT(x, row.y, ax, ay, bx, by)
-            : gradientLinearT(x, row.y, ax, ay, bx, by);
-          const strength = 1 - t;
-          if (strength <= 0) {
-            continue;
-          }
-          if (this.gradientDither && strength <= bayerThreshold(x, row.y)) {
-            continue;
-          }
-          const faded = { ...this.color, a: Math.round(this.color.a * strength) };
-          blendPixelCoverage(
-            tex.buffer, tex.width, tex.height, x, row.y, faded,
-            this.gradientDither ? 1 : strength,
-            locked, this.blendMode, this.wrapMode,
-          );
-        }
-      }
+      paintGradient(tex, style, ax, ay, bx, by);
     });
   }
 
@@ -11561,50 +11412,14 @@ export class GnumarusCanvasEngine {
     }
     const tex = ensured.texture;
     const base = tex.buffer.slice();
-    if (this.curvePixelPerfectActive()) {
-      this.paintPixelPerfectCurve(
-        tex,
-        layer.lockedChannels,
-        base,
-        { x: p0.x, y: p0.y },
-        { x: c1.x, y: c1.y },
-        { x: c2x, y: c2y },
-        { x: p3.x, y: p3.y },
-      );
-    } else if (this.accumulate) {
-      drawCubicBezier(
-        tex.buffer,
-        tex.width,
-        tex.height,
-        { x: p0.x, y: p0.y },
-        { x: c1.x, y: c1.y },
-        { x: c2x, y: c2y },
-        { x: p3.x, y: p3.y },
-        this.curveWidth,
-        this.curveShape,
-        this.curveAntialias,
-        this.color,
-        layer.lockedChannels,
-        this.blendMode,
-        this.wrapMode,
-      );
-    } else {
-      const mask = new Uint8Array(tex.width * tex.height);
-      drawCubicBezierCoverage(
-        mask,
-        tex.width,
-        tex.height,
-        { x: p0.x, y: p0.y },
-        { x: c1.x, y: c1.y },
-        { x: c2x, y: c2y },
-        { x: p3.x, y: p3.y },
-        this.curveWidth,
-        this.curveShape,
-        this.curveAntialias,
-        this.wrapMode,
-      );
-      this.repaintFromMask(tex, base, mask, layer.lockedChannels, this.color);
-    }
+    paintCurveStroke(
+      tex, base,
+      this.shapeStyleFor(this.curveWidth, this.curveShape, this.curveAntialias, layer.lockedChannels, false),
+      { x: p0.x, y: p0.y },
+      { x: c1.x, y: c1.y },
+      { x: c2x, y: c2y },
+      { x: p3.x, y: p3.y },
+    );
     this.resetCurveState();
     const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
     if (diff === null) {
@@ -12022,6 +11837,302 @@ export class GnumarusCanvasEngine {
     }
   }
 
+  /**
+   * Texture dimensions for a shape preview without materializing anything:
+   * the live cell texture when the cell already has one, else the size a
+   * fresh texture would get. Never creates contents or textures.
+   */
+  private shapePreviewDims(layerId: string, frame: number): { width: number; height: number } {
+    const key = animationCellKey(layerId, frame);
+    const contentId = this.cells.get(key);
+    const content = contentId === undefined ? undefined : this.contents.get(contentId);
+    const stored = content?.textureId == null ? undefined : this.textures.get(content.textureId);
+    if (stored !== undefined) {
+      return { width: stored.width, height: stored.height };
+    }
+    return { width: this.imageWidth, height: this.imageHeight };
+  }
+
+  /** True when the active cell holds derived (non-paintable) content. */
+  private isCellDerived(layerId: string, frame: number): boolean {
+    return (
+      this.getCellTextId(layerId, frame) !== null ||
+      this.getCellSvgId(layerId, frame) !== null ||
+      this.getCellModel3dId(layerId, frame) !== null ||
+      this.getCellTilemapId(layerId, frame) !== null
+    );
+  }
+
+  /** Raster preview visibility for tests. */
+  isShapePreviewVisible(): boolean {
+    return this.shapePreview !== null && this.shapePreview.mesh.visible;
+  }
+
+  /** Copy of the current preview scratch for tests (null when hidden). */
+  getShapePreviewPixels(): { width: number; height: number; buffer: number[] } | null {
+    const entry = this.shapePreview;
+    if (entry === null || !entry.mesh.visible) {
+      return null;
+    }
+    return { width: entry.width, height: entry.height, buffer: Array.from(entry.buffer) };
+  }
+
+  /** Hide the shape preview plane, if shown. */
+  private hideShapePreview(): void {
+    if (this.shapePreview !== null && this.shapePreview.mesh.visible) {
+      this.shapePreview.mesh.visible = false;
+      this.shapePreviewKey = null;
+      this.render();
+    } else {
+      this.shapePreviewKey = null;
+      if (this.shapePreview !== null) {
+        this.shapePreview.mesh.visible = false;
+      }
+    }
+  }
+
+  private disposeShapePreview(): void {
+    if (this.shapePreview !== null) {
+      this.scene.remove(this.shapePreview.mesh);
+      this.shapePreview.texture.dispose();
+      this.shapePreview.material.dispose();
+      this.shapePreview = null;
+    }
+    this.shapePreviewKey = null;
+  }
+
+  private ensureShapePreview(width: number, height: number): void {
+    const existing = this.shapePreview;
+    if (existing !== null && existing.width === width && existing.height === height) {
+      return;
+    }
+    this.disposeShapePreview();
+    const buffer = new Uint8ClampedArray(width * height * 4);
+    const texture = new THREE.DataTexture(buffer, width, height);
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.NearestFilter;
+    texture.generateMipmaps = false;
+    texture.flipY = true;
+    texture.needsUpdate = true;
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        uMap: { value: texture },
+        uOpacity: { value: 1 },
+      },
+      vertexShader: LAYER_VERTEX_SHADER,
+      fragmentShader: LAYER_FRAGMENT_SHADER,
+      side: THREE.DoubleSide,
+      transparent: true,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(this.sharedGeometry, material);
+    mesh.matrixAutoUpdate = false;
+    mesh.visible = false;
+    mesh.frustumCulled = false;
+    this.scene.add(mesh);
+    this.shapePreview = {
+      width,
+      height,
+      buffer,
+      zeros: new Uint8ClampedArray(width * height * 4),
+      texture,
+      material,
+      mesh,
+      blending: THREE.NormalBlending,
+    };
+  }
+
+  /**
+   * Rasterize the pending shape/line/curve/gradient gesture into the preview
+   * scratch with the exact commit code path, so the overlay shows precisely
+   * the pixels a commit would paint. Runs from updatePreviews (gesture and
+   * mouse changes) and layoutSceneTransforms (view changes); repainting only
+   * happens when the quantized gesture or the paint settings change.
+   */
+  private syncShapePreview(): void {
+    if (this.disposed) {
+      return;
+    }
+    const mouse = this.lastMouseClient;
+    const layer = this.activeLayer();
+    type PaintFn = (tex: { buffer: Uint8ClampedArray; width: number; height: number }, zeros: Uint8ClampedArray) => void;
+    let paint: PaintFn | null = null;
+    let key = "";
+    const quantize = (value: number): number => Math.round(value * 1000) / 1000;
+    if (
+      mouse !== null &&
+      layer !== null &&
+      (this.tool === "line" ||
+        this.tool === "rectangle" ||
+        this.tool === "ellipseShape" ||
+        this.tool === "gradient" ||
+        this.tool === "polygon" ||
+        this.tool === "curve") &&
+      !this.isCellDerived(layer.id, this.currentFrame)
+    ) {
+      const mapCursor = (): { x: number; y: number } | null =>
+        this.wrapMode === "off" ? this.toImagePixel(mouse.x, mouse.y) : this.toPaintPixel(mouse.x, mouse.y);
+      if (this.tool === "line" && this.lineAnchor !== null) {
+        const pixel = mapCursor();
+        if (pixel !== null) {
+          const ax = this.lineAnchor.x;
+          const ay = this.lineAnchor.y;
+          const style = this.shapeStyleFor(this.lineWidth, this.lineShape, this.lineAntialias, layer.lockedChannels, false);
+          key = `line|${ax}|${ay}|${pixel.x}|${pixel.y}|${this.shapeStyleKey(style)}`;
+          paint = (tex, zeros) => paintLineSegment(tex, zeros, style, ax, ay, pixel.x, pixel.y);
+        }
+      } else if (
+        (this.tool === "rectangle" || this.tool === "ellipseShape" || this.tool === "gradient") &&
+        this.shapeDrag !== null
+      ) {
+        const drag = this.shapeDrag;
+        const style = this.shapeStyleFor(this.shapeWidth, "square", this.shapeAntialias, layer.lockedChannels, this.shapeFilled);
+        key =
+          `${drag.tool}|${quantize(drag.x0)}|${quantize(drag.y0)}|${quantize(drag.x1)}|${quantize(drag.y1)}` +
+          `|${this.shapeStyleKey(style)}`;
+        if (drag.tool === "rectangle") {
+          paint = (tex) => paintRectOutline(tex, style, drag.x0, drag.y0, drag.x1, drag.y1);
+          if (this.shapeFilled) {
+            paint = (tex) => paintRectFilled(tex, style, drag.x0, drag.y0, drag.x1, drag.y1);
+          }
+        } else if (drag.tool === "ellipseShape") {
+          paint = (tex) => paintEllipseOutline(tex, style, drag.x0, drag.y0, drag.x1, drag.y1);
+          if (this.shapeFilled) {
+            paint = (tex) => paintEllipseFilled(tex, style, drag.x0, drag.y0, drag.x1, drag.y1);
+          }
+        } else {
+          paint = (tex) => paintGradient(tex, style, drag.x0, drag.y0, drag.x1, drag.y1);
+        }
+      } else if (this.tool === "polygon" && this.shapePolygon !== null && this.shapePolygon.length > 0) {
+        const cursor = this.clientToLayerImageFloat(mouse.x, mouse.y);
+        if (cursor !== null) {
+          const points = [...this.shapePolygon, { x: cursor.x, y: cursor.y }];
+          const style = this.shapeStyleFor(this.shapeWidth, "square", this.shapeAntialias, layer.lockedChannels, this.shapeFilled);
+          key = `polygon|${points.map((point) => `${quantize(point.x)},${quantize(point.y)}`).join(";")}|${this.shapeStyleKey(style)}`;
+          const frozen = points.map((point) => ({ x: point.x, y: point.y }));
+          paint = (tex) => paintPolygon(tex, style, frozen);
+        }
+      } else if (this.tool === "curve") {
+        const style = this.shapeStyleFor(this.curveWidth, this.curveShape, this.curveAntialias, layer.lockedChannels, false);
+        if (this.curvePhase === "dragging" && this.curveP0 !== null) {
+          const p0 = this.curveP0;
+          // Before the first move event the drag cursor is unset: anchor the
+          // rubber line on the start point, like the old overlay did.
+          const current = this.curveDragCurrent ?? { x: p0.x, y: p0.y };
+          key = `curve-drag|${p0.x}|${p0.y}|${current.x}|${current.y}|${this.shapeStyleKey(style)}`;
+          paint = (tex, zeros) => paintLineSegment(tex, zeros, style, p0.x, p0.y, current.x, current.y);
+        } else if (this.curvePhase === "awaitC1" && this.curveP0 !== null && this.curveP3 !== null) {
+          const control = this.clientToLayerImageFloat(mouse.x, mouse.y);
+          if (control !== null) {
+            const p0 = this.curveP0;
+            const p3 = this.curveP3;
+            key =
+              `curve-c1|${p0.x}|${p0.y}|${quantize(control.x)}|${quantize(control.y)}|${p3.x}|${p3.y}` +
+              `|${this.shapeStyleKey(style)}`;
+            const frozen = { x: control.x, y: control.y };
+            paint = (tex, zeros) => paintCurveStroke(tex, zeros, style, p0, frozen, p3, p3);
+          }
+        } else if (
+          this.curvePhase === "awaitC2" &&
+          this.curveP0 !== null &&
+          this.curveP3 !== null &&
+          this.curveC1 !== null
+        ) {
+          const control = this.clientToLayerImageFloat(mouse.x, mouse.y);
+          if (control !== null) {
+            const p0 = this.curveP0;
+            const c1 = this.curveC1;
+            const p3 = this.curveP3;
+            key =
+              `curve-c2|${p0.x}|${p0.y}|${c1.x}|${c1.y}|${quantize(control.x)}|${quantize(control.y)}|${p3.x}|${p3.y}` +
+              `|${this.shapeStyleKey(style)}`;
+            const frozen = { x: control.x, y: control.y };
+            paint = (tex, zeros) => paintCurveStroke(tex, zeros, style, p0, c1, frozen, p3);
+          }
+        }
+      }
+    }
+    if (paint === null || layer === null) {
+      this.hideShapePreview();
+      return;
+    }
+    const dims = this.shapePreviewDims(layer.id, this.currentFrame);
+    key += `|${dims.width}x${dims.height}|${layer.id}|${this.currentFrame}`;
+    this.ensureShapePreview(dims.width, dims.height);
+    const entry = this.shapePreview;
+    if (entry === null) {
+      return;
+    }
+    let changed = false;
+    if (this.shapePreviewKey !== key) {
+      this.shapePreviewKey = key;
+      entry.buffer.fill(0);
+      paint(entry, entry.zeros);
+      entry.texture.needsUpdate = true;
+      changed = true;
+    }
+    // Match the live layer compositing so translucent preview pixels blend
+    // the same way the committed stroke would.
+    const source = layer.material;
+    if (
+      entry.blending !== source.blending ||
+      entry.material.blendSrc !== source.blendSrc ||
+      entry.material.blendDst !== source.blendDst ||
+      entry.material.blendEquation !== source.blendEquation ||
+      entry.material.blendSrcAlpha !== source.blendSrcAlpha ||
+      entry.material.blendDstAlpha !== source.blendDstAlpha ||
+      entry.material.blendEquationAlpha !== source.blendEquationAlpha ||
+      entry.material.uniforms["uOpacity"]!.value !== source.uniforms["uOpacity"]!.value
+    ) {
+      entry.blending = source.blending;
+      entry.material.blending = source.blending;
+      entry.material.blendSrc = source.blendSrc;
+      entry.material.blendDst = source.blendDst;
+      entry.material.blendEquation = source.blendEquation;
+      entry.material.blendSrcAlpha = source.blendSrcAlpha;
+      entry.material.blendDstAlpha = source.blendDstAlpha;
+      entry.material.blendEquationAlpha = source.blendEquationAlpha;
+      entry.material.uniforms["uOpacity"]!.value = source.uniforms["uOpacity"]!.value;
+      entry.material.needsUpdate = true;
+      changed = true;
+    }
+    const index = this.layers.findIndex((entryLayer) => entryLayer.id === layer.id);
+    const stackIndex = index < 0 ? 0 : index;
+    this.writePlaneMatrix(entry.mesh, entry.width, entry.height, layer.transform, stackIndex * 0.01 + 0.005);
+    entry.mesh.renderOrder = stackIndex + 0.5;
+    // Repositioning runs every sync (view changes move the plane); repaint
+    // only happens on gesture or setting changes via the key above. Render
+    // only when something visible changed — view callers render themselves.
+    const becameVisible = !entry.mesh.visible;
+    if (becameVisible) {
+      entry.mesh.visible = true;
+    }
+    if (changed || becameVisible) {
+      this.render();
+    }
+  }
+
+  /** Stable key for the paint-relevant tool settings. */
+  private shapeStyleKey(style: GnumarusShapeStyle): string {
+    return JSON.stringify([
+      style.color.r,
+      style.color.g,
+      style.color.b,
+      style.color.a,
+      style.locked,
+      style.blend,
+      style.wrap,
+      style.width,
+      style.tip,
+      style.antialias,
+      style.filled,
+      style.dither,
+      style.radial,
+      style.accumulate,
+      style.pixelPerfect,
+    ]);
+  }
+
   private updatePreviews(): void {
     if (this.disposed) {
       return;
@@ -12050,13 +12161,7 @@ export class GnumarusCanvasEngine {
       this.previewTip.style.borderRadius = tipShape === "circle" ? "50%" : "0";
     }
     this.updateTilePreview(mouse);
-    this.previewLine.removeAttribute("display");
-    this.previewLine.style.display = "none";
-    this.previewCurve.style.display = "none";
     this.previewShapeRect.style.display = "none";
-    this.previewShapeEllipse.style.display = "none";
-    this.previewShapePoly.style.display = "none";
-    this.previewGradient.style.display = "none";
     this.cloneTip.style.display = "none";
     this.previewSelectEllipse.style.display = "none";
     this.previewLasso.style.display = "none";
@@ -12074,6 +12179,9 @@ export class GnumarusCanvasEngine {
     }
     this.updateStabilizerOverlay();
     this.updateSelectionOverlay();
+    // Raster shape preview (hides itself when no shape/line/curve gesture is
+    // armed, so Escape, tool switches and mouse-leave all clear it here).
+    this.syncShapePreview();
     if (mouse === null) {
       // Keep the stabilizer dot hidden when the mouse leaves; the overlay
       // helper already hid it, but the svg may still be needed for nothing.
@@ -12096,24 +12204,12 @@ export class GnumarusCanvasEngine {
       marker.style.display = "block";
     };
     if (this.tool === "line" && this.lineAnchor !== null) {
-      this.previewSvg.style.display = "block";
-      this.previewLine.style.display = "block";
-      this.previewLine.setAttribute("x1", String(this.lineAnchor.clientX - rect.left));
-      this.previewLine.setAttribute("y1", String(this.lineAnchor.clientY - rect.top));
-      this.previewLine.setAttribute("x2", String(mouse.x - rect.left));
-      this.previewLine.setAttribute("y2", String(mouse.y - rect.top));
-      this.previewLine.setAttribute("stroke", this.colorCss());
-      this.previewLine.setAttribute("stroke-width", String(Math.max(1, this.lineWidth * this.zoom)));
-      this.previewLine.setAttribute("stroke-linecap", this.lineShape === "circle" ? "round" : "butt");
       return;
     }
-    if (
-      ((this.tool === "rectangle" || this.tool === "ellipseShape" || this.tool === "gradient") &&
-        this.shapeDrag !== null) ||
-      (this.tool === "crop" && this.cropDrag !== null)
-    ) {
+    if (this.tool === "crop" && this.cropDrag !== null) {
       const layer = this.activeLayer();
-      if (layer !== null) {
+      if (layer !== null && this.cropDrag !== null) {
+        const drag = this.cropDrag;
         const toClient = (imageX: number, imageY: number): { x: number; y: number } => {
           const project = layerImageToProject(imageX, imageY, layer.width, layer.height, layer.transform);
           const client = projectToScreen(
@@ -12124,57 +12220,24 @@ export class GnumarusCanvasEngine {
           );
           return { x: client.x - rect.left, y: client.y - rect.top };
         };
-        const activeDrag =
-          this.shapeDrag !== null
-            ? {
-                kind: this.shapeDrag.tool as string,
-                x0: this.shapeDrag.x0,
-                y0: this.shapeDrag.y0,
-                x1: this.shapeDrag.x1,
-                y1: this.shapeDrag.y1,
-              }
-            : this.cropDrag === null
-              ? null
-              : {
-                  kind: "crop",
-                  x0: this.cropDrag.x0,
-                  y0: this.cropDrag.y0,
-                  x1: this.cropDrag.x1,
-                  y1: this.cropDrag.y1,
-                };
-        if (activeDrag === null) {
-          return;
-        }
-        const a = toClient(activeDrag.x0, activeDrag.y0);
-        const b = toClient(activeDrag.x1, activeDrag.y1);
+        const a = toClient(drag.x0, drag.y0);
+        const b = toClient(drag.x1, drag.y1);
         this.previewSvg.style.display = "block";
-        if (activeDrag.kind === "rectangle" || activeDrag.kind === "crop") {
-          this.previewShapeRect.style.display = "block";
-          this.previewShapeRect.setAttribute("x", String(Math.min(a.x, b.x)));
-          this.previewShapeRect.setAttribute("y", String(Math.min(a.y, b.y)));
-          this.previewShapeRect.setAttribute("width", String(Math.abs(b.x - a.x)));
-          this.previewShapeRect.setAttribute("height", String(Math.abs(b.y - a.y)));
-          this.previewShapeRect.setAttribute("stroke", this.colorCss());
-          this.previewShapeRect.setAttribute("stroke-width", String(Math.max(1, this.shapeWidth * this.zoom)));
-        } else if (activeDrag.kind === "ellipseShape") {
-          this.previewShapeEllipse.style.display = "block";
-          this.previewShapeEllipse.setAttribute("cx", String((a.x + b.x) / 2));
-          this.previewShapeEllipse.setAttribute("cy", String((a.y + b.y) / 2));
-          this.previewShapeEllipse.setAttribute("rx", String(Math.abs(b.x - a.x) / 2));
-          this.previewShapeEllipse.setAttribute("ry", String(Math.abs(b.y - a.y) / 2));
-          this.previewShapeEllipse.setAttribute("stroke", this.colorCss());
-          this.previewShapeEllipse.setAttribute("stroke-width", String(Math.max(1, this.shapeWidth * this.zoom)));
-        } else {
-          this.previewGradient.style.display = "block";
-          this.previewGradient.setAttribute("x1", String(a.x));
-          this.previewGradient.setAttribute("y1", String(a.y));
-          this.previewGradient.setAttribute("x2", String(b.x));
-          this.previewGradient.setAttribute("y2", String(b.y));
-          this.previewGradient.setAttribute("stroke", this.colorCss());
-          this.previewGradient.setAttribute("stroke-width", "3");
-        }
+        this.previewShapeRect.style.display = "block";
+        this.previewShapeRect.setAttribute("x", String(Math.min(a.x, b.x)));
+        this.previewShapeRect.setAttribute("y", String(Math.min(a.y, b.y)));
+        this.previewShapeRect.setAttribute("width", String(Math.abs(b.x - a.x)));
+        this.previewShapeRect.setAttribute("height", String(Math.abs(b.y - a.y)));
+        this.previewShapeRect.setAttribute("stroke", this.colorCss());
+        this.previewShapeRect.setAttribute("stroke-width", String(Math.max(1, this.shapeWidth * this.zoom)));
         return;
       }
+    }
+    if (
+      (this.tool === "rectangle" || this.tool === "ellipseShape" || this.tool === "gradient") &&
+      this.shapeDrag !== null
+    ) {
+      return;
     }
     if (this.tool === "polygon" && this.shapePolygon !== null && this.shapePolygon.length > 0) {
       const layer = this.activeLayer();
@@ -12189,23 +12252,22 @@ export class GnumarusCanvasEngine {
           );
           return { x: client.x - rect.left, y: client.y - rect.top };
         };
-        const vertices = this.shapePolygon.map((point) => {
-          const client = toClient(point.x, point.y);
-          return `${client.x},${client.y}`;
-        });
-        if (mouse !== null && this.shapePolygon.length >= 1) {
-          const cursor = toClient(
-            this.clientToLayerImageFloat(mouse.x, mouse.y)?.x ?? this.shapePolygon[0]?.x ?? 0,
-            this.clientToLayerImageFloat(mouse.x, mouse.y)?.y ?? this.shapePolygon[0]?.y ?? 0,
-          );
-          vertices.push(`${cursor.x},${cursor.y}`);
-        }
         this.previewSvg.style.display = "block";
-        this.previewShapePoly.style.display = "block";
-        this.previewShapePoly.setAttribute("points", vertices.join(" "));
-        this.previewShapePoly.setAttribute("stroke", this.colorCss());
-        this.previewShapePoly.setAttribute("stroke-width", String(Math.max(1, this.shapeWidth * this.zoom)));
-        this.previewShapePoly.setAttribute("stroke-linejoin", "round");
+        const markers = this.previewMarkers;
+        for (let i = 0; i < this.shapePolygon.length && i < markers.length; i += 1) {
+          const vertex = this.shapePolygon[i];
+          if (vertex === undefined) {
+            continue;
+          }
+          const client = toClient(vertex.x, vertex.y);
+          const marker = markers[i];
+          if (marker === undefined) {
+            continue;
+          }
+          marker.setAttribute("cx", String(client.x));
+          marker.setAttribute("cy", String(client.y));
+          marker.style.display = "block";
+        }
         return;
       }
     }
@@ -12321,14 +12383,6 @@ export class GnumarusCanvasEngine {
       const endX = current === null ? mouse.x : current.clientX;
       const endY = current === null ? mouse.y : current.clientY;
       this.previewSvg.style.display = "block";
-      this.previewLine.style.display = "block";
-      this.previewLine.setAttribute("x1", String(this.curveP0.clientX - rect.left));
-      this.previewLine.setAttribute("y1", String(this.curveP0.clientY - rect.top));
-      this.previewLine.setAttribute("x2", String(endX - rect.left));
-      this.previewLine.setAttribute("y2", String(endY - rect.top));
-      this.previewLine.setAttribute("stroke", this.colorCss());
-      this.previewLine.setAttribute("stroke-width", String(Math.max(1, this.curveWidth * this.zoom)));
-      this.previewLine.setAttribute("stroke-linecap", this.curveShape === "circle" ? "round" : "butt");
       placeMarker(0, this.curveP0.clientX, this.curveP0.clientY);
       placeMarker(3, endX, endY);
       return;
@@ -12336,16 +12390,7 @@ export class GnumarusCanvasEngine {
     if (this.curvePhase === "awaitC1" && this.curveP0 !== null && this.curveP3 !== null) {
       this.previewSvg.style.display = "block";
       const p0 = rel(this.curveP0.clientX, this.curveP0.clientY);
-      const p3 = rel(this.curveP3.clientX, this.curveP3.clientY);
       const p1 = rel(mouse.x, mouse.y);
-      this.previewCurve.style.display = "block";
-      this.previewCurve.setAttribute(
-        "d",
-        `M ${p0.x} ${p0.y} C ${p1.x} ${p1.y} ${p3.x} ${p3.y} ${p3.x} ${p3.y}`,
-      );
-      this.previewCurve.setAttribute("stroke", this.colorCss());
-      this.previewCurve.setAttribute("stroke-width", String(Math.max(1, this.curveWidth * this.zoom)));
-      this.previewCurve.setAttribute("stroke-linecap", this.curveShape === "circle" ? "round" : "butt");
       this.previewHandleA.style.display = "block";
       this.previewHandleA.setAttribute("x1", String(p0.x));
       this.previewHandleA.setAttribute("y1", String(p0.y));
@@ -12367,14 +12412,6 @@ export class GnumarusCanvasEngine {
       const p3 = rel(this.curveP3.clientX, this.curveP3.clientY);
       const p1 = rel(this.curveC1.clientX, this.curveC1.clientY);
       const p2 = rel(mouse.x, mouse.y);
-      this.previewCurve.style.display = "block";
-      this.previewCurve.setAttribute(
-        "d",
-        `M ${p0.x} ${p0.y} C ${p1.x} ${p1.y} ${p2.x} ${p2.y} ${p3.x} ${p3.y}`,
-      );
-      this.previewCurve.setAttribute("stroke", this.colorCss());
-      this.previewCurve.setAttribute("stroke-width", String(Math.max(1, this.curveWidth * this.zoom)));
-      this.previewCurve.setAttribute("stroke-linecap", this.curveShape === "circle" ? "round" : "butt");
       this.previewHandleA.style.display = "block";
       this.previewHandleA.setAttribute("x1", String(p0.x));
       this.previewHandleA.setAttribute("y1", String(p0.y));
@@ -12397,9 +12434,8 @@ export class GnumarusCanvasEngine {
   private hidePreviews(): void {
     this.previewTip.style.display = "none";
     this.previewStabilizer.style.display = "none";
+    this.hideShapePreview();
     this.previewSvg.style.display = "none";
-    this.previewLine.style.display = "none";
-    this.previewCurve.style.display = "none";
     this.previewSelectEllipse.style.display = "none";
     this.previewLasso.style.display = "none";
     this.previewHandleA.style.display = "none";
@@ -13573,6 +13609,7 @@ export class GnumarusCanvasEngine {
     this.stopFollowLoop();
     this.stopFlyHoldLoop();
     this.disposeFloatingPlane();
+    this.disposeShapePreview();
     this.scene.remove(this.axisXLine);
     this.axisXLine.geometry.dispose();
     this.axisXMaterial.dispose();
@@ -15511,6 +15548,7 @@ export class GnumarusCanvasEngine {
     this.syncSymmetryOverlay();
     this.updateGrid();
     this.syncFloatingPlane();
+    this.syncShapePreview();
     this.updateAxisOverlay();
   }
 

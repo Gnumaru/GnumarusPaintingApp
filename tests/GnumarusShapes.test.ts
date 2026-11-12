@@ -8,9 +8,18 @@ import {
   fillRectRows,
   gradientLinearT,
   gradientRadialT,
+  paintCurveStroke,
+  paintEllipseFilled,
+  paintEllipseOutline,
+  paintGradient,
+  paintLineSegment,
+  paintPolygon,
+  paintRectFilled,
+  paintRectOutline,
   walkRectOutline,
+  type GnumarusShapeStyle,
+  type GnumarusShapeTex,
 } from "../src/shapes/GnumarusShapes";
-
 describe("GnumarusShapes", () => {
   it("walks a rectangular outline without duplicate corners", () => {
     const pixels = walkRectOutline(0, 0, 3, 2);
@@ -120,5 +129,206 @@ describe("GnumarusShapes", () => {
     expect(gradientRadialT(3, 4, 0, 0, 10, 0)).toBeCloseTo(0.5, 9);
     expect(gradientRadialT(30, 0, 0, 0, 10, 0)).toBe(1);
     expect(gradientRadialT(0, 0, 0, 0, 0, 0)).toBe(0);
+  });
+});
+
+function makeTex(width: number, height: number, fill = 0): GnumarusShapeTex {
+  const buffer = new Uint8ClampedArray(width * height * 4);
+  if (fill !== 0) {
+    buffer.fill(fill);
+  }
+  return { buffer, width, height };
+}
+
+function styleOf(overrides: Partial<GnumarusShapeStyle> = {}): GnumarusShapeStyle {
+  return {
+    color: { r: 255, g: 0, b: 0, a: 255 },
+    locked: { r: false, g: false, b: false, a: false },
+    blend: "normal",
+    wrap: "off",
+    width: 1,
+    tip: "square",
+    antialias: false,
+    filled: false,
+    dither: false,
+    radial: false,
+    accumulate: true,
+    pixelPerfect: false,
+    ...overrides,
+  };
+}
+
+function alphaPlane(tex: GnumarusShapeTex): number[] {
+  const out: number[] = [];
+  for (let i = 3; i < tex.buffer.length; i += 4) {
+    out.push(tex.buffer[i] as number);
+  }
+  return out;
+}
+
+describe("GnumarusShapePaint", () => {
+  it("paints aliased rectangle outlines on exact pixels", () => {
+    const tex = makeTex(8, 8);
+    paintRectOutline(tex, styleOf(), 1, 1, 4, 3);
+    // Interior stays empty, border is painted.
+    expect(alphaPlane(tex)).toEqual([
+      0, 0, 0, 0, 0, 0, 0, 0,
+      0, 255, 255, 255, 255, 0, 0, 0,
+      0, 255, 0, 0, 255, 0, 0, 0,
+      0, 255, 255, 255, 255, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0,
+    ]);
+  });
+
+  it("fills rectangles solid", () => {
+    const tex = makeTex(6, 6);
+    paintRectFilled(tex, styleOf({ filled: true }), 1, 1, 3, 2);
+    expect(alphaPlane(tex)).toEqual([
+      0, 0, 0, 0, 0, 0,
+      0, 255, 255, 255, 0, 0,
+      0, 255, 255, 255, 0, 0,
+      0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0,
+    ]);
+  });
+
+  it("paints filled ellipses symmetric around the center", () => {
+    const tex = makeTex(9, 9);
+    paintEllipseFilled(tex, styleOf({ filled: true }), 1, 1, 7, 7);
+    const rows: number[][] = [];
+    for (let y = 0; y < 9; y += 1) {
+      rows.push(alphaPlane(tex).slice(y * 9, y * 9 + 9));
+    }
+    // Middle row is the widest; top and bottom rows mirror each other.
+    expect(rows[4]).toEqual([0, 255, 255, 255, 255, 255, 255, 255, 0]);
+    expect(rows[1]).toEqual(rows[7]);
+    expect(rows[1]?.filter((a) => a === 255).length).toBeGreaterThan(0);
+  });
+
+  it("draws ellipse outlines without filling the interior", () => {
+    const tex = makeTex(9, 9);
+    paintEllipseOutline(tex, styleOf(), 1, 1, 7, 7);
+    // Center stays empty for a hollow outline.
+    expect(tex.buffer[(4 * 9 + 4) * 4 + 3]).toBe(0);
+    expect(alphaPlane(tex).filter((a) => a === 255).length).toBeGreaterThan(8);
+  });
+
+  it("paints closed polygons with even-odd fill", () => {
+    const tex = makeTex(8, 8);
+    const triangle = [
+      { x: 1, y: 1 },
+      { x: 6, y: 1 },
+      { x: 1, y: 6 },
+    ];
+    paintPolygon(tex, styleOf({ filled: true }), triangle);
+    // Interior of the right triangle is painted, the far corner is not.
+    expect(tex.buffer[(3 * 8 + 2) * 4 + 3]).toBe(255);
+    expect(tex.buffer[(5 * 8 + 5) * 4 + 3]).toBe(0);
+    const hollow = makeTex(8, 8);
+    paintPolygon(hollow, styleOf(), triangle);
+    expect(hollow.buffer[(3 * 8 + 2) * 4 + 3]).toBe(0);
+    expect(alphaPlane(hollow).filter((a) => a === 255).length).toBeGreaterThan(0);
+  });
+
+  it("paints line segments identically through both accumulate paths", () => {
+    const a = makeTex(8, 8);
+    const b = makeTex(8, 8);
+    const zero = new Uint8ClampedArray(8 * 8 * 4);
+    paintLineSegment(a, zero, styleOf({ accumulate: true }), 0, 0, 7, 7);
+    paintLineSegment(b, zero, styleOf({ accumulate: false }), 0, 0, 7, 7);
+    expect(Array.from(a.buffer)).toEqual(Array.from(b.buffer));
+    // Diagonal endpoints are painted.
+    expect(a.buffer[3]).toBe(255);
+    expect(a.buffer[(7 * 8 + 7) * 4 + 3]).toBe(255);
+  });
+
+  it("paints cubic curves through both accumulate paths", () => {
+    const p0 = { x: 0, y: 4 };
+    const c1 = { x: 2, y: 0 };
+    const c2 = { x: 6, y: 8 };
+    const p3 = { x: 7, y: 4 };
+    const a = makeTex(8, 8);
+    const b = makeTex(8, 8);
+    const zero = new Uint8ClampedArray(8 * 8 * 4);
+    paintCurveStroke(a, zero, styleOf({ accumulate: true, width: 1 }), p0, c1, c2, p3);
+    paintCurveStroke(b, zero, styleOf({ accumulate: false, width: 1 }), p0, c1, c2, p3);
+    expect(Array.from(a.buffer)).toEqual(Array.from(b.buffer));
+    expect(alphaPlane(a).filter((v) => v === 255).length).toBeGreaterThan(4);
+  });
+
+  it("keeps pixel-perfect curves one pixel thin on sharp turns", () => {
+    const p0 = { x: 1, y: 1 };
+    const c1 = { x: 6, y: 1 };
+    const c2 = { x: 6, y: 1 };
+    const p3 = { x: 6, y: 6 };
+    const tex = makeTex(8, 8);
+    paintCurveStroke(
+      tex,
+      new Uint8ClampedArray(8 * 8 * 4),
+      styleOf({ accumulate: true, width: 1, pixelPerfect: true }),
+      p0, c1, c2, p3,
+    );
+    const painted = alphaPlane(tex).filter((v) => v === 255).length;
+    expect(painted).toBeGreaterThan(0);
+    const wide = makeTex(8, 8);
+    paintCurveStroke(
+      wide,
+      new Uint8ClampedArray(8 * 8 * 4),
+      styleOf({ accumulate: true, width: 3, pixelPerfect: false }),
+      p0, c1, c2, p3,
+    );
+    expect(alphaPlane(wide).filter((v) => v === 255).length).toBeGreaterThanOrEqual(painted);
+  });
+
+  it("fades linear gradients to transparent and dithers when enabled", () => {
+    const tex = makeTex(4, 1);
+    paintGradient(tex, styleOf(), 0, 0, 4, 0);
+    const alphas = alphaPlane(tex);
+    expect(alphas[0]).toBe(255);
+    expect(alphas[3]).toBeLessThan(alphas[0] as number);
+    expect(alphas[3]).toBeGreaterThan(0);
+    const dithered = makeTex(16, 16);
+    paintGradient(dithered, styleOf({ dither: true }), 0, 8, 16, 8);
+    const mid = alphaPlane(dithered).slice(8 * 16, 9 * 16);
+    // Ordered dither drops a Bayer subset of pixels entirely while the kept
+    // ones still carry the fade alpha.
+    expect(mid.filter((a) => a === 0).length).toBeGreaterThan(0);
+    expect(mid.filter((a) => a > 0).length).toBeGreaterThan(0);
+    // Without dither the same row is a smooth ramp with no holes.
+    const smooth = makeTex(16, 16);
+    paintGradient(smooth, styleOf(), 0, 8, 16, 8);
+    const smoothMid = alphaPlane(smooth).slice(8 * 16, 9 * 16);
+    expect(smoothMid.filter((a) => a === 0).length).toBe(0);
+    expect(smoothMid[0]).toBe(255);
+  });
+
+  it("paints radial gradients brightest at the center", () => {
+    const tex = makeTex(9, 9);
+    paintGradient(tex, styleOf({ radial: true }), 4, 4, 8, 4);
+    expect(tex.buffer[(4 * 9 + 4) * 4 + 3]).toBe(255);
+    expect(tex.buffer[(4 * 9 + 8) * 4 + 3]).toBe(0);
+    expect(tex.buffer[(0 * 9 + 0) * 4 + 3]).toBe(0);
+  });
+
+  it("honors locked channels", () => {
+    const tex = makeTex(4, 4);
+    paintRectFilled(tex, styleOf({ filled: true, locked: { r: true, g: false, b: false, a: false } }), 0, 0, 3, 3);
+    expect(tex.buffer[0]).toBe(0);
+    expect(tex.buffer[1]).toBe(0);
+    expect(tex.buffer[2]).toBe(0);
+    expect(tex.buffer[3]).toBe(255);
+  });
+
+  it("wraps paint around texture edges only when enabled", () => {
+    const wrapped = makeTex(8, 8);
+    paintLineSegment(wrapped, new Uint8ClampedArray(8 * 8 * 4), styleOf({ wrap: "both" }), 6, 4, 10, 4);
+    expect(wrapped.buffer[(4 * 8 + 0) * 4 + 3]).toBe(255);
+    const clipped = makeTex(8, 8);
+    paintLineSegment(clipped, new Uint8ClampedArray(8 * 8 * 4), styleOf({ wrap: "off" }), 6, 4, 10, 4);
+    expect(clipped.buffer[(4 * 8 + 0) * 4 + 3]).toBe(0);
   });
 });
