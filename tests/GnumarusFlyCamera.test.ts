@@ -9,6 +9,7 @@ import {
   flyOrbitPose,
   flyPoseFromDirection,
   flyRight,
+  parseFlyCamPose,
   type GnumarusFlyPose,
 } from "../src/canvas/GnumarusFlyCamera";
 
@@ -77,5 +78,36 @@ describe("GnumarusFlyCamera", () => {
     expect(back.x).toBeCloseTo(start.x, 9);
     expect(back.y).toBeCloseTo(start.y, 9);
     expect(back.z).toBeCloseTo(start.z, 9);
+  });
+});
+
+describe("parseFlyCamPose", () => {
+  it("accepts complete poses and clamps the pitch", () => {
+    expect(parseFlyCamPose({ yawDeg: 12.5, pitchDeg: 200, x: 1, y: 2, z: 3 })).toEqual({
+      yawDeg: 12.5,
+      pitchDeg: 89,
+      x: 1,
+      y: 2,
+      z: 3,
+    });
+    expect(parseFlyCamPose({ yawDeg: -45, pitchDeg: -120, x: 0, y: 0, z: 3.43 })).toEqual({
+      yawDeg: -45,
+      pitchDeg: -89,
+      x: 0,
+      y: 0,
+      z: 3.43,
+    });
+  });
+
+  it("rejects missing, non-object, and non-finite poses", () => {
+    expect(parseFlyCamPose(undefined)).toBeNull();
+    expect(parseFlyCamPose(null)).toBeNull();
+    expect(parseFlyCamPose([])).toBeNull();
+    expect(parseFlyCamPose("pose")).toBeNull();
+    expect(parseFlyCamPose({})).toBeNull();
+    expect(parseFlyCamPose({ yawDeg: 0, pitchDeg: 0, x: 0, y: 0 })).toBeNull();
+    expect(parseFlyCamPose({ yawDeg: "a", pitchDeg: 0, x: 0, y: 0, z: 0 })).toBeNull();
+    expect(parseFlyCamPose({ yawDeg: 0, pitchDeg: Number.NaN, x: 0, y: 0, z: 0 })).toBeNull();
+    expect(parseFlyCamPose({ yawDeg: 0, pitchDeg: 0, x: Number.POSITIVE_INFINITY, y: 0, z: 0 })).toBeNull();
   });
 });

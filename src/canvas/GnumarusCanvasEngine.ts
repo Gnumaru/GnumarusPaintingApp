@@ -207,6 +207,7 @@ import {
   flyOrbitPose,
   flyPoseFromDirection,
   flyRight,
+  parseFlyCamPose,
   type GnumarusFlyPose,
 } from "./GnumarusFlyCamera";
 import {
@@ -432,6 +433,8 @@ interface GnumarusCellContent {
   model3dId: string | null;
   /** Tilemap shown instead of a texture, text, vector or 3D model; mutually exclusive with all. */
   tilemapId: string | null;
+  /** Saved fly-camera pose for editing this content; null when never flown. */
+  flyCam: GnumarusFlyPose | null;
   transform: GnumarusLayerTransform;
 }
 
@@ -483,7 +486,7 @@ export interface GnumarusAnimationProjectData {
   svgs?: Array<{ id: string; name: string; svg: string }>;
   tilemaps?: Array<{ id: string; name: string; tilesetId: string; tileWidth: number; tileHeight: number; tiles: GnumarusTilePlacement[] }>;
   models3d?: Array<{ id: string; name: string; ext: string; bytes: Uint8Array; view?: GnumarusModel3dView }>;
-  contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null; svgId?: string | null; model3dId?: string | null; tilemapId?: string | null; transform: GnumarusLayerTransform }>;
+  contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null; svgId?: string | null; model3dId?: string | null; tilemapId?: string | null; flyCam?: GnumarusFlyPose | null; transform: GnumarusLayerTransform }>;
   cells: Array<{ layer: string; frame: number; content: string }>;
   frames: number;
   currentFrame: number;
@@ -1564,6 +1567,7 @@ export class GnumarusCanvasEngine {
       svgId: null,
       tilemapId: null,
       model3dId: null,
+      flyCam: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(animationCellKey("layer0", 0), "content1");
@@ -2428,6 +2432,7 @@ export class GnumarusCanvasEngine {
       svgId: null,
       tilemapId: null,
       model3dId: null,
+      flyCam: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(animationCellKey(layerId, frame), contentId);
@@ -2457,6 +2462,7 @@ export class GnumarusCanvasEngine {
       svgId: null,
       tilemapId: null,
       model3dId: null,
+      flyCam: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(animationCellKey(layerId, frame), contentId);
@@ -2637,6 +2643,7 @@ export class GnumarusCanvasEngine {
       svgId: null,
       tilemapId: null,
       model3dId: null,
+      flyCam: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(animationCellKey(layerId, frame), contentId);
@@ -2669,6 +2676,7 @@ export class GnumarusCanvasEngine {
       svgId: null,
       tilemapId: null,
       model3dId: null,
+      flyCam: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(animationCellKey(layerId, frame), contentId);
@@ -2808,6 +2816,7 @@ export class GnumarusCanvasEngine {
       svgId: null,
       tilemapId: null,
       model3dId: null,
+      flyCam: null,
       transform: { ...content.transform },
     });
     this.cells.set(key, bakedId);
@@ -2992,6 +3001,7 @@ export class GnumarusCanvasEngine {
       textId: null,
       svgId,
       model3dId: null,
+      flyCam: null,
       tilemapId: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
@@ -3195,6 +3205,7 @@ export class GnumarusCanvasEngine {
       svgId: null,
       tilemapId: null,
       model3dId: modelId,
+      flyCam: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(key, createdId);
@@ -3451,20 +3462,26 @@ export class GnumarusCanvasEngine {
       return false;
     }
     if (this.flycam === null || this.flycam.modelId !== modelId) {
-      const view = this.effectiveModelView(modelId) ?? { ...GNUMARUS_MODEL3D_DEFAULT_VIEW };
-      const direction = modelViewDirection(view.azimuth, view.elevation);
-      const pose = flyPoseFromDirection(
-        [direction.x, direction.y, direction.z],
-        view.distance,
-        [view.panX, view.panY, 0],
-      );
-      this.flycam = { modelId, ...pose };
+      const contentId = layer === null ? undefined : this.cells.get(animationCellKey(layer.id, this.currentFrame));
+      const saved = contentId === undefined ? undefined : this.contents.get(contentId)?.flyCam;
+      if (saved !== undefined && saved !== null) {
+        this.flycam = { modelId, yawDeg: saved.yawDeg, pitchDeg: saved.pitchDeg, x: saved.x, y: saved.y, z: saved.z };
+      } else {
+        const view = this.effectiveModelView(modelId) ?? { ...GNUMARUS_MODEL3D_DEFAULT_VIEW };
+        const direction = modelViewDirection(view.azimuth, view.elevation);
+        const pose = flyPoseFromDirection(
+          [direction.x, direction.y, direction.z],
+          view.distance,
+          [view.panX, view.panY, 0],
+        );
+        this.flycam = { modelId, ...pose };
+      }
       this.ensureModelRaster(modelId);
     }
     return true;
   }
 
-  /** Leave fly-camera mode, discarding the transient pose. */
+  /** Leave fly-camera mode. The pose stays saved on the cell's content. */
   exitFlycam(): void {
     this.flycam = null;
     this.flyLookDrag = null;
@@ -3493,6 +3510,23 @@ export class GnumarusCanvasEngine {
     return `:fly:${rounded(fly.yawDeg)},${rounded(fly.pitchDeg)},${rounded(fly.x)},${rounded(fly.y)},${rounded(fly.z)}`;
   }
 
+  /** Persist the live fly pose onto the active cell's content. */
+  private persistFlyPose(): void {
+    const fly = this.flycam;
+    if (fly === null) {
+      return;
+    }
+    const layer = this.activeLayer();
+    const contentId =
+      layer === null ? undefined : this.cells.get(animationCellKey(layer.id, this.currentFrame));
+    const content = contentId === undefined ? undefined : this.contents.get(contentId);
+    if (content === undefined) {
+      return;
+    }
+    content.flyCam = { yawDeg: fly.yawDeg, pitchDeg: fly.pitchDeg, x: fly.x, y: fly.y, z: fly.z };
+    this.onPixelsChanged?.();
+  }
+
   /** Fly the camera: forward/right/up steps in camera space. */
   flyMove(forwardAmount: number, rightAmount: number, upAmount: number): boolean {
     const fly = this.flycam;
@@ -3507,6 +3541,7 @@ export class GnumarusCanvasEngine {
     fly.x += (forward[0] * forwardAmount + right[0] * rightAmount) * FLY_MOVE_STEP;
     fly.y += (forward[1] * forwardAmount + upAmount) * FLY_MOVE_STEP;
     fly.z += (forward[2] * forwardAmount + right[2] * rightAmount) * FLY_MOVE_STEP;
+    this.persistFlyPose();
     this.ensureModelRaster(fly.modelId);
     this.updatePreviews();
     this.onLayersChanged?.();
@@ -3527,6 +3562,7 @@ export class GnumarusCanvasEngine {
       -FLY_MAX_PITCH_DEG,
       Math.min(FLY_MAX_PITCH_DEG, fly.pitchDeg - dyPixels * FLY_LOOK_DEG_PER_PX),
     );
+    this.persistFlyPose();
     this.ensureModelRaster(fly.modelId);
     this.updatePreviews();
     this.onLayersChanged?.();
@@ -3548,6 +3584,7 @@ export class GnumarusCanvasEngine {
     fly.x = moved.x;
     fly.y = moved.y;
     fly.z = moved.z;
+    this.persistFlyPose();
     this.ensureModelRaster(fly.modelId);
     this.updatePreviews();
     this.onLayersChanged?.();
@@ -3566,6 +3603,7 @@ export class GnumarusCanvasEngine {
     fly.x = reset.x;
     fly.y = reset.y;
     fly.z = reset.z;
+    this.persistFlyPose();
     this.ensureModelRaster(fly.modelId);
     this.updatePreviews();
     this.onLayersChanged?.();
@@ -3907,6 +3945,7 @@ export class GnumarusCanvasEngine {
       textId: null,
       svgId: null,
       model3dId: null,
+      flyCam: null,
       tilemapId,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
@@ -4403,6 +4442,7 @@ export class GnumarusCanvasEngine {
       svgId: null,
       tilemapId: null,
       model3dId: null,
+      flyCam: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     };
     this.contents.set(createdId, created);
@@ -4427,6 +4467,7 @@ export class GnumarusCanvasEngine {
         svgId: null,
         tilemapId: null,
         model3dId: null,
+        flyCam: null,
         transform: { ...IDENTITY_LAYER_TRANSFORM },
       };
       this.contents.set(createdId, content);
@@ -4512,6 +4553,7 @@ export class GnumarusCanvasEngine {
         svgId: content.svgId,
         model3dId: content.model3dId,
         tilemapId: content.tilemapId,
+        flyCam: content.flyCam === null ? null : { ...content.flyCam },
         transform: { ...content.transform },
       })),
       cells: [...this.cells.entries()].map(([key, content]) => {
@@ -5790,6 +5832,7 @@ export class GnumarusCanvasEngine {
         svgId: null,
         tilemapId: null,
         model3dId: null,
+        flyCam: null,
         transform: {
           ...input.transform,
           rotation: normalizeRotation(input.transform.rotation),
@@ -5839,7 +5882,7 @@ export class GnumarusCanvasEngine {
       svgs?: Array<{ id: string; name: string; svg: string }>;
       models3d?: Array<{ id: string; name: string; ext: string; bytes: Uint8Array; view?: GnumarusModel3dView }>;
       tilemaps?: Array<{ id: string; name: string; tilesetId: string; tileWidth: number; tileHeight: number; tiles: GnumarusTilePlacement[] }>;
-      contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null; svgId?: string | null; model3dId?: string | null; tilemapId?: string | null; transform: GnumarusLayerTransform }>;
+      contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null; svgId?: string | null; model3dId?: string | null; tilemapId?: string | null; flyCam?: unknown; transform: GnumarusLayerTransform }>;
       cells: Array<{ layer: string; frame: number; content: string }>;
       frames: number;
       currentFrame: number;
@@ -6042,6 +6085,7 @@ export class GnumarusCanvasEngine {
         svgId: content.svgId ?? null,
         model3dId: content.model3dId ?? null,
         tilemapId: content.tilemapId ?? null,
+        flyCam: parseFlyCamPose(content.flyCam),
         transform: { ...content.transform, rotation: normalizeRotation(content.transform.rotation) },
       });
     }
@@ -6255,6 +6299,7 @@ export class GnumarusCanvasEngine {
       svgId: null,
       tilemapId: null,
       model3dId: null,
+      flyCam: null,
       transform: { ...IDENTITY_LAYER_TRANSFORM },
     });
     this.cells.set(animationCellKey("layer0", 0), "content1");

@@ -11383,6 +11383,7 @@ export class GnumarusShell extends LitElement {
           svgId: content.svgId,
           model3dId: content.model3dId,
           tilemapId: content.tilemapId,
+          flyCam: content.flyCam ?? null,
           transform: { ...content.transform },
         })),
         cells: project.animation.cells.map((cell) => ({ ...cell })),
@@ -11971,6 +11972,7 @@ export class GnumarusShell extends LitElement {
         svgId: content.svgId ?? null,
         model3dId: content.model3dId ?? null,
         tilemapId: content.tilemapId ?? null,
+        flyCam: content.flyCam === null || content.flyCam === undefined ? null : { ...content.flyCam },
         transform: { ...content.transform },
       }));
       const textsMeta: GnumarusTextMeta[] = [];

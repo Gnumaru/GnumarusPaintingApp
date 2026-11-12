@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { unzipSync, zipSync } from "fflate";
+import type { GnumarusFlyPose } from "../src/canvas/GnumarusFlyCamera";
 import {
   cellFilePath,
   collectProjectFileReferences,
@@ -49,6 +50,7 @@ describe("GnumarusProjectFormat", () => {
         svgId: null,
         model3dId: null,
         tilemapId: null,
+        flyCam: null,
         transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
       },
     ]);
@@ -110,6 +112,7 @@ describe("GnumarusProjectFormat", () => {
       svgId: null,
       model3dId: null,
       tilemapId: null,
+      flyCam: null,
       transform: { x: 1, y: 2, rotation: 0.5, flipX: true, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
     });
     expect(parsed.layers[0]).toMatchObject({ opacity: 0.5, lockedChannels: { r: true, g: false, b: false, a: false } });
@@ -127,6 +130,7 @@ describe("GnumarusProjectFormat", () => {
       svgId: null,
       model3dId: null,
       tilemapId: null,
+      flyCam: null,
       transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
     });
     project.animation.cells.push(
@@ -425,6 +429,7 @@ describe("GnumarusProjectFormat", () => {
       svgId: null,
       model3dId: null,
       tilemapId: null,
+      flyCam: null,
       transform: { x: 5, y: 5, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
     });
     project.animation.cells.push({ layer: "layer0", frame: 1, content: "content2" });
@@ -590,6 +595,7 @@ describe("GnumarusProjectFormat", () => {
       svgId: "vec1",
       model3dId: null,
       tilemapId: null,
+      flyCam: null,
       transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
     });
     const parsed = parseProject(serializeProject(project));
@@ -645,6 +651,7 @@ describe("GnumarusProjectFormat", () => {
       svgId: null,
       model3dId: "model1",
       tilemapId: null,
+      flyCam: null,
       transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
     });
     const parsed = parseProject(serializeProject(project));
@@ -658,6 +665,24 @@ describe("GnumarusProjectFormat", () => {
     ]);
     expect(parsed.animation.contents[1]).toMatchObject({ model3dId: "model1" });
     expect(collectProjectFileReferences(parsed)).toContain("3dmodels/model1.glb");
+    const fly = createDefaultProject(8, 8);
+    fly.animation.models3d.push({ id: "model1", name: "M1", file: "3dmodels/model1.glb" });
+    fly.animation.contents[0] = {
+      ...fly.animation.contents[0],
+      textureId: null,
+      model3dId: "model1",
+      flyCam: { yawDeg: 12.5, pitchDeg: 200, x: 1, y: 2, z: 3 },
+    };
+    expect(parseProject(serializeProject(fly)).animation.contents[0]).toMatchObject({
+      model3dId: "model1",
+      flyCam: { yawDeg: 12.5, pitchDeg: 89, x: 1, y: 2, z: 3 },
+    });
+    const flyGarbage = createDefaultProject(8, 8);
+    flyGarbage.animation.contents[0] = {
+      ...flyGarbage.animation.contents[0],
+      flyCam: { yawDeg: 1 } as unknown as GnumarusFlyPose,
+    };
+    expect(parseProject(serializeProject(flyGarbage)).animation.contents[0]?.flyCam).toBeNull();
     const badExt = createDefaultProject(8, 8);
     badExt.animation.models3d.push({ id: "m", name: "M", file: "3dmodels/m.txt" });
     expect(() => parseProject(serializeProject(badExt))).toThrow(GnumarusProjectError);
@@ -693,6 +718,7 @@ describe("GnumarusProjectFormat", () => {
       svgId: null,
       model3dId: null,
       tilemapId: "tm1",
+      flyCam: null,
       transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
     });
     const parsed = parseProject(serializeProject(project));

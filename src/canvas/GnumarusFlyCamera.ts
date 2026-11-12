@@ -30,6 +30,36 @@ export interface GnumarusFlyPose {
   z: number;
 }
 
+/** Fly-camera pose validated from project data, or null when absent/invalid. */
+export function parseFlyCamPose(value: unknown): GnumarusFlyPose | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const { yawDeg, pitchDeg, x, y, z } = record;
+  if (
+    typeof yawDeg !== "number" ||
+    !Number.isFinite(yawDeg) ||
+    typeof pitchDeg !== "number" ||
+    !Number.isFinite(pitchDeg) ||
+    typeof x !== "number" ||
+    !Number.isFinite(x) ||
+    typeof y !== "number" ||
+    !Number.isFinite(y) ||
+    typeof z !== "number" ||
+    !Number.isFinite(z)
+  ) {
+    return null;
+  }
+  return {
+    yawDeg,
+    pitchDeg: Math.max(-FLY_MAX_PITCH_DEG, Math.min(FLY_MAX_PITCH_DEG, pitchDeg)),
+    x,
+    y,
+    z,
+  };
+}
+
 function toRadians(degrees: number): number {
   return (degrees * Math.PI) / 180;
 }

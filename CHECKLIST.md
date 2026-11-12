@@ -359,5 +359,6 @@
 - [x] Inversão dos dois eixos da órbita + e2e de direção
 - [x] Setting `modelLighting` (unlit/lit) + engine/setter/cache/i18n + unit + e2e (só novos); build + deploy + docs
 - [x] Inversão da direção do zoom com wheel (up = in, down = out) + e2e; build + deploy
+- [x] Flycam pose salva junto com a célula (parse/validação, write-through + dirty, resume no re-enter, save/reopen) + unit + 2 e2e novos verdes; build + deploy + docs
 - [x] Ferramenta flycam na gaveta do modeltransform (toast sem célula 3D, supressão de atalhos, WASDQEZCR + look-drag, pitch ±89°; transiente, sem pointer lock) + engine + i18n en+pt-BR
 - [x] Unit (GnumarusFlyCamera, 5 testes) + 3 novos e2e @recent verdes + 5 modeltransform ajustados verdes; build + deploy + docs

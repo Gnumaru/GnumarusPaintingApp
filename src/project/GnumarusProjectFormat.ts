@@ -7,6 +7,7 @@ import {
   type GnumarusTilePlacement,
 } from "../tilemap/GnumarusTilemap";
 import type { GnumarusTextDocument } from "../text/GnumarusText";
+import { parseFlyCamPose, type GnumarusFlyPose } from "../canvas/GnumarusFlyCamera";
 import type { GnumarusLayerTransform } from "../canvas/GnumarusViewportMath";
 import { IDENTITY_LAYER_TRANSFORM } from "../canvas/GnumarusViewportMath";
 import type { GnumarusAnimationLoop } from "../animation/GnumarusNamedAnimations";
@@ -84,6 +85,8 @@ export interface GnumarusContentMeta {
   model3dId: string | null;
   /** Tilemap shown instead of a texture, text, vector or 3D model; mutually exclusive with all. */
   tilemapId: string | null;
+  /** Saved fly-camera pose for editing this content; null when never flown. */
+  flyCam: GnumarusFlyPose | null;
   transform: GnumarusLayerTransform;
 }
 
@@ -387,6 +390,7 @@ export function createDefaultProject(width: number, height: number): GnumarusPro
           svgId: null,
           model3dId: null,
           tilemapId: null,
+          flyCam: null,
           transform: { ...IDENTITY_LAYER_TRANSFORM },
         },
       ],
@@ -612,7 +616,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
       throw new GnumarusProjectError("project.json has duplicate content ids");
     }
     contentIds.add(id);
-    const { name, textureId, textId, svgId, model3dId, tilemapId, transform } = entry;
+    const { name, textureId, textId, svgId, model3dId, tilemapId, flyCam, transform } = entry;
     if (textureId !== null && textureId !== undefined && typeof textureId !== "string") {
       throw new GnumarusProjectError("project.json has a content with an invalid texture reference");
     }
@@ -660,6 +664,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
       svgId: resolvedSvg,
       model3dId: resolvedModel3d,
       tilemapId: resolvedTilemap,
+      flyCam: parseFlyCamPose(flyCam),
       transform: parseLayerTransform(transform),
     });
   }
@@ -1024,6 +1029,7 @@ function migrateLegacyLayersToAnimation(
       svgId: null,
       model3dId: null,
       tilemapId: null,
+      flyCam: null,
       transform: layer.transform !== undefined ? { ...layer.transform } : { ...IDENTITY_LAYER_TRANSFORM },
     });
     cells.push({ layer: layer.id, frame: 0, content: contentId });

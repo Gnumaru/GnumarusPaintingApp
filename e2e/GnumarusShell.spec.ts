@@ -11373,3 +11373,47 @@ test("fly camera suppresses editor shortcuts and exits with Escape @recent", asy
   await expect(page.locator("gnumarus-shell [data-testid='flycam-readout']")).toHaveCount(0);
   await expect(page.locator("gnumarus-shell")).toContainText("Brush size");
 });
+
+test("fly camera resumes the saved pose when reopened @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubModelPicker(page, "tri.stl", SIMPLE_STL);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("imported");
+  await selectTool(page, "Fly camera");
+  await page.keyboard.press("w");
+  const before = await flyPoseOf(page);
+  expect(before).not.toBeNull();
+  expect(before?.x ?? 0).toBeLessThan(1.95);
+  await page.keyboard.press("Escape");
+  await expect(page.locator("gnumarus-shell [data-testid='flycam-readout']")).toHaveCount(0);
+  await selectTool(page, "Fly camera");
+  const resumed = await flyPoseOf(page);
+  expect(resumed).toEqual(before);
+});
+
+test("fly camera pose survives save and reopen @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubModelPicker(page, "tri.stl", SIMPLE_STL);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("imported");
+  await selectTool(page, "Fly camera");
+  await page.keyboard.press("w");
+  const before = await flyPoseOf(page);
+  expect(before).not.toBeNull();
+  expect(before?.x ?? 0).toBeLessThan(1.95);
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  expect(await project.writtenProject()).toContain('"flyCam"');
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject");
+  await selectTool(page, "Fly camera");
+  const reopened = await flyPoseOf(page);
+  expect(reopened).toEqual(before);
+});

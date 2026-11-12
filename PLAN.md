@@ -611,3 +611,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Controles: WASD voa frente/trás/esquerda/direita, Q/E desce/sobe, Z/C orbita esquerda/direita um ponto imaginário 5 unidades à frente, R redefine, arrastar com o botão esquerdo olha ao redor, Esc sai (volta à ferramenta anterior). Pitch limitado a ±89°, yaw livre. Modo transiente: sem persistência, sem histórico.
 - Engine: pose flycam (yaw/pitch/pos) derivada da vista efetiva ao entrar; câmera explícita no decode (bypass da órbita); chave de cache inclui a pose; `enterFlycam`/`flyMove`/`flyLook`/`flyOrbit`/`flyResetView`/`getFlycam`/`exitFlycam` (implícito no setTool).
 - Testes: unidade pura (`GnumarusFlyCamera`, 5 testes) + 3 novos e2e @recent verdes (toast sem célula 3D, mover/olhar/orbitar/resetar, supressão de atalhos + saída com Esc); 5 testes do modeltransform ajustados para a gaveta e verdes; full suite não rodada, a pedido.
+
+## 110. Flycam pose salva junto com a célula (implemented)
+- `parseFlyCamPose` puro + `flyCam` no `GnumarusContentMeta`/`GnumarusCellContent` (validado no open, `null` quando ausente/inválido); save escreve de volta → sobrevive a save/reopen.
+- Engine escreve a pose no conteúdo da célula ativa a cada mutação (move/look/orbit/reset) + `onPixelsChanged` (dirty); `enterFlycam` retoma a pose salva ou deriva da vista de órbita atual; sair continua sem salvar nada extra.
+- 2 novos e2e @recent verdes (sair+voltar mantém a pose; save/reopen mantém a pose); full suite não rodada.
