@@ -1,5 +1,5 @@
 export interface GnumarusExpandSettings {
-  /** Cell texture expand step in pixels per Ctrl+Shift+Arrow press. */
+  /** Cell texture expand step in pixels per Ctrl+Alt+Arrow press. */
   step: number;
 }
 

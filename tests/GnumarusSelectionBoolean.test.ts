@@ -17,6 +17,10 @@ import {
   polygonSelectMask,
   selectionMaskBoundaryPath,
   selectionMaskBox,
+  toggleSelectedFrame,
+  toggleSelectedId,
+  unionSelectedFrameRange,
+  unionSelectedIdRange,
   unionSelectionBox,
 } from "../src/canvas/GnumarusSelectionBoolean";
 
@@ -216,5 +220,34 @@ describe("GnumarusFeatherMask", () => {
     const same = featherSelectionMask(mask, 2, 2, 0);
     expect(Array.from(same.mask)).toEqual([255, 0, 0, 255]);
     expect({ width: same.width, height: same.height }).toEqual({ width: 2, height: 2 });
+  });
+});
+
+describe("GnumarusMultiSelection", () => {
+  it("toggles frame membership keeping ascending order", () => {
+    expect(toggleSelectedFrame([0, 1], 9, 10)).toEqual([0, 1, 9]);
+    expect(toggleSelectedFrame([0, 1, 9], 9, 10)).toEqual([0, 1]);
+    expect(toggleSelectedFrame([0, 1], 10, 10)).toEqual([0, 1]);
+    expect(toggleSelectedFrame([1, 0], 0, 5)).toEqual([1]);
+  });
+
+  it("unions frame intervals clamped to the project", () => {
+    expect(unionSelectedFrameRange([0], 9, 7, 10)).toEqual([0, 7, 8, 9]);
+    expect(unionSelectedFrameRange([0, 1], 1, 2, 10)).toEqual([0, 1, 2]);
+    expect(unionSelectedFrameRange([], 0, 99, 4)).toEqual([0, 1, 2, 3]);
+  });
+
+  it("toggles ids keeping stack order", () => {
+    const order = ["a", "b", "c"];
+    expect(toggleSelectedId(["a"], "c", order)).toEqual(["a", "c"]);
+    expect(toggleSelectedId(["a", "c"], "c", order)).toEqual(["a"]);
+    expect(toggleSelectedId(["a"], "zzz", order)).toEqual(["a"]);
+  });
+
+  it("unions id intervals or returns null for unknown endpoints", () => {
+    const order = ["a", "b", "c", "d"];
+    expect(unionSelectedIdRange(["a"], "c", "b", order)).toEqual(["a", "b", "c"]);
+    expect(unionSelectedIdRange([], null, "b", order)).toBeNull();
+    expect(unionSelectedIdRange(["a"], "zzz", "b", order)).toBeNull();
   });
 });

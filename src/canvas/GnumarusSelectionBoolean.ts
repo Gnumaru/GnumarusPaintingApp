@@ -577,3 +577,90 @@ export function clampColorThreshold(value: number): number {
   }
   return Math.min(100, Math.max(0, Math.floor(value)));
 }
+
+/**
+ * Toggle one frame index in a selection, keeping ascending order.
+ * Out-of-range indices are ignored (callers pass clicked headers).
+ */
+export function toggleSelectedFrame(selected: readonly number[], frame: number, count: number): number[] {
+  if (!Number.isInteger(frame) || frame < 0 || frame >= count) {
+    return [...selected].sort((a, b) => a - b);
+  }
+  const next = new Set(selected);
+  if (next.has(frame)) {
+    next.delete(frame);
+  } else {
+    next.add(frame);
+  }
+  return [...next].sort((a, b) => a - b);
+}
+
+/**
+ * Union the clamped `[a..b]` frame interval into a selection, ascending.
+ * Used by Shift+click: the existing selection is kept, the new interval
+ * is added.
+ */
+export function unionSelectedFrameRange(
+  selected: readonly number[],
+  a: number,
+  b: number,
+  count: number,
+): number[] {
+  const next = new Set(selected);
+  if (count > 0) {
+    const low = Math.min(Math.max(0, Math.min(a, b)), count - 1);
+    const high = Math.min(Math.max(0, Math.max(a, b)), count - 1);
+    for (let at = low; at <= high; at += 1) {
+      next.add(at);
+    }
+  }
+  return [...next].sort((x, y) => x - y);
+}
+
+/**
+ * Toggle one id in a selection, keeping stack order (`order`).
+ * Unknown ids are ignored.
+ */
+export function toggleSelectedId(selected: readonly string[], id: string, order: readonly string[]): string[] {
+  if (!order.includes(id)) {
+    return order.filter((entry) => selected.includes(entry));
+  }
+  const next = new Set(selected);
+  if (next.has(id)) {
+    next.delete(id);
+  } else {
+    next.add(id);
+  }
+  return order.filter((entry) => next.has(entry));
+}
+
+/**
+ * Union the stack-order `[anchorId..clickedId]` interval into a selection.
+ * Returns null when either endpoint is unknown (caller falls back to a
+ * plain single selection).
+ */
+export function unionSelectedIdRange(
+  selected: readonly string[],
+  anchorId: string | null,
+  clickedId: string,
+  order: readonly string[],
+): string[] | null {
+  if (anchorId === null) {
+    return null;
+  }
+  const anchorIndex = order.indexOf(anchorId);
+  const clickedIndex = order.indexOf(clickedId);
+  if (anchorIndex < 0 || clickedIndex < 0) {
+    return null;
+  }
+  const next = new Set(selected);
+  const low = Math.min(anchorIndex, clickedIndex);
+  const high = Math.max(anchorIndex, clickedIndex);
+  for (let at = low; at <= high; at += 1) {
+    const entry = order[at];
+    if (entry !== undefined) {
+      next.add(entry);
+    }
+  }
+  return order.filter((entry) => next.has(entry));
+}

@@ -6,6 +6,12 @@ import {
   type GnumarusLayerInfo,
 } from "../canvas/GnumarusCanvasEngine";
 import { sanitizeTextHtml } from "../text/GnumarusTextSanitize";
+import {
+  toggleSelectedFrame,
+  toggleSelectedId,
+  unionSelectedFrameRange,
+  unionSelectedIdRange,
+} from "../canvas/GnumarusSelectionBoolean";
 import { gunzipSync } from "fflate";
 import {
   detectUnsupportedSvgFeatures,
@@ -390,10 +396,12 @@ function gnumarusShortcuts(): GnumarusShortcutSection[] {
         { keys: "Shift+ArrowDown", action: tr("sc.moveLayerDown") },
         { keys: "Insert", action: tr("sc.insertLayer") },
         { keys: "Delete", action: tr("sc.deleteCell") },
-        { keys: "Ctrl+Shift+ArrowUp", action: tr("sc.expandUp") },
-        { keys: "Ctrl+Shift+ArrowDown", action: tr("sc.expandDown") },
-        { keys: "Ctrl+Shift+ArrowLeft", action: tr("sc.expandLeft") },
-        { keys: "Ctrl+Shift+ArrowRight", action: tr("sc.expandRight") },
+        { keys: "Ctrl+Shift+ArrowUp (Cmd+Shift+ArrowUp on macOS)", action: tr("sc.newLayerAbove") },
+        { keys: "Ctrl+Shift+ArrowDown (Cmd+Shift+ArrowDown on macOS)", action: tr("sc.newLayerBelow") },
+        { keys: "Ctrl+Alt+ArrowUp", action: tr("sc.expandUp") },
+        { keys: "Ctrl+Alt+ArrowDown", action: tr("sc.expandDown") },
+        { keys: "Ctrl+Alt+ArrowLeft", action: tr("sc.expandLeft") },
+        { keys: "Ctrl+Alt+ArrowRight", action: tr("sc.expandRight") },
       ],
     },
     {
@@ -403,6 +411,8 @@ function gnumarusShortcuts(): GnumarusShortcutSection[] {
         { keys: "ArrowRight", action: tr("sc.nextFrame") },
         { keys: "Shift+ArrowLeft", action: tr("sc.moveFrameLeft") },
         { keys: "Shift+ArrowRight", action: tr("sc.moveFrameRight") },
+        { keys: "Ctrl+Shift+ArrowLeft (Cmd+Shift+ArrowLeft on macOS)", action: tr("sc.newFrameLeft") },
+        { keys: "Ctrl+Shift+ArrowRight (Cmd+Shift+ArrowRight on macOS)", action: tr("sc.newFrameRight") },
       ],
     },
     {
@@ -763,6 +773,9 @@ export class GnumarusShell extends LitElement {
     .layer-row.active {
       background: #094771;
     }
+    .layer-row.selected {
+      box-shadow: inset 0 0 0 2px #ffd23f;
+    }
     .layer-top {
       display: flex;
       align-items: center;
@@ -974,6 +987,9 @@ export class GnumarusShell extends LitElement {
       white-space: nowrap;
       border-top: 1px solid #111;
       line-height: 24px;
+    }
+    .anim-layer-name.selected {
+      box-shadow: inset 0 0 0 2px #ffd23f;
     }
     .anim-cell {
       border-top: 1px solid #111;
@@ -1513,6 +1529,7 @@ export class GnumarusShell extends LitElement {
     activeLayerId: { type: String },
     renamingId: { type: String },
     contextMenuLayerId: { type: String },
+    contextMenuLayerIds: { type: Array },
     contextMenuX: { type: Number },
     contextMenuY: { type: Number },
     matrixMenu: { type: Object },
@@ -1581,6 +1598,7 @@ export class GnumarusShell extends LitElement {
     expandStep: { type: Number },
     renamingFrame: { type: Number },
     selectedFrames: { type: Array },
+    selectedLayers: { type: Array },
     deleteFramesTarget: { type: Array },
     brushSize: { type: Number },
     brushSizeMin: { type: Number },
@@ -1697,13 +1715,14 @@ export class GnumarusShell extends LitElement {
   declare frameText: string;
   declare renamingId: string | null;
   declare contextMenuLayerId: string | null;
+  /** Multi-layer targets for the shared layers context menu (null = single). */
+  declare contextMenuLayerIds: string[] | null;
   declare contextMenuX: number;
   declare contextMenuY: number;
   declare matrixMenu:
     | { kind: "cell"; layerId: string; frame: number; x: number; y: number }
     | { kind: "frame"; frame: number; x: number; y: number }
     | { kind: "frames"; frames: number[]; x: number; y: number }
-    | { kind: "layer"; layerId: string; x: number; y: number }
     | null;
   declare contentPickerTarget: { layerId: string; frame: number } | null;
   declare texturePickerContentId: string | null;
@@ -1776,9 +1795,11 @@ export class GnumarusShell extends LitElement {
   declare expandStep: number;
   declare renamingFrame: number | null;
   declare selectedFrames: number[];
+  declare selectedLayers: string[];
   declare deleteFramesTarget: number[] | null;
   /** Anchor frame for Shift+click range selection (not reactive by itself). */
   private frameAnchor: number | null = null;
+  private layerAnchor: string | null = null;
   declare brushSize: number;
   declare brushSizeMin: number;
   declare brushShape: GnumarusBrushShape;
@@ -1977,6 +1998,9 @@ export class GnumarusShell extends LitElement {
     this.expandStep = DEFAULT_EXPAND_SETTINGS.step;
     this.renamingFrame = null;
     this.selectedFrames = [];
+    this.selectedLayers = [];
+    this.layerAnchor = null;
+    this.contextMenuLayerIds = null;
     this.deleteFramesTarget = null;
     this.frameAnchor = null;
     this.brushSize = 1;
@@ -2313,9 +2337,9 @@ export class GnumarusShell extends LitElement {
             ${[...this.layers].reverse().map(
               (layer, displayIndex, displayLayers) => html`
                 <div
-                  class="layer-row ${layer.id === this.activeLayerId ? "active" : ""}"
+                  class="layer-row ${layer.id === this.activeLayerId ? "active" : ""} ${this.selectedLayerSet().has(layer.id) ? "selected" : ""}"
                   data-layer-id=${layer.id}
-                  @click=${(): void => this.onSelectLayer(layer.id)}
+                  @click=${(event: MouseEvent): void => this.onSelectLayerClick(layer.id, event.shiftKey, event.ctrlKey || event.metaKey)}
                   @contextmenu=${(event: MouseEvent): void => {
                     event.preventDefault();
                     this.openLayerMenu(layer.id, event.clientX, event.clientY);
@@ -2504,76 +2528,106 @@ export class GnumarusShell extends LitElement {
                 class="context-menu"
                 style="left: ${this.contextMenuX}px; top: ${this.contextMenuY}px;"
               >
-                <button
-                  ?disabled=${this.layers.length > 0 && this.layers[0]?.id === this.contextMenuLayerId}
-                  @click=${(): void => {
-                    if (this.contextMenuLayerId !== null) {
-                      this.onMergeDown(this.contextMenuLayerId);
-                    }
-                  }}
-                >
-                  ${tr("ctx.mergeDown")}
-                </button>
-                <button
-                  @click=${(): void => {
-                    if (this.contextMenuLayerId !== null) {
-                      this.onAddLayerAbove(this.contextMenuLayerId);
-                    }
-                  }}
-                >
-                  ${tr("ctx.addAbove")}
-                </button>
-                <button
-                  @click=${(): void => {
-                    if (this.contextMenuLayerId !== null) {
-                      this.onAddLayerBelow(this.contextMenuLayerId);
-                    }
-                  }}
-                >
-                  ${tr("ctx.addBelow")}
-                </button>
-                <button
-                  @click=${(): void => {
-                    if (this.contextMenuLayerId !== null) {
-                      this.onResetLayerTransform(this.contextMenuLayerId);
-                    }
-                  }}
-                >
-                  ${tr("ctx.resetTransform")}
-                </button>
-                <button
-                  ?disabled=${this.contextMenuLayerId === null ||
-                  this.engine?.getCellTextureId(this.contextMenuLayerId, this.engine.getCurrentFrame()) === null}
-                  @click=${(): void => {
-                    if (this.contextMenuLayerId !== null) {
-                      this.onOpenFitTextureFromLayer(this.contextMenuLayerId);
-                    }
-                  }}
-                >
-                  ${tr("ctx.fitTexture")}
-                </button>
-                <button
-                  ?disabled=${this.contextMenuLayerId === null ||
-                  this.engine?.getCellTextureId(this.contextMenuLayerId, this.engine.getCurrentFrame()) === null}
-                  @click=${(): void => {
-                    if (this.contextMenuLayerId !== null) {
-                      this.onCropCellToCanvasFromLayer(this.contextMenuLayerId);
-                    }
-                  }}
-                >
-                  ${tr("ctx.cropCanvas")}
-                </button>
-                <button
-                  ?disabled=${this.contextMenuLayerId === null ||
-                  this.engine?.getCellTextureId(this.contextMenuLayerId, this.engine.getCurrentFrame()) === null}
-                  @click=${(): void => {
-                    if (this.contextMenuLayerId !== null) {
-                      this.onResizeCellToCanvasFromLayer(this.contextMenuLayerId);
-                    }
-                  }}
-                >
-                  ${tr("ctx.resizeCanvas")}
-                </button>
+                ${this.contextMenuLayerIds !== null && this.contextMenuLayerIds.length > 1
+                  ? html`
+                      <button
+                        @click=${(): void => {
+                          if (this.contextMenuLayerIds !== null) {
+                            this.onDeleteLayers([...this.contextMenuLayerIds]);
+                          }
+                        }}
+                      >
+                        ${tr("ctx.deleteLayers", { count: this.contextMenuLayerIds.length })}
+                      </button>
+                    `
+                  : html`
+                      <button @click=${(): void => this.onRenameLayerFromMenu()}>
+                        ${tr("matrix.renameLayer")}
+                      </button>
+                      <button
+                        ?disabled=${this.layers.length <= 1}
+                        @click=${(): void => {
+                          if (this.contextMenuLayerId !== null) {
+                            this.onDeleteLayer(this.contextMenuLayerId);
+                          }
+                        }}
+                      >
+                        ${tr("ctx.deleteLayer")}
+                      </button>
+                      <button
+                        ?disabled=${this.layers.length > 0 && this.layers[0]?.id === this.contextMenuLayerId}
+                        @click=${(): void => {
+                          if (this.contextMenuLayerId !== null) {
+                            this.onMergeDown(this.contextMenuLayerId);
+                          }
+                        }}
+                      >
+                        ${tr("ctx.mergeDown")}
+                      </button>
+                      <button
+                        @click=${(): void => {
+                          if (this.contextMenuLayerId !== null) {
+                            this.onAddLayerAbove(this.contextMenuLayerId);
+                          }
+                        }}
+                      >
+                        ${tr("ctx.addAbove")}
+                      </button>
+                      <button
+                        @click=${(): void => {
+                          if (this.contextMenuLayerId !== null) {
+                            this.onAddLayerBelow(this.contextMenuLayerId);
+                          }
+                        }}
+                      >
+                        ${tr("ctx.addBelow")}
+                      </button>
+                      <button
+                        @click=${(): void => {
+                          if (this.contextMenuLayerId !== null) {
+                            this.onResetLayerTransform(this.contextMenuLayerId);
+                          }
+                        }}
+                      >
+                        ${tr("ctx.resetTransform")}
+                      </button>
+                      <button
+                        ?disabled=${this.contextMenuLayerId === null ||
+                        this.engine?.getCellTextureId(this.contextMenuLayerId, this.engine.getCurrentFrame()) ===
+                          null}
+                        @click=${(): void => {
+                          if (this.contextMenuLayerId !== null) {
+                            this.onOpenFitTextureFromLayer(this.contextMenuLayerId);
+                          }
+                        }}
+                      >
+                        ${tr("ctx.fitTexture")}
+                      </button>
+                      <button
+                        ?disabled=${this.contextMenuLayerId === null ||
+                        this.engine?.getCellTextureId(this.contextMenuLayerId, this.engine.getCurrentFrame()) ===
+                          null}
+                        @click=${(): void => {
+                          if (this.contextMenuLayerId !== null) {
+                            this.onCropCellToCanvasFromLayer(this.contextMenuLayerId);
+                          }
+                        }}
+                      >
+                        ${tr("ctx.cropCanvas")}
+                      </button>
+                      <button
+                        ?disabled=${this.contextMenuLayerId === null ||
+                        this.engine?.getCellTextureId(this.contextMenuLayerId, this.engine.getCurrentFrame()) ===
+                          null}
+                        @click=${(): void => {
+                          if (this.contextMenuLayerId !== null) {
+                            this.onResizeCellToCanvasFromLayer(this.contextMenuLayerId);
+                          }
+                        }}
+                      >
+                        ${tr("ctx.resizeCanvas")}
+                      </button>
+                    `}
               </div>
             `
           : html``}
@@ -5161,7 +5215,7 @@ export class GnumarusShell extends LitElement {
                           duration,
                           animation: animationPhrase,
                         })}
-                        @click=${(event: MouseEvent): void => this.onSelectFrameClick(frame, event.shiftKey)}
+                        @click=${(event: MouseEvent): void => this.onSelectFrameClick(frame, event.shiftKey, event.ctrlKey || event.metaKey)}
                         @dblclick=${(): void => this.onFrameRenameStart(frame)}
                         @contextmenu=${(event: MouseEvent): void => {
                           event.preventDefault();
@@ -5172,16 +5226,25 @@ export class GnumarusShell extends LitElement {
                 </div>
               `;
             })}
-            ${matrix.rows.map(
-              (row) => html`
+            ${matrix.rows.map((row) => {
+              const layerSelected = this.selectedLayerSet().has(row.layerId);
+              return html`
                 <div
-                  class="anim-layer-name"
+                  class="anim-layer-name ${layerSelected ? "selected" : ""}"
                   title=${row.layerName}
                   data-testid="anim-layer-name"
                   data-matrix-layer=${row.layerId}
                   role="button"
                   tabindex="0"
                   aria-label=${tr("matrix.layerAria", { name: row.layerName })}
+                  @click=${(event: MouseEvent): void =>
+                    this.onSelectLayerClick(row.layerId, event.shiftKey, event.ctrlKey || event.metaKey)}
+                  @keydown=${(event: KeyboardEvent): void => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      this.onSelectLayer(row.layerId);
+                    }
+                  }}
                   @contextmenu=${(event: MouseEvent): void => {
                     event.preventDefault();
                     this.openMatrixLayerMenu(row.layerId, event.clientX, event.clientY);
@@ -5230,8 +5293,8 @@ export class GnumarusShell extends LitElement {
                     </div>
                   `;
                 })}
-              `,
-            )}
+              `;
+            })}
           </div>
         </div>
       </div>
@@ -5270,17 +5333,6 @@ export class GnumarusShell extends LitElement {
           <button @click=${(): void => this.onDeleteFrames([...frames])}>
             ${tr("matrix.deleteFrames", { count: frames.length })}
           </button>
-        </div>
-      `;
-    }
-    if (this.matrixMenu.kind === "layer") {
-      return html`
-        <div class="context-blocker" @click=${(): void => this.closeMatrixMenu()} @contextmenu=${(event: Event): void => {
-          event.preventDefault();
-          this.closeMatrixMenu();
-        }}></div>
-        <div class="context-menu" style="left: ${this.matrixMenu.x}px; top: ${this.matrixMenu.y}px;">
-          <button @click=${(): void => this.onRenameLayerFromMenu()}>${tr("matrix.renameLayer")}</button>
         </div>
       `;
     }
@@ -5656,6 +5708,35 @@ export class GnumarusShell extends LitElement {
         event.key === "ArrowRight"
       ) {
         event.preventDefault();
+        if (this.engine !== null) {
+          if (event.key === "ArrowUp") {
+            this.insertLayerAboveActive();
+          } else if (event.key === "ArrowDown") {
+            this.insertLayerBelowActive();
+          } else if (event.key === "ArrowLeft") {
+            this.onAddFrameBefore(this.engine.getCurrentFrame());
+          } else {
+            this.onAddFrameAfter(this.engine.getCurrentFrame());
+          }
+        }
+        return;
+      }
+    }
+    if ((event.ctrlKey || event.metaKey) && event.altKey && !event.shiftKey) {
+      if (
+        this.eventInField(event) ||
+        this.eventInColorPicker(event) ||
+        this.shadowRoot?.querySelector("dialog[open]") !== null
+      ) {
+        return;
+      }
+      if (
+        event.key === "ArrowUp" ||
+        event.key === "ArrowDown" ||
+        event.key === "ArrowLeft" ||
+        event.key === "ArrowRight"
+      ) {
+        event.preventDefault();
         this.expandCurrentCellTexture(
           event.key === "ArrowUp" ? "up" : event.key === "ArrowDown" ? "down" : event.key === "ArrowLeft" ? "left" : "right",
         );
@@ -5845,6 +5926,7 @@ export class GnumarusShell extends LitElement {
     if (target === undefined || !this.engine.setActiveLayer(target.id)) {
       return;
     }
+    this.selectSingleLayer(target.id);
     this.refreshLayers();
     this.showToast(this.layerToastFor(next, this.layers.length, target.name));
   }
@@ -5853,7 +5935,20 @@ export class GnumarusShell extends LitElement {
     if (this.engine === null) {
       return;
     }
-    this.engine.insertLayerAboveActive();
+    const id = this.engine.insertLayerAboveActive();
+    this.selectSingleLayer(id);
+    this.refreshLayers();
+    this.dirty = true;
+    this.statusMessage = tr("status.layerAdded");
+  }
+
+  /** Insert a new layer immediately below the active layer and select it. */
+  private insertLayerBelowActive(): void {
+    if (this.engine === null) {
+      return;
+    }
+    const id = this.engine.insertLayerBelowActive();
+    this.selectSingleLayer(id);
     this.refreshLayers();
     this.dirty = true;
     this.statusMessage = tr("status.layerAdded");
@@ -9108,6 +9203,7 @@ export class GnumarusShell extends LitElement {
     }
     if (layerChanged) {
       this.engine.setActiveLayer(layerId);
+      this.selectSingleLayer(layerId);
     }
     if (frameChanged) {
       this.engine.setCurrentFrame(frame);
@@ -9155,35 +9251,146 @@ export class GnumarusShell extends LitElement {
     return new Set(valid.length > 0 ? valid : count > 0 ? [Math.min(current, count - 1)] : []);
   }
 
-  private onSelectFrameClick(frame: number, shiftKey: boolean): void {
+  /** Valid selected layers for the current project, defaulting to the active layer. */
+  private selectedLayerSet(): Set<string> {
+    const ids = new Set(this.layers.map((layer) => layer.id));
+    const valid = this.selectedLayers.filter((id) => ids.has(id));
+    if (valid.length > 0) {
+      return new Set(valid);
+    }
+    return this.activeLayerId !== "" && ids.has(this.activeLayerId) ? new Set([this.activeLayerId]) : new Set();
+  }
+
+  /** Layer ids in stack order (bottom first), restricted to the selection. */
+  private selectedLayerIds(): string[] {
+    const selected = this.selectedLayerSet();
+    return this.layers.filter((layer) => selected.has(layer.id)).map((layer) => layer.id);
+  }
+
+  /** Collapse the layer selection onto one layer (plain click paths). */
+  private selectSingleLayer(id: string): void {
+    this.layerAnchor = id;
+    this.selectedLayers = [id];
+  }
+
+  /** Collapse the layer selection onto the active layer, if any. */
+  private collapseLayerSelectionToActive(): void {
+    if (this.activeLayerId !== "") {
+      this.selectSingleLayer(this.activeLayerId);
+    } else {
+      this.selectedLayers = [];
+      this.layerAnchor = null;
+    }
+  }
+
+  private onSelectFrameClick(frame: number, shiftKey: boolean, ctrlKey: boolean): void {
     if (this.engine === null) {
       return;
     }
-    if (!shiftKey) {
+    if (!shiftKey && !ctrlKey) {
       this.onSelectFrame(frame);
       return;
     }
     const count = this.engine.getFrameCount();
+    if (ctrlKey && !shiftKey) {
+      // Toggle membership, keeping everything else; the anchor follows so a
+      // later Shift+click extends from the last touched frame.
+      this.frameAnchor = frame;
+      this.selectedFrames = toggleSelectedFrame([...this.selectedFrameSet()], frame, count);
+      if (this.engine.setCurrentFrame(frame)) {
+        this.refreshLayers();
+      } else {
+        this.requestUpdate();
+      }
+      this.dirty = true;
+      this.reportFrameSelection(frame, count);
+      return;
+    }
+    // Shift (with or without Ctrl): union the anchor..clicked interval.
     const anchor = this.frameAnchor ?? this.engine.getCurrentFrame();
     const clampedAnchor = Math.min(Math.max(0, anchor), count - 1);
-    const low = Math.min(clampedAnchor, frame);
-    const high = Math.max(clampedAnchor, frame);
-    const range: number[] = [];
-    for (let at = low; at <= high; at += 1) {
-      range.push(at);
-    }
-    this.selectedFrames = range;
+    this.frameAnchor = frame;
+    this.selectedFrames = unionSelectedFrameRange([...this.selectedFrameSet()], clampedAnchor, frame, count);
     if (this.engine.setCurrentFrame(frame)) {
       this.refreshLayers();
     } else {
       this.requestUpdate();
     }
     this.dirty = true;
-    this.statusMessage =
-      range.length === 1
-        ? `Frame ${frame + 1} selected`
-        : `Frames ${low + 1}-${high + 1} selected (${range.length})`;
+    this.reportFrameSelection(frame, count);
+  }
+
+  /** Status + toast describing the current frame selection. */
+  private reportFrameSelection(frame: number, count: number): void {
+    const selected = [...this.selectedFrameSet()].sort((a, b) => a - b);
+    if (selected.length > 1 && selected[selected.length - 1]! - selected[0]! === selected.length - 1) {
+      const low = selected[0]!;
+      const high = selected[selected.length - 1]!;
+      this.statusMessage = tr("status.framesSelected", { from: low + 1, to: high + 1, count: selected.length });
+    } else if (selected.length > 1) {
+      this.statusMessage = tr("status.framesSelectedMany", { count: selected.length });
+    } else {
+      this.statusMessage = tr("status.frameSelected", { frame: frame + 1 });
+    }
     this.showToast(this.frameToastFor(frame, count));
+  }
+
+  /** Click (plain/Ctrl/Shift) on a layer row or matrix layer name. */
+  private onSelectLayerClick(id: string, shiftKey: boolean, ctrlKey: boolean): void {
+    if (this.engine === null) {
+      return;
+    }
+    if (!shiftKey && !ctrlKey) {
+      this.onSelectLayer(id);
+      return;
+    }
+    if (ctrlKey && !shiftKey) {
+      // Toggle membership, keeping everything else; the anchor follows so a
+      // later Shift+click extends from the last touched layer. The touched
+      // layer becomes active so painting follows the click.
+      const ids = this.layers.map((layer) => layer.id);
+      this.layerAnchor = id;
+      this.selectedLayers = toggleSelectedId([...this.selectedLayerSet()], id, ids);
+      if (this.engine.setActiveLayer(id)) {
+        this.refreshLayers();
+      } else {
+        this.requestUpdate();
+      }
+      this.dirty = true;
+      this.reportLayerSelection();
+      return;
+    }
+    // Shift (with or without Ctrl): union the anchor..clicked index interval.
+    const ids = this.layers.map((layer) => layer.id);
+    const united = unionSelectedIdRange([...this.selectedLayerSet()], this.layerAnchor, id, ids);
+    if (united === null) {
+      this.onSelectLayer(id);
+      return;
+    }
+    this.layerAnchor = id;
+    this.selectedLayers = united;
+    if (this.engine.setActiveLayer(id)) {
+      this.refreshLayers();
+    } else {
+      this.requestUpdate();
+    }
+    this.dirty = true;
+    this.reportLayerSelection();
+  }
+
+  /** Status + toast describing the current layer selection. */
+  private reportLayerSelection(): void {
+    const selected = this.selectedLayerIds();
+    if (selected.length > 1) {
+      this.statusMessage = tr("status.layersSelected", { count: selected.length });
+      this.showToast(tr("status.layersSelected", { count: selected.length }));
+      return;
+    }
+    const index = this.layers.findIndex((layer) => layer.id === this.activeLayerId);
+    const target = index < 0 ? undefined : this.layers[index];
+    if (target !== undefined) {
+      this.showToast(this.layerToastFor(index, this.layers.length, target.name));
+    }
   }
 
   private onAddFrame(): void {
@@ -9246,8 +9453,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private openMatrixLayerMenu(layerId: string, clientX: number, clientY: number): void {
-    this.closeLayerMenu();
-    this.matrixMenu = { kind: "layer", layerId, x: Math.min(clientX, window.innerWidth - 200), y: Math.min(clientY, window.innerHeight - 80) };
+    this.closeMatrixMenu();
+    // The matrix layer name opens the same context menu as the layers panel.
+    this.openLayerMenu(layerId, clientX, clientY);
   }
 
   private openMatrixFrameMenu(frame: number, clientX: number, clientY: number): void {
@@ -11678,12 +11886,12 @@ export class GnumarusShell extends LitElement {
   }
 
   private onRenameLayerFromMenu(): void {
-    if (this.matrixMenu === null || this.matrixMenu.kind !== "layer") {
-      this.closeMatrixMenu();
+    if (this.contextMenuLayerId === null) {
+      this.closeLayerMenu();
       return;
     }
-    const layerId = this.matrixMenu.layerId;
-    this.closeMatrixMenu();
+    const layerId = this.contextMenuLayerId;
+    this.closeLayerMenu();
     this.openLayerRenameDialog(layerId);
   }
 
@@ -11849,14 +12057,18 @@ export class GnumarusShell extends LitElement {
     } else {
       this.statusMessage = tr("status.layerDeleteLast");
     }
+    this.collapseLayerSelectionToActive();
     this.refreshLayers();
   }
 
   private onSelectLayer(id: string): void {
-    if (this.engine === null || id === this.activeLayerId) {
+    if (this.engine === null) {
       return;
     }
-    this.engine.setActiveLayer(id);
+    if (id !== this.activeLayerId) {
+      this.engine.setActiveLayer(id);
+    }
+    this.selectSingleLayer(id);
     this.refreshLayers();
     const index = this.layers.findIndex((layer) => layer.id === id);
     const target = index < 0 ? undefined : this.layers[index];
@@ -11915,7 +12127,9 @@ export class GnumarusShell extends LitElement {
     if (this.engine === null) {
       return;
     }
-    if (this.engine.insertLayerAbove(id) !== null) {
+    const added = this.engine.insertLayerAbove(id);
+    if (added !== null) {
+      this.selectSingleLayer(added);
       this.refreshLayers();
       this.dirty = true;
       this.statusMessage = tr("status.layerAdded");
@@ -11927,7 +12141,9 @@ export class GnumarusShell extends LitElement {
     if (this.engine === null) {
       return;
     }
-    if (this.engine.insertLayerBelow(id) !== null) {
+    const added = this.engine.insertLayerBelow(id);
+    if (added !== null) {
+      this.selectSingleLayer(added);
       this.refreshLayers();
       this.dirty = true;
       this.statusMessage = tr("status.layerAdded");
@@ -11943,13 +12159,46 @@ export class GnumarusShell extends LitElement {
   }
 
   private openLayerMenu(id: string, clientX: number, clientY: number): void {
-    this.contextMenuLayerId = id;
+    const selected = this.selectedLayerSet();
+    if (selected.size > 1 && selected.has(id)) {
+      this.contextMenuLayerId = id;
+      this.contextMenuLayerIds = this.selectedLayerIds();
+    } else {
+      this.selectSingleLayer(id);
+      this.contextMenuLayerId = id;
+      this.contextMenuLayerIds = null;
+    }
     this.contextMenuX = clientX;
     this.contextMenuY = clientY;
   }
 
   private closeLayerMenu(): void {
     this.contextMenuLayerId = null;
+    this.contextMenuLayerIds = null;
+  }
+
+  /** Delete one layer (the shared layers menu single target). */
+  private onDeleteLayer(id: string): void {
+    this.closeLayerMenu();
+    this.onRemoveLayer(id);
+  }
+
+  /** Delete every layer in a multi-selection (structural, like single delete). */
+  private onDeleteLayers(ids: string[]): void {
+    this.closeLayerMenu();
+    if (this.engine === null || ids.length === 0) {
+      return;
+    }
+    const deleted = this.engine.removeLayers(ids);
+    if (deleted > 0) {
+      this.collapseLayerSelectionToActive();
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = tr("status.layersDeleted", { count: deleted });
+      this.showToast(tr("status.layersDeleted", { count: deleted }));
+    } else {
+      this.statusMessage = tr("status.layerDeleteLast");
+    }
   }
 
   private onMergeDown(id: string): void {
@@ -12458,6 +12707,7 @@ export class GnumarusShell extends LitElement {
     this.engine?.newProject(this.newWidth, this.newHeight);
     this.refreshLayers();
     this.selectSingleFrame(0);
+    this.collapseLayerSelectionToActive();
     this.directoryHandle = null;
     this.projectName = "Untitled";
     this.dirty = true;
@@ -12691,6 +12941,7 @@ export class GnumarusShell extends LitElement {
       this.projectName = dir.name;
       this.dirty = false;
       this.selectSingleFrame(this.engine?.getCurrentFrame() ?? 0);
+      this.collapseLayerSelectionToActive();
       this.statusMessage = tr("status.opened", { dir: dir.name, cleanup: "" });
     } catch (error) {
       this.statusMessage = error instanceof Error ? tr("status.openFailed", { reason: error.message }) : tr("status.openFailedPlain");
@@ -13022,6 +13273,7 @@ export class GnumarusShell extends LitElement {
       });
       this.refreshLayers();
       this.selectSingleFrame(this.engine?.getCurrentFrame() ?? 0);
+      this.collapseLayerSelectionToActive();
       this.directoryHandle = null;
       this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
       this.dirty = true;
@@ -13082,6 +13334,7 @@ export class GnumarusShell extends LitElement {
     });
     this.refreshLayers();
     this.selectSingleFrame(this.engine?.getCurrentFrame() ?? 0);
+    this.collapseLayerSelectionToActive();
     this.directoryHandle = null;
     this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
     this.dirty = true;
@@ -13127,6 +13380,7 @@ export class GnumarusShell extends LitElement {
     });
     this.refreshLayers();
     this.selectSingleFrame(this.engine?.getCurrentFrame() ?? 0);
+    this.collapseLayerSelectionToActive();
     this.directoryHandle = null;
     this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
     this.dirty = true;
@@ -13173,6 +13427,7 @@ export class GnumarusShell extends LitElement {
     });
     this.refreshLayers();
     this.selectSingleFrame(this.engine?.getCurrentFrame() ?? 0);
+    this.collapseLayerSelectionToActive();
     this.directoryHandle = null;
     this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
     this.dirty = true;

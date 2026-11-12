@@ -8389,17 +8389,17 @@ test("cell menu Resize to canvas pads a small texture with transparency", async 
   expect((await getLayers(page)).layers[0]?.width).toBe(32);
 });
 
-test("Ctrl+Shift+Arrow expands the current cell texture by the configured step", async ({ page }) => {
+test("Ctrl+Alt+Arrow expands the current cell texture by the configured step", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await paintCenter(page);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
-  await page.keyboard.press("Control+Shift+ArrowRight");
+  await page.keyboard.press("Control+Alt+ArrowRight");
   await expect(page.locator("gnumarus-shell")).toContainText("Texture expanded to 80 x 64");
   expect((await getLayers(page)).layers[0]?.width).toBe(80);
   // Expanding right keeps existing coordinates: the painted pixel stays put.
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
-  await page.keyboard.press("Control+Shift+ArrowLeft");
+  await page.keyboard.press("Control+Alt+ArrowLeft");
   await expect(page.locator("gnumarus-shell")).toContainText("Texture expanded to 96 x 64");
   expect((await getLayers(page)).layers[0]?.width).toBe(96);
   // Expanding left shifts existing pixels right by the step.
@@ -8414,7 +8414,7 @@ test("Ctrl+Shift+Arrow expands the current cell texture by the configured step",
   const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.expand.v1"));
   expect(persisted).toContain("8");
   await page.getByRole("button", { name: "Close" }).click();
-  await page.keyboard.press("Control+Shift+ArrowDown");
+  await page.keyboard.press("Control+Alt+ArrowDown");
   await expect(page.locator("gnumarus-shell")).toContainText("Texture expanded to 80 x 72");
   expect((await getLayers(page)).layers[0]?.height).toBe(72);
 });
@@ -12503,4 +12503,121 @@ test("darken/lighten/add/screen show through unpainted texels on the GPU canvas 
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   await expect.poll(async () => canvasScreenPixel(page, cx, cy), { timeout: 10000 }).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("Ctrl+click adds discontiguous frames and Shift unions from the last @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  for (let i = 0; i < 4; i += 1) {
+    await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  }
+  expect((await getMatrix(page)).frameCount).toBe(5);
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="4"]').click({ modifiers: ["Control"] });
+  await expect(page.locator("gnumarus-shell")).toContainText("2 frames selected");
+  await expect(matrix.locator(".anim-frame-header.in-range")).toHaveCount(2);
+  await matrix.locator('[data-testid="anim-frame"][data-frame="2"]').click({ modifiers: ["Shift"] });
+  await expect(page.locator("gnumarus-shell")).toContainText("4 frames selected");
+  await expect(matrix.locator(".anim-frame-header.in-range")).toHaveCount(4);
+  await matrix.locator('[data-testid="anim-frame"][data-frame="4"]').click({ modifiers: ["Control"] });
+  await expect(page.locator("gnumarus-shell")).toContainText("3 frames selected");
+  await expect(matrix.locator(".anim-frame-header.in-range")).toHaveCount(3);
+  await matrix.locator('[data-testid="anim-frame"][data-frame="2"]').click({ button: "right" });
+  await expect(page.getByRole("button", { name: "Delete frames (3)" })).toBeVisible();
+  await page.keyboard.press("Escape");
+});
+
+test("Ctrl+click toggles layer selection and Shift unions the range @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.keyboard.press("Insert");
+  await page.keyboard.press("Insert");
+  expect((await getLayers(page)).layers.map((layer) => layer.id)).toEqual(["layer0", "layer1", "layer2"]);
+  const row0 = page.locator('gnumarus-shell [data-layer-id="layer0"]');
+  const row2 = page.locator('gnumarus-shell [data-layer-id="layer2"]');
+  await row0.locator(".layer-name").click();
+  await row2.locator(".layer-name").click({ modifiers: ["Control"] });
+  await expect(page.locator("gnumarus-shell")).toContainText("2 layers selected");
+  await expect(page.locator('gnumarus-shell .layer-row.selected')).toHaveCount(2);
+  await row0.locator(".layer-name").click({ modifiers: ["Shift"] });
+  await expect(page.locator("gnumarus-shell")).toContainText("3 layers selected");
+  await expect(page.locator('gnumarus-shell .layer-row.selected')).toHaveCount(3);
+  await expect(page.locator('gnumarus-shell [data-testid="anim-layer-name"].selected')).toHaveCount(3);
+  await row2.locator(".layer-name").click({ modifiers: ["Control"] });
+  await expect(page.locator("gnumarus-shell")).toContainText("2 layers selected");
+  await expect(page.locator('gnumarus-shell [data-testid="anim-layer-name"].selected')).toHaveCount(2);
+});
+
+test("layer context menus match between panel and matrix, frames stay separate @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.keyboard.press("Insert");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click({ modifiers: ["Control"] });
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click({ button: "right" });
+  const frameMenu = page.locator("gnumarus-shell .context-menu");
+  await expect(frameMenu.getByRole("button", { name: "Delete frames (2)" })).toBeVisible();
+  await expect(frameMenu.getByRole("button", { name: "Rename layer…" })).toHaveCount(0);
+  await expect(frameMenu.getByRole("button", { name: /Delete \d+ layers/ })).toHaveCount(0);
+  await expect(frameMenu.getByRole("button", { name: "Merge Down" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  const panelItems = async (): Promise<string[]> => {
+    await page.locator('gnumarus-shell [data-layer-id="layer0"]').click({ button: "right" });
+    const items = await page.locator("gnumarus-shell .context-menu").getByRole("button").allTextContents();
+    await page.keyboard.press("Escape");
+    return items;
+  };
+  const matrixItems = async (): Promise<string[]> => {
+    await page.locator('gnumarus-shell [data-testid="anim-layer-name"][data-matrix-layer="layer0"]').click({ button: "right" });
+    const items = await page.locator("gnumarus-shell .context-menu").getByRole("button").allTextContents();
+    await page.keyboard.press("Escape");
+    return items;
+  };
+  await expect(await panelItems()).toEqual(await matrixItems());
+  await page.locator('gnumarus-shell [data-testid="anim-layer-name"][data-matrix-layer="layer0"]').click();
+  await page.locator('gnumarus-shell [data-testid="anim-layer-name"][data-matrix-layer="layer1"]').click({ modifiers: ["Control"] });
+  await page.locator('gnumarus-shell [data-testid="anim-layer-name"][data-matrix-layer="layer0"]').click({ button: "right" });
+  const multiMenu = page.locator("gnumarus-shell .context-menu");
+  await expect(multiMenu.getByRole("button")).toHaveText(["Delete 2 layers"]);
+  await page.keyboard.press("Escape");
+});
+
+test("bulk delete removes selected layers keeping one @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.keyboard.press("Insert");
+  await page.keyboard.press("Insert");
+  await page.locator('gnumarus-shell [data-testid="anim-layer-name"][data-matrix-layer="layer0"]').click();
+  await page.locator('gnumarus-shell [data-testid="anim-layer-name"][data-matrix-layer="layer1"]').click({ modifiers: ["Control"] });
+  await page.locator('gnumarus-shell [data-testid="anim-layer-name"][data-matrix-layer="layer0"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Delete 2 layers" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Deleted 2 layers");
+  expect((await getLayers(page)).layers.map((layer) => layer.id)).toEqual(["layer2"]);
+  await page.locator('gnumarus-shell [data-testid="anim-layer-name"][data-matrix-layer="layer2"]').click({ modifiers: ["Control"] });
+  await page.locator('gnumarus-shell [data-testid="anim-layer-name"][data-matrix-layer="layer2"]').click({ button: "right" });
+  await expect(page.locator("gnumarus-shell .context-menu").getByRole("button", { name: "Delete layer" })).toBeVisible();
+});
+
+test("Ctrl+Shift+Arrows create layers and frames @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.keyboard.press("Control+Shift+ArrowUp");
+  let state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.id)).toEqual(["layer0", "layer1"]);
+  expect(state.active).toBe("layer1");
+  await page.keyboard.press("Control+Shift+ArrowDown");
+  state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.id)).toEqual(["layer0", "layer2", "layer1"]);
+  expect(state.active).toBe("layer2");
+  await page.keyboard.press("Control+Shift+ArrowLeft");
+  let matrix = await getMatrix(page);
+  expect(matrix.frameCount).toBe(2);
+  expect(matrix.currentFrame).toBe(0);
+  await page.keyboard.press("Control+Shift+ArrowRight");
+  matrix = await getMatrix(page);
+  expect(matrix.frameCount).toBe(3);
+  expect(matrix.currentFrame).toBe(1);
 });

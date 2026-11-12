@@ -5243,6 +5243,13 @@ export class GnumarusCanvasEngine {
     return this.insertLayerAt(at);
   }
 
+  /** Insert a new layer immediately below the active layer and select it. */
+  insertLayerBelowActive(): string {
+    const index = this.layers.findIndex((layer) => layer.id === this.activeLayerId);
+    const at = index < 0 ? 0 : index;
+    return this.insertLayerAt(at);
+  }
+
   /** Insert a new layer immediately above the given layer and select it. Null for unknown ids. */
   insertLayerAbove(id: string): string | null {
     const index = this.layers.findIndex((layer) => layer.id === id);
@@ -5310,6 +5317,33 @@ export class GnumarusCanvasEngine {
     this.render();
     this.emitStats();
     return true;
+  }
+
+  /**
+   * Remove several layers at once, never deleting the final remaining
+   * layer. Unknown ids are skipped. Returns the number of removed layers.
+   * Like single removal this is structural (no history entry).
+   */
+  removeLayers(ids: readonly string[]): number {
+    const targets = [...new Set(ids)].filter((id) => this.layers.some((layer) => layer.id === id));
+    if (targets.length === 0) {
+      return 0;
+    }
+    let deleted = 0;
+    for (const id of targets) {
+      if (this.layers.length <= 1) {
+        break;
+      }
+      if (this.removeLayerFull(id)) {
+        deleted += 1;
+      }
+    }
+    if (deleted > 0) {
+      this.refreshLayerStacking();
+      this.render();
+      this.emitStats();
+    }
+    return deleted;
   }
 
   /** Fully remove a layer: entry, owned texture, cells; detach referencing contents. */
