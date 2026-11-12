@@ -12653,23 +12653,46 @@ test("changing frame/layer scrolls the matrix and layers list into view @recent"
         box.bottom <= area.bottom + 1 &&
         box.left >= area.left - 1 &&
         box.right <= area.right + 1;
+      const scrollerBox = scroller.getBoundingClientRect();
+      const cornerBox = (root?.querySelector(".anim-corner") as HTMLElement | null)?.getBoundingClientRect();
+      // Sticky headers paint over the scrolled cells: the current cell must
+      // clear the layer-name column (left) and the frame-header row (top).
+      const usable = new DOMRect(
+        scrollerBox.left + (cornerBox?.width ?? 0),
+        scrollerBox.top + (cornerBox?.height ?? 0),
+        Math.max(0, scrollerBox.width - (cornerBox?.width ?? 0)),
+        Math.max(0, scrollerBox.height - (cornerBox?.height ?? 0)),
+      );
       return {
         listTop: list.scrollTop,
         scrollLeft: scroller.scrollLeft,
         scrollTop: scroller.scrollTop,
-        cellVisible: inView(cell.getBoundingClientRect(), scroller.getBoundingClientRect()),
+        cellVisible: inView(cell.getBoundingClientRect(), usable),
         rowVisible: inView(row.getBoundingClientRect(), list.getBoundingClientRect()),
       };
     });
-  // Newest frame/layer is current after the setup: jump back to frame 0.
-  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  // Navigate with the keyboard: unlike clicking, this performs no automatic
+  // browser scrolling, so only the app's own follow logic can reveal cells.
+  for (let i = 0; i < 19; i += 1) {
+    await page.keyboard.press("ArrowLeft");
+  }
   await expect.poll(async () => (await scrollState()).scrollLeft, { timeout: 10000 }).toBe(0);
-  // Select the bottom layer via its matrix name: both panes must follow.
-  await page.locator('gnumarus-shell [data-testid="anim-layer-name"][data-matrix-layer="layer0"]').click();
+  await expect.poll(async () => scrollState(), { timeout: 10000 }).toMatchObject({ cellVisible: true });
+  // Step down to the bottom layer; both panes must follow.
+  for (let i = 0; i < 8; i += 1) {
+    await page.keyboard.press("ArrowDown");
+  }
   await expect.poll(async () => scrollState(), { timeout: 10000 }).toMatchObject({ cellVisible: true, rowVisible: true });
-  const after = await scrollState();
+  let after = await scrollState();
   expect(after.listTop).toBeGreaterThan(0);
   expect(after.scrollTop).toBeGreaterThan(0);
+  // Step back up to the top layer: the cell must clear the corner.
+  for (let i = 0; i < 8; i += 1) {
+    await page.keyboard.press("ArrowUp");
+  }
+  await expect.poll(async () => scrollState(), { timeout: 10000 }).toMatchObject({ cellVisible: true, rowVisible: true });
+  after = await scrollState();
+  expect(after.listTop).toBe(0);
 });
 
 test("browser context menu is suppressed on toolbar buttons and menus @recent", async ({ page }) => {

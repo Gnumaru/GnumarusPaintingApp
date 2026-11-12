@@ -9260,8 +9260,15 @@ export class GnumarusShell extends LitElement {
     });
   }
 
-  /** Scroll a container just enough to fully show a child (no-op when visible). */
-  private scrollChildIntoView(container: Element | null, child: Element | null): void {
+  /** Scroll a container just enough to fully show a child (no-op when visible).
+   * `insetLeft`/`insetTop` reserve overlaid margins (e.g. sticky headers that
+   * paint above the scrolled content). */
+  private scrollChildIntoView(
+    container: Element | null,
+    child: Element | null,
+    insetLeft = 0,
+    insetTop = 0,
+  ): void {
     if (!(container instanceof HTMLElement) || !(child instanceof HTMLElement)) {
       return;
     }
@@ -9273,13 +9280,15 @@ export class GnumarusShell extends LitElement {
     if (rect.width <= 0 && rect.height <= 0) {
       return;
     }
-    if (rect.top < area.top) {
-      container.scrollTop -= area.top - rect.top;
+    const top = area.top + insetTop;
+    if (rect.top < top) {
+      container.scrollTop -= top - rect.top;
     } else if (rect.bottom > area.bottom) {
       container.scrollTop += rect.bottom - area.bottom;
     }
-    if (rect.left < area.left) {
-      container.scrollLeft -= area.left - rect.left;
+    const left = area.left + insetLeft;
+    if (rect.left < left) {
+      container.scrollLeft -= left - rect.left;
     } else if (rect.right > area.right) {
       container.scrollLeft += rect.right - area.right;
     }
@@ -9292,7 +9301,16 @@ export class GnumarusShell extends LitElement {
       return;
     }
     this.scrollChildIntoView(root.querySelector(".layers-list"), root.querySelector(".layer-row.active"));
-    this.scrollChildIntoView(root.querySelector(".anim-scroll"), root.querySelector(".anim-cell.active-cell"));
+    // The sticky corner overlays the scrolled cells: keep the current cell
+    // clear of the layer-name column (left) and the frame-header row (top).
+    const corner = root.querySelector(".anim-corner");
+    const cornerRect = corner instanceof HTMLElement ? corner.getBoundingClientRect() : null;
+    this.scrollChildIntoView(
+      root.querySelector(".anim-scroll"),
+      root.querySelector(".anim-cell.active-cell"),
+      cornerRect?.width ?? 0,
+      cornerRect?.height ?? 0,
+    );
   }
 
   private onCellClick(layerId: string, frame: number): void {
