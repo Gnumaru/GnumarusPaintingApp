@@ -5536,13 +5536,15 @@ test("quick action palette filters and runs actions", async ({ page }) => {
   const input = dialog.locator('[data-testid="action-palette-input"]');
   await expect(input).toBeFocused();
   await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveText([
+    "Adjust colors…",
     "Crop All Cells to Canvas",
-    "Export",
+    "Export project",
     "Fit All Textures to Size",
     "Import 3D Model as layer",
     "Import full project",
-    "Import image as layer",
+    "Import raster image as layer",
     "Import SVG as layer",
+    "Invert colors",
     "New Project",
     "Open Project",
     "Redo",
@@ -8789,7 +8791,7 @@ test("File > Export lists only formats the browser truly encodes", async ({ page
   let prev: string | null = null;
   for (const mime of values) {
     await page.getByRole("button", { name: "File" }).click();
-    await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export", exact: true }).click();
+    await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export project", exact: true }).click();
     await expect(dialog).toBeVisible();
     await dialog.locator("select#exportFormat").selectOption(mime);
     await dialog.locator("#exportOk").click();
@@ -8834,7 +8836,7 @@ test("File > Export JPEG quality changes the file size", async ({ page }) => {
 
   async function exportJpegSize(quality: string): Promise<number> {
     await page.getByRole("button", { name: "File" }).click();
-    await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export", exact: true }).click();
+    await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export project", exact: true }).click();
     await expect(dialog).toBeVisible();
     await dialog.locator("input#exportQuality").fill(quality);
     await page.evaluate(() => {
@@ -11608,7 +11610,7 @@ test("file menu shows renamed import items with tooltips @recent", async ({ page
   );
   await expect(dropdown.getByRole("button", { name: "Import SVG as layer" })).toBeVisible();
   await expect(dropdown.getByRole("button", { name: "Import 3D Model as layer" })).toBeVisible();
-  await expect(dropdown.getByRole("button", { name: "Import image as layer" })).toHaveAttribute(
+  await expect(dropdown.getByRole("button", { name: "Import raster image as layer" })).toHaveAttribute(
     "title",
     "Import a raster image into the current layer (or a new layer above it)",
   );
@@ -11654,7 +11656,7 @@ test("import image as layer lands on the current layer when the cell is empty @r
   await page.waitForSelector("gnumarus-shell canvas");
   await stubImagePicker(page, "red.png", await redPngBytes(page, 8));
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import image as layer" }).click();
+  await page.getByRole("button", { name: "Import raster image as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText('Image "red" imported as layer "L1"');
   expect(await layerCount(page)).toBe(1);
   expect(await getLayers(page)).toMatchObject({ layers: [{ width: 8, height: 8 }] });
@@ -11666,7 +11668,7 @@ test("import image as layer skips fit and crop cleanup @recent", async ({ page }
   await page.waitForSelector("gnumarus-shell canvas");
   await stubImagePicker(page, "dot.png", await borderedPngBytes(page, 8));
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import image as layer" }).click();
+  await page.getByRole("button", { name: "Import raster image as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText('Image "dot" imported as layer "L1"');
   // Default cleanup is crop+fit: a fit would trim the transparent border to
   // 1x1, so keeping 8x8 proves no automatic cleanup ran on image import.
@@ -11680,7 +11682,7 @@ test("import image as layer creates a layer above when the cell is occupied @rec
   await paintCenter(page);
   await stubImagePicker(page, "red.png", await redPngBytes(page, 8));
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import image as layer" }).click();
+  await page.getByRole("button", { name: "Import raster image as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText('Image "red" imported as layer "L2"');
   expect(await layerCount(page)).toBe(2);
   expect(await getLayers(page)).toMatchObject({ layers: [{ width: 64, height: 64 }, { width: 8, height: 8 }] });
@@ -11691,7 +11693,7 @@ test("import image as layer rejects invalid files @recent", async ({ page }) => 
   await page.waitForSelector("gnumarus-shell canvas");
   await stubImagePicker(page, "nope.png", Array.from(new TextEncoder().encode("definitely not an image")));
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import image as layer" }).click();
+  await page.getByRole("button", { name: "Import raster image as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("not a valid image");
   expect(await layerCount(page)).toBe(1);
   expect(await getLayers(page)).toMatchObject({ layers: [{ width: 64, height: 64 }] });
