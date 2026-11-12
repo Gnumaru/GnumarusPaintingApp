@@ -131,9 +131,11 @@ import {
   parseProjectFileFormat,
   parseStorageFormat,
   parseStorageSettings,
+  parseModelLighting,
   parseSvgStorage,
   parseTextStorage,
   serializeStorageSettings,
+  type GnumarusModelLighting,
   type GnumarusProjectFileFormat,
   type GnumarusStorageFormat,
   type GnumarusStorageSettings,
@@ -1518,6 +1520,7 @@ export class GnumarusShell extends LitElement {
     storageProjectFile: { type: String },
     storageTextStorage: { type: String },
     storageSvgStorage: { type: String },
+    storageModelLighting: { type: String },
     brushQuality: { type: Number },
     importCleanup: { type: String },
     expandStep: { type: Number },
@@ -1685,6 +1688,7 @@ export class GnumarusShell extends LitElement {
   declare storageProjectFile: GnumarusProjectFileFormat;
   declare storageTextStorage: GnumarusTextStorage;
   declare storageSvgStorage: GnumarusSvgStorage;
+  declare storageModelLighting: GnumarusModelLighting;
   declare brushQuality: number;
   declare importCleanup: GnumarusImportCleanup;
   declare expandStep: number;
@@ -1859,6 +1863,7 @@ export class GnumarusShell extends LitElement {
     this.storageProjectFile = DEFAULT_STORAGE_SETTINGS.projectFile;
     this.storageTextStorage = DEFAULT_STORAGE_SETTINGS.textStorage;
     this.storageSvgStorage = DEFAULT_STORAGE_SETTINGS.svgStorage;
+    this.storageModelLighting = DEFAULT_STORAGE_SETTINGS.modelLighting;
     this.brushQuality = DEFAULT_STORAGE_SETTINGS.brushQuality;
     this.importCleanup = DEFAULT_IMPORT_CLEANUP;
     this.expandStep = DEFAULT_EXPAND_SETTINGS.step;
@@ -2999,6 +3004,18 @@ export class GnumarusShell extends LitElement {
               <option value="raw">${tr("setting.svgStorageRaw")}</option>
               <option value="compressed">${tr("setting.svgStorageCompressed")}</option>
               <option value="embedded">${tr("setting.svgStorageEmbedded")}</option>
+            </select>
+          </label>
+        </div>
+        <div class="setting-row">
+          <label>${tr("setting.modelLighting")}
+            <select
+              id="storageModelLighting"
+              .value=${this.storageModelLighting}
+              @change=${(): void => this.applyStorageFromDialog()}
+            >
+              <option value="unlit">${tr("setting.modelLightingUnlit")}</option>
+              <option value="lit">${tr("setting.modelLightingLit")}</option>
             </select>
           </label>
         </div>
@@ -4733,6 +4750,8 @@ export class GnumarusShell extends LitElement {
     this.storageProjectFile = storedStorage.projectFile;
     this.storageTextStorage = storedStorage.textStorage;
     this.storageSvgStorage = storedStorage.svgStorage;
+    this.storageModelLighting = storedStorage.modelLighting;
+    this.engine?.setModelLighting(this.storageModelLighting);
     this.storageFormat = storedStorage.format;
     this.storagePngLevel = storedStorage.pngLevel;
     this.storageJpegQuality = storedStorage.jpgQuality;
@@ -4842,6 +4861,7 @@ export class GnumarusShell extends LitElement {
       this.engine.setFollowStrength(this.followStrength);
       this.engine.setPencilPixelPerfect(this.pencilPixelPerfect);
       this.engine.setCurvePixelPerfect(this.curvePixelPerfect);
+      this.engine.setModelLighting(this.storageModelLighting);
       this.refreshLayers();
       // The engine fits the zoom during construction, before the animation
       // matrix above the status bar takes part in the layout. Re-fit once the
@@ -5876,6 +5896,7 @@ export class GnumarusShell extends LitElement {
           projectFile: this.storageProjectFile,
           textStorage: this.storageTextStorage,
           svgStorage: this.storageSvgStorage,
+          modelLighting: this.storageModelLighting,
         }),
       );
     } catch {
@@ -5893,7 +5914,8 @@ export class GnumarusShell extends LitElement {
       this.brushQuality === DEFAULT_STORAGE_SETTINGS.brushQuality &&
       this.storageProjectFile === DEFAULT_STORAGE_SETTINGS.projectFile &&
       this.storageTextStorage === DEFAULT_STORAGE_SETTINGS.textStorage &&
-      this.storageSvgStorage === DEFAULT_STORAGE_SETTINGS.svgStorage
+      this.storageSvgStorage === DEFAULT_STORAGE_SETTINGS.svgStorage &&
+      this.storageModelLighting === DEFAULT_STORAGE_SETTINGS.modelLighting
     );
   }
 
@@ -5910,6 +5932,11 @@ export class GnumarusShell extends LitElement {
   private currentDialogSvgStorage(): GnumarusSvgStorage {
     const input = this.shadowRoot?.getElementById("storageSvgStorage") as HTMLSelectElement | null;
     return parseSvgStorage(input?.value ?? this.storageSvgStorage);
+  }
+
+  private currentDialogModelLighting(): GnumarusModelLighting {
+    const input = this.shadowRoot?.getElementById("storageModelLighting") as HTMLSelectElement | null;
+    return parseModelLighting(input?.value ?? this.storageModelLighting);
   }
 
   private currentDialogStorageFormat(): GnumarusStorageFormat {
@@ -6075,6 +6102,8 @@ export class GnumarusShell extends LitElement {
     this.storageProjectFile = this.currentDialogProjectFile();
     this.storageTextStorage = this.currentDialogTextStorage();
     this.storageSvgStorage = this.currentDialogSvgStorage();
+    this.storageModelLighting = this.currentDialogModelLighting();
+    this.engine?.setModelLighting(this.storageModelLighting);
     this.storageFormat = this.currentDialogStorageFormat();
     this.storageLossless = this.currentDialogStorageLossless();
     this.storageQuality = this.currentDialogStorageQuality();
@@ -6094,6 +6123,8 @@ export class GnumarusShell extends LitElement {
     this.storageProjectFile = DEFAULT_STORAGE_SETTINGS.projectFile;
     this.storageTextStorage = DEFAULT_STORAGE_SETTINGS.textStorage;
     this.storageSvgStorage = DEFAULT_STORAGE_SETTINGS.svgStorage;
+    this.storageModelLighting = DEFAULT_STORAGE_SETTINGS.modelLighting;
+    this.engine?.setModelLighting(this.storageModelLighting);
     this.brushQuality = DEFAULT_STORAGE_SETTINGS.brushQuality;
     this.persistStorage();
     this.statusMessage = tr("status.storageReset");
@@ -6103,6 +6134,14 @@ export class GnumarusShell extends LitElement {
   setSvgStorage(svgStorage: string): void {
     this.storageSvgStorage = parseSvgStorage(svgStorage);
     this.persistStorage();
+    this.statusMessage = this.storageStatusMessage();
+  }
+
+  /** Test hook: set the 3D model lighting mode (unlit/lit). */
+  setModelLighting(modelLighting: string): void {
+    this.storageModelLighting = parseModelLighting(modelLighting);
+    this.persistStorage();
+    this.engine?.setModelLighting(this.storageModelLighting);
     this.statusMessage = this.storageStatusMessage();
   }
 
@@ -6117,10 +6156,12 @@ export class GnumarusShell extends LitElement {
     projectFile: GnumarusProjectFileFormat = DEFAULT_STORAGE_SETTINGS.projectFile,
     textStorage: GnumarusTextStorage = DEFAULT_STORAGE_SETTINGS.textStorage,
     svgStorage: GnumarusSvgStorage = DEFAULT_STORAGE_SETTINGS.svgStorage,
+    modelLighting: GnumarusModelLighting = DEFAULT_STORAGE_SETTINGS.modelLighting,
   ): void {
     this.storageProjectFile = parseProjectFileFormat(projectFile);
     this.storageTextStorage = parseTextStorage(textStorage);
     this.storageSvgStorage = parseSvgStorage(svgStorage);
+    this.storageModelLighting = parseModelLighting(modelLighting);
     this.storageFormat = parseStorageFormat(format);
     this.storageLossless = lossless;
     this.storageQuality = clampStorageQuality(quality);
@@ -6128,6 +6169,7 @@ export class GnumarusShell extends LitElement {
     this.storageJpegQuality = clampStorageJpgQuality(jpgQuality);
     this.brushQuality = clampBrushQuality(brushQuality);
     this.persistStorage();
+    this.engine?.setModelLighting(this.storageModelLighting);
     this.statusMessage = this.storageStatusMessage();
   }
 
@@ -8370,22 +8412,26 @@ export class GnumarusShell extends LitElement {
       <dialog id="texturePickerDialog" @close=${(): void => this.onTexturePickerClosed()}>
         <h3>${this.texturePickerTileset ? tr("dialog.selectTileset") : tr("dialog.selectTexture")}</h3>
         <div class="picker-grid" data-testid="texture-picker-grid">
-          <button
-            class="picker-item"
-            data-testid="texture-picker-none"
-            @click=${(): void => this.onTexturePickerSelect("none")}
-          >
-            <span class="picker-empty" aria-hidden="true">∅</span>
-            <span class="picker-name">${tr("dialog.noTexture")}</span>
-          </button>
-          <button
-            class="picker-item"
-            data-testid="texture-picker-new"
-            @click=${(): void => this.onTexturePickerSelect("new")}
-          >
-            <span class="picker-empty" aria-hidden="true">+</span>
-            <span class="picker-name">${tr("dialog.newTexture")}</span>
-          </button>
+          ${this.texturePickerTileset
+            ? html``
+            : html`
+                <button
+                  class="picker-item"
+                  data-testid="texture-picker-none"
+                  @click=${(): void => this.onTexturePickerSelect("none")}
+                >
+                  <span class="picker-empty" aria-hidden="true">∅</span>
+                  <span class="picker-name">${tr("dialog.noTexture")}</span>
+                </button>
+                <button
+                  class="picker-item"
+                  data-testid="texture-picker-new"
+                  @click=${(): void => this.onTexturePickerSelect("new")}
+                >
+                  <span class="picker-empty" aria-hidden="true">+</span>
+                  <span class="picker-name">${tr("dialog.newTexture")}</span>
+                </button>
+              `}
           ${textures.map((texture) => {
             const url = this.thumbnailDataUrl(texture.id);
             return html`
@@ -8397,7 +8443,13 @@ export class GnumarusShell extends LitElement {
                 @click=${(): void => this.onTexturePickerSelect(texture.id)}
               >
                 ${url !== null
-                  ? html`<img class="picker-thumb" src=${url} alt="" data-texture-id=${texture.id} />`
+                  ? html`<img
+                      class="picker-thumb"
+                      src=${url}
+                      alt=""
+                      data-texture-id=${texture.id}
+                      style=${this.texturePickerTileset ? this.canvasBackgroundCss() : ""}
+                    />`
                   : html`<span class="picker-empty" aria-hidden="true">∅</span>`}
                 <span class="picker-name">${texture.name}</span>
               </button>
@@ -9212,6 +9264,25 @@ export class GnumarusShell extends LitElement {
     dialog?.showModal();
   }
 
+  /** Inline CSS background matching the project canvas (solid color or checkerboard). */
+  private canvasBackgroundCss(): string {
+    if (this.engine === null) {
+      return "background-color: transparent;";
+    }
+    const checker = this.engine.getCheckerSettings();
+    const background = this.engine.getBackgroundSettings();
+    if (background.mode === "solid") {
+      return `background-color: ${background.color};`;
+    }
+    const sizeX = Math.max(1, Math.floor(checker.sizeX));
+    const sizeY = Math.max(1, Math.floor(checker.sizeY));
+    return (
+      `background-color: ${checker.colorA}; ` +
+      `background-image: repeating-conic-gradient(${checker.colorA} 0% 25%, ${checker.colorB} 0% 50%); ` +
+      `background-size: ${sizeX * 2}px ${sizeY * 2}px;`
+    );
+  }
+
   /** Floating tiles window: pick tiles from the effective tileset grid. */
   private renderTileWindow() {
     const tilesetId = this.engine?.getTileBrushTilesetId() ?? null;
@@ -9255,7 +9326,7 @@ export class GnumarusShell extends LitElement {
             : html`
                 <div
                   class="tile-grid"
-                  style="grid-template-columns: repeat(${columns}, ${size.w * previewScale}px);"
+                  style="grid-template-columns: repeat(${columns}, ${size.w * previewScale}px); ${this.canvasBackgroundCss()}"
                 >
                   ${cells.map(
                     (cell) => html`

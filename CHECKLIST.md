@@ -354,3 +354,7 @@
 - [x] 3D model view (orbit/zoom/pan/reset) + live raster + commit/cancel + history + format persistence + unit tests (452 passed)
 - [x] Tool UI (button/options/readout/drag/keys) + i18n en+pt-BR
 - [x] E2E (orbit/commit/cancel/undo/reopen); build + unit green; targeted e2e green; full suite pending (user interrupted, to run later); docs updated
+- [x] Tile window com fundo do canvas (checker CSS / cor sólida) + e2e
+- [x] Picker de tileset sem No/New texture + thumbs com fundo + e2e
+- [x] Inversão dos dois eixos da órbita + e2e de direção
+- [x] Setting `modelLighting` (unlit/lit) + engine/setter/cache/i18n + unit + e2e (só novos); build + deploy + docs

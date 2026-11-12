@@ -11145,3 +11145,117 @@ test("3d model transform requires a model cell", async ({ page }) => {
   await paintCenter(page);
   await expect(page.locator("gnumarus-shell")).toContainText("Select a 3D model cell first");
 });
+
+test("tile window draws the project canvas background @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await paintCenter(page);
+  await page.locator('gnumarus-shell [data-testid="tool-tilebrush"]').click();
+  await page.locator('gnumarus-shell [data-testid="tile-tileset"]').click();
+  await page.locator('gnumarus-shell [data-testid="texture-picker-item"]').first().click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Tileset:");
+  await page.locator('gnumarus-shell [data-testid="tile-window-toggle"]').click();
+  const grid = page.locator('gnumarus-shell [data-testid="tile-window"] .tile-grid');
+  await expect(grid).toBeVisible();
+  await expect(grid).toHaveAttribute("style", /repeating-conic-gradient/);
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.locator("gnumarus-shell select#backgroundMode").selectOption("solid");
+  await page.locator("gnumarus-shell dialog#settingsDialog").getByRole("button", { name: "Close" }).click();
+  await expect(grid).toHaveAttribute("style", /background-color: #808080/);
+});
+
+test("tileset texture picker lists project textures on the canvas background @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.locator('gnumarus-shell [data-testid="tool-tilebrush"]').click();
+  await page.locator('gnumarus-shell [data-testid="tile-tileset"]').click();
+  const dialog = page.locator("gnumarus-shell dialog#texturePickerDialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('[data-testid="texture-picker-none"]')).toHaveCount(0);
+  await expect(dialog.locator('[data-testid="texture-picker-new"]')).toHaveCount(0);
+  await expect(dialog.locator('[data-testid="texture-picker-item"]')).not.toHaveCount(0);
+  await expect(dialog.locator("img.picker-thumb").first()).toHaveAttribute(
+    "style",
+    /repeating-conic-gradient/,
+  );
+});
+
+test("3d model transform drag orbits inverted on both axes @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubModelPicker(page, "tri.stl", SIMPLE_STL);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  const modelId = await cellModel3dId(page, "layer0", 0);
+  expect(typeof modelId).toBe("string");
+  const before = await modelViewOf(page, modelId as string);
+  expect(before).not.toBeNull();
+  await page.locator('gnumarus-shell [data-testid="tool-modeltransform"]').click();
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const drag = async (dx: number, dy: number): Promise<void> => {
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + dx, box.y + box.height / 2 + dy, { steps: 5 });
+    await page.mouse.up();
+  };
+  await drag(120, 0);
+  await page.locator('gnumarus-shell [data-testid="model-view-commit"]').click();
+  const afterX = await modelViewOf(page, modelId as string);
+  expect(afterX?.azimuth ?? 0).toBeCloseTo(((before?.azimuth ?? 0) - 48 + 360) % 360, 0);
+  expect(afterX?.elevation ?? 0).toBeCloseTo(before?.elevation ?? 0, 1);
+  await page.keyboard.press("r");
+  await page.locator('gnumarus-shell [data-testid="model-view-commit"]').click();
+  await drag(0, 80);
+  await page.locator('gnumarus-shell [data-testid="model-view-commit"]').click();
+  const afterY = await modelViewOf(page, modelId as string);
+  expect(afterY?.elevation ?? 0).toBeCloseTo(24.1 + 32, 0);
+  expect(afterY?.azimuth ?? 0).toBeCloseTo(39.8, 0);
+});
+
+test("model lighting setting switches unlit and lit rendering @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubModelPicker(page, "tri.stl", SIMPLE_STL);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText('3D model "tri" imported');
+  const lightingOf = (): Promise<string | null> =>
+    page.evaluate(() => {
+      const root = window as unknown as { __gnumarus?: { engine?: { getModelLighting(): string } } };
+      return root.__gnumarus?.engine?.getModelLighting() ?? null;
+    });
+  await expect(lightingOf()).resolves.toBe("unlit");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#settingsDialog");
+  await expect(dialog.locator("select#storageModelLighting")).toHaveValue("unlit");
+  await dialog.locator("select#storageModelLighting").selectOption("lit");
+  await expect(lightingOf()).resolves.toBe("lit");
+  const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.storage.v1"));
+  expect(persisted).toContain('"modelLighting": "lit"');
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await expect
+    .poll(async () => modelPaintedPixels(page), { timeout: 10000 })
+    .toBeGreaterThan(0);
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page
+    .locator('gnumarus-shell [aria-label="Reset project texture format to default"]')
+    .click();
+  await expect(
+    page.locator("gnumarus-shell dialog#settingsDialog select#storageModelLighting"),
+  ).toHaveValue("unlit");
+  await expect(lightingOf()).resolves.toBe("unlit");
+  const resetPersisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.storage.v1"));
+  expect(resetPersisted).toContain('"modelLighting": "unlit"');
+  await expect
+    .poll(async () => modelPaintedPixels(page), { timeout: 10000 })
+    .toBeGreaterThan(0);
+});

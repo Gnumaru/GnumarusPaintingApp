@@ -196,6 +196,10 @@ import {
   DEFAULT_ROTATION_SETTINGS,
 } from "../settings/GnumarusRotationSettings";
 import {
+  DEFAULT_STORAGE_SETTINGS,
+  type GnumarusModelLighting,
+} from "../settings/GnumarusStorageSettings";
+import {
   animationCellKey,
   clampFrameDurationSec,
   defaultFrameName,
@@ -664,9 +668,9 @@ function normalizeModelAzimuth(azimuth: number): number {
 }
 
 /** Stable cache key for a model view (rounded to avoid float churn). */
-function modelViewKey(view: GnumarusModel3dView): string {
+function modelViewKey(view: GnumarusModel3dView, lighting: GnumarusModelLighting): string {
   const rounded = (value: number): number => Math.round(value * 1000) / 1000;
-  return `${rounded(view.azimuth)}:${rounded(view.elevation)}:${rounded(view.distance)}:${rounded(view.panX)}:${rounded(view.panY)}`;
+  return `${lighting}:${rounded(view.azimuth)}:${rounded(view.elevation)}:${rounded(view.distance)}:${rounded(view.panX)}:${rounded(view.panY)}`;
 }
 
 /** Pending orbit gesture: uncommitted view edits for one model. */
@@ -717,6 +721,34 @@ export class GnumarusCanvasEngine {
   private modelPending = new Set<string>();
   private modelCounter = 1;
   private modelNameCounter = 1;
+  /** How 3D models are shaded when rasterized (rendering-only). */
+  private modelLighting: GnumarusModelLighting = DEFAULT_STORAGE_SETTINGS.modelLighting;
+
+  /** Active 3D model shading mode. */
+  getModelLighting(): GnumarusModelLighting {
+    return this.modelLighting;
+  }
+
+  /**
+   * Set the 3D model shading mode and re-render every cached model raster,
+   * since shading is baked into the cached pixels.
+   */
+  setModelLighting(mode: GnumarusModelLighting): void {
+    if (mode !== "lit" && mode !== "unlit") {
+      return;
+    }
+    if (mode === this.modelLighting) {
+      return;
+    }
+    this.modelLighting = mode;
+    this.modelRasters.clear();
+    for (const modelId of this.models3d.keys()) {
+      this.ensureModelRaster(modelId);
+    }
+    this.syncAllLayerRenders();
+    this.render();
+    this.onLayersChanged?.();
+  }
   /** Tilemap entries by id (tileset + grid placements). */
   private tilemaps = new Map<string, GnumarusTilemapEntry>();
   /** Raster cache by tilemap id (project-sized, keyed by content revision). */
@@ -3129,7 +3161,7 @@ export class GnumarusCanvasEngine {
       bytes: bytes.slice(),
       view,
     });
-    this.modelRasters.set(modelId, { ...raster, key: modelViewKey(view) });
+    this.modelRasters.set(modelId, { ...raster, key: modelViewKey(view, this.modelLighting) });
     if (content !== undefined) {
       content.model3dId = modelId;
       this.syncAllLayerRenders();
@@ -3174,7 +3206,7 @@ export class GnumarusCanvasEngine {
     if (view === null) {
       return;
     }
-    const key = modelViewKey(view);
+    const key = modelViewKey(view, this.modelLighting);
     const cached = this.modelRasters.get(modelId);
     if (cached !== undefined && cached.key === key) {
       return;
@@ -3213,7 +3245,7 @@ export class GnumarusCanvasEngine {
   /** Cache key of the current effective view (or null when missing). */
   private effectiveModelViewKey(modelId: string): string | null {
     const view = this.effectiveModelView(modelId);
-    return view === null ? null : modelViewKey(view);
+    return view === null ? null : modelViewKey(view, this.modelLighting);
   }
 
   /**
@@ -3226,7 +3258,7 @@ export class GnumarusCanvasEngine {
       return null;
     }
     const cached = this.modelRasters.get(modelId);
-    if (cached === undefined || cached.key !== modelViewKey(view)) {
+    if (cached === undefined || cached.key !== modelViewKey(view, this.modelLighting)) {
       return null;
     }
     return { buffer: cached.buffer, width: cached.width, height: cached.height };
@@ -3296,7 +3328,7 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
-  /** Orbit the pending view by screen pixels (azimuth follows x, elevation follows y). */
+  /** Orbit the pending view by screen pixels (drag right orbits left, drag down tilts up). */
   orbitModel(dx: number, dy: number): boolean {
     if (this.modelOrbit === null) {
       if (!this.startModelOrbit()) {
@@ -3307,8 +3339,8 @@ export class GnumarusCanvasEngine {
     if (orbit === null) {
       return false;
     }
-    orbit.view.azimuth = normalizeModelAzimuth(orbit.view.azimuth + dx * 0.4);
-    orbit.view.elevation = Math.min(89, Math.max(-89, orbit.view.elevation - dy * 0.4));
+    orbit.view.azimuth = normalizeModelAzimuth(orbit.view.azimuth - dx * 0.4);
+    orbit.view.elevation = Math.min(89, Math.max(-89, orbit.view.elevation + dy * 0.4));
     this.ensureModelRaster(orbit.modelId);
     this.updatePreviews();
     this.onLayersChanged?.();
@@ -3384,7 +3416,7 @@ export class GnumarusCanvasEngine {
       return false;
     }
     const before = { ...entry.view };
-    if (modelViewKey(before) === modelViewKey(orbit.view)) {
+    if (modelViewKey(before, this.modelLighting) === modelViewKey(orbit.view, this.modelLighting)) {
       this.modelOrbit = null;
       return false;
     }
@@ -4040,6 +4072,52 @@ export class GnumarusCanvasEngine {
   }
 
   /**
+   * Replace every mesh material with an unlit equivalent that draws the
+   * texture and vertex colors directly, ignoring scene lights entirely.
+   */
+  private applyUnlitModelMaterials(object: THREE.Object3D): void {
+    interface UnlitMeshNode {
+      isMesh?: unknown;
+      geometry?: { getAttribute(name: string): unknown } | undefined;
+      material?: unknown;
+    }
+    interface SourceMaterial {
+      map?: unknown;
+      side?: unknown;
+      dispose?: unknown;
+    }
+    object.traverse((node: THREE.Object3D) => {
+      const mesh = node as unknown as UnlitMeshNode;
+      if (mesh.isMesh !== true || mesh.geometry === undefined) {
+        return;
+      }
+      const geometry = mesh.geometry;
+      const convert = (material: unknown): THREE.MeshBasicMaterial => {
+        const source = material as SourceMaterial | null;
+        const options: { map?: unknown; transparent: boolean } =
+          source?.map == null ? { transparent: true } : { map: source.map, transparent: true };
+        const basic = new THREE.MeshBasicMaterial(
+          options as unknown as { map?: THREE.DataTexture | undefined; transparent?: boolean },
+        );
+        const mutable = basic as unknown as { vertexColors?: boolean; side?: unknown; needsUpdate?: boolean };
+        mutable.vertexColors = geometry.getAttribute("color") !== undefined;
+        mutable.side = typeof source?.side === "number" ? source.side : THREE.DoubleSide;
+        mutable.needsUpdate = true;
+        if (typeof source?.dispose === "function") {
+          try {
+            (source as { dispose(): void }).dispose();
+          } catch {
+            // Best effort: never fail a raster.
+          }
+        }
+        return basic;
+      };
+      const converted = Array.isArray(mesh.material) ? mesh.material.map(convert) : convert(mesh.material);
+      (mesh as unknown as { material: unknown }).material = converted;
+    });
+  }
+
+  /**
    * Decode model bytes to a raster via an offscreen three.js render:
    * normalized to a unit box, fitted perspective camera, default lights,
    * transparent background. Null when unloadable or degenerate.
@@ -4077,10 +4155,22 @@ export class GnumarusCanvasEngine {
       group.scale.setScalar(normalized);
       group.position.copy(center).multiplyScalar(-normalized);
       const scene = new THREE.Scene();
-      scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
-      const key = new THREE.DirectionalLight(0xffffff, 1.5);
-      key.position.set(2, 3, 4);
-      scene.add(key);
+      if (this.modelLighting === "unlit") {
+        this.applyUnlitModelMaterials(object);
+      } else {
+        let fileHasLights = false;
+        object.traverse((node: THREE.Object3D) => {
+          if ((node as unknown as { isLight?: unknown }).isLight === true) {
+            fileHasLights = true;
+          }
+        });
+        if (!fileHasLights) {
+          scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
+          const key = new THREE.DirectionalLight(0xffffff, 1.5);
+          key.position.set(2, 3, 4);
+          scene.add(key);
+        }
+      }
       scene.add(group);
       const camera = new THREE.PerspectiveCamera(MODEL_ORBIT_FOV_DEG, 1, 0.01, 100);
       const direction = modelViewDirection(view.azimuth, view.elevation);

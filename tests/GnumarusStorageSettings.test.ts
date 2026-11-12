@@ -12,6 +12,7 @@ import {
   parseStorageFormat,
   parseProjectFileFormat,
   parseSvgStorage,
+  parseModelLighting,
   parseTextStorage,
   parseStorageSettings,
   serializeStorageSettings,
@@ -30,6 +31,7 @@ describe("GnumarusStorageSettings", () => {
       projectFile: "gpa",
       textStorage: "embedded",
       svgStorage: "compressed",
+      modelLighting: "unlit",
     });
     expect(GNUMARUS_MIN_STORAGE_QUALITY).toBe(0);
     expect(GNUMARUS_MAX_STORAGE_QUALITY).toBe(100);
@@ -62,6 +64,7 @@ describe("GnumarusStorageSettings", () => {
       projectFile: "gpa",
       textStorage: "embedded",
       svgStorage: "compressed",
+      modelLighting: "unlit",
     });
     expect(
       parseStorageSettings(JSON.stringify({ lossless: false, quality: 75, projectFile: "json" })),
@@ -75,6 +78,7 @@ describe("GnumarusStorageSettings", () => {
       projectFile: "json",
       textStorage: "embedded",
       svgStorage: "compressed",
+      modelLighting: "unlit",
     });
     expect(
       parseStorageSettings(JSON.stringify({ lossless: false, quality: 75, projectFile: "rar" })),
@@ -88,25 +92,32 @@ describe("GnumarusStorageSettings", () => {
       projectFile: "gpa",
       textStorage: "embedded",
       svgStorage: "compressed",
+      modelLighting: "unlit",
     });
     expect(
       parseStorageSettings(JSON.stringify({ format: "png", lossless: true, quality: 50, pngLevel: 3, jpgQuality: 80 })),
-    ).toEqual({ format: "png", lossless: true, quality: 50, pngLevel: 3, jpgQuality: 80, brushQuality: 90, projectFile: "gpa", textStorage: "embedded", svgStorage: "compressed" });
+    ).toEqual({ format: "png", lossless: true, quality: 50, pngLevel: 3, jpgQuality: 80, brushQuality: 90, projectFile: "gpa", textStorage: "embedded", svgStorage: "compressed", modelLighting: "unlit" });
     expect(
       parseStorageSettings(JSON.stringify({ lossless: true, quality: 50, textStorage: "html" })),
-    ).toEqual({ format: "jxl", lossless: true, quality: 50, pngLevel: 9, jpgQuality: 95, brushQuality: 90, projectFile: "gpa", textStorage: "html", svgStorage: "compressed" });
+    ).toEqual({ format: "jxl", lossless: true, quality: 50, pngLevel: 9, jpgQuality: 95, brushQuality: 90, projectFile: "gpa", textStorage: "html", svgStorage: "compressed", modelLighting: "unlit" });
     expect(
       parseStorageSettings(JSON.stringify({ lossless: true, quality: 50, textStorage: "htmlZip" })),
-    ).toEqual({ format: "jxl", lossless: true, quality: 50, pngLevel: 9, jpgQuality: 95, brushQuality: 90, projectFile: "gpa", textStorage: "htmlZip", svgStorage: "compressed" });
+    ).toEqual({ format: "jxl", lossless: true, quality: 50, pngLevel: 9, jpgQuality: 95, brushQuality: 90, projectFile: "gpa", textStorage: "htmlZip", svgStorage: "compressed", modelLighting: "unlit" });
     expect(
       parseStorageSettings(JSON.stringify({ lossless: true, quality: 50, svgStorage: "raw" })),
-    ).toEqual({ format: "jxl", lossless: true, quality: 50, pngLevel: 9, jpgQuality: 95, brushQuality: 90, projectFile: "gpa", textStorage: "embedded", svgStorage: "raw" });
+    ).toEqual({ format: "jxl", lossless: true, quality: 50, pngLevel: 9, jpgQuality: 95, brushQuality: 90, projectFile: "gpa", textStorage: "embedded", svgStorage: "raw", modelLighting: "unlit" });
     expect(
       parseStorageSettings(JSON.stringify({ lossless: true, quality: 50, svgStorage: "embedded" })),
-    ).toEqual({ format: "jxl", lossless: true, quality: 50, pngLevel: 9, jpgQuality: 95, brushQuality: 90, projectFile: "gpa", textStorage: "embedded", svgStorage: "embedded" });
+    ).toEqual({ format: "jxl", lossless: true, quality: 50, pngLevel: 9, jpgQuality: 95, brushQuality: 90, projectFile: "gpa", textStorage: "embedded", svgStorage: "embedded", modelLighting: "unlit" });
     expect(
       parseStorageSettings(JSON.stringify({ lossless: true, quality: 50, textStorage: "bogus" })),
-    ).toEqual({ format: "jxl", lossless: true, quality: 50, pngLevel: 9, jpgQuality: 95, brushQuality: 90, projectFile: "gpa", textStorage: "embedded", svgStorage: "compressed" });
+    ).toEqual({ format: "jxl", lossless: true, quality: 50, pngLevel: 9, jpgQuality: 95, brushQuality: 90, projectFile: "gpa", textStorage: "embedded", svgStorage: "compressed", modelLighting: "unlit" });
+    expect(
+      parseStorageSettings(JSON.stringify({ lossless: true, quality: 50, modelLighting: "lit" })),
+    ).toEqual({ format: "jxl", lossless: true, quality: 50, pngLevel: 9, jpgQuality: 95, brushQuality: 90, projectFile: "gpa", textStorage: "embedded", svgStorage: "compressed", modelLighting: "lit" });
+    expect(
+      parseStorageSettings(JSON.stringify({ lossless: true, quality: 50, modelLighting: "bogus" })),
+    ).toEqual({ format: "jxl", lossless: true, quality: 50, pngLevel: 9, jpgQuality: 95, brushQuality: 90, projectFile: "gpa", textStorage: "embedded", svgStorage: "compressed", modelLighting: "unlit" });
   });
 
   it("parses formats with a JXL fallback and clamps levels", () => {
@@ -131,6 +142,10 @@ describe("GnumarusStorageSettings", () => {
     expect(parseSvgStorage("embedded")).toBe("embedded");
     expect(parseSvgStorage("zip")).toBe("compressed");
     expect(parseSvgStorage(undefined)).toBe("compressed");
+    expect(parseModelLighting("unlit")).toBe("unlit");
+    expect(parseModelLighting("lit")).toBe("lit");
+    expect(parseModelLighting("shaded")).toBe("unlit");
+    expect(parseModelLighting(undefined)).toBe("unlit");
     expect(clampStoragePngLevel(4)).toBe(4);
     expect(clampStoragePngLevel(4.9)).toBe(4);
     expect(clampStoragePngLevel(-1)).toBe(0);
@@ -152,6 +167,7 @@ describe("GnumarusStorageSettings", () => {
       projectFile: "gpa",
       textStorage: "embedded",
       svgStorage: "compressed",
+      modelLighting: "unlit",
     });
     expect(parseStorageSettings(JSON.stringify({ lossless: false, quality: -1 }))).toEqual({
       format: "jxl",
@@ -163,6 +179,7 @@ describe("GnumarusStorageSettings", () => {
       projectFile: "gpa",
       textStorage: "embedded",
       svgStorage: "compressed",
+      modelLighting: "unlit",
     });
     expect(parseStorageSettings(JSON.stringify({ lossless: true, quality: 50, brushQuality: 250 }))).toEqual({
       format: "jxl",
@@ -174,6 +191,7 @@ describe("GnumarusStorageSettings", () => {
       projectFile: "gpa",
       textStorage: "embedded",
       svgStorage: "compressed",
+      modelLighting: "unlit",
     });
   });
 

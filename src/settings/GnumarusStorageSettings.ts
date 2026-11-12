@@ -9,6 +9,9 @@
  * future saves. `textStorage` selects where rich text documents are saved:
  * inline in the project data file (`embedded`, the default), raw `.html`
  * files, or single-file `.zip` archives; loading sniffs each text reference.
+ * `modelLighting` selects how 3D models are shaded when rasterized:
+ * flat unlit colors (`unlit`, the default) or the file's own lights with a
+ * directional fallback (`lit`); it only affects rendering, never the files.
  */
 export type GnumarusStorageFormat = "jxl" | "webp" | "jpg" | "png";
 
@@ -31,6 +34,14 @@ export type GnumarusTextStorage = "embedded" | "html" | "htmlZip";
  */
 export type GnumarusSvgStorage = "raw" | "compressed" | "embedded";
 
+/**
+ * How 3D models are shaded when rasterized: flat unlit colors drawn
+ * directly from textures and vertex colors (`unlit`, the default), or lit
+ * by the lights in the imported file with a directional light created when
+ * the file has none (`lit`). Rendering-only; never changes saved files.
+ */
+export type GnumarusModelLighting = "unlit" | "lit";
+
 export interface GnumarusStorageSettings {
   /** Texture container format, default JXL. */
   format: GnumarusStorageFormat;
@@ -50,6 +61,8 @@ export interface GnumarusStorageSettings {
   textStorage: GnumarusTextStorage;
   /** Vector graphic storage, default single-file ZIP archives. */
   svgStorage: GnumarusSvgStorage;
+  /** 3D model shading, default flat unlit colors. */
+  modelLighting: GnumarusModelLighting;
 }
 
 export const DEFAULT_STORAGE_SETTINGS: GnumarusStorageSettings = {
@@ -62,6 +75,7 @@ export const DEFAULT_STORAGE_SETTINGS: GnumarusStorageSettings = {
   projectFile: "gpa",
   textStorage: "embedded",
   svgStorage: "compressed",
+  modelLighting: "unlit",
 };
 
 export const STORAGE_SETTINGS_STORAGE_KEY = "gnumarus.settings.storage.v1";
@@ -122,6 +136,10 @@ export function parseProjectFileFormat(value: unknown): GnumarusProjectFileForma
   return value === "json" ? "json" : "gpa";
 }
 
+export function parseModelLighting(value: unknown): GnumarusModelLighting {
+  return value === "lit" ? "lit" : "unlit";
+}
+
 export function parseSvgStorage(value: unknown): GnumarusSvgStorage {
   if (value === "raw" || value === "embedded") {
     return value;
@@ -147,7 +165,7 @@ export function parseStorageSettings(jsonText: string): GnumarusStorageSettings 
   if (!isRecord(parsed)) {
     throw new GnumarusStorageSettingsError("storage settings root must be an object");
   }
-  const { format, lossless, quality, pngLevel, jpgQuality, brushQuality, projectFile, textStorage, svgStorage } = parsed;
+  const { format, lossless, quality, pngLevel, jpgQuality, brushQuality, projectFile, textStorage, svgStorage, modelLighting } = parsed;
   if (typeof lossless !== "boolean" || typeof quality !== "number") {
     throw new GnumarusStorageSettingsError("storage settings have invalid fields");
   }
@@ -163,6 +181,7 @@ export function parseStorageSettings(jsonText: string): GnumarusStorageSettings 
     projectFile: parseProjectFileFormat(projectFile),
     textStorage: parseTextStorage(textStorage),
     svgStorage: parseSvgStorage(svgStorage),
+    modelLighting: parseModelLighting(modelLighting),
   };
 }
 
@@ -178,6 +197,7 @@ export function serializeStorageSettings(settings: GnumarusStorageSettings): str
       projectFile: parseProjectFileFormat(settings.projectFile),
       textStorage: parseTextStorage(settings.textStorage),
       svgStorage: parseSvgStorage(settings.svgStorage),
+      modelLighting: parseModelLighting(settings.modelLighting),
     },
     null,
     2,
