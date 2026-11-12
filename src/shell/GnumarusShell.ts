@@ -891,6 +891,23 @@ export class GnumarusShell extends LitElement {
       flex-direction: column;
       min-height: 0;
     }
+    .anim-matrix.sized {
+      flex: 0 0 auto;
+      max-height: none;
+    }
+    .matrix-resize-handle {
+      flex: 0 0 auto;
+      height: 7px;
+      cursor: ns-resize;
+      touch-action: none;
+      background: transparent;
+      border: 0;
+      padding: 0;
+    }
+    .matrix-resize-handle:hover,
+    .matrix-resize-handle:active {
+      background: #0e639c;
+    }
     .anim-scroll {
       overflow: auto;
       min-height: 0;
@@ -1574,6 +1591,7 @@ export class GnumarusShell extends LitElement {
     exportSheetWebpLossless: { type: Boolean },
     playing: { type: Boolean },
     uiHidden: { type: Boolean },
+    matrixHeightPx: { type: Number },
     toastMessage: { type: String },
     toastDurationSec: { type: Number },
     swatches: { attribute: false },
@@ -1771,6 +1789,8 @@ export class GnumarusShell extends LitElement {
   declare exportSheetWebpLossless: boolean;
   declare playing: boolean;
   declare uiHidden: boolean;
+  /** Explicit animation-matrix height in px (null = automatic). */
+  declare matrixHeightPx: number | null;
   declare toastMessage: string;
   declare toastDurationSec: number;
   declare onionEnabled: boolean;
@@ -1974,6 +1994,7 @@ export class GnumarusShell extends LitElement {
     this.playing = false;
     this.playTimer = null;
     this.uiHidden = false;
+    this.matrixHeightPx = null;
     this.toastMessage = "";
     this.toastDurationSec = DEFAULT_TOAST_SETTINGS.durationSec;
     this.onionEnabled = DEFAULT_ONION_SETTINGS.enabled;
@@ -5102,11 +5123,36 @@ export class GnumarusShell extends LitElement {
     `;
   }
 
+  /** Smallest animation-matrix height in px (corner plus a row sliver). */
+  private readonly minMatrixHeightPx = 56;
+
+  /** Resize the animation matrix by dragging its top edge. */
+  private onMatrixResizeStart(event: PointerEvent): void {
+    if (this.engine === null) {
+      return;
+    }
+    event.preventDefault();
+    const startY = event.clientY;
+    const matrix = this.shadowRoot?.querySelector(".anim-matrix") as HTMLElement | null;
+    const startH = matrix?.getBoundingClientRect().height ?? 148;
+    const move = (moveEvent: PointerEvent): void => {
+      const max = Math.max(120, window.innerHeight - 240);
+      this.matrixHeightPx = Math.min(max, Math.max(this.minMatrixHeightPx, Math.round(startH + (startY - moveEvent.clientY))));
+    };
+    const up = (): void => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  }
+
   private renderAnimationMatrix() {
     if (this.engine === null) {
       return html``;
-    }
-    const matrix = this.engine.getAnimationMatrix();
+    }    const matrix = this.engine.getAnimationMatrix();
     const columns = `120px repeat(${matrix.frameCount}, 76px)`;
     const activeAnimation = this.engine.getActiveAnimationName();
     const activeFrames =
@@ -5119,7 +5165,17 @@ export class GnumarusShell extends LitElement {
           );
     const animationFrameCounts = countAnimationFrames(this.engine.getNamedAnimations());
     return html`
-      <div class="anim-matrix" data-testid="animation-matrix" aria-label=${tr("matrix.matrixAria")} ?hidden=${this.uiHidden}>
+      <div class="anim-matrix ${this.matrixHeightPx === null ? "" : "sized"}" data-testid="animation-matrix" aria-label=${tr("matrix.matrixAria")} ?hidden=${this.uiHidden}
+        style=${this.matrixHeightPx === null ? "" : `height: ${this.matrixHeightPx}px;`}
+      >
+        <div
+          class="matrix-resize-handle"
+          data-testid="matrix-resize"
+          role="separator"
+          aria-label=${tr("matrix.resizeHint")}
+          title=${tr("matrix.resizeHint")}
+          @pointerdown=${(event: PointerEvent): void => this.onMatrixResizeStart(event)}
+        ></div>
         <div class="anim-scroll">
           <div class="anim-grid" style="grid-template-columns: ${columns};">
             <div class="anim-corner">
@@ -5418,6 +5474,15 @@ export class GnumarusShell extends LitElement {
     this.fsSupported = isFileSystemAccessSupported();
     window.addEventListener("keydown", this.onGlobalKeyDown);
     window.addEventListener("pointerdown", this.onGlobalPointerDown);
+    // Desktop-like chrome: no native browser menu on our own buttons and
+    // menus (toolbar, menubar, dropdowns, context menus, flyouts). Text
+    // fields keep theirs so copy/paste still works.
+    this.shadowRoot?.addEventListener("contextmenu", (event: Event): void => {
+      if (event.defaultPrevented || this.eventInField(event)) {
+        return;
+      }
+      event.preventDefault();
+    });
     const storedChecker = this.loadCheckerSettings();
     this.checkerMode = storedChecker.mode;
     this.checkerSizeX = storedChecker.sizeX;
@@ -5871,7 +5936,7 @@ export class GnumarusShell extends LitElement {
   }
 
   /** Detect text editing focus, piercing shadow DOM retargeting via composedPath. */
-  private eventInField(event: KeyboardEvent): boolean {    if (typeof event.composedPath === "function") {
+  private eventInField(event: Event): boolean {    if (typeof event.composedPath === "function") {
       for (const node of event.composedPath()) {
         if (
           node instanceof HTMLInputElement ||

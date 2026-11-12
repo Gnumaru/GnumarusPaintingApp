@@ -12671,3 +12671,67 @@ test("changing frame/layer scrolls the matrix and layers list into view @recent"
   expect(after.listTop).toBeGreaterThan(0);
   expect(after.scrollTop).toBeGreaterThan(0);
 });
+
+test("browser context menu is suppressed on toolbar buttons and menus @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    (window as unknown as { __ctxPrevented?: boolean[] }).__ctxPrevented = [];
+    document.addEventListener("contextmenu", (event: Event) => {
+      (window as unknown as { __ctxPrevented?: boolean[] }).__ctxPrevented?.push(event.defaultPrevented);
+    });
+  });
+  // Plain toolbar button without a drawer flyout.
+  await page.locator('gnumarus-shell [aria-label="Loupe"]').click({ button: "right" });
+  // Menubar button.
+  await page.getByRole("button", { name: "File" }).click({ button: "right" });
+  // Layer context-menu item (menu stays open: right-click never activates).
+  await page.locator('gnumarus-shell [data-layer-id="layer0"]').click({ button: "right" });
+  await page.locator("gnumarus-shell .context-menu").getByRole("button", { name: "Add above" }).click({ button: "right" });
+  await page.keyboard.press("Escape");
+  // Text fields keep their native menu for copy/paste.
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.locator("gnumarus-shell dialog#settingsDialog input").first().click({ button: "right" });
+  await page.keyboard.press("Escape");
+  const prevented = await page.evaluate(
+    () => (window as unknown as { __ctxPrevented?: boolean[] }).__ctxPrevented ?? [],
+  );
+  expect(prevented).toEqual([true, true, true, true, false]);
+});
+
+test("animation matrix resizes by dragging its top edge @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  const handle = page.locator('gnumarus-shell [data-testid="matrix-resize"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click();
+  const before = (await matrix.boundingBox())?.height ?? 0;
+  expect(before).toBeGreaterThan(0);
+  const hbox = (await handle.boundingBox()) ?? null;
+  if (hbox === null) {
+    throw new Error("resize handle has no bounding box");
+  }
+  const startX = hbox.x + hbox.width / 2;
+  const startY = hbox.y + hbox.height / 2;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX, startY - 60, { steps: 5 });
+  await page.mouse.up();
+  const grown = (await matrix.boundingBox())?.height ?? 0;
+  expect(grown).toBeGreaterThanOrEqual(before + 50);
+  const hbox2 = (await handle.boundingBox()) ?? null;
+  if (hbox2 === null) {
+    throw new Error("resize handle has no bounding box");
+  }
+  await page.mouse.move(hbox2.x + hbox2.width / 2, hbox2.y + hbox2.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(startX, startY + 40, { steps: 5 });
+  await page.mouse.up();
+  const shrunk = (await matrix.boundingBox())?.height ?? 0;
+  expect(shrunk).toBeLessThan(grown);
+  // The matrix stays functional after resizing.
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  expect((await getMatrix(page)).currentFrame).toBe(0);
+});
