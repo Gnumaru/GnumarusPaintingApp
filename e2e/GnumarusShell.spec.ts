@@ -11417,3 +11417,91 @@ test("fly camera pose survives save and reopen @recent", async ({ page }) => {
   const reopened = await flyPoseOf(page);
   expect(reopened).toEqual(before);
 });
+
+test("fly camera drag up looks up and drag down looks down @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubModelPicker(page, "tri.stl", SIMPLE_STL);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("imported");
+  await selectTool(page, "Fly camera");
+  const before = await flyPoseOf(page);
+  expect(before).not.toBeNull();
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx, cy - 60, { steps: 5 });
+  await page.mouse.up();
+  const lookedUp = await flyPoseOf(page);
+  expect(lookedUp?.pitchDeg ?? 0).toBeLessThan(before?.pitchDeg ?? 0);
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx, cy + 60, { steps: 5 });
+  await page.mouse.up();
+  const lookedDown = await flyPoseOf(page);
+  expect(lookedDown?.pitchDeg ?? 0).toBeGreaterThan(lookedUp?.pitchDeg ?? 0);
+});
+
+test("fly camera turns with J/L and pitches with I/K within plus-minus 89 degrees @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubModelPicker(page, "tri.stl", SIMPLE_STL);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("imported");
+  await selectTool(page, "Fly camera");
+  const before = await flyPoseOf(page);
+  expect(before).not.toBeNull();
+  await page.keyboard.press("j");
+  const left = await flyPoseOf(page);
+  expect(left?.yawDeg ?? 0).toBeGreaterThan(before?.yawDeg ?? 0);
+  await page.keyboard.press("l");
+  const backYaw = await flyPoseOf(page);
+  // A hold-loop frame may land between down/up, so allow sub-degree drift.
+  expect(backYaw?.yawDeg ?? 0).toBeCloseTo(before?.yawDeg ?? 0, 0);
+  await page.keyboard.press("i");
+  const up = await flyPoseOf(page);
+  expect(up?.pitchDeg ?? 0).toBeLessThan(before?.pitchDeg ?? 0);
+  await page.keyboard.press("k");
+  const backPitch = await flyPoseOf(page);
+  expect(backPitch?.pitchDeg ?? 0).toBeCloseTo(before?.pitchDeg ?? 0, 0);
+  for (let n = 0; n < 20; n += 1) {
+    await page.keyboard.press("k");
+  }
+  expect((await flyPoseOf(page))?.pitchDeg ?? 0).toBe(89);
+  for (let n = 0; n < 40; n += 1) {
+    await page.keyboard.press("i");
+  }
+  expect((await flyPoseOf(page))?.pitchDeg ?? 0).toBe(-89);
+});
+
+test("fly camera keeps moving while a key is held and stops on release @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubModelPicker(page, "tri.stl", SIMPLE_STL);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("imported");
+  await selectTool(page, "Fly camera");
+  const before = await flyPoseOf(page);
+  expect(before).not.toBeNull();
+  await page.keyboard.down("w");
+  await page.waitForTimeout(500);
+  const held = await flyPoseOf(page);
+  // A single discrete step moves ~0.15 on x; holding must travel further.
+  expect(held?.x ?? 0).toBeLessThan((before?.x ?? 0) - 0.35);
+  await page.keyboard.up("w");
+  // The release may land while a frame is in flight, so wait for the pose
+  // to settle and then require full quiescence across a second window.
+  await page.waitForTimeout(400);
+  const settled = await flyPoseOf(page);
+  await page.waitForTimeout(300);
+  expect(await flyPoseOf(page)).toEqual(settled);
+});

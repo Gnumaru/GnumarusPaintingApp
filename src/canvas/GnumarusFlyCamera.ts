@@ -9,6 +9,18 @@
 /** Degrees the camera yaws per orbit keypress. */
 export const FLY_ORBIT_STEP_DEG = 5;
 
+/** Degrees the camera turns per look-key press (J/L yaw, I/K pitch). */
+export const FLY_KEY_STEP_DEG = 5;
+
+/** World units traveled per second while a fly-move key is held. */
+export const FLY_MOVE_SPEED_UNITS_PER_SEC = 2;
+
+/** Degrees turned per second while a fly yaw/orbit key is held. */
+export const FLY_TURN_SPEED_DEG_PER_SEC = 60;
+
+/** Degrees pitched per second while a fly pitch key is held. */
+export const FLY_PITCH_SPEED_DEG_PER_SEC = 45;
+
 /** Degrees the camera turns per pixel of look drag. */
 export const FLY_LOOK_DEG_PER_PX = 0.2;
 
@@ -106,15 +118,15 @@ export function flyPoseFromDirection(
   return { yawDeg, pitchDeg, x, y, z };
 }
 
-/** Orbit the pose left (+1) or right (-1) around a point ahead of the camera. */
-export function flyOrbitPose(pose: GnumarusFlyPose, direction: 1 | -1): GnumarusFlyPose {
+/** Orbit the pose around a point ahead of the camera by an arbitrary yaw delta. */
+export function flyOrbitByDegrees(pose: GnumarusFlyPose, deltaYawDeg: number): GnumarusFlyPose {
   const forward = flyForward(pose.yawDeg, pose.pitchDeg);
   const pivot: [number, number, number] = [
     pose.x + forward[0] * FLY_PIVOT_DISTANCE,
     pose.y + forward[1] * FLY_PIVOT_DISTANCE,
     pose.z + forward[2] * FLY_PIVOT_DISTANCE,
   ];
-  const yawDeg = pose.yawDeg + direction * FLY_ORBIT_STEP_DEG;
+  const yawDeg = pose.yawDeg + deltaYawDeg;
   const turned = flyForward(yawDeg, pose.pitchDeg);
   return {
     yawDeg,
@@ -122,5 +134,31 @@ export function flyOrbitPose(pose: GnumarusFlyPose, direction: 1 | -1): Gnumarus
     x: pivot[0] - turned[0] * FLY_PIVOT_DISTANCE,
     y: pivot[1] - turned[1] * FLY_PIVOT_DISTANCE,
     z: pivot[2] - turned[2] * FLY_PIVOT_DISTANCE,
+  };
+}
+
+/** Orbit the pose left (+1) or right (-1) around a point ahead of the camera. */
+export function flyOrbitPose(pose: GnumarusFlyPose, direction: 1 | -1): GnumarusFlyPose {
+  return flyOrbitByDegrees(pose, direction * FLY_ORBIT_STEP_DEG);
+}
+
+/**
+ * Turn the camera in place: positive yawDeltaDeg turns left, positive
+ * pitchDeltaDeg looks down. Pitch clamps to ±89°, yaw is unbounded.
+ */
+export function flyLookByDegrees(
+  pose: GnumarusFlyPose,
+  yawDeltaDeg: number,
+  pitchDeltaDeg: number,
+): GnumarusFlyPose {
+  return {
+    yawDeg: pose.yawDeg + yawDeltaDeg,
+    pitchDeg: Math.max(
+      -FLY_MAX_PITCH_DEG,
+      Math.min(FLY_MAX_PITCH_DEG, pose.pitchDeg + pitchDeltaDeg),
+    ),
+    x: pose.x,
+    y: pose.y,
+    z: pose.z,
   };
 }

@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  FLY_KEY_STEP_DEG,
   FLY_LOOK_DEG_PER_PX,
   FLY_MAX_PITCH_DEG,
+  FLY_MOVE_SPEED_UNITS_PER_SEC,
   FLY_MOVE_STEP,
   FLY_ORBIT_STEP_DEG,
+  FLY_PITCH_SPEED_DEG_PER_SEC,
   FLY_PIVOT_DISTANCE,
+  FLY_TURN_SPEED_DEG_PER_SEC,
   flyForward,
+  flyLookByDegrees,
+  flyOrbitByDegrees,
   flyOrbitPose,
   flyPoseFromDirection,
   flyRight,
@@ -22,8 +28,12 @@ function closeTo(actual: readonly [number, number, number], expected: readonly [
 describe("GnumarusFlyCamera", () => {
   it("exposes sane tuning constants", () => {
     expect(FLY_ORBIT_STEP_DEG).toBe(5);
+    expect(FLY_KEY_STEP_DEG).toBe(5);
     expect(FLY_LOOK_DEG_PER_PX).toBe(0.2);
     expect(FLY_MOVE_STEP).toBe(0.25);
+    expect(FLY_MOVE_SPEED_UNITS_PER_SEC).toBe(2);
+    expect(FLY_TURN_SPEED_DEG_PER_SEC).toBe(60);
+    expect(FLY_PITCH_SPEED_DEG_PER_SEC).toBe(45);
     expect(FLY_PIVOT_DISTANCE).toBe(5);
     expect(FLY_MAX_PITCH_DEG).toBe(89);
   });
@@ -78,6 +88,28 @@ describe("GnumarusFlyCamera", () => {
     expect(back.x).toBeCloseTo(start.x, 9);
     expect(back.y).toBeCloseTo(start.y, 9);
     expect(back.z).toBeCloseTo(start.z, 9);
+  });
+
+  it("orbits by arbitrary degrees matching the fixed left/right steps", () => {
+    const start: GnumarusFlyPose = { yawDeg: 39.8, pitchDeg: 24.1, x: 1, y: 1, z: 3 };
+    expect(flyOrbitByDegrees(start, 5)).toEqual(flyOrbitPose(start, 1));
+    expect(flyOrbitByDegrees(start, -5)).toEqual(flyOrbitPose(start, -1));
+    const quarter = flyOrbitByDegrees(start, 1.5);
+    expect(quarter.yawDeg).toBeCloseTo(41.3, 9);
+    expect(quarter.pitchDeg).toBeCloseTo(start.pitchDeg, 9);
+  });
+
+  it("turns in place with positive yaw left and positive pitch down, clamped", () => {
+    const start: GnumarusFlyPose = { yawDeg: 10, pitchDeg: 0, x: 1, y: 2, z: 3 };
+    expect(flyLookByDegrees(start, FLY_KEY_STEP_DEG, 0)).toEqual({ ...start, yawDeg: 15 });
+    expect(flyLookByDegrees(start, -FLY_KEY_STEP_DEG, 0)).toEqual({ ...start, yawDeg: 5 });
+    // I looks up (pitch decreases), K looks down (pitch increases).
+    expect(flyLookByDegrees(start, 0, -FLY_KEY_STEP_DEG)).toEqual({ ...start, pitchDeg: -5 });
+    expect(flyLookByDegrees(start, 0, FLY_KEY_STEP_DEG)).toEqual({ ...start, pitchDeg: 5 });
+    expect(flyLookByDegrees(start, 0, 200).pitchDeg).toBe(89);
+    expect(flyLookByDegrees(start, 0, -200).pitchDeg).toBe(-89);
+    // Yaw stays unbounded while pitch clamps.
+    expect(flyLookByDegrees(start, 720, 200)).toEqual({ ...start, yawDeg: 730, pitchDeg: 89 });
   });
 });
 

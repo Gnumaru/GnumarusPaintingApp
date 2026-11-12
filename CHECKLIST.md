@@ -362,3 +362,4 @@
 - [x] Flycam pose salva junto com a célula (parse/validação, write-through + dirty, resume no re-enter, save/reopen) + unit + 2 e2e novos verdes; build + deploy + docs
 - [x] Ferramenta flycam na gaveta do modeltransform (toast sem célula 3D, supressão de atalhos, WASDQEZCR + look-drag, pitch ±89°; transiente, sem pointer lock) + engine + i18n en+pt-BR
 - [x] Unit (GnumarusFlyCamera, 5 testes) + 3 novos e2e @recent verdes + 5 modeltransform ajustados verdes; build + deploy + docs
+- [x] Flycam lote 111 (drag vertical corrigido up=up, teclas J/L/I/K ±89°, contínuo ao segurar via rAF + parada no keyup/blur/switch/load) + 2 unit novos + 3 e2e novos verdes + 5 fly antigos re-rodados verdes; full unit 461; build + deploy + docs

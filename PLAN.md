@@ -612,7 +612,11 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Engine: pose flycam (yaw/pitch/pos) derivada da vista efetiva ao entrar; câmera explícita no decode (bypass da órbita); chave de cache inclui a pose; `enterFlycam`/`flyMove`/`flyLook`/`flyOrbit`/`flyResetView`/`getFlycam`/`exitFlycam` (implícito no setTool).
 - Testes: unidade pura (`GnumarusFlyCamera`, 5 testes) + 3 novos e2e @recent verdes (toast sem célula 3D, mover/olhar/orbitar/resetar, supressão de atalhos + saída com Esc); 5 testes do modeltransform ajustados para a gaveta e verdes; full suite não rodada, a pedido.
 
-## 110. Flycam pose salva junto com a célula (implemented)
+## 111. Flycam: corrigir olhar vertical, teclas J/L/I/K e movimento contínuo (implemented)
+- Drag vertical corrigido: arrastar para cima olha para cima e para baixo olha para baixo (pitch += dy; antes estava invertido).
+- Novas teclas: J gira para a esquerda, L para a direita, I olha para cima, K olha para baixo (passo discreto de 5° no keydown, como Z/C; pitch sempre limitado a ±89°).
+- Movimento contínuo ao segurar: set de teclas por `code` + loop rAF com dt (2 u/s translação, 60°/s órbita/giro, 45°/s arfagem); passo discreto mantido no keydown inicial (repeats viram no-op) para resposta imediata e testes determinísticos; keyup/blur/tool-switch/load/new-project/dispose param o loop.
+- Testes: 2 novos unitários puros (`flyOrbitByDegrees`, `flyLookByDegrees` + novas constantes) + 3 novos e2e @recent verdes (direção do pitch no drag, J/L/I/K com clamp ±89°, contínuo ao segurar + assentamento após soltar); 5 e2e fly antigos re-rodados verdes como regressão da área; full unit 461 verde; sem full e2e suite, a pedido.
 - `parseFlyCamPose` puro + `flyCam` no `GnumarusContentMeta`/`GnumarusCellContent` (validado no open, `null` quando ausente/inválido); save escreve de volta → sobrevive a save/reopen.
 - Engine escreve a pose no conteúdo da célula ativa a cada mutação (move/look/orbit/reset) + `onPixelsChanged` (dirty); `enterFlycam` retoma a pose salva ou deriva da vista de órbita atual; sair continua sem salvar nada extra.
 - 2 novos e2e @recent verdes (sair+voltar mantém a pose; save/reopen mantém a pose); full suite não rodada.

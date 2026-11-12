@@ -3919,36 +3919,29 @@ export class GnumarusShell extends LitElement {
     if (this.engine === null) {
       return;
     }
-    switch (event.key.toLowerCase()) {
-      case "w":
-        this.engine.flyMove(1, 0, 0);
+    // Movement keys go through the hold tracker: one discrete step on the
+    // initial keydown (repeats are no-ops) plus a rAF loop while held.
+    // KeyJ/KeyL turn left/right, KeyI/KeyK pitch up/down (±89° clamp).
+    switch (event.code) {
+      case "KeyW":
+      case "KeyA":
+      case "KeyS":
+      case "KeyD":
+      case "KeyQ":
+      case "KeyE":
+      case "KeyZ":
+      case "KeyC":
+      case "KeyJ":
+      case "KeyL":
+      case "KeyI":
+      case "KeyK":
+        this.engine.flyPressKey(event.code);
         break;
-      case "s":
-        this.engine.flyMove(-1, 0, 0);
-        break;
-      case "a":
-        this.engine.flyMove(0, -1, 0);
-        break;
-      case "d":
-        this.engine.flyMove(0, 1, 0);
-        break;
-      case "q":
-        this.engine.flyMove(0, 0, -1);
-        break;
-      case "e":
-        this.engine.flyMove(0, 0, 1);
-        break;
-      case "z":
-        this.engine.flyOrbit(1);
-        break;
-      case "c":
-        this.engine.flyOrbit(-1);
-        break;
-      case "r":
+      case "KeyR":
         this.engine.flyResetView();
         this.statusMessage = tr("status.flycamReset");
         break;
-      case "escape":
+      case "Escape":
         this.exitFlycam();
         break;
       default:
@@ -5104,8 +5097,8 @@ export class GnumarusShell extends LitElement {
       !this.eventInColorPicker(event) &&
       this.shadowRoot?.querySelector("dialog[open]") === null
     ) {
-      // Fly-camera mode owns every plain key: WASDQE fly, ZC orbit, R
-      // resets, Esc exits. Dialogs and text fields keep working above it.
+      // Fly-camera mode owns every plain key: WASDQE fly, ZC orbit, JL
+      // turn, IK pitch, R resets, Esc exits. Dialogs and text fields keep working above it.
       // All other editor shortcuts stay suppressed while flying (Ctrl
       // combos handled above still apply).
       this.handleFlycamKey(event);

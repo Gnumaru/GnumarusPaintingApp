@@ -200,10 +200,16 @@ import {
   type GnumarusModelLighting,
 } from "../settings/GnumarusStorageSettings";
 import {
+  FLY_KEY_STEP_DEG,
   FLY_LOOK_DEG_PER_PX,
   FLY_MAX_PITCH_DEG,
+  FLY_MOVE_SPEED_UNITS_PER_SEC,
   FLY_MOVE_STEP,
+  FLY_PITCH_SPEED_DEG_PER_SEC,
+  FLY_TURN_SPEED_DEG_PER_SEC,
   flyForward,
+  flyLookByDegrees,
+  flyOrbitByDegrees,
   flyOrbitPose,
   flyPoseFromDirection,
   flyRight,
@@ -735,6 +741,12 @@ export class GnumarusCanvasEngine {
   private flycam: { modelId: string; yawDeg: number; pitchDeg: number; x: number; y: number; z: number } | null = null;
   /** Active fly-camera look drag (client-pixel anchor), if any. */
   private flyLookDrag: { x: number; y: number } | null = null;
+  /** Fly-camera movement keys currently held (by KeyboardEvent.code). */
+  private readonly flyHeld = new Set<string>();
+  /** Pending hold-to-move frame while fly keys are held, if any. */
+  private flyHoldRaf: number | null = null;
+  /** Timestamp of the last hold-to-move frame, in milliseconds. */
+  private flyHoldLastMs = 0;
   /** Model ids with a decode already in flight. */
   private modelPending = new Set<string>();
   private modelCounter = 1;
@@ -3485,6 +3497,7 @@ export class GnumarusCanvasEngine {
   exitFlycam(): void {
     this.flycam = null;
     this.flyLookDrag = null;
+    this.stopFlyHold();
   }
 
   /** Eye (position + look target) driving the rasterizer while flying. */
@@ -3548,7 +3561,7 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
-  /** Turn the camera from a mouse drag: right looks right, down looks down. */
+  /** Turn the camera from a mouse drag: right looks right, up looks up. */
   flyLook(dxPixels: number, dyPixels: number): boolean {
     const fly = this.flycam;
     if (fly === null || !this.models3d.has(fly.modelId)) {
@@ -3560,7 +3573,7 @@ export class GnumarusCanvasEngine {
     fly.yawDeg -= dxPixels * FLY_LOOK_DEG_PER_PX;
     fly.pitchDeg = Math.max(
       -FLY_MAX_PITCH_DEG,
-      Math.min(FLY_MAX_PITCH_DEG, fly.pitchDeg - dyPixels * FLY_LOOK_DEG_PER_PX),
+      Math.min(FLY_MAX_PITCH_DEG, fly.pitchDeg + dyPixels * FLY_LOOK_DEG_PER_PX),
     );
     this.persistFlyPose();
     this.ensureModelRaster(fly.modelId);
@@ -3591,6 +3604,29 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
+  /** Turn the camera in place: positive yaw turns left, positive pitch looks down. */
+  flyLookByDegrees(yawDeltaDeg: number, pitchDeltaDeg: number): boolean {
+    const fly = this.flycam;
+    if (fly === null || !this.models3d.has(fly.modelId)) {
+      return false;
+    }
+    if (yawDeltaDeg === 0 && pitchDeltaDeg === 0) {
+      return false;
+    }
+    const moved = flyLookByDegrees(
+      { yawDeg: fly.yawDeg, pitchDeg: fly.pitchDeg, x: fly.x, y: fly.y, z: fly.z },
+      yawDeltaDeg,
+      pitchDeltaDeg,
+    );
+    fly.yawDeg = moved.yawDeg;
+    fly.pitchDeg = moved.pitchDeg;
+    this.persistFlyPose();
+    this.ensureModelRaster(fly.modelId);
+    this.updatePreviews();
+    this.onLayersChanged?.();
+    return true;
+  }
+
   /** Reset the fly pose to the classic 3/4 framing for the active model. */
   flyResetView(): boolean {
     const fly = this.flycam;
@@ -3609,6 +3645,217 @@ export class GnumarusCanvasEngine {
     this.onLayersChanged?.();
     return true;
   }
+
+  /** Keyboard codes driving the fly camera while held (KeyJ/KeyL turn, KeyI/KeyK pitch). */
+  private static readonly FLY_HELD_CODES = new Set([
+    "KeyW",
+    "KeyA",
+    "KeyS",
+    "KeyD",
+    "KeyQ",
+    "KeyE",
+    "KeyZ",
+    "KeyC",
+    "KeyJ",
+    "KeyL",
+    "KeyI",
+    "KeyK",
+  ]);
+
+  /**
+   * Press a fly-camera key: applies one discrete step immediately (shared
+   * with key repeat, which stays a no-op while held) and starts the
+   * hold-to-move loop. False when not flying or for unknown codes.
+   */
+  flyPressKey(code: string): boolean {
+    const fly = this.flycam;
+    if (fly === null || !this.models3d.has(fly.modelId)) {
+      return false;
+    }
+    if (!GnumarusCanvasEngine.FLY_HELD_CODES.has(code)) {
+      return false;
+    }
+    if (this.flyHeld.has(code)) {
+      return true;
+    }
+    this.flyHeld.add(code);
+    this.applyFlyKeyStep(code);
+    this.startFlyHoldLoop();
+    return true;
+  }
+
+  /** Release a held fly-camera key, stopping the hold loop when none remain. */
+  flyReleaseKey(code: string): void {
+    if (!this.flyHeld.delete(code)) {
+      return;
+    }
+    if (this.flyHeld.size === 0) {
+      this.stopFlyHoldLoop();
+    }
+  }
+
+  /** Stop hold-to-move and forget held keys (tool switch, load, blur, exit). */
+  private stopFlyHold(): void {
+    this.flyHeld.clear();
+    this.stopFlyHoldLoop();
+  }
+
+  private stopFlyHoldLoop(): void {
+    if (this.flyHoldRaf !== null) {
+      cancelAnimationFrame(this.flyHoldRaf);
+      this.flyHoldRaf = null;
+    }
+  }
+
+  private startFlyHoldLoop(): void {
+    if (this.flyHoldRaf !== null || this.flyHeld.size === 0 || this.disposed) {
+      return;
+    }
+    this.flyHoldLastMs = performance.now();
+    this.flyHoldRaf = requestAnimationFrame(this.flyHoldTick);
+  }
+
+  /** One discrete step for a freshly pressed fly key (mirrors the old keydown moves). */
+  private applyFlyKeyStep(code: string): void {
+    switch (code) {
+      case "KeyW":
+        this.flyMove(1, 0, 0);
+        break;
+      case "KeyS":
+        this.flyMove(-1, 0, 0);
+        break;
+      case "KeyA":
+        this.flyMove(0, -1, 0);
+        break;
+      case "KeyD":
+        this.flyMove(0, 1, 0);
+        break;
+      case "KeyQ":
+        this.flyMove(0, 0, -1);
+        break;
+      case "KeyE":
+        this.flyMove(0, 0, 1);
+        break;
+      case "KeyZ":
+        this.flyOrbit(1);
+        break;
+      case "KeyC":
+        this.flyOrbit(-1);
+        break;
+      case "KeyJ":
+        this.flyLookByDegrees(FLY_KEY_STEP_DEG, 0);
+        break;
+      case "KeyL":
+        this.flyLookByDegrees(-FLY_KEY_STEP_DEG, 0);
+        break;
+      case "KeyI":
+        this.flyLookByDegrees(0, -FLY_KEY_STEP_DEG);
+        break;
+      case "KeyK":
+        this.flyLookByDegrees(0, FLY_KEY_STEP_DEG);
+        break;
+      default:
+        break;
+    }
+  }
+
+  /** Continuous hold-to-move frame: scales the same steps by elapsed time. */
+  private readonly flyHoldTick = (nowMs: number): void => {
+    this.flyHoldRaf = null;
+    const fly = this.flycam;
+    if (fly === null || !this.models3d.has(fly.modelId) || this.flyHeld.size === 0 || this.disposed) {
+      this.flyHeld.clear();
+      return;
+    }
+    const dtSec = Math.min(0.1, Math.max(0, (nowMs - this.flyHoldLastMs) / 1000));
+    this.flyHoldLastMs = nowMs;
+    let forwardUnits = 0;
+    let rightUnits = 0;
+    let upUnits = 0;
+    let orbitDeg = 0;
+    let yawDeg = 0;
+    let pitchDeg = 0;
+    for (const code of this.flyHeld) {
+      switch (code) {
+        case "KeyW":
+          forwardUnits += FLY_MOVE_SPEED_UNITS_PER_SEC * dtSec;
+          break;
+        case "KeyS":
+          forwardUnits -= FLY_MOVE_SPEED_UNITS_PER_SEC * dtSec;
+          break;
+        case "KeyD":
+          rightUnits += FLY_MOVE_SPEED_UNITS_PER_SEC * dtSec;
+          break;
+        case "KeyA":
+          rightUnits -= FLY_MOVE_SPEED_UNITS_PER_SEC * dtSec;
+          break;
+        case "KeyE":
+          upUnits += FLY_MOVE_SPEED_UNITS_PER_SEC * dtSec;
+          break;
+        case "KeyQ":
+          upUnits -= FLY_MOVE_SPEED_UNITS_PER_SEC * dtSec;
+          break;
+        case "KeyZ":
+          orbitDeg += FLY_TURN_SPEED_DEG_PER_SEC * dtSec;
+          break;
+        case "KeyC":
+          orbitDeg -= FLY_TURN_SPEED_DEG_PER_SEC * dtSec;
+          break;
+        case "KeyJ":
+          yawDeg += FLY_TURN_SPEED_DEG_PER_SEC * dtSec;
+          break;
+        case "KeyL":
+          yawDeg -= FLY_TURN_SPEED_DEG_PER_SEC * dtSec;
+          break;
+        case "KeyI":
+          pitchDeg -= FLY_PITCH_SPEED_DEG_PER_SEC * dtSec;
+          break;
+        case "KeyK":
+          pitchDeg += FLY_PITCH_SPEED_DEG_PER_SEC * dtSec;
+          break;
+        default:
+          break;
+      }
+    }
+    let changed = false;
+    if (orbitDeg !== 0) {
+      const moved = flyOrbitByDegrees(
+        { yawDeg: fly.yawDeg, pitchDeg: fly.pitchDeg, x: fly.x, y: fly.y, z: fly.z },
+        orbitDeg,
+      );
+      fly.yawDeg = moved.yawDeg;
+      fly.pitchDeg = moved.pitchDeg;
+      fly.x = moved.x;
+      fly.y = moved.y;
+      fly.z = moved.z;
+      changed = true;
+    }
+    if (yawDeg !== 0 || pitchDeg !== 0) {
+      const moved = flyLookByDegrees(
+        { yawDeg: fly.yawDeg, pitchDeg: fly.pitchDeg, x: fly.x, y: fly.y, z: fly.z },
+        yawDeg,
+        pitchDeg,
+      );
+      fly.yawDeg = moved.yawDeg;
+      fly.pitchDeg = moved.pitchDeg;
+      changed = true;
+    }
+    if (forwardUnits !== 0 || rightUnits !== 0 || upUnits !== 0) {
+      const forward = flyForward(fly.yawDeg, fly.pitchDeg);
+      const right = flyRight(forward);
+      fly.x += forward[0] * forwardUnits + right[0] * rightUnits;
+      fly.y += forward[1] * forwardUnits + upUnits;
+      fly.z += forward[2] * forwardUnits + right[2] * rightUnits;
+      changed = true;
+    }
+    if (changed) {
+      this.persistFlyPose();
+      this.ensureModelRaster(fly.modelId);
+      this.updatePreviews();
+      this.onLayersChanged?.();
+    }
+    this.flyHoldRaf = requestAnimationFrame(this.flyHoldTick);
+  };
 
   /**
    * Commit the pending orbit view to the model entry (single undoable
@@ -6259,6 +6506,7 @@ export class GnumarusCanvasEngine {
     this.cells.clear();
     this.flycam = null;
     this.flyLookDrag = null;
+    this.stopFlyHold();
     this.lineAnchor = null;
     this.resetCurveState();
     this.stabilizerPos = null;
@@ -10980,6 +11228,7 @@ export class GnumarusCanvasEngine {
     if (tool !== "flycam") {
       this.flycam = null;
       this.flyLookDrag = null;
+      this.stopFlyHold();
     }
     if (this.tempEyedropper && tool !== "eyedropper") {
       // Manual tool change cancels the Ctrl-held temporary eyedropper.
@@ -11754,6 +12003,7 @@ export class GnumarusCanvasEngine {
     }
     this.disposed = true;
     this.stopFollowLoop();
+    this.stopFlyHoldLoop();
     this.disposeFloatingPlane();
     this.scene.remove(this.axisXLine);
     this.axisXLine.geometry.dispose();
@@ -13230,6 +13480,10 @@ export class GnumarusCanvasEngine {
       if (event.key === "Control") {
         this.endTempEyedropper();
       }
+      this.flyReleaseKey(event.code);
+    });
+    window.addEventListener("blur", () => {
+      this.stopFlyHold();
     });
   }
 
