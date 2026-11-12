@@ -12655,20 +12655,29 @@ test("changing frame/layer scrolls the matrix and layers list into view @recent"
         box.right <= area.right + 1;
       const scrollerBox = scroller.getBoundingClientRect();
       const cornerBox = (root?.querySelector(".anim-corner") as HTMLElement | null)?.getBoundingClientRect();
-      // Sticky headers paint over the scrolled cells: the current cell must
-      // clear the layer-name column (left) and the frame-header row (top).
+      // Usable area: client box (no borders, no classic scrollbars) minus
+      // the sticky overlays (layer-name column left, frame-header row top).
+      const usableLeft = scrollerBox.left + scroller.clientLeft + (cornerBox?.width ?? 0);
+      const usableTop = scrollerBox.top + scroller.clientTop + (cornerBox?.height ?? 0);
       const usable = new DOMRect(
-        scrollerBox.left + (cornerBox?.width ?? 0),
-        scrollerBox.top + (cornerBox?.height ?? 0),
-        Math.max(0, scrollerBox.width - (cornerBox?.width ?? 0)),
-        Math.max(0, scrollerBox.height - (cornerBox?.height ?? 0)),
+        usableLeft,
+        usableTop,
+        Math.max(0, scrollerBox.left + scroller.clientLeft + scroller.clientWidth - usableLeft),
+        Math.max(0, scrollerBox.top + scroller.clientTop + scroller.clientHeight - usableTop),
+      );
+      const listBox = list.getBoundingClientRect();
+      const listUsable = new DOMRect(
+        listBox.left + list.clientLeft,
+        listBox.top + list.clientTop,
+        list.clientWidth,
+        list.clientHeight,
       );
       return {
         listTop: list.scrollTop,
         scrollLeft: scroller.scrollLeft,
         scrollTop: scroller.scrollTop,
         cellVisible: inView(cell.getBoundingClientRect(), usable),
-        rowVisible: inView(row.getBoundingClientRect(), list.getBoundingClientRect()),
+        rowVisible: inView(row.getBoundingClientRect(), listUsable),
       };
     });
   // Navigate with the keyboard: unlike clicking, this performs no automatic
@@ -12693,6 +12702,16 @@ test("changing frame/layer scrolls the matrix and layers list into view @recent"
   await expect.poll(async () => scrollState(), { timeout: 10000 }).toMatchObject({ cellVisible: true, rowVisible: true });
   after = await scrollState();
   expect(after.listTop).toBe(0);
+  // Last frame: the right edge must clear the vertical scrollbar itself.
+  for (let i = 0; i < 19; i += 1) {
+    await page.keyboard.press("ArrowRight");
+  }
+  await expect.poll(async () => scrollState(), { timeout: 10000 }).toMatchObject({ cellVisible: true });
+  // Bottom layer on the last frame: the corner cell must clear both scrollbars.
+  for (let i = 0; i < 8; i += 1) {
+    await page.keyboard.press("ArrowDown");
+  }
+  await expect.poll(async () => scrollState(), { timeout: 10000 }).toMatchObject({ cellVisible: true, rowVisible: true });
 });
 
 test("browser context menu is suppressed on toolbar buttons and menus @recent", async ({ page }) => {

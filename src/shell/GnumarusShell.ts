@@ -279,7 +279,7 @@ import {
   type GnumarusSymmetryMode,
   type GnumarusTipAngleMode,
 } from "../canvas/GnumarusPaintBrush";
-import { parseWrapMode, type GnumarusWrapMode } from "../canvas/GnumarusViewportMath";
+import { parseWrapMode, scrollIntoViewDelta, type GnumarusWrapMode } from "../canvas/GnumarusViewportMath";
 import {
   BRUSH_PRESET_STORAGE_KEY,
   BUILT_IN_BRUSH_PRESETS,
@@ -9261,7 +9261,9 @@ export class GnumarusShell extends LitElement {
   }
 
   /** Scroll a container just enough to fully show a child (no-op when visible).
-   * `insetLeft`/`insetTop` reserve overlaid margins (e.g. sticky headers that
+   * Visibility is measured against the container's client area (excluding
+   * borders and classic scrollbars, which would otherwise cover the child's
+   * edge), minus `insetLeft`/`insetTop` overlays (e.g. sticky headers that
    * paint above the scrolled content). */
   private scrollChildIntoView(
     container: Element | null,
@@ -9277,21 +9279,23 @@ export class GnumarusShell extends LitElement {
       return;
     }
     const rect = child.getBoundingClientRect();
-    if (rect.width <= 0 && rect.height <= 0) {
-      return;
-    }
-    const top = area.top + insetTop;
-    if (rect.top < top) {
-      container.scrollTop -= top - rect.top;
-    } else if (rect.bottom > area.bottom) {
-      container.scrollTop += rect.bottom - area.bottom;
-    }
-    const left = area.left + insetLeft;
-    if (rect.left < left) {
-      container.scrollLeft -= left - rect.left;
-    } else if (rect.right > area.right) {
-      container.scrollLeft += rect.right - area.right;
-    }
+    const delta = scrollIntoViewDelta(
+      {
+        left: area.left + container.clientLeft + insetLeft,
+        top: area.top + container.clientTop + insetTop,
+        right: area.left + container.clientLeft + container.clientWidth,
+        bottom: area.top + container.clientTop + container.clientHeight,
+      },
+      {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        empty: rect.width <= 0 && rect.height <= 0,
+      },
+    );
+    container.scrollTop += delta.dTop;
+    container.scrollLeft += delta.dLeft;
   }
 
   /** Bring the active layer row and the current matrix cell into view. */

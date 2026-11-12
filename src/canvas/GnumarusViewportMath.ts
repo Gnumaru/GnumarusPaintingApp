@@ -635,3 +635,50 @@ export function rotatedBounds(width: number, height: number, rotation: number): 
     height: width * sin + height * cos,
   };
 }
+
+/** Visible client rectangle of a scroll container (CSS px, viewport space). */
+export interface GnumarusScrollView {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/** Child rectangle to bring into view (CSS px, same space as the view). */
+export interface GnumarusScrollChild {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  /** Zero-area children are ignored (nothing to reveal). */
+  empty: boolean;
+}
+
+/**
+ * Minimal scroll deltas (add to `scrollTop`/`scrollLeft`) that fully reveal
+ * a child inside a scroll view, preferring the top/left edge. Zero when the
+ * child already fits. The caller builds the view from the container's client
+ * area (borders and classic scrollbars excluded) minus overlaid margins
+ * such as sticky headers.
+ */
+export function scrollIntoViewDelta(view: GnumarusScrollView, child: GnumarusScrollChild): {
+  dTop: number;
+  dLeft: number;
+} {
+  if (child.empty) {
+    return { dTop: 0, dLeft: 0 };
+  }
+  let dTop = 0;
+  if (child.top < view.top) {
+    dTop = child.top - view.top;
+  } else if (child.bottom > view.bottom) {
+    dTop = child.bottom - view.bottom;
+  }
+  let dLeft = 0;
+  if (child.left < view.left) {
+    dLeft = child.left - view.left;
+  } else if (child.right > view.right) {
+    dLeft = child.right - view.right;
+  }
+  return { dTop, dLeft };
+}

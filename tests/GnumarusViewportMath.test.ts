@@ -21,6 +21,7 @@ import {
   projectToLayerImageFloat,
   projectToLayerPixel,
   rotatedBounds,
+  scrollIntoViewDelta,
   screenToImagePixel,
   screenToLayerPixel,
   type GnumarusLayerTransform,
@@ -465,5 +466,34 @@ describe("GnumarusViewportMath", () => {  it("maps the container center to the i
     expect(clipSegmentToRect(-100, 10, 100, 10, 0, 0, 64, 64)).toEqual({ ax: 0, ay: 10, bx: 64, by: 10 });
     expect(clipSegmentToRect(5, 5, 5, 5, 0, 0, 64, 64)).toEqual({ ax: 5, ay: 5, bx: 5, by: 5 });
     expect(clipSegmentToRect(0, 0, 0, 0, 10, 10, 64, 64)).toBeNull();
+  });
+});
+
+describe("scrollIntoViewDelta", () => {
+  const view = (left: number, top: number, right: number, bottom: number) => ({ left, top, right, bottom });
+  const child = (left: number, top: number, right: number, bottom: number, empty = false) => ({
+    left,
+    top,
+    right,
+    bottom,
+    empty,
+  });
+
+  it("stays put when the child already fits", () => {
+    expect(scrollIntoViewDelta(view(0, 0, 100, 100), child(10, 10, 50, 50))).toEqual({ dTop: 0, dLeft: 0 });
+  });
+
+  it("scrolls the minimum to reveal each edge", () => {
+    expect(scrollIntoViewDelta(view(0, 0, 100, 100), child(-30, 10, 20, 50))).toEqual({ dTop: 0, dLeft: -30 });
+    expect(scrollIntoViewDelta(view(0, 0, 100, 100), child(10, -20, 50, 30))).toEqual({ dTop: -20, dLeft: 0 });
+    expect(scrollIntoViewDelta(view(0, 0, 100, 100), child(60, 10, 130, 50))).toEqual({ dTop: 0, dLeft: 30 });
+    expect(scrollIntoViewDelta(view(0, 0, 100, 100), child(10, 60, 50, 140))).toEqual({ dTop: 40, dLeft: 0 });
+  });
+
+  it("ignores empty children", () => {
+    expect(scrollIntoViewDelta(view(0, 0, 100, 100), child(-50, -50, -10, -10, true))).toEqual({
+      dTop: 0,
+      dLeft: 0,
+    });
   });
 });
