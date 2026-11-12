@@ -33,6 +33,20 @@ import {
   type GnumarusDirectoryHandle,
 } from "../project/GnumarusFileSystem";
 import {
+  DEFAULT_ONION_SETTINGS,
+  ONION_SETTINGS_STORAGE_KEY,
+  parseOnionSettings,
+  serializeOnionSettings,
+} from "../settings/GnumarusOnionSettings";
+import {
+  GNUMARUS_MAX_RECENT_COLORS,
+  GNUMARUS_MAX_SWATCHES,
+  normalizeSwatchHex,
+  parseSwatchSettings,
+  serializeSwatchSettings,
+  SWATCH_SETTINGS_STORAGE_KEY,
+} from "../settings/GnumarusSwatchSettings";
+import {
   decodeSvgFile,
   decodeTextFile,
   encodeProjectArchive,
@@ -200,6 +214,7 @@ import { decodePngToBuffer, encodeBufferToPngBlob } from "../project/GnumarusPng
 import { parseAsepriteFile } from "../project/GnumarusAseprite";
 import { parsePsdFile } from "../project/GnumarusPsd";
 import { parseXcfFile } from "../project/GnumarusXcf";
+import { adjustPixel, clampAdjustLevels, invertPixel } from "../color/GnumarusAdjustments";
 import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
 import {
   applyAlphaPlane,
@@ -209,6 +224,7 @@ import {
   findAlphaBoundingBox,
   parseBlendMode,
   parseBrushShape,
+  parseLayerBlendMode,
   parsePressureResponse,
   type GnumarusBlendMode,
   type GnumarusBrushShape,
@@ -687,6 +703,9 @@ export class GnumarusShell extends LitElement {
       padding: 8px 0;
       gap: 8px;
       flex: 0 0 auto;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
     }
     .toolbar gnumarus-color-picker {
       --gnumarus-swatch-width: 36px;
@@ -804,6 +823,23 @@ export class GnumarusShell extends LitElement {
     .layer-opacity input[type="range"] {
       flex: 1 1 auto;
       min-width: 0;
+    }
+    .layer-blend {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 4px;
+      font-size: 11px;
+      color: #9a9a9a;
+    }
+    .layer-blend select {
+      flex: 1 1 auto;
+      min-width: 0;
+      background: #1e1e1e;
+      color: #e6e6e6;
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 2px 4px;
     }
     .layer-channels {
       display: flex;
@@ -1493,6 +1529,9 @@ export class GnumarusShell extends LitElement {
     textEditorColor: { type: String },
     fitTextureTarget: { type: Object },
     fitThreshold: { type: Number },
+    adjustBrightness: { type: Number },
+    adjustContrast: { type: Number },
+    adjustPosterize: { type: Number },
     checkerColorA: { type: String },
     checkerColorB: { type: String },
     defaultFrameDuration: { type: Number },
@@ -1522,6 +1561,12 @@ export class GnumarusShell extends LitElement {
     uiHidden: { type: Boolean },
     toastMessage: { type: String },
     toastDurationSec: { type: Number },
+    swatches: { attribute: false },
+    recentColors: { attribute: false },
+    onionEnabled: { type: Boolean },
+    onionPast: { type: Number },
+    onionFuture: { type: Number },
+    onionTint: { type: Boolean },
     locale: { type: String },
     fitDefaultThreshold: { type: Number },
     storageLossless: { type: Boolean },
@@ -1540,6 +1585,7 @@ export class GnumarusShell extends LitElement {
     selectedFrames: { type: Array },
     deleteFramesTarget: { type: Array },
     brushSize: { type: Number },
+    brushSizeMin: { type: Number },
     brushShape: { type: String },
     presetName: { type: String },
     brushTipKind: { type: String },
@@ -1574,9 +1620,12 @@ export class GnumarusShell extends LitElement {
     stabilizerMode: { type: String },
     ropeLength: { type: Number },
     followStrength: { type: Number },
+    featherRadius: { type: Number },
+    growShrinkPx: { type: Number },
     blendMode: { type: String },
     accumulate: { type: Boolean },
     lineWidth: { type: Number },
+    lineWidthMin: { type: Number },
     shapeWidth: { type: Number },
     retouchSize: { type: Number },
     shadeMode: { type: String },
@@ -1590,6 +1639,7 @@ export class GnumarusShell extends LitElement {
     lineShape: { type: String },
     lineAntialias: { type: Boolean },
     curveWidth: { type: Number },
+    curveWidthMin: { type: Number },
     curveShape: { type: String },
     curveAntialias: { type: Boolean },
   };
@@ -1671,6 +1721,9 @@ export class GnumarusShell extends LitElement {
   declare textEditorColor: string;
   declare fitTextureTarget: { kind: "single"; textureId: string } | { kind: "all" } | null;
   declare fitThreshold: number;
+  declare adjustBrightness: number;
+  declare adjustContrast: number;
+  declare adjustPosterize: number;
   declare checkerColorA: string;
   declare checkerColorB: string;
   declare defaultFrameDuration: number;
@@ -1700,6 +1753,12 @@ export class GnumarusShell extends LitElement {
   declare uiHidden: boolean;
   declare toastMessage: string;
   declare toastDurationSec: number;
+  declare onionEnabled: boolean;
+  declare onionPast: number;
+  declare onionFuture: number;
+  declare onionTint: boolean;
+  declare swatches: string[];
+  declare recentColors: string[];
   declare locale: GnumarusLocaleSetting;
   declare fitDefaultThreshold: number;
   declare storageLossless: boolean;
@@ -1752,6 +1811,8 @@ export class GnumarusShell extends LitElement {
   declare stabilizerMode: GnumarusStabilizerMode;
   declare ropeLength: number;
   declare followStrength: number;
+  declare featherRadius: number;
+  declare growShrinkPx: number;
   declare blendMode: GnumarusBlendMode;
   declare accumulate: boolean;
   declare lineWidth: number;
@@ -1859,6 +1920,9 @@ export class GnumarusShell extends LitElement {
     this.tileWindowY = 120;
     this.fitTextureTarget = null;
     this.fitThreshold = 0;
+    this.adjustBrightness = 0;
+    this.adjustContrast = 0;
+    this.adjustPosterize = 0;
     this.checkerColorA = DEFAULT_CHECKER_SETTINGS.colorA;
     this.checkerColorB = DEFAULT_CHECKER_SETTINGS.colorB;
     this.defaultFrameDuration = DEFAULT_ANIMATION_FRAME_DURATION;
@@ -1889,6 +1953,12 @@ export class GnumarusShell extends LitElement {
     this.uiHidden = false;
     this.toastMessage = "";
     this.toastDurationSec = DEFAULT_TOAST_SETTINGS.durationSec;
+    this.onionEnabled = DEFAULT_ONION_SETTINGS.enabled;
+    this.onionPast = DEFAULT_ONION_SETTINGS.past;
+    this.onionFuture = DEFAULT_ONION_SETTINGS.future;
+    this.onionTint = DEFAULT_ONION_SETTINGS.tint;
+    this.swatches = [];
+    this.recentColors = [];
     this.locale = DEFAULT_LOCALE_SETTINGS.locale;
     this.fitDefaultThreshold = DEFAULT_FIT_SETTINGS.alphaThreshold;
     this.storageLossless = DEFAULT_STORAGE_SETTINGS.lossless;
@@ -1940,6 +2010,8 @@ export class GnumarusShell extends LitElement {
     this.stabilizerMode = GNUMARUS_DEFAULT_STABILIZER_MODE;
     this.ropeLength = GNUMARUS_DEFAULT_ROPE_LENGTH;
     this.followStrength = GNUMARUS_DEFAULT_FOLLOW_STRENGTH;
+    this.featherRadius = 0;
+    this.growShrinkPx = 1;
     this.blendMode = "normal";
     this.accumulate = true;
     this.lineWidth = 1;
@@ -2138,11 +2210,21 @@ export class GnumarusShell extends LitElement {
           <gnumarus-color-picker
             id="pencilColor"
             .value=${this.colorValue}
+            .swatches=${this.swatches}
+            .recents=${this.recentColors}
             model="hsl"
             @gnumarus-color-change=${(event: Event): void => {
               const detail = (event as CustomEvent<{ value?: unknown }>).detail;
               if (typeof detail?.value === "string") {
                 this.setPencilColor(detail.value);
+              }
+            }}
+            @gnumarus-swatches-edit=${(event: Event): void => {
+              const detail = (event as CustomEvent<{ kind?: unknown; hex?: unknown }>).detail;
+              if (detail?.kind === "add") {
+                this.addSwatch(this.colorValue);
+              } else if (detail?.kind === "remove" && typeof detail.hex === "string") {
+                this.removeSwatch(detail.hex);
               }
             }}
           ></gnumarus-color-picker>
@@ -2314,6 +2396,26 @@ export class GnumarusShell extends LitElement {
                         }
                       }}
                     />
+                  </div>
+                  <div class="layer-blend">
+                    <select
+                      aria-label=${tr("layer.blendMode")}
+                      title=${tr("layer.blendModeHint")}
+                      .value=${layer.blend}
+                      @change=${(event: Event): void => {
+                        const target = event.target as HTMLSelectElement | null;
+                        if (target !== null) {
+                          this.onBlendInput(layer.id, target.value);
+                        }
+                      }}
+                    >
+                      <option value="normal">${tr("blend.normal")}</option>
+                      <option value="multiply">${tr("blend.multiply")}</option>
+                      <option value="screen">${tr("blend.screen")}</option>
+                      <option value="darken">${tr("blend.darken")}</option>
+                      <option value="lighten">${tr("blend.lighten")}</option>
+                      <option value="add">${tr("blend.add")}</option>
+                    </select>
                   </div>
                   <div class="layer-channels">
                     <span>${tr("layer.lock")}</span>
@@ -2577,6 +2679,46 @@ export class GnumarusShell extends LitElement {
         <div class="dialog-actions">
           <button @click=${(): void => this.closeFitTextureDialog()}>${tr("btn.cancel")}</button>
           <button id="fitTextureOk" @click=${(): void => this.confirmFitTexture()}>${tr("btn.ok")}</button>
+        </div>
+      </dialog>
+      <dialog id="adjustColorsDialog">
+        <h3>${tr("dialog.adjustTitle")}</h3>
+        <p>${tr("dialog.adjustHint")}</p>
+        <label
+          >${tr("dialog.brightness")}
+          <input type="number" id="adjustBrightness" min="-100" max="100" step="1" .value=${String(this.adjustBrightness)} />
+        </label>
+        <label
+          >${tr("dialog.contrast")}
+          <input type="number" id="adjustContrast" min="-100" max="100" step="1" .value=${String(this.adjustContrast)} />
+        </label>
+        <label
+          >${tr("dialog.posterize")}
+          <input type="number" id="adjustPosterize" min="0" max="255" step="1" .value=${String(this.adjustPosterize)} />
+        </label>
+        <div class="dialog-actions">
+          <button @click=${(): void => this.closeAdjustColorsDialog()}>${tr("btn.cancel")}</button>
+          <button id="adjustColorsOk" @click=${(): void => this.confirmAdjustColors()}>${tr("btn.ok")}</button>
+        </div>
+      </dialog>
+      <dialog id="adjustColorsDialog">
+        <h3>${tr("dialog.adjustTitle")}</h3>
+        <p>${tr("dialog.adjustHint")}</p>
+        <label
+          >${tr("dialog.brightness")}
+          <input type="number" id="adjustBrightness" min="-100" max="100" step="1" .value=${String(this.adjustBrightness)} />
+        </label>
+        <label
+          >${tr("dialog.contrast")}
+          <input type="number" id="adjustContrast" min="-100" max="100" step="1" .value=${String(this.adjustContrast)} />
+        </label>
+        <label
+          >${tr("dialog.posterize")}
+          <input type="number" id="adjustPosterize" min="0" max="255" step="1" .value=${String(this.adjustPosterize)} />
+        </label>
+        <div class="dialog-actions">
+          <button @click=${(): void => this.closeAdjustColorsDialog()}>${tr("btn.cancel")}</button>
+          <button id="adjustColorsOk" @click=${(): void => this.confirmAdjustColors()}>${tr("btn.ok")}</button>
         </div>
       </dialog>
       <dialog id="shortcutsDialog">
@@ -2935,6 +3077,70 @@ export class GnumarusShell extends LitElement {
                 aria-label=${tr("a11y.resetFrameDuration")}
                 title=${tr("a11y.resetToDefault")}
                 @click=${(): void => this.resetDefaultFrameDuration()}
+              >
+                ↻
+              </button>`
+            : html``}
+        </div>
+        <div class="settings-section">${tr("setting.onion")}</div>
+        <div class="setting-row">
+          <label title=${tr("setting.onionEnabledHint")}
+            ><input
+              type="checkbox"
+              id="onionEnabled"
+              .checked=${this.onionEnabled}
+              @change=${(): void => this.applyOnionFromDialog()}
+            />
+            ${tr("setting.onionEnabled")}
+          </label>
+        </div>
+        <div class="setting-row">
+          <label title=${tr("setting.onionPastHint")}
+            >${tr("setting.onionPast")}
+            <input
+              type="number"
+              id="onionPast"
+              min="0"
+              max="8"
+              step="1"
+              .value=${String(this.onionPast)}
+              @input=${(): void => this.applyOnionFromDialog()}
+            />
+          </label>
+        </div>
+        <div class="setting-row">
+          <label title=${tr("setting.onionFutureHint")}
+            >${tr("setting.onionFuture")}
+            <input
+              type="number"
+              id="onionFuture"
+              min="0"
+              max="8"
+              step="1"
+              .value=${String(this.onionFuture)}
+              @input=${(): void => this.applyOnionFromDialog()}
+            />
+          </label>
+        </div>
+        <div class="setting-row">
+          <label title=${tr("setting.onionTintHint")}
+            ><input
+              type="checkbox"
+              id="onionTint"
+              .checked=${this.onionTint}
+              @change=${(): void => this.applyOnionFromDialog()}
+            />
+            ${tr("setting.onionTint")}
+          </label>
+          ${this.onionEnabled !== DEFAULT_ONION_SETTINGS.enabled ||
+          this.onionPast !== DEFAULT_ONION_SETTINGS.past ||
+          this.onionFuture !== DEFAULT_ONION_SETTINGS.future ||
+          this.onionTint !== DEFAULT_ONION_SETTINGS.tint
+            ? html`<button
+                class="reset-btn"
+                aria-label=${tr("setting.onion")}
+                title=${tr("a11y.resetToDefault")}
+                @click=${(): void => this.resetOnionToDefault()}
               >
                 ↻
               </button>`
@@ -4670,6 +4876,40 @@ export class GnumarusShell extends LitElement {
           >
             ${tr("opt.commitSelection")}
           </button>
+          <label title=${tr("opt.featherHint")}
+            >${tr("opt.feather")}
+            <input
+              type="number"
+              id="featherRadius"
+              data-testid="feather-radius"
+              min="0"
+              max="32"
+              step="1"
+              .value=${String(this.featherRadius)}
+              ?disabled=${!this.floatingActive}
+              @change=${(): void => this.applyFeatherFromDialog()}
+            />
+          </label>
+          <label title=${tr("opt.growShrinkHint")}
+            >${tr("opt.growShrink")}
+            <input
+              type="number"
+              id="growShrinkPx"
+              data-testid="grow-shrink-px"
+              min="1"
+              max="64"
+              step="1"
+              .value=${String(this.growShrinkPx)}
+              ?disabled=${!this.floatingActive}
+              @change=${(): void => this.applyGrowShrinkFromDialog()}
+            />
+          </label>
+          <button data-testid="selection-grow" ?disabled=${!this.floatingActive} title=${tr("opt.growHint")} @click=${(): void => this.reshapeFloatingSelection(1)}>
+            ${tr("opt.grow")}
+          </button>
+          <button data-testid="selection-shrink" ?disabled=${!this.floatingActive} title=${tr("opt.shrinkHint")} @click=${(): void => this.reshapeFloatingSelection(-1)}>
+            ${tr("opt.shrink")}
+          </button>
         </div>
       `;
     }
@@ -4791,6 +5031,14 @@ export class GnumarusShell extends LitElement {
                 title=${this.playing ? tr("matrix.stop") : tr("matrix.play")}
                 @click=${(): void => this.togglePlayback()}
                 >${this.playing ? "■" : "▶"}</button
+              >
+              <button
+                data-testid="onion-toggle"
+                aria-label=${tr("matrix.onion")}
+                title=${tr("matrix.onionHint")}
+                class=${this.onionEnabled ? "active" : ""}
+                @click=${(): void => this.toggleOnionSkinning()}
+                >◍</button
               >
               <select
                 data-testid="animation-select"
@@ -5013,6 +5261,12 @@ export class GnumarusShell extends LitElement {
         <button ?disabled=${cellTextureId === null} @click=${(): void => this.onResizeCellToCanvasFromCell()}>
           ${tr("ctx.resizeCanvas")}
         </button>
+        <button ?disabled=${cellTextureId === null} @click=${(): void => void this.runAction("adjust-colors")}>
+          ${tr("ctx.adjustColors")}
+        </button>
+        <button ?disabled=${cellTextureId === null} @click=${(): void => void this.runAction("adjust-invert")}>
+          ${tr("ctx.invertColors")}
+        </button>
       </div>
     `;
   }
@@ -5079,6 +5333,14 @@ export class GnumarusShell extends LitElement {
     this.backgroundColor = storedBackground.color;
     const storedToast = this.loadToastSettings();
     this.toastDurationSec = storedToast.durationSec;
+    const storedSwatches = this.loadSwatchSettings();
+    this.swatches = storedSwatches.swatches;
+    this.recentColors = storedSwatches.recent;
+    const storedOnion = this.loadOnionSettings();
+    this.onionEnabled = storedOnion.enabled;
+    this.onionPast = storedOnion.past;
+    this.onionFuture = storedOnion.future;
+    this.onionTint = storedOnion.tint;
     const storedLocale = this.loadLocaleSettings();
     this.locale = storedLocale.locale;
     this.applyActiveLocale();
@@ -5223,6 +5485,9 @@ export class GnumarusShell extends LitElement {
       this.engine.setStabilizerMode(this.stabilizerMode);
       this.engine.setRopeLength(this.ropeLength);
       this.engine.setFollowStrength(this.followStrength);
+      this.engine.setOnionEnabled(this.onionEnabled);
+      this.engine.setOnionCounts(this.onionPast, this.onionFuture);
+      this.engine.setOnionTint(this.onionTint);
       this.engine.setPencilPixelPerfect(this.pencilPixelPerfect);
       this.engine.setCurvePixelPerfect(this.curvePixelPerfect);
       this.engine.setModelLighting(this.storageModelLighting);
@@ -5845,6 +6110,22 @@ export class GnumarusShell extends LitElement {
       },
     });
     this.actionRegistry.register({
+      id: "adjust-invert",
+      name: tr("action.invert"),
+      requirements: [],
+      run: (): void => {
+        this.adjustCellInvert();
+      },
+    });
+    this.actionRegistry.register({
+      id: "adjust-colors",
+      name: tr("action.adjust"),
+      requirements: [],
+      run: (): void => {
+        void this.openAdjustColorsDialog();
+      },
+    });
+    this.actionRegistry.register({
       id: "crop-all-cells-to-canvas",
       name: tr("action.cropAll"),
       requirements: [],
@@ -6161,6 +6442,53 @@ export class GnumarusShell extends LitElement {
     }
   }
 
+  private loadOnionSettings(): { enabled: boolean; past: number; future: number; tint: boolean } {
+    try {
+      const stored = window.localStorage.getItem(ONION_SETTINGS_STORAGE_KEY);
+      if (stored !== null) {
+        return parseOnionSettings(stored);
+      }
+    } catch {
+      // Corrupt or unavailable storage falls back to defaults.
+    }
+    return { ...DEFAULT_ONION_SETTINGS };
+  }
+
+  private persistOnion(): void {
+    try {
+      window.localStorage.setItem(
+        ONION_SETTINGS_STORAGE_KEY,
+        serializeOnionSettings({
+          enabled: this.onionEnabled,
+          past: this.onionPast,
+          future: this.onionFuture,
+          tint: this.onionTint,
+        }),
+      );
+    } catch {
+      // Storage failures must not break the settings flow.
+    }
+  }
+
+  /** Test hook: set the onion skinning state (enabled, past/future counts, tint). */
+  setOnionState(enabled: boolean, past: number, future: number, tint: boolean): void {
+    this.onionEnabled = enabled === true;
+    this.onionPast = Math.min(8, Math.max(0, Math.floor(past)));
+    this.onionFuture = Math.min(8, Math.max(0, Math.floor(future)));
+    this.onionTint = tint !== false;
+    this.engine?.setOnionEnabled(this.onionEnabled);
+    this.engine?.setOnionCounts(this.onionPast, this.onionFuture);
+    this.engine?.setOnionTint(this.onionTint);
+    this.persistOnion();
+    this.refreshLayers();
+  }
+
+  /** Matrix corner action: toggle onion skinning ghosts. */
+  private toggleOnionSkinning(): void {
+    this.setOnionState(!this.onionEnabled, this.onionPast, this.onionFuture, this.onionTint);
+    this.statusMessage = this.onionEnabled ? tr("status.onionOn") : tr("status.onionOff");
+  }
+
   private currentDialogToastDuration(): number {
     const input = this.shadowRoot?.getElementById("toastDuration") as HTMLInputElement | null;
     const parsed = Number(input?.value ?? String(DEFAULT_TOAST_SETTINGS.durationSec));
@@ -6177,6 +6505,47 @@ export class GnumarusShell extends LitElement {
     this.toastDurationSec = DEFAULT_TOAST_SETTINGS.durationSec;
     this.persistToast();
     this.statusMessage = tr("status.toastReset");
+  }
+
+  private currentDialogOnionState(): { enabled: boolean; past: number; future: number; tint: boolean } {
+    const enabledInput = this.shadowRoot?.getElementById("onionEnabled") as HTMLInputElement | null;
+    const pastInput = this.shadowRoot?.getElementById("onionPast") as HTMLInputElement | null;
+    const futureInput = this.shadowRoot?.getElementById("onionFuture") as HTMLInputElement | null;
+    const tintInput = this.shadowRoot?.getElementById("onionTint") as HTMLInputElement | null;
+    const count = (input: HTMLInputElement | null, fallback: number): number => {
+      const parsed = Math.floor(Number(input?.value ?? String(fallback)));
+      return Number.isFinite(parsed) ? Math.min(8, Math.max(0, parsed)) : fallback;
+    };
+    return {
+      enabled: enabledInput?.checked === true,
+      past: count(pastInput, this.onionPast),
+      future: count(futureInput, this.onionFuture),
+      tint: tintInput?.checked !== false,
+    };
+  }
+
+  private applyOnionFromDialog(): void {
+    const next = this.currentDialogOnionState();
+    this.onionEnabled = next.enabled;
+    this.onionPast = next.past;
+    this.onionFuture = next.future;
+    this.onionTint = next.tint;
+    this.engine?.setOnionEnabled(next.enabled);
+    this.engine?.setOnionCounts(next.past, next.future);
+    this.engine?.setOnionTint(next.tint);
+    this.persistOnion();
+    this.refreshLayers();
+    this.statusMessage = next.enabled ? tr("status.onionOn") : tr("status.onionOff");
+  }
+
+  private resetOnionToDefault(): void {
+    this.setOnionState(
+      DEFAULT_ONION_SETTINGS.enabled,
+      DEFAULT_ONION_SETTINGS.past,
+      DEFAULT_ONION_SETTINGS.future,
+      DEFAULT_ONION_SETTINGS.tint,
+    );
+    this.statusMessage = tr("status.onionOff");
   }
 
   /** Test hook: set the toast display time in seconds (0.5..2.0, clamped). */
@@ -6909,6 +7278,62 @@ export class GnumarusShell extends LitElement {
     }
     this.colorValue = rgbaBytesToHex(parsed);
     this.engine?.setColor(this.colorValue);
+    this.pushRecentColor(this.colorValue);
+  }
+
+  /** Remember a color in the recents row (dedupe, newest first, capped). */
+  private pushRecentColor(hex: string): void {
+    const normalized = normalizeSwatchHex(hex);
+    if (normalized === null) {
+      return;
+    }
+    const rest = this.recentColors.filter((entry) => entry !== normalized);
+    this.recentColors = [normalized, ...rest].slice(0, GNUMARUS_MAX_RECENT_COLORS);
+    this.persistSwatches();
+  }
+
+  /** Add the current paint color to the saved swatches (dedupe, capped). */
+  private addSwatch(hex: string): void {
+    const normalized = normalizeSwatchHex(hex);
+    if (normalized === null || this.swatches.includes(normalized)) {
+      return;
+    }
+    this.swatches = [...this.swatches, normalized].slice(0, GNUMARUS_MAX_SWATCHES);
+    this.persistSwatches();
+    this.statusMessage = tr("status.swatchAdded", { hex: normalized });
+  }
+
+  /** Remove one saved swatch by hex. */
+  private removeSwatch(hex: string): void {
+    const normalized = normalizeSwatchHex(hex);
+    if (normalized === null || !this.swatches.includes(normalized)) {
+      return;
+    }
+    this.swatches = this.swatches.filter((entry) => entry !== normalized);
+    this.persistSwatches();
+  }
+
+  private loadSwatchSettings(): { swatches: string[]; recent: string[] } {
+    try {
+      const stored = window.localStorage.getItem(SWATCH_SETTINGS_STORAGE_KEY);
+      if (stored !== null) {
+        return parseSwatchSettings(stored);
+      }
+    } catch {
+      // Corrupt or unavailable storage falls back to empty lists.
+    }
+    return { swatches: [], recent: [] };
+  }
+
+  private persistSwatches(): void {
+    try {
+      window.localStorage.setItem(
+        SWATCH_SETTINGS_STORAGE_KEY,
+        serializeSwatchSettings({ swatches: this.swatches, recent: this.recentColors }),
+      );
+    } catch {
+      // Storage failures must not break the settings flow.
+    }
   }
 
   /** Test hook: set the brush size (floats 0.1..64, clamped). */
@@ -8398,6 +8823,14 @@ export class GnumarusShell extends LitElement {
     this.persistZoom();
     this.toastDurationSec = DEFAULT_TOAST_SETTINGS.durationSec;
     this.persistToast();
+    this.onionEnabled = DEFAULT_ONION_SETTINGS.enabled;
+    this.onionPast = DEFAULT_ONION_SETTINGS.past;
+    this.onionFuture = DEFAULT_ONION_SETTINGS.future;
+    this.onionTint = DEFAULT_ONION_SETTINGS.tint;
+    this.engine?.setOnionEnabled(this.onionEnabled);
+    this.engine?.setOnionCounts(this.onionPast, this.onionFuture);
+    this.engine?.setOnionTint(this.onionTint);
+    this.persistOnion();
     this.locale = DEFAULT_LOCALE_SETTINGS.locale;
     this.persistLocale();
     this.applyActiveLocale();
@@ -8541,6 +8974,7 @@ export class GnumarusShell extends LitElement {
         transform: { ...info.transform },
         visible: info.visible,
         opacity: info.opacity,
+        blend: info.blend,
       };
     });
     const checker = this.engine.getCheckerSettings();
@@ -11368,6 +11802,13 @@ export class GnumarusShell extends LitElement {
     this.dirty = true;
   }
 
+  private onBlendInput(id: string, blend: string): void {
+    if (this.engine?.setLayerBlendMode(id, parseLayerBlendMode(blend)) === true) {
+      this.refreshLayers();
+      this.dirty = true;
+    }
+  }
+
   private onToggleChannelLock(id: string, channel: "r" | "g" | "b" | "a"): void {
     if (this.engine === null) {
       return;
@@ -11467,6 +11908,49 @@ export class GnumarusShell extends LitElement {
     }
   }
 
+  /** Report a mask-op outcome (ok refreshes, transformed needs a reset first). */
+  private reportMaskOutcome(outcome: "ok" | "transformed" | "none", done: () => void): void {
+    if (outcome === "transformed") {
+      this.statusMessage = tr("status.maskNeedsReset");
+      this.showToast(tr("status.maskNeedsReset"));
+      return;
+    }
+    if (outcome === "none") {
+      return;
+    }
+    done();
+    this.refreshLayers();
+  }
+
+  /** Feather the floating mask by the dialog radius (no undo until merge). */
+  private applyFeatherFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("featherRadius") as HTMLInputElement | null;
+    const parsed = Math.floor(Number(input?.value ?? "0"));
+    const radius = Number.isFinite(parsed) ? Math.min(32, Math.max(0, parsed)) : 0;
+    this.featherRadius = radius;
+    this.reportMaskOutcome(this.engine?.featherFloatingSelection(radius) ?? "none", () => {
+      this.statusMessage = tr("status.feathered", { value: radius });
+    });
+  }
+
+  /** Grow (+1) or shrink (-1) the floating mask by the dialog pixel count. */
+  private reshapeFloatingSelection(direction: 1 | -1): void {
+    const input = this.shadowRoot?.getElementById("growShrinkPx") as HTMLInputElement | null;
+    const parsed = Math.floor(Number(input?.value ?? "1"));
+    const px = Number.isFinite(parsed) ? Math.min(64, Math.max(1, parsed)) : 1;
+    this.growShrinkPx = px;
+    this.reportMaskOutcome(this.engine?.reshapeFloatingSelection(direction * px) ?? "none", () => {
+      this.dirty = true;
+      this.statusMessage = direction > 0 ? tr("status.grown", { value: px }) : tr("status.shrunk", { value: px });
+    });
+  }
+
+  private applyGrowShrinkFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("growShrinkPx") as HTMLInputElement | null;
+    const parsed = Math.floor(Number(input?.value ?? "1"));
+    this.growShrinkPx = Number.isFinite(parsed) ? Math.min(64, Math.max(1, parsed)) : 1;
+  }
+
   private onOpenFitTextureFromLayer(layerId: string): void {
     if (this.engine === null) {
       this.closeLayerMenu();
@@ -11525,6 +12009,74 @@ export class GnumarusShell extends LitElement {
     const dialog = this.shadowRoot?.getElementById("fitTextureDialog") as HTMLDialogElement | null;
     dialog?.close();
     this.fitTextureTarget = null;
+  }
+
+  /** Open the Adjust colors dialog (brightness/contrast/posterize). */
+  private async openAdjustColorsDialog(): Promise<void> {
+    if (this.engine === null) {
+      return;
+    }
+    this.closeAllMenus();
+    await this.updateComplete;
+    const dialog = this.shadowRoot?.getElementById("adjustColorsDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+    const ok = this.shadowRoot?.getElementById("adjustColorsOk") as HTMLButtonElement | null;
+    ok?.focus();
+  }
+
+  private closeAdjustColorsDialog(): void {
+    const dialog = this.shadowRoot?.getElementById("adjustColorsDialog") as HTMLDialogElement | null;
+    dialog?.close();
+  }
+
+  private currentDialogAdjustLevels(): { brightness: number; contrast: number; posterize: number } {
+    const num = (id: string, fallback: number): number => {
+      const input = this.shadowRoot?.getElementById(id) as HTMLInputElement | null;
+      const raw = Number(input?.value ?? String(fallback));
+      return Number.isFinite(raw) ? raw : fallback;
+    };
+    return clampAdjustLevels({
+      brightness: num("adjustBrightness", 0),
+      contrast: num("adjustContrast", 0),
+      posterize: num("adjustPosterize", 0),
+    });
+  }
+
+  /** Apply the dialog levels to the current cell (single undoable entry). */
+  private confirmAdjustColors(): void {
+    const levels = this.currentDialogAdjustLevels();
+    this.adjustBrightness = levels.brightness;
+    this.adjustContrast = levels.contrast;
+    this.adjustPosterize = levels.posterize;
+    this.closeAdjustColorsDialog();
+    if (this.engine === null) {
+      return;
+    }
+    const outcome = this.engine.adjustCurrentCellPixels((r, g, b, a) => adjustPixel(r, g, b, a, levels));
+    if (outcome === "adjusted") {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = tr("status.adjusted");
+    } else if (outcome === "empty") {
+      this.statusMessage = tr("status.adjustEmpty");
+      this.showToast(tr("status.adjustEmpty"));
+    }
+  }
+
+  /** Invert the current cell colors (single undoable entry). */
+  private adjustCellInvert(): void {
+    if (this.engine === null) {
+      return;
+    }
+    const outcome = this.engine.adjustCurrentCellPixels((r, g, b, a) => invertPixel(r, g, b, a));
+    if (outcome === "adjusted") {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = tr("status.inverted");
+    } else if (outcome === "empty") {
+      this.statusMessage = tr("status.adjustEmpty");
+      this.showToast(tr("status.adjustEmpty"));
+    }
   }
 
   private confirmFitTexture(): void {
@@ -12020,6 +12572,7 @@ export class GnumarusShell extends LitElement {
           name: layer.name,
           visible: layer.visible,
           opacity: layer.opacity,
+          blend: layer.blend,
           lockedChannels: { ...layer.lockedChannels },
         })),
         textures,
@@ -12786,6 +13339,7 @@ export class GnumarusShell extends LitElement {
           name: layer.name,
           visible: layer.visible,
           opacity: layer.opacity,
+          blend: layer.blend,
           lockedChannels: { ...layer.lockedChannels },
         })),
         animation: {

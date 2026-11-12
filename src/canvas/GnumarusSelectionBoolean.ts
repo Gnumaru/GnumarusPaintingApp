@@ -67,6 +67,150 @@ export function unionSelectionBox(a: GnumarusSelectionRect, b: GnumarusSelection
 }
 
 /** Count set mask bytes. */
+/** Box-blur a selection mask (0..255) treating everything outside as transparent (full-kernel normalization, so edges fade to zero). */
+export function blurSelectionMask(mask: Uint8Array, width: number, height: number, radius: number): Uint8Array {
+  const out = new Uint8Array(mask);
+  const r = Math.max(0, Math.floor(radius));
+  if (r === 0 || width < 1 || height < 1 || mask.length !== width * height) {
+    return out;
+  }
+  const kernel = (2 * r + 1) * (2 * r + 1);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let sum = 0;
+      for (let oy = -r; oy <= r; oy += 1) {
+        for (let ox = -r; ox <= r; ox += 1) {
+          const sx = x + ox;
+          const sy = y + oy;
+          if (sx < 0 || sy < 0 || sx >= width || sy >= height) {
+            continue;
+          }
+          sum += mask[sy * width + sx] as number;
+        }
+      }
+      out[y * width + x] = Math.round(sum / kernel);
+    }
+  }
+  return out;
+}
+
+/** Dilate set mask pixels outward by the given pixel count (square structuring). */
+/**
+ * Feather a mask: pad it symmetrically by `radius`, then box-blur treating
+ * everything outside as transparent (full-kernel normalization, so the
+ * falloff reaches ~0 at the padded border). Returns the padded mask plus
+ * its new dimensions; centers are preserved by the symmetric padding.
+ */
+export function featherSelectionMask(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  radius: number,
+): { mask: Uint8Array; width: number; height: number } {
+  const r = Math.max(0, Math.floor(radius));
+  if (r < 1 || width < 1 || height < 1 || mask.length !== width * height) {
+    return { mask: Uint8Array.from(mask), width, height };
+  }
+  const paddedWidth = width + r * 2;
+  const paddedHeight = height + r * 2;
+  const padded = new Uint8Array(paddedWidth * paddedHeight);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      padded[(y + r) * paddedWidth + (x + r)] = mask[y * width + x] as number;
+    }
+  }
+  const out = new Uint8Array(paddedWidth * paddedHeight);
+  const kernel = (2 * r + 1) * (2 * r + 1);
+  for (let y = 0; y < paddedHeight; y += 1) {
+    for (let x = 0; x < paddedWidth; x += 1) {
+      let sum = 0;
+      for (let oy = -r; oy <= r; oy += 1) {
+        for (let ox = -r; ox <= r; ox += 1) {
+          const sx = x + ox;
+          const sy = y + oy;
+          if (sx < 0 || sy < 0 || sx >= paddedWidth || sy >= paddedHeight) {
+            continue;
+          }
+          sum += padded[sy * paddedWidth + sx] as number;
+        }
+      }
+      out[y * paddedWidth + x] = Math.round(sum / kernel);
+    }
+  }
+  return { mask: out, width: paddedWidth, height: paddedHeight };
+}
+
+export function dilateSelectionMask(mask: Uint8Array, width: number, height: number, steps: number): Uint8Array {
+  let current = Uint8Array.from(mask);
+  const n = Math.max(0, Math.floor(steps));
+  for (let step = 0; step < n; step += 1) {
+    const next = Uint8Array.from(current);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        if ((current[y * width + x] as number) !== 0) {
+          continue;
+        }
+        let hit = false;
+        for (let oy = -1; oy <= 1 && !hit; oy += 1) {
+          for (let ox = -1; ox <= 1; ox += 1) {
+            const sx = x + ox;
+            const sy = y + oy;
+            if (sx < 0 || sy < 0 || sx >= width || sy >= height) {
+              continue;
+            }
+            if ((current[sy * width + sx] as number) !== 0) {
+              hit = true;
+              break;
+            }
+          }
+        }
+        if (hit) {
+          next[y * width + x] = 255;
+        }
+      }
+    }
+    current = next;
+  }
+  return current;
+}
+
+/** Erode set mask pixels inward by the given pixel count (square structuring). */
+export function erodeSelectionMask(mask: Uint8Array, width: number, height: number, steps: number): Uint8Array {
+  let current = Uint8Array.from(mask);
+  const n = Math.max(0, Math.floor(steps));
+  for (let step = 0; step < n; step += 1) {
+    const next = Uint8Array.from(current);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        if ((current[y * width + x] as number) === 0) {
+          continue;
+        }
+        let clear = false;
+        for (let oy = -1; oy <= 1 && !clear; oy += 1) {
+          for (let ox = -1; ox <= 1; ox += 1) {
+            const sx = x + ox;
+            const sy = y + oy;
+            if (sx < 0 || sy < 0 || sx >= width || sy >= height) {
+              // Outside the box is empty, so border pixels erode.
+              clear = true;
+              break;
+            }
+            if ((current[sy * width + sx] as number) === 0) {
+              clear = true;
+              break;
+            }
+          }
+        }
+        if (clear) {
+          next[y * width + x] = 0;
+        }
+      }
+    }
+    current = next;
+  }
+  return current;
+}
+
 export function countSelectionMask(mask: Uint8Array): number {  let count = 0;
   for (let i = 0; i < mask.length; i += 1) {
     if ((mask[i] ?? 0) !== 0) {

@@ -12,7 +12,7 @@ import { parseModelLighting, type GnumarusModelLighting } from "../settings/Gnum
 import type { GnumarusLayerTransform } from "../canvas/GnumarusViewportMath";
 import { IDENTITY_LAYER_TRANSFORM } from "../canvas/GnumarusViewportMath";
 import type { GnumarusAnimationLoop } from "../animation/GnumarusNamedAnimations";
-import { parseChannelLock, type GnumarusChannelLock } from "../canvas/GnumarusPixelBuffer";
+import { parseChannelLock, parseLayerBlendMode, type GnumarusChannelLock, type GnumarusLayerBlendMode } from "../canvas/GnumarusPixelBuffer";
 import {
   clampFrameDurationSec,
   defaultFrameName,
@@ -144,6 +144,8 @@ export interface GnumarusLayerMeta {
   name: string;
   visible: boolean;
   opacity: number;
+  /** Compositing blend mode; absent in legacy files means normal. */
+  blend?: GnumarusLayerBlendMode;
   lockedChannels: GnumarusChannelLock;
   /** Legacy size/transform/cells: present in old files, omitted in new ones. */
   width?: number;
@@ -369,6 +371,7 @@ export function createDefaultProject(width: number, height: number): GnumarusPro
         visible: true,
         opacity: 1,
         lockedChannels: { r: false, g: false, b: false, a: false },
+        blend: "normal",
       },
     ],
     animation: {
@@ -1087,7 +1090,7 @@ export function parseProject(jsonText: string): GnumarusProjectMeta {
     if (!isRecord(entry)) {
       throw new GnumarusProjectError("project.json has an invalid layer");
     }
-    const { id, name, visible, opacity, width, height, transform, lockedChannels, cells } = entry;
+    const { id, name, visible, opacity, width, height, transform, lockedChannels, cells, blend } = entry;
     if (typeof id !== "string" || typeof name !== "string") {
       throw new GnumarusProjectError("project.json has a layer with invalid id/name");
     }
@@ -1103,6 +1106,7 @@ export function parseProject(jsonText: string): GnumarusProjectMeta {
       name,
       visible,
       opacity,
+      blend: parseLayerBlendMode(blend),
       lockedChannels: parseChannelLock(lockedChannels),
     };
     if (typeof width === "number" && width >= 1) {

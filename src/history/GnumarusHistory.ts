@@ -2,6 +2,7 @@ import type { GnumarusChannelLock } from "../canvas/GnumarusPixelBuffer";
 import type { GnumarusLayerTransform } from "../canvas/GnumarusViewportMath";
 import type { GnumarusTextDocument } from "../text/GnumarusText";
 import type { GnumarusTilePlacement } from "../tilemap/GnumarusTilemap";
+import type { GnumarusLayerBlendMode } from "../canvas/GnumarusPixelBuffer";
 import type { GnumarusModel3dView } from "../project/GnumarusProjectFormat";
 
 export interface GnumarusImageDiff {
@@ -86,6 +87,7 @@ export interface GnumarusMergedLayerSnapshot {
   textureName: string;
   visible: boolean;
   opacity: number;
+  blend: GnumarusLayerBlendMode;
   width: number;
   height: number;
   transform: GnumarusLayerTransform;

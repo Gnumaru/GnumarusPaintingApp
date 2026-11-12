@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   applyCoverageMask,
   applyAlphaPlane,
+  blendLayerChannel,
   buffersEqual,
   clampBrushSize,
+  compositeBlendPixelOver,
   extractAlphaPlane,
   clampBrushSizeFloat,
   clearPixelBuffer,
@@ -23,6 +25,7 @@ import {
   normalizePointerPressure,
   parseBrushShape,
   parseHexColor,
+  parseLayerBlendMode,
   parsePressureResponse,
   pressureAlphaMultiplier,
   pressureSizeInRange,
@@ -608,6 +611,43 @@ describe("GnumarusPixelBuffer", () => {
     expect(pressureAlphaMultiplier("opacity", 0.5)).toBe(0.5);
     expect(pressureAlphaMultiplier("size+opacity", 0.5)).toBe(0.5);
     expect(pressureAlphaMultiplier("size", 0.5)).toBe(1);
+  });
+
+  it("parses layer blend modes with a normal fallback", () => {
+    expect(parseLayerBlendMode("multiply")).toBe("multiply");
+    expect(parseLayerBlendMode("screen")).toBe("screen");
+    expect(parseLayerBlendMode("darken")).toBe("darken");
+    expect(parseLayerBlendMode("lighten")).toBe("lighten");
+    expect(parseLayerBlendMode("add")).toBe("add");
+    expect(parseLayerBlendMode("normal")).toBe("normal");
+    expect(parseLayerBlendMode("bogus")).toBe("normal");
+    expect(parseLayerBlendMode(undefined)).toBe("normal");
+  });
+
+  it("blends one channel pair per layer mode", () => {
+    expect(blendLayerChannel("normal", 100, 200)).toBe(100);
+    expect(blendLayerChannel("multiply", 255, 128)).toBe(128);
+    expect(blendLayerChannel("multiply", 0, 200)).toBe(0);
+    expect(blendLayerChannel("screen", 255, 128)).toBe(255);
+    expect(blendLayerChannel("screen", 0, 200)).toBe(200);
+    expect(blendLayerChannel("darken", 100, 200)).toBe(100);
+    expect(blendLayerChannel("lighten", 100, 200)).toBe(200);
+    expect(blendLayerChannel("add", 200, 100)).toBe(255);
+    expect(blendLayerChannel("add", 10, 20)).toBe(30);
+  });
+
+  it("composites blended colors with normal alpha", () => {
+    const opaque = (r: number, g: number, b: number): Uint8ClampedArray =>
+      new Uint8ClampedArray([r, g, b, 255]);
+    const dst = opaque(255, 0, 0);
+    compositeBlendPixelOver(dst, 0, opaque(128, 128, 128), 0, 1, "multiply");
+    expect(Array.from(dst)).toEqual([128, 0, 0, 255]);
+    const light = opaque(255, 0, 0);
+    compositeBlendPixelOver(light, 0, opaque(128, 128, 128), 0, 1, "screen");
+    expect(Array.from(light)).toEqual([255, 128, 128, 255]);
+    const untouched = opaque(10, 20, 30);
+    compositeBlendPixelOver(untouched, 0, new Uint8ClampedArray([0, 0, 0, 0]), 0, 1, "multiply");
+    expect(Array.from(untouched)).toEqual([10, 20, 30, 255]);
   });
 
   it("maps pressure gain into a min/max size range", () => {

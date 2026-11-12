@@ -221,6 +221,7 @@ describe("GnumarusHistory", () => {
           height: 4,
           transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
           lockedChannels: { r: false, g: false, b: false, a: false },
+      blend: "normal",
           stackIndex: 1,
           buffer: upperBuffer,
           cells: [{ frame: 0, content: "content9" }],
@@ -276,6 +277,7 @@ describe("GnumarusHistory", () => {
           height: 4,
           transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
           lockedChannels: { r: false, g: false, b: false, a: false },
+      blend: "normal",
           stackIndex: 1,
           buffer: createPixelBuffer(4, 4),
           cells: [
@@ -339,6 +341,7 @@ describe("GnumarusHistory", () => {
           height: 4,
           transform: { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 },
           lockedChannels: { r: false, g: false, b: false, a: false },
+      blend: "normal",
           stackIndex: 1,
           buffer: createPixelBuffer(4, 4),
           cells: [{ frame: 0, content: "content9" }],

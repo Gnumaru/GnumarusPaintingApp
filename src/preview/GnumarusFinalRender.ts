@@ -1,4 +1,11 @@
-import { compositePixelOver, parseHexColor, type GnumarusRgba } from "../canvas/GnumarusPixelBuffer";
+import {
+  compositeBlendPixelOver,
+  compositePixelOver,
+  parseHexColor,
+  parseLayerBlendMode,
+  type GnumarusLayerBlendMode,
+  type GnumarusRgba,
+} from "../canvas/GnumarusPixelBuffer";
 import { layerPixelCenterToProject, IDENTITY_LAYER_TRANSFORM, layerLinearMatrix } from "../canvas/GnumarusViewportMath";
 import type { GnumarusLayerTransform } from "../canvas/GnumarusViewportMath";
 
@@ -9,6 +16,8 @@ export interface GnumarusFlattenLayerInput {
   transform: GnumarusLayerTransform;
   visible: boolean;
   opacity: number;
+  /** Compositing blend mode; absent means normal. */
+  blend?: GnumarusLayerBlendMode;
 }
 
 /**
@@ -165,7 +174,12 @@ function compositePreparedAt(
     if (sx < 0 || sy < 0 || sx >= layer.width || sy >= layer.height) {
       continue;
     }
-    compositePixelOver(dst, dstIndex, layer.buffer, (sy * layer.width + sx) * 4, layer.opacity);
+    const blend = parseLayerBlendMode((layer as { blend?: unknown }).blend);
+    if (blend === "normal") {
+      compositePixelOver(dst, dstIndex, layer.buffer, (sy * layer.width + sx) * 4, layer.opacity);
+    } else {
+      compositeBlendPixelOver(dst, dstIndex, layer.buffer, (sy * layer.width + sx) * 4, layer.opacity, blend);
+    }
   }
 }
 

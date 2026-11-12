@@ -17,6 +17,39 @@ export interface GnumarusChannelLock {
 /** How painted colors combine with existing pixels. */
 export type GnumarusBlendMode = "normal" | "copy" | "eraser";
 
+/** Per-layer compositing blend mode (paint blend modes are separate). */
+export type GnumarusLayerBlendMode = "normal" | "multiply" | "screen" | "darken" | "lighten" | "add";
+
+/** Parse a layer blend mode, defaulting to normal for missing or invalid input. */
+export function parseLayerBlendMode(value: unknown): GnumarusLayerBlendMode {
+  return value === "multiply" ||
+    value === "screen" ||
+    value === "darken" ||
+    value === "lighten" ||
+    value === "add"
+    ? value
+    : "normal";
+}
+
+/** Blend one channel pair (0..255 bytes) for a layer blend mode. */
+export function blendLayerChannel(mode: GnumarusLayerBlendMode, src: number, dst: number): number {
+  switch (mode) {
+    case "multiply":
+      return Math.round((src * dst) / 255);
+    case "screen":
+      return Math.round(255 - ((255 - src) * (255 - dst)) / 255);
+    case "darken":
+      return Math.min(src, dst);
+    case "lighten":
+      return Math.max(src, dst);
+    case "add":
+      return Math.min(255, src + dst);
+    case "normal":
+    default:
+      return src;
+  }
+}
+
 /** Parse a blend mode, defaulting to normal for missing or invalid input. */
 export function parseBlendMode(value: unknown): GnumarusBlendMode {
   if (value === "copy") {
@@ -1177,6 +1210,64 @@ export function applyCoverageMask(
       }
       blendPixelCoverage(buffer, width, height, x, y, color, m / 255, locked, blend);
     }
+  }
+}
+
+/** Per-pixel layer blend composite: blended color source-over the backdrop. */
+export function compositeBlendPixelOver(
+  dst: Uint8ClampedArray,
+  dstIndex: number,
+  src: Uint8ClampedArray,
+  srcIndex: number,
+  opacity: number,
+  blend: GnumarusLayerBlendMode,
+  dstLocked: GnumarusChannelLock | undefined = undefined,
+): void {
+  const srcA = (src[srcIndex + 3] / 255) * opacity;
+  if (srcA <= 0) {
+    return;
+  }
+  const dstA = dst[dstIndex + 3] / 255;
+  const outA = srcA + dstA * (1 - srcA);
+  const inv = dstA * (1 - srcA);
+  if (blend === "normal") {
+    compositePixelOver(dst, dstIndex, src, srcIndex, opacity, dstLocked);
+    return;
+  }
+  const outR = Math.round(
+    (blendLayerChannel(blend, src[srcIndex] as number, dst[dstIndex] as number) * srcA +
+      (dst[dstIndex] as number) * inv) /
+      outA,
+  );
+  const outG = Math.round(
+    (blendLayerChannel(blend, src[srcIndex + 1] as number, dst[dstIndex + 1] as number) * srcA +
+      (dst[dstIndex + 1] as number) * inv) /
+      outA,
+  );
+  const outB = Math.round(
+    (blendLayerChannel(blend, src[srcIndex + 2] as number, dst[dstIndex + 2] as number) * srcA +
+      (dst[dstIndex + 2] as number) * inv) /
+      outA,
+  );
+  const outAlpha = Math.round(outA * 255);
+  if (dstLocked === undefined || areAllChannelsUnlocked(dstLocked)) {
+    dst[dstIndex] = outR;
+    dst[dstIndex + 1] = outG;
+    dst[dstIndex + 2] = outB;
+    dst[dstIndex + 3] = outAlpha;
+    return;
+  }
+  if (dstLocked.r !== true) {
+    dst[dstIndex] = outR;
+  }
+  if (dstLocked.g !== true) {
+    dst[dstIndex + 1] = outG;
+  }
+  if (dstLocked.b !== true) {
+    dst[dstIndex + 2] = outB;
+  }
+  if (dstLocked.a !== true) {
+    dst[dstIndex + 3] = outAlpha;
   }
 }
 

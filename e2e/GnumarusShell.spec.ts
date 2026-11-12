@@ -12083,3 +12083,310 @@ test("crop tool refuses an empty cell @recent", async ({ page }) => {
   await expect(page.locator("gnumarus-shell")).toContainText("no texture");
   expect(await textureDims(page)).toEqual({ width: 64, height: 64 });
 });
+
+async function onionVisible(page: import("@playwright/test").Page): Promise<{ past: boolean; future: boolean }> {
+  return page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { onionGhostVisible(which: string): boolean } } };
+    const engine = root.__gnumarus?.engine;
+    return { past: engine?.onionGhostVisible("past") ?? false, future: engine?.onionGhostVisible("future") ?? false };
+  });
+}
+
+async function setOnion(page: import("@playwright/test").Page, enabled: boolean, past: number, future: number): Promise<void> {
+  await page.evaluate(([on, p, f]: [boolean, number, number]) => {
+    const root = window as unknown as { __gnumarus?: { shell?: { setOnionState(a: boolean, b: number, c: number, d: boolean): void } } };
+    root.__gnumarus?.shell?.setOnionState(on, p, f, true);
+  }, [enabled, past, future] as [boolean, number, number]);
+}
+
+test("onion skin ghosts neighbor frames per side @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  await setOnion(page, true, 1, 1);
+  // Single frame: no neighbors, no ghosts.
+  expect(await onionVisible(page)).toEqual({ past: false, future: false });
+  await page.getByRole("button", { name: "Add frame", exact: true }).click();
+  await setPencil(page, "#0000ff");
+  await paintCenter(page);
+  // Frame 0 sees only the future ghost; frame 1 only the past ghost.
+  await page.locator('gnumarus-shell [data-testid="anim-frame"][data-frame="0"]').click();
+  expect(await onionVisible(page)).toEqual({ past: false, future: true });
+  await page.locator('gnumarus-shell [data-testid="anim-frame"][data-frame="1"]').click();
+  expect(await onionVisible(page)).toEqual({ past: true, future: false });
+  await setOnion(page, false, 1, 1);
+  expect(await onionVisible(page)).toEqual({ past: false, future: false });
+});
+
+test("onion toggle button and settings persist @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.locator('gnumarus-shell [data-testid="onion-toggle"]').click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Onion skin on");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#settingsDialog");
+  await expect(dialog.locator("select#onionPast, input#onionPast")).toHaveCount(1);
+  await expect(dialog.locator("#onionPast")).toHaveValue("1");
+  await dialog.locator("#onionPast").fill("2");
+  await expect(page.locator("gnumarus-shell")).toContainText("Onion skin on");
+  await page.reload();
+  await page.waitForSelector("gnumarus-shell canvas");
+  const enabled = await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { onionEnabled?: boolean } } };
+    return root.__gnumarus?.shell?.onionEnabled ?? false;
+  });
+  expect(enabled).toBe(true);
+});
+
+test("swatches save, apply, persist and remove @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#00ff00");
+  const picker = await openPicker(page, "pencilColor");
+  await picker.getByTestId("swatch-add").click();
+  const swatch = picker.locator('[data-testid="palette-swatch"][data-hex="#00ff00"]');
+  await expect(swatch).toBeVisible();
+  await setPencil(page, "#0000ff");
+  await swatch.click();
+  expect(await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { colorValue: string } } };
+    return root.__gnumarus?.shell?.colorValue ?? "";
+  })).toBe("#00ff00");
+  await page.reload();
+  await page.waitForSelector("gnumarus-shell canvas");
+  const picker2 = await openPicker(page, "pencilColor");
+  await expect(picker2.locator('[data-testid="palette-swatch"][data-hex="#00ff00"]')).toBeVisible();
+  await picker2.locator('[data-testid="palette-swatch"][data-hex="#00ff00"] [data-testid="swatch-remove"]').click();
+  await expect(picker2.locator('[data-testid="palette-swatch"][data-hex="#00ff00"]')).toHaveCount(0);
+});
+
+test("recent colors track the paint color @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await setPencil(page, "#0000ff");
+  const picker = await openPicker(page, "pencilColor");
+  const recents = picker.getByTestId("recent-swatch");
+  await expect(recents).toHaveCount(2);
+  expect(await recents.first().getAttribute("data-hex")).toBe("#0000ff");
+  expect(await recents.nth(1).getAttribute("data-hex")).toBe("#ff0000");
+});
+
+async function previewRgba(page: import("@playwright/test").Page, x: number, y: number): Promise<number[] | null> {
+  return page.evaluate(([px, py]: number[]) => {
+    const root = document.querySelector("gnumarus-shell")?.shadowRoot ?? null;
+    const canvas = root?.getElementById("previewCanvas") as HTMLCanvasElement | null;
+    const context = canvas?.getContext("2d") ?? null;
+    if (context === null) {
+      return null;
+    }
+    const data = context.getImageData(px, py, 1, 1).data;
+    return [data[0], data[1], data[2], data[3]];
+  }, [x, y] as [number, number]);
+}
+
+test("layer blend modes composite in canvas and preview @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await paintCenter(page);
+  await page.keyboard.press("Insert");
+  await setPencil(page, "#00ff00");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await paintCenter(page);
+  await page.getByRole("button", { name: "Final preview" }).click();
+  const preview = page.locator("gnumarus-shell canvas#previewCanvas");
+  await expect(preview).toBeVisible();
+  await expect.poll(async () => previewRgba(page, 32, 32), { timeout: 10000 }).toEqual([0, 255, 0, 255]);
+  const blend = page.locator('gnumarus-shell [data-layer-id="layer1"] select[aria-label="Blend mode"]');
+  await expect(blend).toHaveValue("normal");
+  await blend.selectOption("multiply");
+  await expect.poll(async () => previewRgba(page, 32, 32), { timeout: 10000 }).toEqual([0, 0, 0, 255]);
+  await blend.selectOption("screen");
+  await expect.poll(async () => previewRgba(page, 32, 32), { timeout: 10000 }).toEqual([255, 255, 0, 255]);
+});
+
+test("layer blend mode persists through save and reopen @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await paintCenter(page);
+  await page.keyboard.press("Insert");
+  await page.locator('gnumarus-shell [data-layer-id="layer1"] select[aria-label="Blend mode"]').selectOption("multiply");
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  expect(await project.writtenProject()).toContain('"blend": "multiply"');
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject");
+  await expect(page.locator('gnumarus-shell [data-layer-id="layer1"] select[aria-label="Blend mode"]')).toHaveValue("multiply");
+});
+
+async function layerToScreen(page: import("@playwright/test").Page, x: number, y: number): Promise<{ x: number; y: number }> {
+  const box = await canvasBox(page);
+  const zoom = await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { getViewState(): { zoom: number } } } };
+    return root.__gnumarus?.engine?.getViewState().zoom ?? 1;
+  });
+  return { x: box.x + box.width / 2 + (x - 32) * zoom, y: box.y + box.height / 2 + (y - 32) * zoom };
+}
+
+async function dragLayerBox(
+  page: import("@playwright/test").Page,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+): Promise<void> {
+  const a = await layerToScreen(page, x0, y0);
+  const b = await layerToScreen(page, x1, y1);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 5 });
+  await page.mouse.up();
+}
+
+async function paintLayerRect(page: import("@playwright/test").Page, hex: string, x0: number, y0: number, x1: number, y1: number): Promise<void> {
+  await setPencil(page, hex);
+  await page.evaluate(([ax, ay, bx, by]: number[]) => {
+    const root = window as unknown as { __gnumarus?: { engine?: { setShapeFilled(f: boolean): void; commitShapeRect(a: number, b: number, c: number, d: number): boolean } } };
+    root.__gnumarus?.engine?.setShapeFilled(true);
+    root.__gnumarus?.engine?.commitShapeRect(ax, ay, bx, by);
+  }, [x0, y0, x1, y1] as [number, number, number, number]);
+}
+
+async function countRedIn(page: import("@playwright/test").Page, x0: number, y0: number, x1: number, y1: number): Promise<number> {
+  return page.evaluate(([ax, ay, bx, by]: number[]) => {
+    const root = window as unknown as { __gnumarus?: { engine?: { readPixel(x: number, y: number): { r: number; g: number; b: number; a: number } | null } } };
+    const engine = root.__gnumarus?.engine;
+    if (engine === undefined) {
+      return -1;
+    }
+    let count = 0;
+    for (let y = ay; y < by; y += 1) {
+      for (let x = ax; x < bx; x += 1) {
+        const pixel = engine.readPixel(x, y);
+        if (pixel !== null && pixel.r === 255 && pixel.g === 0 && pixel.b === 0 && pixel.a === 255) {
+          count += 1;
+        }
+      }
+    }
+    return count;
+  }, [x0, y0, x1, y1] as [number, number, number, number]);
+}
+
+async function setMaskOption(page: import("@playwright/test").Page, inputId: string, value: string): Promise<void> {
+  const input = page.locator(`gnumarus-shell #${inputId}`);
+  await input.fill(value);
+  await input.evaluate((el) => el.dispatchEvent(new Event("change", { bubbles: true })));
+  // Blur the number input: engine Enter-to-merge ignores key events from
+  // inside text fields, so focus must leave before Enter commits.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.());
+}
+
+async function commitFloatingSelection(page: import("@playwright/test").Page): Promise<void> {
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.());
+  await page.keyboard.press("Enter");
+}
+
+test("selection feather softens the merged edge @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintLayerRect(page, "#ff0000", 24, 24, 39, 39);
+  expect(await countRedIn(page, 20, 20, 44, 44)).toBe(256);
+  await page.keyboard.press("r");
+  await dragLayerBox(page, 24, 24, 39, 39);
+  await page.keyboard.press("v");
+  await setMaskOption(page, "featherRadius", "2");
+  await commitFloatingSelection(page);
+  const partial = await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { readPixel(x: number, y: number): { a: number } | null } } };
+    const engine = root.__gnumarus?.engine;
+    if (engine === undefined) {
+      return -1;
+    }
+    let count = 0;
+    for (let y = 20; y < 44; y += 1) {
+      for (let x = 20; x < 44; x += 1) {
+        const pixel = engine.readPixel(x, y);
+        if (pixel !== null && pixel.a > 0 && pixel.a < 255) {
+          count += 1;
+        }
+      }
+    }
+    return count;
+  });
+  expect(partial).toBeGreaterThan(0);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.keyboard.press("Control+z");
+  expect(await countRedIn(page, 20, 20, 44, 44)).toBe(256 - 256);
+});
+
+test("selection grow expands and shrink contracts the merged area @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintLayerRect(page, "#ff0000", 24, 24, 39, 39);
+  await page.keyboard.press("r");
+  await dragLayerBox(page, 26, 26, 37, 37);
+  await page.keyboard.press("v");
+  await setMaskOption(page, "growShrinkPx", "4");
+  await page.locator("gnumarus-shell [data-testid=\"selection-grow\"]").click();
+  await commitFloatingSelection(page);
+  // Grown by 2px each side: the full 16x16 square is red again.
+  expect(await countRedIn(page, 20, 20, 44, 44)).toBe(256);
+  await page.keyboard.press("Control+z");
+  // Undo restores the cut hole: only the border ring stays red.
+  expect(await countRedIn(page, 20, 20, 44, 44)).toBe(256 - 144);
+  // Repaint to a full square: the next cut must hold solid reds.
+  await paintLayerRect(page, "#ff0000", 24, 24, 39, 39);
+  expect(await countRedIn(page, 20, 20, 44, 44)).toBe(256);
+  await page.keyboard.press("r");
+  await dragLayerBox(page, 24, 24, 39, 39);
+  await page.keyboard.press("v");
+  await setMaskOption(page, "growShrinkPx", "4");
+  await page.locator("gnumarus-shell [data-testid=\"selection-shrink\"]").click();
+  await commitFloatingSelection(page);
+  // Shrunk by 4px each side: only the center 8x8 stays red.
+  expect(await countRedIn(page, 20, 20, 44, 44)).toBe(64);
+  await page.keyboard.press("Control+z");
+  expect(await countRedIn(page, 20, 20, 44, 44)).toBe(0);
+});
+
+test("adjust invert flips cell colors and undoes @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintLayerRect(page, "#ff0000", 24, 24, 39, 39);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { runAction(id: string): boolean } } };
+    root.__gnumarus?.shell?.runAction("adjust-invert");
+  });
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 255, b: 255, a: 255 });
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("adjust colors dialog applies brightness and undoes @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintLayerRect(page, "#ff0000", 24, 24, 39, 39);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { runAction(id: string): boolean } } };
+    root.__gnumarus?.shell?.runAction("adjust-colors");
+  });
+  const dialog = page.locator('gnumarus-shell dialog#adjustColorsDialog[open]');
+  await expect(dialog).toBeVisible();
+  await dialog.locator("#adjustBrightness").fill("100");
+  await dialog.getByRole("button", { name: "OK" }).click();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
+  await expect(page.locator("gnumarus-shell")).toContainText("Colors adjusted");
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});

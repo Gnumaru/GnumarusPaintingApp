@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  blurSelectionMask,
   clampSelectionRect,
   colorDistanceRGBA,
   colorSelectTolerance,
+  dilateSelectionMask,
   ellipseSelectMask,
+  erodeSelectionMask,
+  featherSelectionMask,
   floodSelectMask,
   globalSelectMask,
   countSelectionMask,
@@ -151,5 +155,66 @@ describe("selection shape masks", () => {
     const global = globalSelectMask(buffer, 4, 1, 2, 0, colorSelectTolerance(0));
     expect(Array.from(global)).toEqual([0, 0, 255, 0]);
     expect(countSelectionMask(floodSelectMask(buffer, 4, 1, 9, 9, 10))).toBe(0);
+  });
+});
+
+describe("GnumarusSelectionMaskOps", () => {
+  it("blurs hard mask edges into ramps", () => {
+    const mask = new Uint8Array(25).fill(0);
+    for (const [x, y] of [[1, 1], [2, 1], [3, 1], [1, 2], [2, 2], [3, 2], [1, 3], [2, 3], [3, 3]] as Array<[number, number]>) {
+      mask[y * 5 + x] = 255;
+    }
+    const blurred = blurSelectionMask(mask, 5, 5, 1);
+    expect(blurred[2 * 5 + 2]).toBe(255);
+    expect(blurred[1 * 5 + 2]).toBeGreaterThan(0);
+    expect(blurred[1 * 5 + 2]).toBeLessThan(255);
+    expect(blurred[0]).toBeLessThan(blurred[1 * 5 + 2]);
+    expect(Array.from(blurSelectionMask(mask, 5, 5, 0))).toEqual(Array.from(mask));
+  });
+
+  it("dilates set pixels outward and erodes them inward", () => {
+    const mask = new Uint8Array(25).fill(0);
+    mask[12] = 255;
+    const grown = dilateSelectionMask(mask, 5, 5, 1);
+    expect(countSelectionMask(grown)).toBe(9);
+    const shrunk = erodeSelectionMask(grown, 5, 5, 1);
+    expect(countSelectionMask(shrunk)).toBe(1);
+    expect(erodeSelectionMask(mask, 5, 5, 1)[12]).toBe(0);
+    expect(dilateSelectionMask(mask, 5, 5, 0)[12]).toBe(255);
+  });
+
+  it("erodes full-mask borders inward (outside is empty)", () => {
+    const full = new Uint8Array(16).fill(255);
+    const once = erodeSelectionMask(full, 4, 4, 1);
+    expect(countSelectionMask(once)).toBe(4);
+    expect(once[0]).toBe(0);
+    expect(once[1 * 4 + 1]).toBe(255);
+  });
+});
+
+describe("GnumarusFeatherMask", () => {
+  it("pads symmetrically and fades to zero at the border", () => {
+    const mask = new Uint8Array(16).fill(255);
+    const grown = featherSelectionMask(mask, 4, 4, 1);
+    expect(grown.width).toBe(6);
+    expect(grown.height).toBe(6);
+    // Interior keeps full weight (full kernel coverage).
+    const center = grown.mask[3 * 6 + 3] as number;
+    expect(center).toBe(255);
+    // Falloff: edge of the source area is partial, padded border is fainter.
+    const edge = grown.mask[1 * 6 + 1] as number;
+    expect(edge).toBeGreaterThan(0);
+    expect(edge).toBeLessThan(255);
+    const corner = grown.mask[0] as number;
+    expect(corner).toBeLessThan(edge);
+    // Symmetric padding keeps the center aligned with the old center.
+    expect(grown.mask[2 * 6 + 2]).toBe(grown.mask[3 * 6 + 3]);
+  });
+
+  it("passes invalid input through unchanged", () => {
+    const mask = new Uint8Array([255, 0, 0, 255]);
+    const same = featherSelectionMask(mask, 2, 2, 0);
+    expect(Array.from(same.mask)).toEqual([255, 0, 0, 255]);
+    expect({ width: same.width, height: same.height }).toEqual({ width: 2, height: 2 });
   });
 });

@@ -7,6 +7,18 @@
 declare module "three" {
   export const NearestFilter: number;
   export const DoubleSide: number;
+  export const NormalBlending: number;
+  export const AdditiveBlending: number;
+  export const CustomBlending: number;
+  export const ZeroFactor: number;
+  export const OneFactor: number;
+  export const SrcColorFactor: number;
+  export const OneMinusSrcColorFactor: number;
+  export const SrcAlphaFactor: number;
+  export const OneMinusSrcAlphaFactor: number;
+  export const AddEquation: number;
+  export const MinEquation: number;
+  export const MaxEquation: number;
 
   export class Vector3 {
     x: number;
@@ -120,6 +132,14 @@ declare module "three" {
 
   export class ShaderMaterial {
     readonly uniforms: Record<string, ShaderUniform>;
+    blending: number;
+    blendSrc: number;
+    blendDst: number;
+    blendEquation: number;
+    blendSrcAlpha: number;
+    blendDstAlpha: number;
+    blendEquationAlpha: number;
+    needsUpdate: boolean;
     constructor(options: {
       uniforms: Record<string, ShaderUniform>;
       vertexShader: string;

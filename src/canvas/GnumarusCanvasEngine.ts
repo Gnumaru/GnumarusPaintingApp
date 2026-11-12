@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { compositeLayersAt } from "../preview/GnumarusFinalRender";
+import { compositeFinalImage, compositeLayersAt } from "../preview/GnumarusFinalRender";
 import {
   GNUMARUS_TEXT_MAX_RASTER_DIMENSION,
   GNUMARUS_TEXT_RASTER_SCALE,
@@ -62,12 +62,14 @@ import {
   parseBlendMode,
   parseChannelLock,
   parseHexColor,
+  parseLayerBlendMode,
   resizePixelBuffer,
   setPixel,
   stampSegmentCoverage,
   type GnumarusBlendMode,
   type GnumarusBrushShape,
   type GnumarusChannelLock,
+  type GnumarusLayerBlendMode,
   type GnumarusPressureResponse,
   type GnumarusRgba,
 } from "./GnumarusPixelBuffer";
@@ -139,11 +141,14 @@ import {
   type GnumarusWrapMode,
 } from "./GnumarusViewportMath";
 import {
+  blurSelectionMask,
   clampColorThreshold,
   clampSelectionRect,
   colorSelectTolerance,
   countSelectionMask,
+  dilateSelectionMask,
   ellipseSelectMask,
+  erodeSelectionMask,
   floodSelectMask,
   globalSelectMask,
   intersectSelectionRects,
@@ -419,6 +424,8 @@ export interface GnumarusLayerInfo {
   name: string;
   visible: boolean;
   opacity: number;
+  /** Per-layer compositing blend mode (normal paints over). */
+  blend: GnumarusLayerBlendMode;
   width: number;
   height: number;
   transform: GnumarusLayerTransform;
@@ -521,6 +528,7 @@ export interface GnumarusAnimationProjectData {
     name: string;
     visible: boolean;
     opacity: number;
+    blend?: GnumarusLayerBlendMode;
     lockedChannels: GnumarusChannelLock;
   }>;
   textures: GnumarusTexturePixels[];
@@ -544,6 +552,7 @@ export interface GnumarusProjectLayerInput {
   name: string;
   visible: boolean;
   opacity: number;
+  blend?: GnumarusLayerBlendMode;
   width: number;
   height: number;
   buffer: Uint8ClampedArray;
@@ -979,6 +988,13 @@ export class GnumarusCanvasEngine {
   private retouchLast: { x: number; y: number } | null = null;
   /** Clone source anchor (layer + cell pixel), kept until reselected. */
   private cloneSource: { layerId: string; x: number; y: number } | null = null;
+  /** Onion skinning: ghost neighbor frames over the canvas. */
+  private onionEnabled = false;
+  private onionPast = 1;
+  private onionFuture = 1;
+  private onionTint = true;
+  /** Ghost planes (past blue / future red), project-sized. */
+  private onionPlanes: Array<{ mesh: THREE.Mesh; texture: THREE.DataTexture | null }> = [];
   /** Stroke-start dab center for aligned clone offsets. */
   private retouchStart: { x: number; y: number } | null = null;
   private curveP0: { x: number; y: number; clientX: number; clientY: number } | null = null;
@@ -1637,6 +1653,32 @@ export class GnumarusCanvasEngine {
     this.gridPlane.renderOrder = 1000;
     this.gridPlane.visible = false;
     this.scene.add(this.gridPlane);
+    for (let ghost = 0; ghost < 2; ghost += 1) {
+      const blank = new THREE.DataTexture(new Uint8ClampedArray(4), 1, 1);
+      blank.magFilter = THREE.NearestFilter;
+      blank.minFilter = THREE.NearestFilter;
+      blank.generateMipmaps = false;
+      blank.flipY = true;
+      blank.needsUpdate = true;
+      const material = new THREE.ShaderMaterial({
+        uniforms: {
+          uMap: { value: blank },
+          uOpacity: { value: 1 },
+        },
+        vertexShader: LAYER_VERTEX_SHADER,
+        fragmentShader: LAYER_FRAGMENT_SHADER,
+        side: THREE.DoubleSide,
+        transparent: true,
+        depthWrite: false,
+      });
+      const mesh = new THREE.Mesh(this.sharedGeometry, material);
+      mesh.matrixAutoUpdate = false;
+      mesh.renderOrder = 900 + ghost;
+      mesh.visible = false;
+      mesh.frustumCulled = false;
+      this.scene.add(mesh);
+      this.onionPlanes.push({ mesh, texture: null });
+    }
     const makeAxisLine = (color: number): { material: THREE.LineBasicMaterial; line: THREE.LineSegments } => {
       const material = new THREE.LineBasicMaterial({ color, transparent: true, depthWrite: false });
       const geometry = new THREE.BufferGeometry();
@@ -1752,6 +1794,7 @@ export class GnumarusCanvasEngine {
     height: number,
     transform: GnumarusLayerTransform,
     lockedChannels: GnumarusChannelLock | undefined = undefined,
+    blend: GnumarusLayerBlendMode = "normal",
   ): GnumarusLayer {
     const texture = new THREE.DataTexture(buffer, width, height);
     texture.magFilter = THREE.NearestFilter;
@@ -1778,11 +1821,13 @@ export class GnumarusCanvasEngine {
     plane.visible = visible;
     this.scene.add(plane);
     const parsedLock = lockedChannels === undefined ? { r: false, g: false, b: false, a: false } : parseChannelLock(lockedChannels);
-    return {
+    const parsedBlend = parseLayerBlendMode(blend);
+    const created: GnumarusLayer = {
       id,
       name,
       visible,
       opacity: clampedOpacity,
+      blend: parsedBlend,
       width,
       height,
       transform: { ...transform },
@@ -1793,6 +1838,8 @@ export class GnumarusCanvasEngine {
       plane,
       renderTextureId: null,
     };
+    this.applyLayerBlending(created);
+    return created;
   }
 
   private refreshLayerStacking(): void {
@@ -1900,6 +1947,7 @@ export class GnumarusCanvasEngine {
     transform: GnumarusLayerTransform;
     visible: boolean;
     opacity: number;
+    blend: GnumarusLayerBlendMode;
   }> | null {
     if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
       return null;
@@ -1915,6 +1963,7 @@ export class GnumarusCanvasEngine {
           transform: { ...IDENTITY_LAYER_TRANSFORM },
           visible: false,
           opacity: layer.opacity,
+          blend: layer.blend,
         };
       }
       return {
@@ -1924,6 +1973,7 @@ export class GnumarusCanvasEngine {
         transform: { ...cell.transform },
         visible: layer.visible,
         opacity: layer.opacity,
+        blend: layer.blend,
       };
     });
   }
@@ -1966,6 +2016,9 @@ export class GnumarusCanvasEngine {
   private syncAllLayerRenders(): void {
     for (const layer of this.layers) {
       this.syncLayerRender(layer);
+    }
+    if (this.onionEnabled && !this.drawing) {
+      this.refreshOnionSkins();
     }
   }
 
@@ -3562,6 +3615,81 @@ export class GnumarusCanvasEngine {
     return this.getModelView(modelId);
   }
 
+  /**
+   * Apply a per-pixel color mapping to the active cell texture (adjustments,
+   * invert). Honors channel locks like paint; empty cells are refused.
+   * One undoable history entry on change.
+   */
+  adjustCurrentCellPixels(
+    transform: (r: number, g: number, b: number, a: number) => [number, number, number, number],
+  ): "adjusted" | "unchanged" | "empty" {
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return "empty";
+    }
+    if (this.isCellContentEmpty(layer.id, this.currentFrame)) {
+      return "empty";
+    }
+    if (this.denyPaintOnDerived()) {
+      return "empty";
+    }
+    const ensured = this.ensureCellContent(layer.id, this.currentFrame);
+    if (ensured === null) {
+      return "empty";
+    }
+    const tex = ensured.texture;
+    const base = tex.buffer.slice();
+    for (let i = 0; i < tex.buffer.length; i += 4) {
+      const out = transform(
+        tex.buffer[i] as number,
+        tex.buffer[i + 1] as number,
+        tex.buffer[i + 2] as number,
+        tex.buffer[i + 3] as number,
+      );
+      tex.buffer[i] = out[0];
+      tex.buffer[i + 1] = out[1];
+      tex.buffer[i + 2] = out[2];
+      tex.buffer[i + 3] = out[3];
+    }
+    // Re-apply channel locks (the mapping runs unlocked like Delete's clear).
+    const locked = layer.lockedChannels;
+    if (locked.r || locked.g || locked.b || locked.a) {
+      for (let i = 0; i < tex.buffer.length; i += 4) {
+        if (locked.r) {
+          tex.buffer[i] = base[i] as number;
+        }
+        if (locked.g) {
+          tex.buffer[i + 1] = base[i + 1] as number;
+        }
+        if (locked.b) {
+          tex.buffer[i + 2] = base[i + 2] as number;
+        }
+        if (locked.a) {
+          tex.buffer[i + 3] = base[i + 3] as number;
+        }
+      }
+    }
+    const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
+    if (diff === null) {
+      this.syncAllLayerRenders();
+      this.refreshLayerStacking();
+      this.render();
+      this.updatePreviews();
+      this.emitStats();
+      return "unchanged";
+    }
+    this.history.push({ type: "stroke", layerId: tex.id, diff });
+    this.syncAllLayerRenders();
+    this.markTextureViewsDirty(tex.id);
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    this.updatePreviews();
+    return "adjusted";
+  }
+
   /** True while an orbit gesture has uncommitted changes. */
   hasUncommittedModelView(): boolean {
     return this.modelOrbit !== null;
@@ -5000,6 +5128,7 @@ export class GnumarusCanvasEngine {
         name: layer.name,
         visible: layer.visible,
         opacity: layer.opacity,
+        blend: layer.blend,
         lockedChannels: { ...layer.lockedChannels },
       })),
       textures: [...this.textures.values()].map((texture) => ({
@@ -5066,6 +5195,7 @@ export class GnumarusCanvasEngine {
       name: layer.name,
       visible: layer.visible,
       opacity: layer.opacity,
+      blend: layer.blend,
       width: layer.width,
       height: layer.height,
       transform: { ...layer.transform },
@@ -5230,6 +5360,7 @@ export class GnumarusCanvasEngine {
       snapshot.height,
       { ...IDENTITY_LAYER_TRANSFORM },
       { ...snapshot.lockedChannels },
+      snapshot.blend,
     );
     this.textures.set(snapshot.id, {
       id: snapshot.id,
@@ -5351,6 +5482,7 @@ export class GnumarusCanvasEngine {
       height: ownedEntry.height,
       transform: { ...upper.transform },
       lockedChannels: { ...upper.lockedChannels },
+      blend: upper.blend,
       stackIndex: index,
       buffer: ownedEntry.buffer.slice(),
       cells: [],
@@ -5477,6 +5609,7 @@ export class GnumarusCanvasEngine {
       height: ownedEntry.height,
       transform: { ...upper.transform },
       lockedChannels: { ...upper.lockedChannels },
+      blend: upper.blend,
       stackIndex: index,
       buffer: ownedEntry.buffer.slice(),
       cells: [],
@@ -5607,6 +5740,73 @@ export class GnumarusCanvasEngine {
     layer.material.uniforms["uOpacity"]!.value = clamped;
     this.render();
     return true;
+  }
+
+  /** Active blend mode of a layer (for the layers panel and tests). */
+  getLayerBlendMode(id: string): GnumarusLayerBlendMode | null {
+    const layer = this.findLayer(id);
+    return layer === null ? null : layer.blend;
+  }
+
+  /** Set the compositing blend mode of a layer (undoable: no, like opacity). */
+  setLayerBlendMode(id: string, blend: GnumarusLayerBlendMode): boolean {
+    const layer = this.findLayer(id);
+    if (layer === null) {
+      return false;
+    }
+    const parsed = parseLayerBlendMode(blend);
+    if (parsed === layer.blend) {
+      return false;
+    }
+    layer.blend = parsed;
+    this.applyLayerBlending(layer);
+    this.render();
+    this.onLayersChanged?.();
+    return true;
+  }
+
+  /** Map a layer blend mode onto its three.js material blending factors. */
+  private applyLayerBlending(layer: GnumarusLayer): void {
+    const material = layer.material;
+    switch (layer.blend) {
+      case "multiply":
+        material.blending = THREE.CustomBlending;
+        material.blendSrc = THREE.ZeroFactor;
+        material.blendDst = THREE.SrcColorFactor;
+        material.blendEquation = THREE.AddEquation;
+        break;
+      case "screen":
+        material.blending = THREE.CustomBlending;
+        material.blendSrc = THREE.OneFactor;
+        material.blendDst = THREE.OneMinusSrcColorFactor;
+        material.blendEquation = THREE.AddEquation;
+        break;
+      case "darken":
+        material.blending = THREE.CustomBlending;
+        material.blendSrc = THREE.OneFactor;
+        material.blendDst = THREE.OneFactor;
+        material.blendEquation = THREE.MinEquation;
+        break;
+      case "lighten":
+        material.blending = THREE.CustomBlending;
+        material.blendSrc = THREE.OneFactor;
+        material.blendDst = THREE.OneFactor;
+        material.blendEquation = THREE.MaxEquation;
+        break;
+      case "add":
+        material.blending = THREE.AdditiveBlending;
+        break;
+      case "normal":
+      default:
+        material.blending = THREE.NormalBlending;
+        break;
+    }
+    if (material.blending === THREE.CustomBlending) {
+      material.blendSrcAlpha = THREE.SrcAlphaFactor;
+      material.blendDstAlpha = THREE.OneMinusSrcAlphaFactor;
+      material.blendEquationAlpha = THREE.AddEquation;
+    }
+    material.needsUpdate = true;
   }
 
   setLayerLockedChannels(id: string, locked: GnumarusChannelLock): boolean {
@@ -6343,6 +6543,7 @@ export class GnumarusCanvasEngine {
           rotation: normalizeRotation(input.transform.rotation),
         },
         parseChannelLock(input.lockedChannels),
+        parseLayerBlendMode((input as { blend?: unknown }).blend),
       );
       this.layers.push(layer);
       this.textures.set(input.id, {
@@ -6405,6 +6606,7 @@ export class GnumarusCanvasEngine {
         name: string;
         visible: boolean;
         opacity: number;
+        blend?: GnumarusLayerBlendMode;
         lockedChannels: GnumarusChannelLock;
       }>;
       textures: GnumarusTexturePixels[];
@@ -6470,6 +6672,7 @@ export class GnumarusCanvasEngine {
           1,
           { ...IDENTITY_LAYER_TRANSFORM },
           parseChannelLock(layer.lockedChannels),
+          parseLayerBlendMode((layer as { blend?: unknown }).blend),
         ),
       );
     }
@@ -8012,6 +8215,142 @@ export class GnumarusCanvasEngine {
   /** Clone source anchor for the clone tool (test/debug readout). */
   getCloneSource(): { layerId: string; x: number; y: number } | null {
     return this.cloneSource === null ? null : { ...this.cloneSource };
+  }
+
+  isOnionEnabled(): boolean {
+    return this.onionEnabled;
+  }
+
+  setOnionEnabled(enabled: boolean): void {
+    const next = enabled === true;
+    if (next === this.onionEnabled) {
+      return;
+    }
+    this.onionEnabled = next;
+    this.refreshOnionSkins();
+    this.render();
+    this.onLayersChanged?.();
+  }
+
+  getOnionPast(): number {
+    return this.onionPast;
+  }
+
+  getOnionFuture(): number {
+    return this.onionFuture;
+  }
+
+  isOnionTint(): boolean {
+    return this.onionTint;
+  }
+
+  setOnionCounts(past: number, future: number): void {
+    const nextPast = Number.isFinite(past) ? Math.min(8, Math.max(0, Math.floor(past))) : this.onionPast;
+    const nextFuture = Number.isFinite(future) ? Math.min(8, Math.max(0, Math.floor(future))) : this.onionFuture;
+    if (nextPast === this.onionPast && nextFuture === this.onionFuture) {
+      return;
+    }
+    this.onionPast = nextPast;
+    this.onionFuture = nextFuture;
+    this.refreshOnionSkins();
+    this.render();
+    this.onLayersChanged?.();
+  }
+
+  setOnionTint(tint: boolean): void {
+    const next = tint !== false;
+    if (next === this.onionTint) {
+      return;
+    }
+    this.onionTint = next;
+    this.refreshOnionSkins();
+    this.render();
+    this.onLayersChanged?.();
+  }
+
+  /** Onion ghost visibility for tests and the matrix toggle. */
+  onionGhostVisible(which: "past" | "future"): boolean {
+    const plane = this.onionPlanes[which === "past" ? 0 : 1];
+    return plane !== undefined && plane.mesh.visible;
+  }
+
+  /**
+   * Rebuild the onion ghost textures from neighbor frames (past blue,
+   * future red like Pixelorama; white when tinting is off). Each side bakes
+   * up to N frames with 0.6/i alpha falloff, near frames first so farther
+   * frames land on top. Hidden when disabled or friendless.
+   */
+  refreshOnionSkins(): void {
+    const width = Math.max(1, Math.floor(this.imageWidth));
+    const height = Math.max(1, Math.floor(this.imageHeight));
+    const sides: Array<{ index: 0 | 1; direction: -1 | 1; rate: number; tint: { r: number; g: number; b: number } }> = [
+      { index: 0, direction: -1, rate: this.onionPast, tint: this.onionTint ? { r: 0, g: 0, b: 1 } : { r: 1, g: 1, b: 1 } },
+      { index: 1, direction: 1, rate: this.onionFuture, tint: this.onionTint ? { r: 1, g: 0, b: 0 } : { r: 1, g: 1, b: 1 } },
+    ];
+    for (const side of sides) {
+      const slot = this.onionPlanes[side.index];
+      if (slot === undefined) {
+        continue;
+      }
+      if (!this.onionEnabled || side.rate < 1 || this.frameCount < 2) {
+        slot.mesh.visible = false;
+        continue;
+      }
+      const ghost = new Uint8ClampedArray(width * height * 4);
+      let painted = false;
+      for (let i = 1; i <= side.rate; i += 1) {
+        const frame = this.currentFrame + side.direction * i;
+        if (frame < 0 || frame >= this.frameCount) {
+          continue;
+        }
+        const inputs = this.getFrameFlattenInputs(frame);
+        if (inputs === null) {
+          continue;
+        }
+        const flat = compositeFinalImage(width, height, inputs);
+        const alpha = 0.6 / i;
+        for (let p = 0; p < width * height; p += 1) {
+          const a = (flat[p * 4 + 3] as number) / 255;
+          if (!(a > 0)) {
+            continue;
+          }
+          const weight = a * alpha;
+          const o = p * 4;
+          const nr = Math.round((flat[o] as number) * side.tint.r);
+          const ng = Math.round((flat[o + 1] as number) * side.tint.g);
+          const nb = Math.round((flat[o + 2] as number) * side.tint.b);
+          const prev = 1 - weight;
+          ghost[o] = Math.round((ghost[o] as number) * prev + nr * weight);
+          ghost[o + 1] = Math.round((ghost[o + 1] as number) * prev + ng * weight);
+          ghost[o + 2] = Math.round((ghost[o + 2] as number) * prev + nb * weight);
+          ghost[o + 3] = Math.round((ghost[o + 3] as number) * prev + 255 * weight);
+          painted = true;
+        }
+      }
+      if (!painted) {
+        slot.mesh.visible = false;
+        continue;
+      }
+      const current = slot.texture;
+      if (current === null || current.image.width !== width || current.image.height !== height) {
+        current?.dispose();
+        const texture = new THREE.DataTexture(ghost, width, height);
+        texture.magFilter = THREE.NearestFilter;
+        texture.minFilter = THREE.NearestFilter;
+        texture.generateMipmaps = false;
+        texture.flipY = true;
+        texture.needsUpdate = true;
+        slot.texture = texture;
+        const material = slot.mesh.material as THREE.ShaderMaterial;
+        material.uniforms["uMap"]!.value = texture;
+      } else {
+        (current.image.data as Uint8ClampedArray).set(ghost);
+        current.needsUpdate = true;
+      }
+      this.writePlaneMatrix(slot.mesh, width, height, { ...IDENTITY_LAYER_TRANSFORM }, 0);
+      slot.mesh.renderOrder = 900 + side.index;
+      slot.mesh.visible = true;
+    }
   }
 
   setGradientDither(enabled: boolean): boolean {
@@ -9706,15 +10045,25 @@ export class GnumarusCanvasEngine {
         if (sx < 0 || sy < 0 || sx >= floating.width || sy >= floating.height) {
           continue;
         }
-        if ((floating.mask[sy * floating.width + sx] ?? 0) === 0) {
+        const maskValue = floating.mask[sy * floating.width + sx] ?? 0;
+        if (maskValue === 0) {
           continue;
         }
         const source = (sy * floating.width + sx) * 4;
         const dest = (dy * tex.width + dx) * 4;
-        tex.buffer[dest] = floating.buffer[source]!;
-        tex.buffer[dest + 1] = floating.buffer[source + 1]!;
-        tex.buffer[dest + 2] = floating.buffer[source + 2]!;
-        tex.buffer[dest + 3] = floating.buffer[source + 3]!;
+        if (maskValue >= 255) {
+          tex.buffer[dest] = floating.buffer[source]!;
+          tex.buffer[dest + 1] = floating.buffer[source + 1]!;
+          tex.buffer[dest + 2] = floating.buffer[source + 2]!;
+          tex.buffer[dest + 3] = floating.buffer[source + 3]!;
+          continue;
+        }
+        const alpha = maskValue / 255;
+        const inv = 1 - alpha;
+        tex.buffer[dest] = Math.round((floating.buffer[source] as number) * alpha + (tex.buffer[dest] as number) * inv);
+        tex.buffer[dest + 1] = Math.round((floating.buffer[source + 1] as number) * alpha + (tex.buffer[dest + 1] as number) * inv);
+        tex.buffer[dest + 2] = Math.round((floating.buffer[source + 2] as number) * alpha + (tex.buffer[dest + 2] as number) * inv);
+        tex.buffer[dest + 3] = Math.round((floating.buffer[source + 3] as number) * alpha + (tex.buffer[dest + 3] as number) * inv);
       }
     }
     this.floating = null;
@@ -9739,6 +10088,150 @@ export class GnumarusCanvasEngine {
     this.emitStats();
     this.updatePreviews();
     return true;
+  }
+
+  /**
+   * Whether the floating selection is axis-aligned with its home texture
+   * (mask ops need pixel-exact framing, so transformed floatings refuse).
+   */
+  private floatingHomeOrigin(): { x: number; y: number } | null {
+    const floating = this.floating;
+    if (floating === null || !floating.active) {
+      return null;
+    }
+    const placement = this.floatingPlacement(floating);
+    if (
+      placement.rotation !== 0 ||
+      placement.rotationX !== 0 ||
+      placement.rotationY !== 0 ||
+      placement.skewX !== 0 ||
+      placement.skewY !== 0 ||
+      placement.scaleX !== 1 ||
+      placement.scaleY !== 1 ||
+      placement.flipX ||
+      placement.flipY
+    ) {
+      return null;
+    }
+    const box = selectionCornerBox(placement);
+    return { x: Math.round(box.minX), y: Math.round(box.minY) };
+  }
+
+  /**
+   * Expand the floating box symmetrically by `pad` pixels, sampling the new
+   * rim from the home texture (transparent outside it). Keeps the placement
+   * center fixed. Returns false for transformed floatings or missing data.
+   */
+  private padFloatingForRim(pad: number): boolean {
+    const floating = this.floating;
+    if (floating === null || !floating.active) {
+      return false;
+    }
+    const tex = this.textures.get(floating.textureId);
+    const origin = this.floatingHomeOrigin();
+    if (tex === undefined || origin === null || pad < 1) {
+      return false;
+    }
+    const left = origin.x - pad;
+    const top = origin.y - pad;
+    const nw = floating.width + pad * 2;
+    const nh = floating.height + pad * 2;
+    const padded = new Uint8ClampedArray(nw * nh * 4);
+    const rim = new Uint8Array(nw * nh);
+    for (let y = 0; y < nh; y += 1) {
+      for (let x = 0; x < nw; x += 1) {
+        const hx = left + x;
+        const hy = top + y;
+        const dest = (y * nw + x) * 4;
+        const lx = x - pad;
+        const ly = y - pad;
+        if (lx >= 0 && ly >= 0 && lx < floating.width && ly < floating.height) {
+          const source = (ly * floating.width + lx) * 4;
+          padded[dest] = floating.buffer[source] as number;
+          padded[dest + 1] = floating.buffer[source + 1] as number;
+          padded[dest + 2] = floating.buffer[source + 2] as number;
+          padded[dest + 3] = floating.buffer[source + 3] as number;
+          rim[y * nw + x] = floating.mask[ly * floating.width + lx] as number;
+        } else if (hx >= 0 && hy >= 0 && hx < tex.width && hy < tex.height) {
+          const home = (hy * tex.width + hx) * 4;
+          padded[dest] = tex.buffer[home] as number;
+          padded[dest + 1] = tex.buffer[home + 1] as number;
+          padded[dest + 2] = tex.buffer[home + 2] as number;
+          padded[dest + 3] = tex.buffer[home + 3] as number;
+        }
+      }
+    }
+    floating.buffer = padded;
+    floating.mask = rim;
+    floating.width = nw;
+    floating.height = nh;
+    floating.cx = left + nw / 2;
+    floating.cy = top + nh / 2;
+    floating.initial.cx = floating.cx;
+    floating.initial.cy = floating.cy;
+    floating.maskFull = false;
+    return true;
+  }
+
+  /**
+   * Feather the floating mask with a true outside falloff (single undo on
+   * merge). Refuses transformed floatings; radius 0 is a no-op.
+   */
+  featherFloatingSelection(radius: number): "ok" | "transformed" | "none" {
+    const floating = this.floating;
+    if (floating === null || !floating.active) {
+      return "none";
+    }
+    const r = Math.max(0, Math.floor(radius));
+    if (r < 1) {
+      return "ok";
+    }
+    if (!this.padFloatingForRim(r)) {
+      return "transformed";
+    }
+    floating.mask = blurSelectionMask(floating.mask, floating.width, floating.height, r);
+    floating.maskFull = false;
+    this.afterFloatingChange();
+    this.updateSelectionOverlay();
+    return "ok";
+  }
+
+  /**
+   * Grow (dilate) or shrink (erode) the floating mask by whole pixels.
+   * Growing pads the box and samples the rim from the home texture;
+   * shrinking stays in place and drops an emptied selection. No undo until
+   * the merge bakes the result. Transformed floatings refuse with a toast.
+   */
+  reshapeFloatingSelection(delta: number): "ok" | "transformed" | "none" {
+    const floating = this.floating;
+    if (floating === null || !floating.active) {
+      return "none";
+    }
+    const steps = Math.abs(Math.floor(delta));
+    if (steps < 1) {
+      return "ok";
+    }
+    if (delta > 0) {
+      if (!this.padFloatingForRim(steps)) {
+        return "transformed";
+      }
+      floating.mask = dilateSelectionMask(floating.mask, floating.width, floating.height, steps);
+    } else {
+      floating.mask = erodeSelectionMask(floating.mask, floating.width, floating.height, steps);
+    }
+    if (countSelectionMask(floating.mask) === 0) {
+      this.floating = null;
+      this.clearTransformGestures();
+      this.disposeFloatingPlane();
+      this.updatePreviews();
+      this.updateSelectionOverlay();
+      this.onLayersChanged?.();
+      return "ok";
+    }
+    floating.maskFull = countSelectionMask(floating.mask) === floating.width * floating.height;
+    this.afterFloatingChange();
+    this.updateSelectionOverlay();
+    return "ok";
   }
 
   /**

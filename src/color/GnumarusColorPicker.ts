@@ -158,6 +158,46 @@ export class GnumarusColorPicker extends LitElement {
       color: #9a9a9a;
       font-size: 11px;
     }
+    .swatch-section-label {
+      display: block;
+      color: #9a9a9a;
+      font-size: 11px;
+      margin: 8px 0 4px;
+    }
+    .swatch-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      max-width: 264px;
+    }
+    .palette-swatch {
+      position: relative;
+      width: 22px;
+      height: 22px;
+      border: 1px solid #555;
+      border-radius: 3px;
+      padding: 0;
+      cursor: pointer;
+    }
+    .palette-swatch:hover {
+      border-color: #0e639c;
+    }
+    .palette-swatch .remove {
+      position: absolute;
+      top: -7px;
+      right: -7px;
+      z-index: 1;
+      width: 14px;
+      height: 14px;
+      line-height: 12px;
+      font-size: 10px;
+      border-radius: 50%;
+      border: 1px solid #555;
+      background: #1e1e1e;
+      color: #ccc;
+      padding: 0;
+      cursor: pointer;
+    }
     .hex-row {
       display: flex;
       gap: 8px;
@@ -233,11 +273,17 @@ export class GnumarusColorPicker extends LitElement {
     value: { type: String },
     model: { type: String },
     open: { type: Boolean },
+    swatches: { attribute: false },
+    recents: { attribute: false },
   };
 
   declare value: string;
   declare model: GnumarusColorModelId;
   declare open: boolean;
+  /** Saved swatch palette (hex colors), owned by the host shell. */
+  declare swatches: string[];
+  /** Recently used colors (hex), owned by the host shell. */
+  declare recents: string[];
 
   private rgba: GnumarusRgbaBytes = { r: 0, g: 0, b: 0, a: 255 };
   private modelValues: number[] = [0, 0, 0];
@@ -250,6 +296,8 @@ export class GnumarusColorPicker extends LitElement {
     this.value = "#000000";
     this.model = "hsl";
     this.open = false;
+    this.swatches = [];
+    this.recents = [];
     this.syncFromValue(this.value, "hsl");
   }
 
@@ -285,6 +333,27 @@ export class GnumarusColorPicker extends LitElement {
         }
       }
     }
+  }
+
+  private pickSwatch(hex: string): void {
+    const parsed = parseHexToRgbaBytes(hex);
+    if (parsed === null) {
+      return;
+    }
+    this.rgba = parsed;
+    this.modelValues = rgbBytesToModelAxes(parsed, this.model);
+    this.trackHsvHue();
+    this.emitChange();
+  }
+
+  private editSwatches(kind: "add" | "remove", hex?: string): void {
+    this.dispatchEvent(
+      new CustomEvent("gnumarus-swatches-edit", {
+        detail: kind === "add" ? { kind } : { kind, hex },
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   private emitChange(): void {
@@ -618,6 +687,23 @@ export class GnumarusColorPicker extends LitElement {
           top: Math.min(rect.top, Math.max(8, window.innerHeight - 420)),
         };
       }
+      // The content height varies (swatches/recents grow the popup), so
+      // re-measure after render and pull the popup up when it would
+      // otherwise spill below the viewport with no way to scroll to it.
+      void this.updateComplete.then(() => {
+        if (!this.open || this.popupPos === null) {
+          return;
+        }
+        const dialog = this.shadowRoot?.querySelector(".popup") as HTMLElement | null;
+        if (dialog === null) {
+          return;
+        }
+        const overflow = dialog.getBoundingClientRect().bottom - window.innerHeight + 8;
+        if (overflow > 0) {
+          this.popupPos = { left: this.popupPos.left, top: Math.max(8, this.popupPos.top - overflow) };
+          this.requestUpdate();
+        }
+      });
       window.addEventListener("pointerdown", this.onDocumentPointerDown);
       window.addEventListener("keydown", this.onDocumentKeyDown);
     } else {
@@ -798,6 +884,64 @@ export class GnumarusColorPicker extends LitElement {
                   @change=${(event: Event): void => this.onHexChange(event)}
                 />
               </div>
+              <span class="swatch-section-label">${tr("color.swatches")}</span>
+              <div class="swatch-grid" data-testid="swatch-grid">
+                ${this.swatches.map(
+                  (entry) => html`<button
+                    class="palette-swatch"
+                    data-testid="palette-swatch"
+                    data-hex=${entry}
+                    title=${entry}
+                    aria-label=${tr("color.applySwatch", { hex: entry })}
+                    style="background-color: ${entry};"
+                    @click=${(event: Event): void => {
+                      if ((event.target as HTMLElement | null)?.closest?.(".remove") != null) {
+                        return;
+                      }
+                      this.pickSwatch(entry);
+                    }}
+                    ><span
+                      class="remove"
+                      data-testid="swatch-remove"
+                      data-hex=${entry}
+                      title=${tr("color.removeSwatch")}
+                      aria-label=${tr("color.removeSwatch")}
+                      @click=${(): void => {
+                        this.editSwatches("remove", entry);
+                      }}
+                      >×</span
+                    ></button
+                  >`,
+                )}
+                <button
+                  class="palette-swatch"
+                  data-testid="swatch-add"
+                  title=${tr("color.addSwatch")}
+                  aria-label=${tr("color.addSwatch")}
+                  style="background: transparent; border-style: dashed;"
+                  @click=${(): void => this.editSwatches("add")}
+                >
+                  +
+                </button>
+              </div>
+              ${this.recents.length > 0
+                ? html`
+                    <span class="swatch-section-label">${tr("color.recent")}</span>
+                    <div class="swatch-grid" data-testid="recent-grid">
+                      ${this.recents.map(
+                        (entry) => html`<button
+                          class="palette-swatch"
+                          data-testid="recent-swatch"
+                          data-hex=${entry}
+                          title=${entry}
+                          aria-label=${tr("color.applySwatch", { hex: entry })}
+                          style="background-color: ${entry};"
+                          @click=${(): void => this.pickSwatch(entry)}
+                        ></button>`,
+                      )}
+                    </div>
+                  `
+                : html``}
             </div>
           `
         : html``}
