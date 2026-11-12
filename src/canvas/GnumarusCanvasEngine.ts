@@ -197,6 +197,7 @@ import {
 } from "../settings/GnumarusRotationSettings";
 import {
   DEFAULT_STORAGE_SETTINGS,
+  parseModelLighting,
   type GnumarusModelLighting,
 } from "../settings/GnumarusStorageSettings";
 import {
@@ -491,7 +492,7 @@ export interface GnumarusAnimationProjectData {
   texts?: Array<{ id: string; name: string; document: GnumarusTextDocument }>;
   svgs?: Array<{ id: string; name: string; svg: string }>;
   tilemaps?: Array<{ id: string; name: string; tilesetId: string; tileWidth: number; tileHeight: number; tiles: GnumarusTilePlacement[] }>;
-  models3d?: Array<{ id: string; name: string; ext: string; bytes: Uint8Array; view?: GnumarusModel3dView }>;
+  models3d?: Array<{ id: string; name: string; ext: string; bytes: Uint8Array; view?: GnumarusModel3dView; lighting?: GnumarusModelLighting }>;
   contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null; svgId?: string | null; model3dId?: string | null; tilemapId?: string | null; flyCam?: GnumarusFlyPose | null; transform: GnumarusLayerTransform }>;
   cells: Array<{ layer: string; frame: number; content: string }>;
   frames: number;
@@ -731,7 +732,7 @@ export class GnumarusCanvasEngine {
   /** 3D model entries by id (source bytes + orbit view, decoded on demand). */
   private models3d = new Map<
     string,
-    { id: string; name: string; ext: string; bytes: Uint8Array; view: GnumarusModel3dView }
+    { id: string; name: string; ext: string; bytes: Uint8Array; view: GnumarusModel3dView; lighting: GnumarusModelLighting }
   >();
   /** Raster cache by model id (512px offscreen renders, keyed by orbit view). */
   private modelRasters = new Map<string, { buffer: Uint8ClampedArray; width: number; height: number; key: string }>();
@@ -751,33 +752,25 @@ export class GnumarusCanvasEngine {
   private modelPending = new Set<string>();
   private modelCounter = 1;
   private modelNameCounter = 1;
-  /** How 3D models are shaded when rasterized (rendering-only). */
+  /** Default shading stamped onto newly imported models (rendering-only). */
   private modelLighting: GnumarusModelLighting = DEFAULT_STORAGE_SETTINGS.modelLighting;
 
-  /** Active 3D model shading mode. */
+  /** Default 3D model shading mode for new imports and tool use. */
   getModelLighting(): GnumarusModelLighting {
     return this.modelLighting;
   }
 
   /**
-   * Set the 3D model shading mode and re-render every cached model raster,
-   * since shading is baked into the cached pixels.
+   * Set the default 3D model shading mode. Only affects models imported
+   * afterwards or touched by the model transform / fly camera tools, which
+   * stamp the default onto the model they render; already-imported models
+   * keep rendering exactly as before.
    */
   setModelLighting(mode: GnumarusModelLighting): void {
     if (mode !== "lit" && mode !== "unlit") {
       return;
     }
-    if (mode === this.modelLighting) {
-      return;
-    }
     this.modelLighting = mode;
-    this.modelRasters.clear();
-    for (const modelId of this.models3d.keys()) {
-      this.ensureModelRaster(modelId);
-    }
-    this.syncAllLayerRenders();
-    this.render();
-    this.onLayersChanged?.();
   }
   /** Tilemap entries by id (tileset + grid placements). */
   private tilemaps = new Map<string, GnumarusTilemapEntry>();
@@ -3186,7 +3179,8 @@ export class GnumarusCanvasEngine {
       }
     }
     const view = { ...GNUMARUS_MODEL3D_DEFAULT_VIEW };
-    const raster = await this.decodeModel3d(ext, bytes, view);
+    const lighting = this.modelLighting;
+    const raster = await this.decodeModel3d(ext, bytes, view, null, lighting);
     if (raster === null) {
       return null;
     }
@@ -3197,6 +3191,7 @@ export class GnumarusCanvasEngine {
       ext,
       bytes: bytes.slice(),
       view,
+      lighting,
     });
     this.modelRasters.set(modelId, { ...raster, key: this.modelRasterKey(modelId, view) });
     if (content !== undefined) {
@@ -3251,7 +3246,8 @@ export class GnumarusCanvasEngine {
     }
     this.modelPending.add(modelId);
     const eye = this.flyCameraEye(modelId);
-    void this.decodeModel3d(entry.ext, entry.bytes, view, eye)
+    const lighting = this.models3d.get(modelId)?.lighting ?? DEFAULT_STORAGE_SETTINGS.modelLighting;
+    void this.decodeModel3d(entry.ext, entry.bytes, view, eye, lighting)
       .then((raster) => {
         if (raster !== null && this.effectiveModelViewKey(modelId) === key) {
           this.modelRasters.set(modelId, { ...raster, key });
@@ -3281,9 +3277,10 @@ export class GnumarusCanvasEngine {
     return entry === undefined ? null : { ...entry.view };
   }
 
-  /** Cache key for a model raster: orbit view, lighting mode and fly pose. */
+  /** Cache key for a model raster: orbit view, per-model lighting and fly pose. */
   private modelRasterKey(modelId: string, view: GnumarusModel3dView): string {
-    return modelViewKey(view, this.modelLighting) + this.flyRasterKey(modelId);
+    const lighting = this.models3d.get(modelId)?.lighting ?? DEFAULT_STORAGE_SETTINGS.modelLighting;
+    return modelViewKey(view, lighting) + this.flyRasterKey(modelId);
   }
 
   /** Cache key of the current effective view (or null when missing). */
@@ -3362,6 +3359,7 @@ export class GnumarusCanvasEngine {
     if (modelId === null) {
       return false;
     }
+    this.syncModelLighting(modelId);
     if (this.modelOrbit === null || this.modelOrbit.modelId !== modelId) {
       const stored = this.getModelView(modelId);
       if (stored === null) {
@@ -3473,6 +3471,7 @@ export class GnumarusCanvasEngine {
     if (modelId === null || !this.models3d.has(modelId)) {
       return false;
     }
+    this.syncModelLighting(modelId);
     if (this.flycam === null || this.flycam.modelId !== modelId) {
       const contentId = layer === null ? undefined : this.cells.get(animationCellKey(layer.id, this.currentFrame));
       const saved = contentId === undefined ? undefined : this.contents.get(contentId)?.flyCam;
@@ -3523,6 +3522,21 @@ export class GnumarusCanvasEngine {
     return `:fly:${rounded(fly.yawDeg)},${rounded(fly.pitchDeg)},${rounded(fly.x)},${rounded(fly.y)},${rounded(fly.z)}`;
   }
 
+  /**
+   * Stamp the current default shading onto a model touched by the model
+   * transform or fly camera tools. Returns true when the stored lighting
+   * changed (the raster cache key covers it, so the next ensure re-renders).
+   */
+  private syncModelLighting(modelId: string): boolean {
+    const entry = this.models3d.get(modelId);
+    if (entry === undefined || entry.lighting === this.modelLighting) {
+      return false;
+    }
+    entry.lighting = this.modelLighting;
+    this.onPixelsChanged?.();
+    return true;
+  }
+
   /** Persist the live fly pose onto the active cell's content. */
   private persistFlyPose(): void {
     const fly = this.flycam;
@@ -3546,6 +3560,7 @@ export class GnumarusCanvasEngine {
     if (fly === null || !this.models3d.has(fly.modelId)) {
       return false;
     }
+    this.syncModelLighting(fly.modelId);
     if (forwardAmount === 0 && rightAmount === 0 && upAmount === 0) {
       return false;
     }
@@ -3567,6 +3582,7 @@ export class GnumarusCanvasEngine {
     if (fly === null || !this.models3d.has(fly.modelId)) {
       return false;
     }
+    this.syncModelLighting(fly.modelId);
     if (dxPixels === 0 && dyPixels === 0) {
       return false;
     }
@@ -3588,6 +3604,7 @@ export class GnumarusCanvasEngine {
     if (fly === null || !this.models3d.has(fly.modelId)) {
       return false;
     }
+    this.syncModelLighting(fly.modelId);
     const moved = flyOrbitPose(
       { yawDeg: fly.yawDeg, pitchDeg: fly.pitchDeg, x: fly.x, y: fly.y, z: fly.z },
       direction,
@@ -3610,6 +3627,7 @@ export class GnumarusCanvasEngine {
     if (fly === null || !this.models3d.has(fly.modelId)) {
       return false;
     }
+    this.syncModelLighting(fly.modelId);
     if (yawDeltaDeg === 0 && pitchDeltaDeg === 0) {
       return false;
     }
@@ -3633,6 +3651,7 @@ export class GnumarusCanvasEngine {
     if (fly === null || !this.models3d.has(fly.modelId)) {
       return false;
     }
+    this.syncModelLighting(fly.modelId);
     const reset = this.defaultFlyPose();
     fly.yawDeg = reset.yawDeg;
     fly.pitchDeg = reset.pitchDeg;
@@ -3767,6 +3786,7 @@ export class GnumarusCanvasEngine {
       this.flyHeld.clear();
       return;
     }
+    this.syncModelLighting(fly.modelId);
     const dtSec = Math.min(0.1, Math.max(0, (nowMs - this.flyHoldLastMs) / 1000));
     this.flyHoldLastMs = nowMs;
     let forwardUnits = 0;
@@ -4584,6 +4604,7 @@ export class GnumarusCanvasEngine {
     bytes: Uint8Array,
     view: GnumarusModel3dView,
     eye: { position: [number, number, number]; target: [number, number, number] } | null = null,
+    lighting: GnumarusModelLighting = DEFAULT_STORAGE_SETTINGS.modelLighting,
   ): Promise<{ buffer: Uint8ClampedArray; width: number; height: number } | null> {
     const renderer = this.ensureModelRenderer();
     if (renderer === null || bytes.length === 0) {
@@ -4613,7 +4634,7 @@ export class GnumarusCanvasEngine {
       group.scale.setScalar(normalized);
       group.position.copy(center).multiplyScalar(-normalized);
       const scene = new THREE.Scene();
-      if (this.modelLighting === "unlit") {
+      if (lighting === "unlit") {
         this.applyUnlitModelMaterials(object);
       } else {
         let fileHasLights = false;
@@ -4783,6 +4804,7 @@ export class GnumarusCanvasEngine {
         ext: model.ext,
         bytes: model.bytes,
         view: { ...model.view },
+        lighting: model.lighting,
       })),
       tilemaps: [...this.tilemaps.values()].map((tilemap) => ({
         id: tilemap.id,
@@ -6127,7 +6149,7 @@ export class GnumarusCanvasEngine {
       textures: GnumarusTexturePixels[];
       texts?: Array<{ id: string; name: string; document: GnumarusTextDocument }>;
       svgs?: Array<{ id: string; name: string; svg: string }>;
-      models3d?: Array<{ id: string; name: string; ext: string; bytes: Uint8Array; view?: GnumarusModel3dView }>;
+      models3d?: Array<{ id: string; name: string; ext: string; bytes: Uint8Array; view?: GnumarusModel3dView; lighting?: GnumarusModelLighting }>;
       tilemaps?: Array<{ id: string; name: string; tilesetId: string; tileWidth: number; tileHeight: number; tiles: GnumarusTilePlacement[] }>;
       contents: Array<{ id: string; name: string; textureId: string | null; textId?: string | null; svgId?: string | null; model3dId?: string | null; tilemapId?: string | null; flyCam?: unknown; transform: GnumarusLayerTransform }>;
       cells: Array<{ layer: string; frame: number; content: string }>;
@@ -6264,6 +6286,7 @@ export class GnumarusCanvasEngine {
         ext: model.ext,
         bytes: new Uint8Array(model.bytes),
         view: parseModel3dView((model as { view?: unknown }).view),
+        lighting: parseModelLighting((model as { lighting?: unknown }).lighting),
       });
       this.ensureModelRaster(model.id);
     }

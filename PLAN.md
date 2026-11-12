@@ -620,3 +620,8 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - `parseFlyCamPose` puro + `flyCam` no `GnumarusContentMeta`/`GnumarusCellContent` (validado no open, `null` quando ausente/inválido); save escreve de volta → sobrevive a save/reopen.
 - Engine escreve a pose no conteúdo da célula ativa a cada mutação (move/look/orbit/reset) + `onPixelsChanged` (dirty); `enterFlycam` retoma a pose salva ou deriva da vista de órbita atual; sair continua sem salvar nada extra.
 - 2 novos e2e @recent verdes (sair+voltar mantém a pose; save/reopen mantém a pose); full suite não rodada.
+
+## 112. Iluminação por modelo com seletor no editor (implemented)
+- `lighting` por modelo (`GnumarusModel3dMeta`/`entry`, validado com `parseModelLighting`, default `unlit`, round-trip no save/reopen); import carimba o default atual; load nunca carimba (modelos antigos mantêm o que têm, ausente = unlit).
+- Seletor `modelLighting` na barra do editor junto de wrap/symmetry (mesmo valor do setting/dialog, persistido); trocar NÃO re-renderiza nada — só vale para novos imports e quando modeltransform (`startModelOrbit`) ou flycam (`enterFlycam` + mutações) tocam no modelo (carimbo + dirty + re-raster via chave de cache por modelo).
+- Testes: unit (round-trip `lit`/lixo→`unlit`) + 2 novos e2e @recent verdes (default não afeta importado, transform/flycam aplicam, save/reopen mantém); e2e antigo do setting reescrito para o novo comportamento; 16 e2e modelo/fly re-rodados verdes como regressão da área; full unit 461 verde; sem full e2e suite, a pedido.

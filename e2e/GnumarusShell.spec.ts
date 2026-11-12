@@ -11249,7 +11249,7 @@ test("3d model transform drag orbits inverted on both axes @recent", async ({ pa
   expect(afterY?.azimuth ?? 0).toBeCloseTo(39.8, 0);
 });
 
-test("model lighting setting switches unlit and lit rendering @recent", async ({ page }) => {
+test("model lighting default leaves imported models alone until a 3D tool touches them @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await stubModelPicker(page, "tri.stl", SIMPLE_STL);
@@ -11261,33 +11261,64 @@ test("model lighting setting switches unlit and lit rendering @recent", async ({
       const root = window as unknown as { __gnumarus?: { engine?: { getModelLighting(): string } } };
       return root.__gnumarus?.engine?.getModelLighting() ?? null;
     });
+  const editorSelect = page.locator("gnumarus-shell [data-testid='editor-options'] select#modelLighting");
+  await expect(editorSelect).toHaveValue("unlit");
   await expect(lightingOf()).resolves.toBe("unlit");
-  await page.getByRole("button", { name: "Edit" }).click();
-  await page.getByRole("button", { name: "Settings" }).click();
-  const dialog = page.locator("gnumarus-shell dialog#settingsDialog");
-  await expect(dialog.locator("select#storageModelLighting")).toHaveValue("unlit");
-  await dialog.locator("select#storageModelLighting").selectOption("lit");
+  const before = await modelPaintedPixels(page);
+  expect(before).toBeGreaterThan(0);
+  await editorSelect.selectOption("lit");
   await expect(lightingOf()).resolves.toBe("lit");
   const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.storage.v1"));
   expect(persisted).toContain('"modelLighting": "lit"');
-  await dialog.getByRole("button", { name: "Close" }).click();
-  await expect
-    .poll(async () => modelPaintedPixels(page), { timeout: 10000 })
-    .toBeGreaterThan(0);
+  // Switching the default re-renders nothing: the imported model is untouched.
+  await page.waitForTimeout(500);
+  await expect(modelPaintedPixels(page)).resolves.toBe(before);
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  expect(await project.writtenProject()).toContain('"lighting": "unlit"');
+  // The settings dialog mirrors the same default.
   await page.getByRole("button", { name: "Edit" }).click();
   await page.getByRole("button", { name: "Settings" }).click();
-  await page
-    .locator('gnumarus-shell [aria-label="Reset project texture format to default"]')
-    .click();
-  await expect(
-    page.locator("gnumarus-shell dialog#settingsDialog select#storageModelLighting"),
-  ).toHaveValue("unlit");
+  await expect(page.locator("gnumarus-shell dialog#settingsDialog select#storageModelLighting")).toHaveValue("lit");
+  await page.locator('gnumarus-shell [aria-label="Reset project texture format to default"]').click();
+  await expect(page.locator("gnumarus-shell dialog#settingsDialog select#storageModelLighting")).toHaveValue("unlit");
+  await expect(editorSelect).toHaveValue("unlit");
   await expect(lightingOf()).resolves.toBe("unlit");
-  const resetPersisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.storage.v1"));
-  expect(resetPersisted).toContain('"modelLighting": "unlit"');
-  await expect
-    .poll(async () => modelPaintedPixels(page), { timeout: 10000 })
-    .toBeGreaterThan(0);
+  await page.getByRole("button", { name: "Close" }).click();
+  // Using the 3D model transform tool stamps the current default onto the model.
+  await editorSelect.selectOption("lit");
+  await selectTool(page, "3D model transform");
+  await page.keyboard.press("r");
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  expect(await project.writtenProject()).toContain('"lighting": "lit"');
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject");
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  expect(await project.writtenProject()).toContain('"lighting": "lit"');
+});
+
+test("fly camera applies the editor lighting default to the flown model @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubModelPicker(page, "tri.stl", SIMPLE_STL);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText('3D model "tri" imported');
+  await page.locator("gnumarus-shell [data-testid='editor-options'] select#modelLighting").selectOption("lit");
+  await selectTool(page, "Fly camera");
+  await expect(page.locator("gnumarus-shell [data-testid='flycam-readout']")).toBeVisible();
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  expect(await project.writtenProject()).toContain('"lighting": "lit"');
 });
 
 async function flyPoseOf(page: import("@playwright/test").Page): Promise<{

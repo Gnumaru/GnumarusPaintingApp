@@ -8,6 +8,7 @@ import {
 } from "../tilemap/GnumarusTilemap";
 import type { GnumarusTextDocument } from "../text/GnumarusText";
 import { parseFlyCamPose, type GnumarusFlyPose } from "../canvas/GnumarusFlyCamera";
+import { parseModelLighting, type GnumarusModelLighting } from "../settings/GnumarusStorageSettings";
 import type { GnumarusLayerTransform } from "../canvas/GnumarusViewportMath";
 import { IDENTITY_LAYER_TRANSFORM } from "../canvas/GnumarusViewportMath";
 import type { GnumarusAnimationLoop } from "../animation/GnumarusNamedAnimations";
@@ -58,6 +59,8 @@ export interface GnumarusModel3dMeta {
   file: string;
   /** Persisted orbit view (defaults to the classic 3/4 angle when absent). */
   view?: GnumarusModel3dView;
+  /** Shading used the last time a tool rendered this model (default unlit). */
+  lighting?: GnumarusModelLighting;
 }
 
 export interface GnumarusTilemapMeta {
@@ -922,7 +925,7 @@ function parseModel3dMetas(value: unknown): GnumarusModel3dMeta[] {
       throw new GnumarusProjectError("project.json has duplicate 3D model ids");
     }
     seenIds.add(id);
-    const { name, file, view } = entry;
+    const { name, file, view, lighting } = entry;
     const modelFile = parseModel3dFilePath(file);
     if (modelFile === null) {
       throw new GnumarusProjectError("project.json has a 3D model with an invalid file");
@@ -931,7 +934,7 @@ function parseModel3dMetas(value: unknown): GnumarusModel3dMeta[] {
       throw new GnumarusProjectError("project.json has duplicate 3D model files");
     }
     seenFiles.add(modelFile);
-    checked.push({ id, name: checkedName(name, "3D model"), file: modelFile, view: parseModel3dView(view) });
+    checked.push({ id, name: checkedName(name, "3D model"), file: modelFile, view: parseModel3dView(view), lighting: parseModelLighting(lighting) });
   }
   return checked;
 }

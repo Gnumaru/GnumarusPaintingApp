@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { unzipSync, zipSync } from "fflate";
 import type { GnumarusFlyPose } from "../src/canvas/GnumarusFlyCamera";
+import type { GnumarusModelLighting } from "../src/settings/GnumarusStorageSettings";
 import {
   cellFilePath,
   collectProjectFileReferences,
@@ -661,10 +662,22 @@ describe("GnumarusProjectFormat", () => {
         name: "M1",
         file: "3dmodels/model1.glb",
         view: { azimuth: 39.8, elevation: 24.1, distance: 3.43, panX: 0, panY: 0 },
+        lighting: "unlit",
       },
     ]);
     expect(parsed.animation.contents[1]).toMatchObject({ model3dId: "model1" });
     expect(collectProjectFileReferences(parsed)).toContain("3dmodels/model1.glb");
+    const lit = createDefaultProject(8, 8);
+    lit.animation.models3d.push({ id: "model1", name: "M1", file: "3dmodels/model1.glb", lighting: "lit" });
+    expect(parseProject(serializeProject(lit)).animation.models3d[0]).toMatchObject({ lighting: "lit" });
+    const litGarbage = createDefaultProject(8, 8);
+    litGarbage.animation.models3d.push({
+      id: "model1",
+      name: "M1",
+      file: "3dmodels/model1.glb",
+      lighting: "bright" as unknown as GnumarusModelLighting,
+    });
+    expect(parseProject(serializeProject(litGarbage)).animation.models3d[0]).toMatchObject({ lighting: "unlit" });
     const fly = createDefaultProject(8, 8);
     fly.animation.models3d.push({ id: "model1", name: "M1", file: "3dmodels/model1.glb" });
     fly.animation.contents[0] = {

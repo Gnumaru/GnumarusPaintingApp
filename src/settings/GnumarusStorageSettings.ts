@@ -9,9 +9,10 @@
  * future saves. `textStorage` selects where rich text documents are saved:
  * inline in the project data file (`embedded`, the default), raw `.html`
  * files, or single-file `.zip` archives; loading sniffs each text reference.
- * `modelLighting` selects how 3D models are shaded when rasterized:
+ * `modelLighting` selects the default shading for 3D models when rasterized:
  * flat unlit colors (`unlit`, the default) or the file's own lights with a
- * directional fallback (`lit`); it only affects rendering, never the files.
+ * directional fallback (`lit`); it only affects models imported afterwards
+ * or touched by the 3D model transform / fly camera tools, never the files.
  */
 export type GnumarusStorageFormat = "jxl" | "webp" | "jpg" | "png";
 
@@ -38,7 +39,9 @@ export type GnumarusSvgStorage = "raw" | "compressed" | "embedded";
  * How 3D models are shaded when rasterized: flat unlit colors drawn
  * directly from textures and vertex colors (`unlit`, the default), or lit
  * by the lights in the imported file with a directional light created when
- * the file has none (`lit`). Rendering-only; never changes saved files.
+ * the file has none (`lit`). This is the default stamped onto newly imported
+ * models and applied when the 3D model transform / fly camera tools render
+ * a model; rendering-only, never changes saved files.
  */
 export type GnumarusModelLighting = "unlit" | "lit";
 

@@ -4052,6 +4052,13 @@ export class GnumarusShell extends LitElement {
             <option value="both">${tr("val.fourWay")}</option>
           </select>
         </label>
+        <label title=${tr("opt.lightingHint")}
+          >${tr("opt.lighting")}
+          <select id="modelLighting" .value=${this.storageModelLighting} @change=${(): void => this.applyModelLightingFromEditor()}>
+            <option value="unlit">${tr("setting.modelLightingUnlit")}</option>
+            <option value="lit">${tr("setting.modelLightingLit")}</option>
+          </select>
+        </label>
       </div>
     `;
   }
@@ -7019,6 +7026,19 @@ export class GnumarusShell extends LitElement {
     this.symmetryMode = mode;
     this.engine?.setSymmetryMode(mode);
     this.statusMessage = tr("status.symmetry", { value: this.symmetryLabel(mode) });
+  }
+
+  /**
+   * Editor-bar lighting default: only affects models imported afterwards
+   * or touched by the 3D model transform / fly camera tools. Already
+   * imported models keep rendering exactly as before.
+   */
+  private applyModelLightingFromEditor(): void {
+    const select = this.shadowRoot?.getElementById("modelLighting") as HTMLSelectElement | null;
+    this.storageModelLighting = parseModelLighting(select?.value ?? this.storageModelLighting);
+    this.persistStorage();
+    this.engine?.setModelLighting(this.storageModelLighting);
+    this.statusMessage = this.storageStatusMessage();
   }
 
   /** Test hook: force the stroke velocity reading (null restores measurement). */
@@ -11203,8 +11223,8 @@ export class GnumarusShell extends LitElement {
   private async resolveStoredModels3d(
     models: GnumarusModel3dMeta[],
     fileBlobs: Map<string, Blob>,
-  ): Promise<Array<{ id: string; name: string; ext: string; bytes: Uint8Array; view?: GnumarusModel3dView }>> {
-    const out: Array<{ id: string; name: string; ext: string; bytes: Uint8Array; view?: GnumarusModel3dView }> = [];
+  ): Promise<Array<{ id: string; name: string; ext: string; bytes: Uint8Array; view?: GnumarusModel3dView; lighting?: GnumarusModelLighting }>> {
+    const out: Array<{ id: string; name: string; ext: string; bytes: Uint8Array; view?: GnumarusModel3dView; lighting?: GnumarusModelLighting }> = [];
     for (const model of models) {
       const ext = model.file.slice(model.file.lastIndexOf(".") + 1).toLowerCase();
       out.push({
@@ -11213,6 +11233,7 @@ export class GnumarusShell extends LitElement {
         ext,
         bytes: await this.decodeStoredModel3dFile(model.file, fileBlobs),
         view: model.view === undefined ? undefined : { ...model.view },
+        lighting: model.lighting,
       });
     }
     return out;
@@ -12015,6 +12036,7 @@ export class GnumarusShell extends LitElement {
           name: model.name,
           file,
           view: model.view === undefined ? { ...GNUMARUS_MODEL3D_DEFAULT_VIEW } : { ...model.view },
+          lighting: model.lighting ?? "unlit",
         });
         blobs.set(file, new Blob([model.bytes as Uint8Array<ArrayBuffer>], { type: "application/octet-stream" }));
       }
