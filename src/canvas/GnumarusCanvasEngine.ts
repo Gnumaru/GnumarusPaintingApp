@@ -200,6 +200,16 @@ import {
   type GnumarusModelLighting,
 } from "../settings/GnumarusStorageSettings";
 import {
+  FLY_LOOK_DEG_PER_PX,
+  FLY_MAX_PITCH_DEG,
+  FLY_MOVE_STEP,
+  flyForward,
+  flyOrbitPose,
+  flyPoseFromDirection,
+  flyRight,
+  type GnumarusFlyPose,
+} from "./GnumarusFlyCamera";
+import {
   animationCellKey,
   clampFrameDurationSec,
   defaultFrameName,
@@ -271,6 +281,7 @@ export type GnumarusCanvasTool =
   | "text"
   | "tilebrush"
   | "modeltransform"
+  | "flycam"
   | "destransform"
   | "destransform3d";
 
@@ -717,6 +728,10 @@ export class GnumarusCanvasEngine {
   private modelRasters = new Map<string, { buffer: Uint8ClampedArray; width: number; height: number; key: string }>();
   /** Pending orbit gesture (uncommitted model view edits), if any. */
   private modelOrbit: GnumarusModelOrbit | null = null;
+  /** Active fly-camera pose (transient free-flight view, never persisted). */
+  private flycam: { modelId: string; yawDeg: number; pitchDeg: number; x: number; y: number; z: number } | null = null;
+  /** Active fly-camera look drag (client-pixel anchor), if any. */
+  private flyLookDrag: { x: number; y: number } | null = null;
   /** Model ids with a decode already in flight. */
   private modelPending = new Set<string>();
   private modelCounter = 1;
@@ -3161,7 +3176,7 @@ export class GnumarusCanvasEngine {
       bytes: bytes.slice(),
       view,
     });
-    this.modelRasters.set(modelId, { ...raster, key: modelViewKey(view, this.modelLighting) });
+    this.modelRasters.set(modelId, { ...raster, key: this.modelRasterKey(modelId, view) });
     if (content !== undefined) {
       content.model3dId = modelId;
       this.syncAllLayerRenders();
@@ -3206,13 +3221,14 @@ export class GnumarusCanvasEngine {
     if (view === null) {
       return;
     }
-    const key = modelViewKey(view, this.modelLighting);
+    const key = this.modelRasterKey(modelId, view);
     const cached = this.modelRasters.get(modelId);
     if (cached !== undefined && cached.key === key) {
       return;
     }
     this.modelPending.add(modelId);
-    void this.decodeModel3d(entry.ext, entry.bytes, view)
+    const eye = this.flyCameraEye(modelId);
+    void this.decodeModel3d(entry.ext, entry.bytes, view, eye)
       .then((raster) => {
         if (raster !== null && this.effectiveModelViewKey(modelId) === key) {
           this.modelRasters.set(modelId, { ...raster, key });
@@ -3242,10 +3258,15 @@ export class GnumarusCanvasEngine {
     return entry === undefined ? null : { ...entry.view };
   }
 
+  /** Cache key for a model raster: orbit view, lighting mode and fly pose. */
+  private modelRasterKey(modelId: string, view: GnumarusModel3dView): string {
+    return modelViewKey(view, this.modelLighting) + this.flyRasterKey(modelId);
+  }
+
   /** Cache key of the current effective view (or null when missing). */
   private effectiveModelViewKey(modelId: string): string | null {
     const view = this.effectiveModelView(modelId);
-    return view === null ? null : modelViewKey(view, this.modelLighting);
+    return view === null ? null : this.modelRasterKey(modelId, view);
   }
 
   /**
@@ -3258,7 +3279,7 @@ export class GnumarusCanvasEngine {
       return null;
     }
     const cached = this.modelRasters.get(modelId);
-    if (cached === undefined || cached.key !== modelViewKey(view, this.modelLighting)) {
+    if (cached === undefined || cached.key !== this.modelRasterKey(modelId, view)) {
       return null;
     }
     return { buffer: cached.buffer, width: cached.width, height: cached.height };
@@ -3401,6 +3422,156 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
+  /** Active fly-camera pose (a copy), or null when not flying. */
+  getFlycam(): { modelId: string; yawDeg: number; pitchDeg: number; x: number; y: number; z: number } | null {
+    return this.flycam === null ? null : { ...this.flycam };
+  }
+
+  /** Default fly pose framing the model like the classic 3/4 view. */
+  private defaultFlyPose(): GnumarusFlyPose {
+    const direction = modelViewDirection(
+      GNUMARUS_MODEL3D_DEFAULT_VIEW.azimuth,
+      GNUMARUS_MODEL3D_DEFAULT_VIEW.elevation,
+    );
+    return flyPoseFromDirection(
+      [direction.x, direction.y, direction.z],
+      GNUMARUS_MODEL3D_DEFAULT_VIEW.distance,
+      [0, 0, 0],
+    );
+  }
+
+  /**
+   * Enter fly-camera mode on the active cell's model, keeping the current
+   * pose when already flying it. False when the active cell holds no model.
+   */
+  enterFlycam(): boolean {
+    const layer = this.activeLayer();
+    const modelId = layer === null ? null : this.getCellModel3dId(layer.id, this.currentFrame);
+    if (modelId === null || !this.models3d.has(modelId)) {
+      return false;
+    }
+    if (this.flycam === null || this.flycam.modelId !== modelId) {
+      const view = this.effectiveModelView(modelId) ?? { ...GNUMARUS_MODEL3D_DEFAULT_VIEW };
+      const direction = modelViewDirection(view.azimuth, view.elevation);
+      const pose = flyPoseFromDirection(
+        [direction.x, direction.y, direction.z],
+        view.distance,
+        [view.panX, view.panY, 0],
+      );
+      this.flycam = { modelId, ...pose };
+      this.ensureModelRaster(modelId);
+    }
+    return true;
+  }
+
+  /** Leave fly-camera mode, discarding the transient pose. */
+  exitFlycam(): void {
+    this.flycam = null;
+    this.flyLookDrag = null;
+  }
+
+  /** Eye (position + look target) driving the rasterizer while flying. */
+  private flyCameraEye(modelId: string): { position: [number, number, number]; target: [number, number, number] } | null {
+    const fly = this.flycam;
+    if (fly === null || fly.modelId !== modelId) {
+      return null;
+    }
+    const forward = flyForward(fly.yawDeg, fly.pitchDeg);
+    return {
+      position: [fly.x, fly.y, fly.z],
+      target: [fly.x + forward[0], fly.y + forward[1], fly.z + forward[2]],
+    };
+  }
+
+  /** Cache key suffix pinning a model raster to the active fly pose. */
+  private flyRasterKey(modelId: string): string {
+    const fly = this.flycam;
+    if (fly === null || fly.modelId !== modelId) {
+      return "";
+    }
+    const rounded = (value: number): number => Math.round(value * 1000) / 1000;
+    return `:fly:${rounded(fly.yawDeg)},${rounded(fly.pitchDeg)},${rounded(fly.x)},${rounded(fly.y)},${rounded(fly.z)}`;
+  }
+
+  /** Fly the camera: forward/right/up steps in camera space. */
+  flyMove(forwardAmount: number, rightAmount: number, upAmount: number): boolean {
+    const fly = this.flycam;
+    if (fly === null || !this.models3d.has(fly.modelId)) {
+      return false;
+    }
+    if (forwardAmount === 0 && rightAmount === 0 && upAmount === 0) {
+      return false;
+    }
+    const forward = flyForward(fly.yawDeg, fly.pitchDeg);
+    const right = flyRight(forward);
+    fly.x += (forward[0] * forwardAmount + right[0] * rightAmount) * FLY_MOVE_STEP;
+    fly.y += (forward[1] * forwardAmount + upAmount) * FLY_MOVE_STEP;
+    fly.z += (forward[2] * forwardAmount + right[2] * rightAmount) * FLY_MOVE_STEP;
+    this.ensureModelRaster(fly.modelId);
+    this.updatePreviews();
+    this.onLayersChanged?.();
+    return true;
+  }
+
+  /** Turn the camera from a mouse drag: right looks right, down looks down. */
+  flyLook(dxPixels: number, dyPixels: number): boolean {
+    const fly = this.flycam;
+    if (fly === null || !this.models3d.has(fly.modelId)) {
+      return false;
+    }
+    if (dxPixels === 0 && dyPixels === 0) {
+      return false;
+    }
+    fly.yawDeg -= dxPixels * FLY_LOOK_DEG_PER_PX;
+    fly.pitchDeg = Math.max(
+      -FLY_MAX_PITCH_DEG,
+      Math.min(FLY_MAX_PITCH_DEG, fly.pitchDeg - dyPixels * FLY_LOOK_DEG_PER_PX),
+    );
+    this.ensureModelRaster(fly.modelId);
+    this.updatePreviews();
+    this.onLayersChanged?.();
+    return true;
+  }
+
+  /** Orbit left (+1) or right (-1) around a point ahead of the camera. */
+  flyOrbit(direction: 1 | -1): boolean {
+    const fly = this.flycam;
+    if (fly === null || !this.models3d.has(fly.modelId)) {
+      return false;
+    }
+    const moved = flyOrbitPose(
+      { yawDeg: fly.yawDeg, pitchDeg: fly.pitchDeg, x: fly.x, y: fly.y, z: fly.z },
+      direction,
+    );
+    fly.yawDeg = moved.yawDeg;
+    fly.pitchDeg = moved.pitchDeg;
+    fly.x = moved.x;
+    fly.y = moved.y;
+    fly.z = moved.z;
+    this.ensureModelRaster(fly.modelId);
+    this.updatePreviews();
+    this.onLayersChanged?.();
+    return true;
+  }
+
+  /** Reset the fly pose to the classic 3/4 framing for the active model. */
+  flyResetView(): boolean {
+    const fly = this.flycam;
+    if (fly === null || !this.models3d.has(fly.modelId)) {
+      return false;
+    }
+    const reset = this.defaultFlyPose();
+    fly.yawDeg = reset.yawDeg;
+    fly.pitchDeg = reset.pitchDeg;
+    fly.x = reset.x;
+    fly.y = reset.y;
+    fly.z = reset.z;
+    this.ensureModelRaster(fly.modelId);
+    this.updatePreviews();
+    this.onLayersChanged?.();
+    return true;
+  }
+
   /**
    * Commit the pending orbit view to the model entry (single undoable
    * history entry) and refresh. No-op without pending changes.
@@ -3416,7 +3587,7 @@ export class GnumarusCanvasEngine {
       return false;
     }
     const before = { ...entry.view };
-    if (modelViewKey(before, this.modelLighting) === modelViewKey(orbit.view, this.modelLighting)) {
+    if (this.modelRasterKey(orbit.modelId, before) === this.modelRasterKey(orbit.modelId, orbit.view)) {
       this.modelOrbit = null;
       return false;
     }
@@ -4126,6 +4297,7 @@ export class GnumarusCanvasEngine {
     ext: string,
     bytes: Uint8Array,
     view: GnumarusModel3dView,
+    eye: { position: [number, number, number]; target: [number, number, number] } | null = null,
   ): Promise<{ buffer: Uint8ClampedArray; width: number; height: number } | null> {
     const renderer = this.ensureModelRenderer();
     if (renderer === null || bytes.length === 0) {
@@ -4173,9 +4345,14 @@ export class GnumarusCanvasEngine {
       }
       scene.add(group);
       const camera = new THREE.PerspectiveCamera(MODEL_ORBIT_FOV_DEG, 1, 0.01, 100);
-      const direction = modelViewDirection(view.azimuth, view.elevation);
-      camera.position.copy(direction).multiplyScalar(Math.max(0.5, view.distance));
-      camera.lookAt(view.panX, view.panY, 0);
+      if (eye !== null) {
+        camera.position.set(eye.position[0], eye.position[1], eye.position[2]);
+        camera.lookAt(eye.target[0], eye.target[1], eye.target[2]);
+      } else {
+        const direction = modelViewDirection(view.azimuth, view.elevation);
+        camera.position.copy(direction).multiplyScalar(Math.max(0.5, view.distance));
+        camera.lookAt(view.panX, view.panY, 0);
+      }
       renderer.clear();
       renderer.render(scene, camera);
       const canvas = document.createElement("canvas");
@@ -6036,6 +6213,8 @@ export class GnumarusCanvasEngine {
     this.textures.clear();
     this.contents.clear();
     this.cells.clear();
+    this.flycam = null;
+    this.flyLookDrag = null;
     this.lineAnchor = null;
     this.resetCurveState();
     this.stabilizerPos = null;
@@ -10753,6 +10932,10 @@ export class GnumarusCanvasEngine {
       this.commitModelOrbit();
       this.modelDrag = null;
     }
+    if (tool !== "flycam") {
+      this.flycam = null;
+      this.flyLookDrag = null;
+    }
     if (this.tempEyedropper && tool !== "eyedropper") {
       // Manual tool change cancels the Ctrl-held temporary eyedropper.
       this.tempEyedropper = false;
@@ -11570,6 +11753,21 @@ export class GnumarusCanvasEngine {
   private attachEvents(): void {
     const canvas = this.renderer.domElement;
     canvas.addEventListener("pointerdown", (event: PointerEvent) => {
+      if (this.tool === "flycam") {
+        // Every mouse button/gesture belongs to the fly camera: left-drag
+        // looks around, everything else is swallowed.
+        if (event.button !== 0) {
+          return;
+        }
+        const layer = this.activeLayer();
+        if (layer === null || this.getCellModel3dId(layer.id, this.currentFrame) === null || !this.enterFlycam()) {
+          this.onNotice?.("model3d-needs-cell");
+          return;
+        }
+        this.flyLookDrag = { x: event.clientX, y: event.clientY };
+        canvas.setPointerCapture(event.pointerId);
+        return;
+      }
       if (event.button === 1 && (this.tool === "loupe" || this.tool === "transform")) {
         event.preventDefault();
         if (event.altKey) {
@@ -12371,6 +12569,18 @@ export class GnumarusCanvasEngine {
         }
         return;
       }
+      if (this.flyLookDrag !== null) {
+        const drag = this.flyLookDrag;
+        const dx = event.clientX - drag.x;
+        const dy = event.clientY - drag.y;
+        drag.x = event.clientX;
+        drag.y = event.clientY;
+        this.lastMouseClient = { x: event.clientX, y: event.clientY };
+        if (dx !== 0 || dy !== 0) {
+          this.flyLook(dx, dy);
+        }
+        return;
+      }
       if (this.sizeDrag !== null) {
         // Horizontal movement only: right grows, left shrinks, vertical is ignored.
         const size = clampBrushSizeFloat(
@@ -12507,6 +12717,9 @@ export class GnumarusCanvasEngine {
       }
       if (this.modelDrag !== null) {
         this.modelDrag = null;
+      }
+      if (this.flyLookDrag !== null) {
+        this.flyLookDrag = null;
       }
       if (this.layerCenterTap !== null) {
         const layerId = this.layerCenterTap.layerId;
@@ -12650,6 +12863,7 @@ export class GnumarusCanvasEngine {
     canvas.addEventListener("pointercancel", () => {
       this.centerTap = null;
       this.flipTap = null;
+      this.flyLookDrag = null;
       this.layerCenterTap = null;
       this.layerFlipTap = null;
       this.rot3dCenterTap = null;
@@ -12684,6 +12898,9 @@ export class GnumarusCanvasEngine {
       "wheel",
       (event: WheelEvent) => {
         event.preventDefault();
+        if (this.tool === "flycam") {
+          return;
+        }
         if (event.ctrlKey || event.altKey || event.shiftKey || event.metaKey) {
           // Ctrl+wheel (alone) resizes the pencil brush in whole units.
           if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey) {
@@ -12740,13 +12957,15 @@ export class GnumarusCanvasEngine {
       })();
       if (event.key === "Control" && !event.repeat && !event.altKey && !event.metaKey && !inField) {
         // The Ctrl selection modifiers belong to the selection tools;
-        // summoning the eyedropper there would steal their drags.
+        // summoning the eyedropper there would steal their drags. The fly
+        // camera owns every unmodified key, so it never summons it either.
         if (
           this.tool !== "rectselect" &&
           this.tool !== "ellipse" &&
           this.tool !== "lasso" &&
           this.tool !== "polylasso" &&
-          this.tool !== "colorselect"
+          this.tool !== "colorselect" &&
+          this.tool !== "flycam"
         ) {
           this.beginTempEyedropper();
         }

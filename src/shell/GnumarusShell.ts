@@ -467,6 +467,7 @@ export const GNUMARUS_TOOL_DRAWERS: GnumarusToolDrawerDef[] = [
   { id: "selection", tools: ["rectselect", "ellipse", "lasso", "polylasso", "colorselect"] },
   { id: "destructive", tools: ["destransform", "destransform3d"] },
   { id: "transform", tools: ["transform", "transform3d"] },
+  { id: "model", tools: ["modeltransform", "flycam"] },
 ];
 
 export class GnumarusShell extends LitElement {
@@ -1756,6 +1757,7 @@ export class GnumarusShell extends LitElement {
       selection: "rectselect",
       destructive: "destransform",
       transform: "transform",
+      model: "modeltransform",
     };
     this.drawerOpen = null;
     this.colorThreshold = 10;
@@ -2076,18 +2078,7 @@ export class GnumarusShell extends LitElement {
           >
             <span class="tool-icon" aria-hidden="true">▦</span>
           </button>
-          <button
-            class=${this.tool === "modeltransform" ? "active" : ""}
-            title=${tr("tool.modeltransformHint")}
-            aria-label=${tr("tool.modeltransform")}
-            data-testid="tool-modeltransform"
-            @click=${(): void => {
-              this.tool = "modeltransform";
-              this.engine?.setTool("modeltransform");
-            }}
-          >
-            <span class="tool-icon" aria-hidden="true">⬢</span>
-          </button>
+          ${this.renderToolDrawer("model")}
 
           ${this.renderToolDrawer("selection")}
           ${this.renderToolDrawer("destructive")}
@@ -3635,6 +3626,9 @@ export class GnumarusShell extends LitElement {
     if (tool === "modeltransform") {
       return tr("toolname.modeltransform");
     }
+    if (tool === "flycam") {
+      return tr("toolname.flycam");
+    }
     if (tool === "pencil") {
       return tr("toolname.pencil");
     }
@@ -3748,6 +3742,12 @@ export class GnumarusShell extends LitElement {
     if (tool === "rectselect") {
       return tr("tool.rectselect");
     }
+    if (tool === "modeltransform") {
+      return tr("tool.modeltransform");
+    }
+    if (tool === "flycam") {
+      return tr("tool.flycam");
+    }
     if (tool === "bucket") {
       return tr("tool.bucket");
     }
@@ -3798,6 +3798,12 @@ export class GnumarusShell extends LitElement {
     if (tool === "rectselect") {
       return tr("tool.rectselectHint");
     }
+    if (tool === "modeltransform") {
+      return tr("tool.modeltransformHint");
+    }
+    if (tool === "flycam") {
+      return tr("tool.flycamHint");
+    }
     return tr("tool.pencilHint");
   }
 
@@ -3839,17 +3845,116 @@ export class GnumarusShell extends LitElement {
     if (tool === "rectselect") {
       return "▭";
     }
+    if (tool === "modeltransform") {
+      return "⬢";
+    }
+    if (tool === "flycam") {
+      return "✈";
+    }
     return "✎";
   }
 
   /** Activate a drawer tool (optionally closing the flyout). */
   private selectDrawerTool(id: string, tool: GnumarusCanvasTool, close = false): void {
+    if (tool === "flycam") {
+      if (close) {
+        this.drawerOpen = null;
+      }
+      this.activateFlycamTool(id);
+      return;
+    }
     this.drawerFront = { ...this.drawerFront, [id]: tool };
     this.tool = tool;
     this.engine?.setTool(tool);
     if (close) {
       this.drawerOpen = null;
     }
+  }
+
+  /** Tool active before entering fly-camera mode (restored on exit). */
+  private toolBeforeFlycam: GnumarusCanvasTool | null = null;
+
+  /**
+   * Enter fly-camera mode on the active cell: requires a 3D model, otherwise
+   * a toast explains and the current tool stays.
+   */
+  private activateFlycamTool(drawerId: string): void {
+    if (this.engine === null) {
+      return;
+    }
+    const layerId = this.engine.getActiveLayerId();
+    if (this.engine.getCellModel3dId(layerId, this.engine.getCurrentFrame()) === null) {
+      this.statusMessage = tr("status.model3dNeedsCell");
+      this.showToast(tr("status.model3dNeedsCell"));
+      return;
+    }
+    if (!this.engine.enterFlycam()) {
+      this.statusMessage = tr("status.model3dNeedsCell");
+      this.showToast(tr("status.model3dNeedsCell"));
+      return;
+    }
+    if (this.tool !== "flycam") {
+      this.toolBeforeFlycam = this.tool;
+    }
+    this.drawerFront = { ...this.drawerFront, [drawerId]: "flycam" };
+    this.tool = "flycam";
+    this.engine.setTool("flycam");
+    this.refreshLayers();
+  }
+
+  /** Leave fly-camera mode, restoring the previously active tool. */
+  private exitFlycam(): void {
+    const previous = this.toolBeforeFlycam ?? "pencil";
+    this.toolBeforeFlycam = null;
+    if (this.tool !== "flycam") {
+      return;
+    }
+    this.tool = previous;
+    this.engine?.setTool(previous);
+    this.refreshLayers();
+  }
+
+  /** Route one key event to the fly camera (always consumed). */
+  private handleFlycamKey(event: KeyboardEvent): void {
+    if (this.engine === null) {
+      return;
+    }
+    switch (event.key.toLowerCase()) {
+      case "w":
+        this.engine.flyMove(1, 0, 0);
+        break;
+      case "s":
+        this.engine.flyMove(-1, 0, 0);
+        break;
+      case "a":
+        this.engine.flyMove(0, -1, 0);
+        break;
+      case "d":
+        this.engine.flyMove(0, 1, 0);
+        break;
+      case "q":
+        this.engine.flyMove(0, 0, -1);
+        break;
+      case "e":
+        this.engine.flyMove(0, 0, 1);
+        break;
+      case "z":
+        this.engine.flyOrbit(1);
+        break;
+      case "c":
+        this.engine.flyOrbit(-1);
+        break;
+      case "r":
+        this.engine.flyResetView();
+        this.statusMessage = tr("status.flycamReset");
+        break;
+      case "escape":
+        this.exitFlycam();
+        break;
+      default:
+        break;
+    }
+    this.refreshLayers();
   }
 
   private renderBlendModeOption() {
@@ -4372,6 +4477,9 @@ export class GnumarusShell extends LitElement {
     }
     if (this.tool === "modeltransform") {
       return this.renderModelTransformOptions();
+    }
+    if (this.tool === "flycam") {
+      return this.renderFlycamOptions();
     }
     if (
       this.tool === "rectselect" ||
@@ -4988,6 +5096,21 @@ export class GnumarusShell extends LitElement {
         event.preventDefault();
         this.toggleActionPalette();
       }
+      return;
+    }
+    if (
+      this.tool === "flycam" &&
+      !this.eventInField(event) &&
+      !this.eventInColorPicker(event) &&
+      this.shadowRoot?.querySelector("dialog[open]") === null
+    ) {
+      // Fly-camera mode owns every plain key: WASDQE fly, ZC orbit, R
+      // resets, Esc exits. Dialogs and text fields keep working above it.
+      // All other editor shortcuts stay suppressed while flying (Ctrl
+      // combos handled above still apply).
+      this.handleFlycamKey(event);
+      event.preventDefault();
+      event.stopImmediatePropagation();
       return;
     }
     if (event.key === "Tab") {
@@ -9381,6 +9504,45 @@ export class GnumarusShell extends LitElement {
     window.addEventListener("pointerup", up);
   }
 
+  /** Fly-camera options bar: live pose readout plus reset. */
+  private renderFlycamOptions() {
+    const fly = this.engine?.getFlycam() ?? null;
+    const readout =
+      fly === null
+        ? ""
+        : tr("opt.flycamReadout", {
+            yaw: Math.round(((fly.yawDeg % 360) + 360) % 360),
+            pitch: Math.round(fly.pitchDeg * 10) / 10,
+            x: Math.round(fly.x * 100) / 100,
+            y: Math.round(fly.y * 100) / 100,
+            z: Math.round(fly.z * 100) / 100,
+          });
+    return html`
+      <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
+        ${fly === null
+          ? html`<span class="tool-options-empty">${tr("opt.flycamNoCell")}</span>`
+          : html`
+              <span class="tool-options-readout" data-testid="flycam-readout">${readout}</span>
+              <button data-testid="flycam-reset" title=${tr("opt.modelResetHint")} @click=${(): void => this.handleFlycamReset()}>
+                ${tr("opt.modelReset")}
+              </button>
+            `}
+        <span class="tool-options-empty">${tr("opt.flycamHint")}</span>
+      </div>
+    `;
+  }
+
+  /** Fly-camera bar action: reset the view to the classic 3/4 framing. */
+  private handleFlycamReset(): void {
+    if (this.engine === null) {
+      return;
+    }
+    if (this.engine.flyResetView()) {
+      this.statusMessage = tr("status.flycamReset");
+      this.refreshLayers();
+    }
+  }
+
   /** 3D model transform options: live view readout plus reset/commit/cancel. */
   private renderModelTransformOptions() {
     const view = this.engine?.getModelViewForActiveCell() ?? null;
@@ -10997,6 +11159,7 @@ export class GnumarusShell extends LitElement {
 
   private async createNew(): Promise<void> {
     this.stopPlayback();
+    this.exitFlycam();
     const widthInput = this.shadowRoot?.getElementById("newWidth") as HTMLInputElement | null;
     const heightInput = this.shadowRoot?.getElementById("newHeight") as HTMLInputElement | null;
     const width = Math.min(16384, Math.max(1, Number(widthInput?.value ?? "64") || 64));
@@ -11165,6 +11328,7 @@ export class GnumarusShell extends LitElement {
       return;
     }
     this.stopPlayback();
+    this.exitFlycam();
     try {
       this.statusMessage = tr("status.opening");
       const dir = await pickProjectDirectory();
@@ -11419,6 +11583,7 @@ export class GnumarusShell extends LitElement {
       return;
     }
     this.stopPlayback();
+    this.exitFlycam();
     let handle;
     try {
       handle = await pickImportFile();

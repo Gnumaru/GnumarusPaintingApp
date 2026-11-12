@@ -6047,6 +6047,8 @@ const DRAWER_FOR_TOOL: Record<string, string> = {
   "Destructive selection 3D rotation": "destructive",
   "Non-destructive cell transform": "transform",
   "Non-destructive cell 3D rotation": "transform",
+  "3D model transform": "model",
+  "Fly camera": "model",
 };
 
 /** Click a toolbar tool, opening its drawer flyout when it is not the front. */
@@ -6501,7 +6503,7 @@ test("tool tooltips start with the selection shortcut", async ({ page }) => {
     { label: "Eyedropper", title: expect.stringMatching(/^Ctrl \(hold\): Eyedropper \(/) },
     { label: "Text", title: expect.stringMatching(/^X: Text \(/) },
     { label: "Tile brush", title: "Tile brush (click an empty cell to create a tilemap, click a tilemap cell to place the selected tile; right-click erases)" },
-    { label: "3D model transform", title: "3D model transform (drag to orbit the model, wheel to zoom, right-drag to pan; R resets, Enter commits, Esc cancels)" },
+    { label: "3D model transform", title: expect.stringMatching(/^3D model transform \(drag to orbit/) },
     { label: "Rectangular selection", title: expect.stringMatching(/^R: Rectangular selection \(/) },
     { label: "Destructive selection transform", title: expect.stringMatching(/^V: Destructive selection transform \(/) },
     { label: "Non-destructive cell transform", title: expect.stringMatching(/^T: Non-destructive cell transform \(/) },
@@ -11063,7 +11065,7 @@ test("3d model transform orbits, commits and reopens", async ({ page }) => {
   expect(typeof modelId).toBe("string");
   const before = await modelViewOf(page, modelId as string);
   expect(before).not.toBeNull();
-  await page.locator('gnumarus-shell [data-testid="tool-modeltransform"]').click();
+  await page.locator('gnumarus-shell [data-testid="model-drawer"] > button').click();
   await expect(page.locator('gnumarus-shell [data-testid="model-view-readout"]')).toBeVisible();
   const canvas = page.locator("gnumarus-shell canvas");
   const box = await canvas.boundingBox();
@@ -11108,7 +11110,7 @@ test("3d model transform cancels and resets the view", async ({ page }) => {
   const modelId = await cellModel3dId(page, "layer0", 0);
   expect(typeof modelId).toBe("string");
   const original = await modelViewOf(page, modelId as string);
-  await page.locator('gnumarus-shell [data-testid="tool-modeltransform"]').click();
+  await page.locator('gnumarus-shell [data-testid="model-drawer"] > button').click();
   const canvas = page.locator("gnumarus-shell canvas");
   const box = await canvas.boundingBox();
   if (box === null) {
@@ -11141,7 +11143,7 @@ test("3d model transform cancels and resets the view", async ({ page }) => {
 test("3d model transform requires a model cell", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await page.locator('gnumarus-shell [data-testid="tool-modeltransform"]').click();
+  await page.locator('gnumarus-shell [data-testid="model-drawer"] > button').click();
   await paintCenter(page);
   await expect(page.locator("gnumarus-shell")).toContainText("Select a 3D model cell first");
 });
@@ -11156,7 +11158,7 @@ test("3d model transform wheel up zooms in and wheel down zooms out @recent", as
   expect(typeof modelId).toBe("string");
   const before = await modelViewOf(page, modelId as string);
   expect(before).not.toBeNull();
-  await page.locator('gnumarus-shell [data-testid="tool-modeltransform"]').click();
+  await page.locator('gnumarus-shell [data-testid="model-drawer"] > button').click();
   const canvas = page.locator("gnumarus-shell canvas");
   const box = await canvas.boundingBox();
   if (box === null) {
@@ -11221,7 +11223,7 @@ test("3d model transform drag orbits inverted on both axes @recent", async ({ pa
   expect(typeof modelId).toBe("string");
   const before = await modelViewOf(page, modelId as string);
   expect(before).not.toBeNull();
-  await page.locator('gnumarus-shell [data-testid="tool-modeltransform"]').click();
+  await page.locator('gnumarus-shell [data-testid="model-drawer"] > button').click();
   const canvas = page.locator("gnumarus-shell canvas");
   const box = await canvas.boundingBox();
   if (box === null) {
@@ -11286,4 +11288,88 @@ test("model lighting setting switches unlit and lit rendering @recent", async ({
   await expect
     .poll(async () => modelPaintedPixels(page), { timeout: 10000 })
     .toBeGreaterThan(0);
+});
+
+async function flyPoseOf(page: import("@playwright/test").Page): Promise<{
+  yawDeg: number;
+  pitchDeg: number;
+  x: number;
+  y: number;
+  z: number;
+} | null> {
+  return page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          getFlycam(): { modelId: string; yawDeg: number; pitchDeg: number; x: number; y: number; z: number } | null;
+        };
+      };
+    };
+    const fly = root.__gnumarus?.engine?.getFlycam() ?? null;
+    return fly === null ? null : { yawDeg: fly.yawDeg, pitchDeg: fly.pitchDeg, x: fly.x, y: fly.y, z: fly.z };
+  });
+}
+
+test("fly camera requires a 3D model cell @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await selectTool(page, "Fly camera");
+  await expect(page.locator("gnumarus-shell")).toContainText("Select a 3D model cell first");
+  await expect(page.locator("gnumarus-shell [data-testid='flycam-readout']")).toHaveCount(0);
+  await expect(page.locator("gnumarus-shell")).toContainText("Brush size");
+});
+
+test("fly camera flies, looks, orbits and resets @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubModelPicker(page, "tri.stl", SIMPLE_STL);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("imported");
+  await selectTool(page, "Fly camera");
+  await expect(page.locator("gnumarus-shell [data-testid='flycam-readout']")).toBeVisible();
+  const before = await flyPoseOf(page);
+  expect(before).not.toBeNull();
+  expect(before?.yawDeg ?? 0).toBeCloseTo(39.8, 0);
+  expect(before?.pitchDeg ?? 0).toBeCloseTo(24.1, 1);
+  await page.keyboard.press("w");
+  const moved = await flyPoseOf(page);
+  expect(moved?.x ?? 0).toBeLessThan(before?.x ?? 0);
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 60, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.up();
+  const looked = await flyPoseOf(page);
+  expect(looked?.yawDeg ?? 0).toBeLessThan(moved?.yawDeg ?? 0);
+  await page.keyboard.press("z");
+  const orbited = await flyPoseOf(page);
+  expect(orbited?.yawDeg ?? 0).toBeGreaterThan(looked?.yawDeg ?? 0);
+  await page.keyboard.press("r");
+  await expect(page.locator("gnumarus-shell")).toContainText("Fly camera reset");
+  const reset = await flyPoseOf(page);
+  expect(reset?.yawDeg ?? 0).toBeCloseTo(39.8, 0);
+  expect(reset?.pitchDeg ?? 0).toBeCloseTo(24.1, 1);
+});
+
+test("fly camera suppresses editor shortcuts and exits with Escape @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubModelPicker(page, "tri.stl", SIMPLE_STL);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("imported");
+  await selectTool(page, "Fly camera");
+  await expect(page.locator("gnumarus-shell [data-testid='flycam-readout']")).toBeVisible();
+  await page.keyboard.press("b");
+  await expect(page.locator("gnumarus-shell [data-testid='flycam-readout']")).toBeVisible();
+  await page.keyboard.press("Tab");
+  await expect(page.locator("gnumarus-shell .menubar")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("gnumarus-shell [data-testid='flycam-readout']")).toHaveCount(0);
+  await expect(page.locator("gnumarus-shell")).toContainText("Brush size");
 });
