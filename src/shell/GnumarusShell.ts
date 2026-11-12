@@ -4746,7 +4746,6 @@ export class GnumarusShell extends LitElement {
               type="checkbox"
               id="pencilPixelPerfect"
               .checked=${this.pencilPixelPerfect}
-              ?disabled=${this.brushSize !== 1 || this.brushSizeMin !== 1 || this.pencilAntialias || this.wrapMode !== "off"}
               @change=${(): void => this.applyPencilPixelPerfectFromDialog()}
             />
             ${tr("opt.pixelPerfect")}
@@ -4850,7 +4849,6 @@ export class GnumarusShell extends LitElement {
               type="checkbox"
               id="curvePixelPerfect"
               .checked=${this.curvePixelPerfect}
-              ?disabled=${this.curveWidth !== 1 || this.curveWidthMin !== 1 || this.curveAntialias || this.wrapMode !== "off"}
               @change=${(): void => this.applyCurvePixelPerfectFromDialog()}
             />
             ${tr("opt.pixelPerfect")}
@@ -8272,17 +8270,29 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.pencilAntialias", { value: this.onOffLabel(enabled) });
   }
 
-  /** Test hook: enable or disable pencil pixel perfect (1px + no AA only). */
+  /** Test hook: enable or disable pencil pixel perfect (enabling snaps brush size min/max to 1). */
   setPencilPixelPerfect(enabled: boolean): void {
     const next = enabled === true;
+    if (next) {
+      this.brushSize = 1;
+      this.brushSizeMin = 1;
+      this.engine?.setBrushSize(1);
+      this.engine?.setBrushSizeMin(1);
+    }
     this.pencilPixelPerfect = next;
     this.engine?.setPencilPixelPerfect(next);
     this.statusMessage = tr("status.pencilPixelPerfect", { value: this.onOffLabel(next) });
   }
 
-  /** Test hook: enable or disable curve pixel perfect (1px + no AA only). */
+  /** Test hook: enable or disable curve pixel perfect (enabling snaps curve width min/max to 1). */
   setCurvePixelPerfect(enabled: boolean): void {
     const next = enabled === true;
+    if (next) {
+      this.curveWidth = 1;
+      this.curveWidthMin = 1;
+      this.engine?.setCurveWidth(1);
+      this.engine?.setCurveWidthMin(1);
+    }
     this.curvePixelPerfect = next;
     this.engine?.setCurvePixelPerfect(next);
     this.statusMessage = tr("status.curvePixelPerfect", { value: this.onOffLabel(next) });
@@ -8300,6 +8310,12 @@ export class GnumarusShell extends LitElement {
 
   private applyPencilPixelPerfectFromDialog(): void {
     const enabled = this.currentDialogPencilPixelPerfect();
+    if (enabled) {
+      this.brushSize = 1;
+      this.brushSizeMin = 1;
+      this.engine?.setBrushSize(1);
+      this.engine?.setBrushSizeMin(1);
+    }
     this.pencilPixelPerfect = enabled;
     this.engine?.setPencilPixelPerfect(enabled);
     this.statusMessage = tr("status.pencilPixelPerfect", { value: this.onOffLabel(enabled) });
@@ -8307,6 +8323,12 @@ export class GnumarusShell extends LitElement {
 
   private applyCurvePixelPerfectFromDialog(): void {
     const enabled = this.currentDialogCurvePixelPerfect();
+    if (enabled) {
+      this.curveWidth = 1;
+      this.curveWidthMin = 1;
+      this.engine?.setCurveWidth(1);
+      this.engine?.setCurveWidthMin(1);
+    }
     this.curvePixelPerfect = enabled;
     this.engine?.setCurvePixelPerfect(enabled);
     this.statusMessage = tr("status.curvePixelPerfect", { value: this.onOffLabel(enabled) });

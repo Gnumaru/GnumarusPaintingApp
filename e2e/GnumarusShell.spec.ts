@@ -4942,7 +4942,7 @@ async function paintedNeighborStats(
   }, side);
 }
 
-test("pencil pixel perfect is gated to 1px without AA and thins tight turns", async ({ page }) => {
+test("pencil pixel perfect snaps size to 1 and thins tight turns @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.getByRole("button", { name: "Pencil" }).click();
@@ -4951,13 +4951,16 @@ test("pencil pixel perfect is gated to 1px without AA and thins tight turns", as
   const pixelPerfect = page.locator("gnumarus-shell input#pencilPixelPerfect");
   await expect(pixelPerfect).toBeEnabled();
   await page.locator("gnumarus-shell input#brushSize").fill("3");
-  await expect(pixelPerfect).toBeDisabled();
-  await page.locator("gnumarus-shell input#brushSize").fill("1");
+  await page.locator("gnumarus-shell input#brushSizeMin").fill("2");
   await expect(pixelPerfect).toBeEnabled();
+  await pixelPerfect.check();
+  await expect(page.locator("gnumarus-shell input#brushSize")).toHaveValue("1");
+  await expect(page.locator("gnumarus-shell input#brushSizeMin")).toHaveValue("1");
   await page.locator("gnumarus-shell input#pencilAntialias").check();
-  await expect(pixelPerfect).toBeDisabled();
+  await expect(pixelPerfect).toBeEnabled();
   await page.locator("gnumarus-shell input#pencilAntialias").uncheck();
   await expect(pixelPerfect).toBeEnabled();
+  await pixelPerfect.uncheck();
 
   await loadTinyLayer(page, 8);
   await setPencil(page, "#ff0000");
@@ -5033,7 +5036,7 @@ test("pencil pixel perfect still paints crossings and revisits", async ({ page }
   expect(await readPixel(page, 3, 3)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
-test("curve pixel perfect is gated to 1px without AA and keeps curves thin", async ({ page }) => {
+test("curve pixel perfect snaps width to 1 and keeps curves thin @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadTinyLayer(page, 16);
@@ -5042,9 +5045,10 @@ test("curve pixel perfect is gated to 1px without AA and keeps curves thin", asy
   const pixelPerfect = page.locator("gnumarus-shell input#curvePixelPerfect");
   await expect(pixelPerfect).toBeEnabled();
   await page.locator("gnumarus-shell input#curveWidth").fill("2");
-  await expect(pixelPerfect).toBeDisabled();
-  await page.locator("gnumarus-shell input#curveWidth").fill("1");
+  await expect(pixelPerfect).toBeEnabled();
   await pixelPerfect.check();
+  await expect(page.locator("gnumarus-shell input#curveWidth")).toHaveValue("1");
+  await expect(page.locator("gnumarus-shell input#curveWidthMin")).toHaveValue("1");
   await expect(page.locator("gnumarus-shell")).toContainText("Curve pixel perfect: on");
   const canvas = page.locator("gnumarus-shell canvas");
   const box = await canvas.boundingBox();
@@ -11756,19 +11760,21 @@ test("brush min size clamps to the max @recent", async ({ page }) => {
   await expect(page.locator("gnumarus-shell")).toContainText("Brush size: 4");
 });
 
-test("pixel perfect requires min and max size of 1 @recent", async ({ page }) => {
+test("pixel perfect snaps min and max size to 1 @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.getByRole("button", { name: "Pencil" }).click();
   const box = page.locator('gnumarus-shell input#pencilPixelPerfect');
   await expect(box).toBeEnabled();
   await page.locator("gnumarus-shell input#brushSize").fill("4");
-  await page.locator("gnumarus-shell input#brushSizeMin").fill("1");
-  await expect(box).toBeDisabled();
-  await page.locator("gnumarus-shell input#brushSize").fill("1");
+  await page.locator("gnumarus-shell input#brushSizeMin").fill("2");
   await expect(box).toBeEnabled();
-  await page.locator("gnumarus-shell input#brushSizeMin").fill("0.5");
-  await expect(box).toBeDisabled();
+  await box.check();
+  await expect(page.locator("gnumarus-shell input#brushSize")).toHaveValue("1");
+  await expect(page.locator("gnumarus-shell input#brushSizeMin")).toHaveValue("1");
+  await expect(page.locator("gnumarus-shell")).toContainText("Pencil pixel perfect: on");
+  await box.uncheck();
+  await expect(page.locator("gnumarus-shell")).toContainText("Pencil pixel perfect: off");
 });
 
 async function dragCanvas(page: import("@playwright/test").Page, x0: number, y0: number, x1: number, y1: number): Promise<void> {
