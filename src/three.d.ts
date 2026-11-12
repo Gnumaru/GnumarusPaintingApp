@@ -14,6 +14,7 @@ declare module "three" {
   export const OneFactor: number;
   export const SrcColorFactor: number;
   export const OneMinusSrcColorFactor: number;
+  export const DstColorFactor: number;
   export const SrcAlphaFactor: number;
   export const OneMinusSrcAlphaFactor: number;
   export const AddEquation: number;

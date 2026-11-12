@@ -644,7 +644,13 @@ const LAYER_FRAGMENT_SHADER = [
   "uniform float uOpacity;",
   "void main() {",
   "  vec4 tex = texture2D(uMap, vUv);",
-  "  gl_FragColor = vec4(tex.rgb, tex.a * uOpacity);",
+  "  float alpha = tex.a * uOpacity;",
+  // Fully transparent fragments must not touch the framebuffer: blend-mode
+  // equations (multiply factors, min/max) cannot see alpha, so without this
+  // an untouched transparent-black texel would paint black instead of
+  // showing the layers below.
+  "  if (alpha <= 0.0) { discard; }",
+  "  gl_FragColor = vec4(tex.rgb, alpha);",
   "}",
 ].join("\n");
 
@@ -5770,9 +5776,11 @@ export class GnumarusCanvasEngine {
     const material = layer.material;
     switch (layer.blend) {
       case "multiply":
+        // out = S*D*As + D*(1-As) for opaque backdrops: exact for opaque and
+        // transparent texels (transparent shows through via the discard above).
         material.blending = THREE.CustomBlending;
-        material.blendSrc = THREE.ZeroFactor;
-        material.blendDst = THREE.SrcColorFactor;
+        material.blendSrc = THREE.DstColorFactor;
+        material.blendDst = THREE.OneMinusSrcAlphaFactor;
         material.blendEquation = THREE.AddEquation;
         break;
       case "screen":
@@ -5794,7 +5802,11 @@ export class GnumarusCanvasEngine {
         material.blendEquation = THREE.MaxEquation;
         break;
       case "add":
-        material.blending = THREE.AdditiveBlending;
+        // out = S*As + D: exact for opaque backdrops at any source alpha.
+        material.blending = THREE.CustomBlending;
+        material.blendSrc = THREE.SrcAlphaFactor;
+        material.blendDst = THREE.OneFactor;
+        material.blendEquation = THREE.AddEquation;
         break;
       case "normal":
       default:
@@ -5802,7 +5814,9 @@ export class GnumarusCanvasEngine {
         break;
     }
     if (material.blending === THREE.CustomBlending) {
-      material.blendSrcAlpha = THREE.SrcAlphaFactor;
+      // outA = Sa + Da*(1-Sa): plain source-over alpha for every mode.
+      // outA = Sa + Da*(1-Sa): plain source-over alpha for every mode.
+      material.blendSrcAlpha = THREE.OneFactor;
       material.blendDstAlpha = THREE.OneMinusSrcAlphaFactor;
       material.blendEquationAlpha = THREE.AddEquation;
     }
