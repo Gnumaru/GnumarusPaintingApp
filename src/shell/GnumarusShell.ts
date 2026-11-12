@@ -396,6 +396,14 @@ function gnumarusShortcuts(): GnumarusShortcutSection[] {
         { keys: "G or F", action: tr("sc.toolBucket") },
         { keys: "N", action: tr("sc.toolLine") },
         { keys: "C", action: tr("sc.toolCurve") },
+        { keys: "D", action: tr("sc.toolRectangle") },
+        { keys: "H", action: tr("sc.toolEllipseShape") },
+        { keys: "J", action: tr("sc.toolPolygon") },
+        { keys: "K", action: tr("sc.toolGradient") },
+        { keys: "S", action: tr("sc.toolShading") },
+        { keys: "I", action: tr("sc.toolBlur") },
+        { keys: "A", action: tr("sc.toolClone") },
+        { keys: "Q", action: tr("sc.toolRecolor") },
         { keys: "Z", action: tr("sc.toolLoupe") },
         { keys: "T", action: tr("sc.toolTransform") },
         { keys: "Y", action: tr("sc.toolRot3d") },
@@ -465,8 +473,10 @@ export interface GnumarusToolDrawerDef {
 
 export const GNUMARUS_TOOL_DRAWERS: GnumarusToolDrawerDef[] = [
   { id: "paint", tools: ["pencil", "line", "curve"] },
+  { id: "shape", tools: ["rectangle", "ellipseShape", "polygon", "gradient"] },
+  { id: "retouch", tools: ["shading", "blur", "clone", "recolor", "jumble"] },
   { id: "selection", tools: ["rectselect", "ellipse", "lasso", "polylasso", "colorselect"] },
-  { id: "destructive", tools: ["destransform", "destransform3d"] },
+  { id: "destructive", tools: ["destransform", "destransform3d", "crop"] },
   { id: "transform", tools: ["transform", "transform3d"] },
   { id: "model", tools: ["modeltransform", "flycam"] },
 ];
@@ -1567,6 +1577,16 @@ export class GnumarusShell extends LitElement {
     blendMode: { type: String },
     accumulate: { type: Boolean },
     lineWidth: { type: Number },
+    shapeWidth: { type: Number },
+    retouchSize: { type: Number },
+    shadeMode: { type: String },
+    shadeAmount: { type: Number },
+    blurMode: { type: String },
+    recolorTolerance: { type: Number },
+    shapeFilled: { type: Boolean },
+    shapeAntialias: { type: Boolean },
+    gradientMode: { type: String },
+    gradientDither: { type: Boolean },
     lineShape: { type: String },
     lineAntialias: { type: Boolean },
     curveWidth: { type: Number },
@@ -1736,6 +1756,16 @@ export class GnumarusShell extends LitElement {
   declare accumulate: boolean;
   declare lineWidth: number;
   declare lineWidthMin: number;
+  declare shapeWidth: number;
+  declare retouchSize: number;
+  declare shadeMode: "lighten" | "darken" | "hue";
+  declare shadeAmount: number;
+  declare blurMode: "blur" | "sharpen";
+  declare recolorTolerance: number;
+  declare shapeFilled: boolean;
+  declare shapeAntialias: boolean;
+  declare gradientMode: "linear" | "radial";
+  declare gradientDither: boolean;
   declare lineShape: GnumarusBrushShape;
   declare lineAntialias: boolean;
   declare curveWidth: number;
@@ -1913,6 +1943,16 @@ export class GnumarusShell extends LitElement {
     this.blendMode = "normal";
     this.accumulate = true;
     this.lineWidth = 1;
+    this.shapeWidth = 1;
+    this.retouchSize = 8;
+    this.shadeMode = "lighten";
+    this.shadeAmount = 0.2;
+    this.blurMode = "blur";
+    this.recolorTolerance = 30;
+    this.shapeFilled = false;
+    this.shapeAntialias = false;
+    this.gradientMode = "linear";
+    this.gradientDither = false;
     this.lineWidthMin = 1;
     this.lineShape = "circle";
     this.lineAntialias = false;
@@ -2088,6 +2128,8 @@ export class GnumarusShell extends LitElement {
           >
             <span class="tool-icon" aria-hidden="true">▦</span>
           </button>
+          ${this.renderToolDrawer("shape")}
+          ${this.renderToolDrawer("retouch")}
           ${this.renderToolDrawer("model")}
 
           ${this.renderToolDrawer("selection")}
@@ -3654,6 +3696,36 @@ export class GnumarusShell extends LitElement {
     if (tool === "line") {
       return tr("toolname.line");
     }
+    if (tool === "rectangle") {
+      return tr("toolname.rectangle");
+    }
+    if (tool === "ellipseShape") {
+      return tr("toolname.ellipseShape");
+    }
+    if (tool === "polygon") {
+      return tr("toolname.polygon");
+    }
+    if (tool === "gradient") {
+      return tr("toolname.gradient");
+    }
+    if (tool === "shading") {
+      return tr("toolname.shading");
+    }
+    if (tool === "blur") {
+      return tr("toolname.blur");
+    }
+    if (tool === "clone") {
+      return tr("toolname.clone");
+    }
+    if (tool === "recolor") {
+      return tr("toolname.recolor");
+    }
+    if (tool === "jumble") {
+      return tr("toolname.jumble");
+    }
+    if (tool === "crop") {
+      return tr("toolname.crop");
+    }
     return tr("toolname.curve");
   }
 
@@ -3734,6 +3806,36 @@ export class GnumarusShell extends LitElement {
     if (tool === "line") {
       return tr("tool.line");
     }
+    if (tool === "rectangle") {
+      return tr("tool.rectangle");
+    }
+    if (tool === "ellipseShape") {
+      return tr("tool.ellipseShape");
+    }
+    if (tool === "polygon") {
+      return tr("tool.polygon");
+    }
+    if (tool === "gradient") {
+      return tr("tool.gradient");
+    }
+    if (tool === "shading") {
+      return tr("tool.shading");
+    }
+    if (tool === "blur") {
+      return tr("tool.blur");
+    }
+    if (tool === "clone") {
+      return tr("tool.clone");
+    }
+    if (tool === "recolor") {
+      return tr("tool.recolor");
+    }
+    if (tool === "jumble") {
+      return tr("tool.jumble");
+    }
+    if (tool === "crop") {
+      return tr("tool.crop");
+    }
     if (tool === "curve") {
       return tr("tool.curve");
     }
@@ -3790,6 +3892,36 @@ export class GnumarusShell extends LitElement {
     if (tool === "line") {
       return tr("tool.lineHint");
     }
+    if (tool === "rectangle") {
+      return tr("tool.rectangleHint");
+    }
+    if (tool === "ellipseShape") {
+      return tr("tool.ellipseShapeHint");
+    }
+    if (tool === "polygon") {
+      return tr("tool.polygonHint");
+    }
+    if (tool === "gradient") {
+      return tr("tool.gradientHint");
+    }
+    if (tool === "shading") {
+      return tr("tool.shadingHint");
+    }
+    if (tool === "blur") {
+      return tr("tool.blurHint");
+    }
+    if (tool === "clone") {
+      return tr("tool.cloneHint");
+    }
+    if (tool === "recolor") {
+      return tr("tool.recolorHint");
+    }
+    if (tool === "jumble") {
+      return tr("tool.jumbleHint");
+    }
+    if (tool === "crop") {
+      return tr("tool.cropHint");
+    }
     if (tool === "curve") {
       return tr("tool.curveHint");
     }
@@ -3836,6 +3968,36 @@ export class GnumarusShell extends LitElement {
     }
     if (tool === "line") {
       return "╲";
+    }
+    if (tool === "rectangle") {
+      return "▭";
+    }
+    if (tool === "ellipseShape") {
+      return "◯";
+    }
+    if (tool === "polygon") {
+      return "⬠";
+    }
+    if (tool === "gradient") {
+      return "◨";
+    }
+    if (tool === "shading") {
+      return "◐";
+    }
+    if (tool === "blur") {
+      return "░";
+    }
+    if (tool === "clone") {
+      return "⧉";
+    }
+    if (tool === "recolor") {
+      return "◑";
+    }
+    if (tool === "jumble") {
+      return "⟡";
+    }
+    if (tool === "crop") {
+      return "◫";
     }
     if (tool === "curve") {
       return "〜";
@@ -4528,6 +4690,30 @@ export class GnumarusShell extends LitElement {
       return this.renderFlycamOptions();
     }
     if (
+      this.tool === "rectangle" ||
+      this.tool === "ellipseShape" ||
+      this.tool === "polygon" ||
+      this.tool === "gradient"
+    ) {
+      return this.renderShapeOptions();
+    }
+    if (
+      this.tool === "shading" ||
+      this.tool === "blur" ||
+      this.tool === "clone" ||
+      this.tool === "recolor" ||
+      this.tool === "jumble"
+    ) {
+      return this.renderRetouchOptions();
+    }
+    if (this.tool === "crop") {
+      return html`
+        <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
+          <span class="tool-options-empty">${tr("opt.cropHint")}</span>
+        </div>
+      `;
+    }
+    if (
       this.tool === "rectselect" ||
       this.tool === "ellipse" ||
       this.tool === "lasso" ||
@@ -4977,6 +5163,21 @@ export class GnumarusShell extends LitElement {
             this.statusMessage = tr("status.tileCellOccupied");
             this.showToast(tr("status.tileCellOccupied"));
           }
+        },
+        onCropOutcome: (outcome, width, height): void => {
+          if (outcome === "cropped") {
+            this.statusMessage = tr("status.textureCropped", { w: width, h: height });
+            this.dirty = true;
+          } else if (outcome === "outside") {
+            this.statusMessage = tr("status.cropOutside");
+            this.showToast(tr("status.cropOutside"));
+          } else if (outcome === "empty") {
+            this.statusMessage = tr("status.cropNoTexture");
+            this.showToast(tr("status.cropNoTexture"));
+          } else {
+            this.statusMessage = tr("status.cropInside");
+          }
+          this.refreshLayers();
         },
         onNotice: (kind): void => {
           if (kind === "text-paint-blocked") {
@@ -7978,6 +8179,99 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.curveAntialias", { value: this.onOffLabel(enabled) });
   }
 
+  private currentDialogShapeWidth(): number {
+    const input = this.shadowRoot?.getElementById("shapeWidth") as HTMLInputElement | null;
+    const parsed = Number(input?.value ?? "1");
+    return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1);
+  }
+
+  private applyShapeWidthFromDialog(): void {
+    const size = this.currentDialogShapeWidth();
+    this.shapeWidth = size;
+    this.engine?.setShapeWidth(size);
+    this.statusMessage = tr("status.brushSize", { value: size });
+  }
+
+  private applyShapeFilledFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("shapeFilled") as HTMLInputElement | null;
+    const filled = input?.checked === true;
+    this.shapeFilled = filled;
+    this.engine?.setShapeFilled(filled);
+    this.refreshLayers();
+  }
+
+  private applyShapeAntialiasFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("shapeAntialias") as HTMLInputElement | null;
+    const enabled = input?.checked === true;
+    this.shapeAntialias = enabled;
+    this.engine?.setShapeAntialias(enabled);
+    this.refreshLayers();
+  }
+
+  private currentDialogRetouchSize(): number {
+    const input = this.shadowRoot?.getElementById("retouchSize") as HTMLInputElement | null;
+    const parsed = Number(input?.value ?? "8");
+    return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 8);
+  }
+
+  private applyRetouchSizeFromDialog(): void {
+    const size = this.currentDialogRetouchSize();
+    this.retouchSize = size;
+    this.engine?.setRetouchSize(size);
+    this.statusMessage = tr("status.brushSize", { value: size });
+  }
+
+  private applyShadeModeFromDialog(): void {
+    const select = this.shadowRoot?.getElementById("shadeMode") as HTMLSelectElement | null;
+    const raw = select?.value ?? "lighten";
+    const mode = raw === "darken" ? "darken" : raw === "hue" ? "hue" : "lighten";
+    this.shadeMode = mode;
+    this.engine?.setShadeMode(mode);
+    this.refreshLayers();
+  }
+
+  private applyShadeAmountFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("shadeAmount") as HTMLInputElement | null;
+    const parsed = Math.round(Number(input?.value ?? "20"));
+    const amount = (Number.isFinite(parsed) ? Math.min(100, Math.max(1, parsed)) : 20) / 100;
+    this.shadeAmount = amount;
+    this.engine?.setShadeAmount(amount);
+    this.refreshLayers();
+  }
+
+  private applyBlurModeFromDialog(): void {
+    const select = this.shadowRoot?.getElementById("blurMode") as HTMLSelectElement | null;
+    const mode = select?.value === "sharpen" ? "sharpen" : "blur";
+    this.blurMode = mode;
+    this.engine?.setBlurMode(mode);
+    this.refreshLayers();
+  }
+
+  private applyRecolorToleranceFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("recolorTolerance") as HTMLInputElement | null;
+    const parsed = Math.round(Number(input?.value ?? "30"));
+    const tolerance = Number.isFinite(parsed) ? Math.min(100, Math.max(0, parsed)) : 30;
+    this.recolorTolerance = tolerance;
+    this.engine?.setRecolorTolerance(tolerance);
+    this.refreshLayers();
+  }
+
+  private applyGradientModeFromDialog(): void {
+    const select = this.shadowRoot?.getElementById("gradientMode") as HTMLSelectElement | null;
+    const mode = select?.value === "radial" ? "radial" : "linear";
+    this.gradientMode = mode;
+    this.engine?.setGradientMode(mode);
+    this.refreshLayers();
+  }
+
+  private applyGradientDitherFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("gradientDither") as HTMLInputElement | null;
+    const enabled = input?.checked === true;
+    this.gradientDither = enabled;
+    this.engine?.setGradientDither(enabled);
+    this.refreshLayers();
+  }
+
   /** Test and picker hook: set checker color A (opaque hex only). */
   setCheckerColorA(hex: string): void {
     const six = hex.trim().toLowerCase().slice(0, 7);
@@ -9760,6 +10054,138 @@ export class GnumarusShell extends LitElement {
               </button>
             `}
         <span class="tool-options-empty">${tr("opt.flycamHint")}</span>
+      </div>
+    `;
+  }
+
+  /** Retouch tool options: shared dab size plus per-tool mode controls. */
+  private renderRetouchOptions() {
+    return html`
+      <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
+        <label title=${tr("opt.retouchSizeHint")}
+          >${tr("opt.retouchSize")}
+          <input
+            type="number"
+            id="retouchSize"
+            min="0.1"
+            max="64"
+            step="0.1"
+            .value=${String(this.retouchSize)}
+            @input=${(): void => this.applyRetouchSizeFromDialog()}
+          />
+        </label>
+        ${this.tool === "shading"
+          ? html`
+              <label title=${tr("opt.shadeModeHint")}
+                >${tr("opt.shadeMode")}
+                <select id="shadeMode" .value=${this.shadeMode} @change=${(): void => this.applyShadeModeFromDialog()}>
+                  <option value="lighten">${tr("opt.shadeLighten")}</option>
+                  <option value="darken">${tr("opt.shadeDarken")}</option>
+                  <option value="hue">${tr("opt.shadeHue")}</option>
+                </select>
+              </label>
+              <label title=${tr("opt.shadeAmountHint")}
+                >${tr("opt.shadeAmount")}
+                <input
+                  type="number"
+                  id="shadeAmount"
+                  min="1"
+                  max="100"
+                  step="1"
+                  .value=${String(Math.round(this.shadeAmount * 100))}
+                  @input=${(): void => this.applyShadeAmountFromDialog()}
+                />
+              </label>
+            `
+          : html``}
+        ${this.tool === "blur"
+          ? html`
+              <label title=${tr("opt.blurModeHint")}
+                >${tr("opt.blurMode")}
+                <select id="blurMode" .value=${this.blurMode} @change=${(): void => this.applyBlurModeFromDialog()}>
+                  <option value="blur">${tr("opt.blurBlur")}</option>
+                  <option value="sharpen">${tr("opt.blurSharpen")}</option>
+                </select>
+              </label>
+            `
+          : html``}
+        ${this.tool === "recolor"
+          ? html`
+              <label title=${tr("opt.recolorToleranceHint")}
+                >${tr("opt.recolorTolerance")}
+                <input
+                  type="number"
+                  id="recolorTolerance"
+                  min="0"
+                  max="100"
+                  step="1"
+                  .value=${String(this.recolorTolerance)}
+                  @input=${(): void => this.applyRecolorToleranceFromDialog()}
+                />
+              </label>
+            `
+          : html``}
+        ${this.tool === "clone" ? html`<span class="tool-options-empty">${tr("opt.cloneHint")}</span>` : html``}
+        ${this.tool === "jumble" ? html`<span class="tool-options-empty">${tr("opt.jumbleHint")}</span>` : html``}
+      </div>
+    `;
+  }
+
+  /** Shape + gradient tool options: shared width/fill/AA for shapes, mode/dither for gradients. */
+  private renderShapeOptions() {
+    return html`
+      <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
+        ${this.tool === "gradient"
+          ? html`
+              <label title=${tr("opt.gradientModeHint")}
+                >${tr("opt.gradientMode")}
+                <select id="gradientMode" .value=${this.gradientMode} @change=${(): void => this.applyGradientModeFromDialog()}>
+                  <option value="linear">${tr("opt.gradientLinear")}</option>
+                  <option value="radial">${tr("opt.gradientRadial")}</option>
+                </select>
+              </label>
+              <label title=${tr("opt.gradientDitherHint")}
+                ><input
+                  type="checkbox"
+                  id="gradientDither"
+                  .checked=${this.gradientDither}
+                  @change=${(): void => this.applyGradientDitherFromDialog()}
+                />
+                ${tr("opt.gradientDither")}
+              </label>
+            `
+          : html`
+              <label title=${tr("opt.shapeWidthHint")}
+                >${tr("opt.shapeWidth")}
+                <input
+                  type="number"
+                  id="shapeWidth"
+                  min="0.1"
+                  max="64"
+                  step="0.1"
+                  .value=${String(this.shapeWidth)}
+                  @input=${(): void => this.applyShapeWidthFromDialog()}
+                />
+              </label>
+              <label title=${tr("opt.shapeFillHint")}
+                ><input
+                  type="checkbox"
+                  id="shapeFilled"
+                  .checked=${this.shapeFilled}
+                  @change=${(): void => this.applyShapeFilledFromDialog()}
+                />
+                ${tr("opt.shapeFill")}
+              </label>
+              <label title=${tr("opt.shapeAntialiasHint")}
+                ><input
+                  type="checkbox"
+                  id="shapeAntialias"
+                  .checked=${this.shapeAntialias}
+                  @change=${(): void => this.applyShapeAntialiasFromDialog()}
+                />
+                ${tr("opt.shapeAntialias")}
+              </label>
+            `}
       </div>
     `;
   }
