@@ -604,3 +604,4 @@ No animation/timeline, no vector editing, no 3D viewport, no filters, no WASM, n
 - Direção do drag de órbita do modelo 3D invertida nos dois eixos.
 - Nova setting `modelLighting` (`unlit` padrão: MeshBasicMaterial, cores chapadas estilo PS1/N64, sem luzes; `lit`: luzes do arquivo, direcional de fallback como hoje); engine reaplica raster ao trocar (iluminação na chave de cache); UI + reset + persist + hook + i18n en+pt-BR.
 - Testes unitários (parse/serialize da setting) + 4 novos e2e @recent verdes (fundo da janela checker+sólido, picker sem none/new com fundo nos thumbs, direção da órbita nos dois eixos, setting unlit/lit com render nos dois modos + persist + reset); full suite não rodada, a pedido.
+- Correção follow-up: direção do zoom com wheel invertida (wheel up = zoom in, wheel down = zoom out, igual ao zoom do canvas) + 1 novo e2e @recent.

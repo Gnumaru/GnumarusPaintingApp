@@ -12698,7 +12698,7 @@ export class GnumarusCanvasEngine {
           const layer = this.activeLayer();
           const modelId = layer === null ? null : this.getCellModel3dId(layer.id, this.currentFrame);
           if (modelId !== null && this.startModelOrbit()) {
-            this.zoomModelOrbit(Math.exp(-event.deltaY * 0.0015));
+            this.zoomModelOrbit(Math.exp(event.deltaY * 0.0015));
             return;
           }
         }

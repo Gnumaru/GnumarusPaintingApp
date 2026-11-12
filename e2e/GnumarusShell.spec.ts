@@ -11146,6 +11146,34 @@ test("3d model transform requires a model cell", async ({ page }) => {
   await expect(page.locator("gnumarus-shell")).toContainText("Select a 3D model cell first");
 });
 
+test("3d model transform wheel up zooms in and wheel down zooms out @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubModelPicker(page, "tri.stl", SIMPLE_STL);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  const modelId = await cellModel3dId(page, "layer0", 0);
+  expect(typeof modelId).toBe("string");
+  const before = await modelViewOf(page, modelId as string);
+  expect(before).not.toBeNull();
+  await page.locator('gnumarus-shell [data-testid="tool-modeltransform"]').click();
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -120);
+  await page.locator('gnumarus-shell [data-testid="model-view-commit"]').click();
+  const zoomedIn = await modelViewOf(page, modelId as string);
+  expect(zoomedIn?.distance ?? 0).toBeLessThan(before?.distance ?? 0);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, 240);
+  await page.locator('gnumarus-shell [data-testid="model-view-commit"]').click();
+  const zoomedOut = await modelViewOf(page, modelId as string);
+  expect(zoomedOut?.distance ?? 0).toBeGreaterThan(zoomedIn?.distance ?? 0);
+});
+
 test("tile window draws the project canvas background @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

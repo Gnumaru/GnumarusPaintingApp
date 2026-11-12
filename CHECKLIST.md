@@ -358,3 +358,4 @@
 - [x] Picker de tileset sem No/New texture + thumbs com fundo + e2e
 - [x] Inversão dos dois eixos da órbita + e2e de direção
 - [x] Setting `modelLighting` (unlit/lit) + engine/setter/cache/i18n + unit + e2e (só novos); build + deploy + docs
+- [x] Inversão da direção do zoom com wheel (up = in, down = out) + e2e; build + deploy
