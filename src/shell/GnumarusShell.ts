@@ -9188,6 +9188,46 @@ export class GnumarusShell extends LitElement {
     if (this.previewOpen) {
       void this.refreshPreview();
     }
+    // Keep the active layer row and the current matrix cell on screen after
+    // any navigation (frame/layer switch, add/remove, playback follows too).
+    void this.updateComplete.then(() => {
+      this.scrollCurrentCellIntoView();
+    });
+  }
+
+  /** Scroll a container just enough to fully show a child (no-op when visible). */
+  private scrollChildIntoView(container: Element | null, child: Element | null): void {
+    if (!(container instanceof HTMLElement) || !(child instanceof HTMLElement)) {
+      return;
+    }
+    const area = container.getBoundingClientRect();
+    if (area.width <= 0 || area.height <= 0) {
+      return;
+    }
+    const rect = child.getBoundingClientRect();
+    if (rect.width <= 0 && rect.height <= 0) {
+      return;
+    }
+    if (rect.top < area.top) {
+      container.scrollTop -= area.top - rect.top;
+    } else if (rect.bottom > area.bottom) {
+      container.scrollTop += rect.bottom - area.bottom;
+    }
+    if (rect.left < area.left) {
+      container.scrollLeft -= area.left - rect.left;
+    } else if (rect.right > area.right) {
+      container.scrollLeft += rect.right - area.right;
+    }
+  }
+
+  /** Bring the active layer row and the current matrix cell into view. */
+  private scrollCurrentCellIntoView(): void {
+    const root = this.shadowRoot;
+    if (root === null) {
+      return;
+    }
+    this.scrollChildIntoView(root.querySelector(".layers-list"), root.querySelector(".layer-row.active"));
+    this.scrollChildIntoView(root.querySelector(".anim-scroll"), root.querySelector(".anim-cell.active-cell"));
   }
 
   private onCellClick(layerId: string, frame: number): void {

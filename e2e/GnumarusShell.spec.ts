@@ -12621,3 +12621,53 @@ test("Ctrl+Shift+Arrows create layers and frames @recent", async ({ page }) => {
   expect(matrix.frameCount).toBe(3);
   expect(matrix.currentFrame).toBe(1);
 });
+
+test("changing frame/layer scrolls the matrix and layers list into view @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  for (let i = 0; i < 19; i += 1) {
+    await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  }
+  for (let i = 0; i < 8; i += 1) {
+    await page.keyboard.press("Insert");
+  }
+  const scrollState = (): Promise<{
+    listTop: number;
+    scrollLeft: number;
+    scrollTop: number;
+    cellVisible: boolean;
+    rowVisible: boolean;
+  }> =>
+    page.evaluate(() => {
+      const root = document.querySelector("gnumarus-shell")?.shadowRoot ?? null;
+      const list = root?.querySelector(".layers-list") as HTMLElement | null;
+      const scroller = root?.querySelector(".anim-scroll") as HTMLElement | null;
+      const cell = root?.querySelector(".anim-cell.active-cell") as HTMLElement | null;
+      const row = root?.querySelector(".layer-row.active") as HTMLElement | null;
+      if (list === null || scroller === null || cell === null || row === null) {
+        throw new Error("scroll nodes are missing");
+      }
+      const inView = (box: DOMRect, area: DOMRect): boolean =>
+        box.top >= area.top - 1 &&
+        box.bottom <= area.bottom + 1 &&
+        box.left >= area.left - 1 &&
+        box.right <= area.right + 1;
+      return {
+        listTop: list.scrollTop,
+        scrollLeft: scroller.scrollLeft,
+        scrollTop: scroller.scrollTop,
+        cellVisible: inView(cell.getBoundingClientRect(), scroller.getBoundingClientRect()),
+        rowVisible: inView(row.getBoundingClientRect(), list.getBoundingClientRect()),
+      };
+    });
+  // Newest frame/layer is current after the setup: jump back to frame 0.
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  await expect.poll(async () => (await scrollState()).scrollLeft, { timeout: 10000 }).toBe(0);
+  // Select the bottom layer via its matrix name: both panes must follow.
+  await page.locator('gnumarus-shell [data-testid="anim-layer-name"][data-matrix-layer="layer0"]').click();
+  await expect.poll(async () => scrollState(), { timeout: 10000 }).toMatchObject({ cellVisible: true, rowVisible: true });
+  const after = await scrollState();
+  expect(after.listTop).toBeGreaterThan(0);
+  expect(after.scrollTop).toBeGreaterThan(0);
+});
