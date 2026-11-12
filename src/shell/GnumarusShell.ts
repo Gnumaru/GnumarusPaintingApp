@@ -17,6 +17,7 @@ import {
   isFileSaveSupported,
   isFileSystemAccessSupported,
   pickImportFile,
+  pickImageFile,
   pickModel3dFile,
   pickProjectDirectory,
   pickSvgFile,
@@ -1929,13 +1930,14 @@ export class GnumarusShell extends LitElement {
           ${this.fileMenuOpen
             ? html`
                 <div class="dropdown">
-                  <button @click=${(): void => void this.runAction("new-project")}>${tr("menu.newProject")}</button>
-                  <button @click=${(): void => void this.runAction("open-project")}>${tr("menu.openProject")}</button>
+                  <button title=${tr("menu.newProjectTitle")} @click=${(): void => void this.runAction("new-project")}>${tr("menu.newProject")}</button>
+                  <button title=${tr("menu.openProjectTitle")} @click=${(): void => void this.runAction("open-project")}>${tr("menu.openProject")}</button>
                   <button title=${tr("menu.saveTitle")} @click=${(): void => void this.runAction("save-project")}>${tr("menu.saveProject")}</button>
-                  <button @click=${(): void => void this.runAction("import")}>${tr("menu.import")}</button>
-                  <button @click=${(): void => void this.runAction("import-svg")}>${tr("menu.importSvg")}</button>
-                  <button @click=${(): void => void this.runAction("import-3d-model")}>${tr("menu.importModel3d")}</button>
-                  <button @click=${(): void => void this.runAction("export")}>${tr("menu.export")}</button>
+                  <button title=${tr("menu.importTitle")} @click=${(): void => void this.runAction("import")}>${tr("menu.import")}</button>
+                  <button title=${tr("menu.importSvgTitle")} @click=${(): void => void this.runAction("import-svg")}>${tr("menu.importSvg")}</button>
+                  <button title=${tr("menu.importModel3dTitle")} @click=${(): void => void this.runAction("import-3d-model")}>${tr("menu.importModel3d")}</button>
+                  <button title=${tr("menu.importImageTitle")} @click=${(): void => void this.runAction("import-image")}>${tr("menu.importImage")}</button>
+                  <button title=${tr("menu.exportTitle")} @click=${(): void => void this.runAction("export")}>${tr("menu.export")}</button>
                 </div>
               `
             : html``}
@@ -1951,10 +1953,11 @@ export class GnumarusShell extends LitElement {
           ${this.editMenuOpen
             ? html`
                 <div class="dropdown">
-                  <button ?disabled=${!this.canUndo} @click=${(): void => this.doUndo()}>${tr("menu.undo")}</button>
-                  <button ?disabled=${!this.canRedo} @click=${(): void => this.doRedo()}>${tr("menu.redo")}</button>
-                  <button @click=${(): void => this.openSettingsDialog()}>${tr("menu.settings")}</button>
+                  <button title=${tr("menu.undoTitle")} ?disabled=${!this.canUndo} @click=${(): void => void this.runAction("undo")}>${tr("menu.undo")}</button>
+                  <button title=${tr("menu.redoTitle")} ?disabled=${!this.canRedo} @click=${(): void => void this.runAction("redo")}>${tr("menu.redo")}</button>
+                  <button title=${tr("menu.settingsTitle")} @click=${(): void => void this.runAction("settings")}>${tr("menu.settings")}</button>
                   <button
+                    title=${tr("menu.resetCanvasTransformTitle")}
                     @click=${(): void => {
                       this.runAction("reset-canvas-transform");
                     }}
@@ -1976,8 +1979,8 @@ export class GnumarusShell extends LitElement {
           ${this.helpMenuOpen
             ? html`
                 <div class="dropdown">
-                  <button @click=${(): void => this.openShortcutsDialog()}>${tr("menu.shortcuts")}</button>
-                  <button @click=${(): void => this.openSourceCode()}>${tr("menu.sourceCode")}</button>
+                  <button title=${tr("menu.shortcutsTitle")} @click=${(): void => void this.runAction("shortcuts")}>${tr("menu.shortcuts")}</button>
+                  <button title=${tr("menu.sourceCodeTitle")} @click=${(): void => void this.runAction("source-code")}>${tr("menu.sourceCode")}</button>
                 </div>
               `
             : html``}
@@ -5514,6 +5517,54 @@ export class GnumarusShell extends LitElement {
       requirements: [],
       run: (): void => {
         void this.importModel3dFile();
+      },
+    });
+    this.actionRegistry.register({
+      id: "import-image",
+      name: tr("menu.importImage"),
+      requirements: [],
+      run: (): void => {
+        void this.importImageAsLayerFile();
+      },
+    });
+    this.actionRegistry.register({
+      id: "undo",
+      name: tr("menu.undo"),
+      requirements: [],
+      run: (): void => {
+        this.doUndo();
+      },
+    });
+    this.actionRegistry.register({
+      id: "redo",
+      name: tr("menu.redo"),
+      requirements: [],
+      run: (): void => {
+        this.doRedo();
+      },
+    });
+    this.actionRegistry.register({
+      id: "settings",
+      name: tr("menu.settings"),
+      requirements: [],
+      run: (): void => {
+        this.openSettingsDialog();
+      },
+    });
+    this.actionRegistry.register({
+      id: "shortcuts",
+      name: tr("menu.shortcuts"),
+      requirements: [],
+      run: (): void => {
+        this.openShortcutsDialog();
+      },
+    });
+    this.actionRegistry.register({
+      id: "source-code",
+      name: tr("menu.sourceCode"),
+      requirements: [],
+      run: (): void => {
+        this.openSourceCode();
       },
     });
     this.actionRegistry.register({
@@ -11572,6 +11623,90 @@ export class GnumarusShell extends LitElement {
     this.refreshLayers();
     this.dirty = true;
     this.statusMessage = tr("status.model3dImported", { name });
+    this.showToast(this.statusMessage);
+  }
+
+  /**
+   * Import a raster image (PNG, JPEG, WebP, GIF or BMP) as a layer. When the
+   * current cell is empty (or holds an empty content) the image lands on the
+   * current layer; otherwise a new layer is created above the active one and
+   * the image goes there. Unlike full-project imports, no fit/crop cleanup
+   * runs: the texture keeps the exact image pixels and dimensions.
+   */
+  private async importImageAsLayerFile(): Promise<void> {
+    this.fileMenuOpen = false;
+    if (this.engine === null) {
+      return;
+    }
+    if (!isFilePickerSupported()) {
+      this.statusMessage = tr("status.importNeedsFs");
+      return;
+    }
+    this.stopPlayback();
+    this.exitFlycam();
+    let handle;
+    try {
+      handle = await pickImageFile();
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
+      const reason = error instanceof Error ? error.message : String(error);
+      this.statusMessage = tr("status.importFailed", { reason });
+      this.showToast(tr("status.importFailed", { reason }));
+      return;
+    }
+    if (handle === null) {
+      this.statusMessage = tr("status.importNeedsFs");
+      return;
+    }
+    const fileName = await this.svgPickerFileName(handle);
+    const picked = await handle.getFile();
+    let decoded: { width: number; height: number; buffer: Uint8ClampedArray };
+    try {
+      const bitmap = await createImageBitmap(new Blob([new Uint8Array(await picked.arrayBuffer())]));
+      const canvas = document.createElement("canvas");
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const context = canvas.getContext("2d");
+      if (context === null) {
+        bitmap.close();
+        throw new Error("2D canvas is unavailable for image decoding.");
+      }
+      context.drawImage(bitmap, 0, 0);
+      bitmap.close();
+      if (canvas.width < 1 || canvas.height < 1) {
+        throw new Error("Decoded image is empty.");
+      }
+      const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+      decoded = { width: canvas.width, height: canvas.height, buffer: imageData.data };
+    } catch {
+      this.statusMessage = tr("status.imageInvalid");
+      this.showToast(tr("status.imageInvalid"));
+      return;
+    }
+    if (decoded.width > 16384 || decoded.height > 16384) {
+      this.statusMessage = tr("status.imageTooLarge");
+      this.showToast(tr("status.imageTooLarge"));
+      return;
+    }
+    let layerId = this.engine.getActiveLayerId();
+    const frame = this.engine.getCurrentFrame();
+    if (!this.engine.isCellContentEmpty(layerId, frame)) {
+      layerId = this.engine.insertLayerAboveActive();
+      this.refreshLayers();
+    }
+    const name = fileName.replace(/\.[^.]+$/, "").slice(0, 64) || "Image";
+    const created = this.engine.ensureImageContent(layerId, frame, decoded.width, decoded.height, decoded.buffer, name);
+    if (created === null) {
+      this.statusMessage = tr("status.imageInvalid");
+      this.showToast(tr("status.imageInvalid"));
+      return;
+    }
+    this.refreshLayers();
+    this.dirty = true;
+    const layerName = this.engine.getLayers().find((layer) => layer.id === layerId)?.name ?? layerId;
+    this.statusMessage = tr("status.imageImported", { name, layer: layerName });
     this.showToast(this.statusMessage);
   }
 

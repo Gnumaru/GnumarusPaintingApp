@@ -5545,14 +5545,20 @@ test("quick action palette filters and runs actions", async ({ page }) => {
     "Crop All Cells to Canvas",
     "Export",
     "Fit All Textures to Size",
-    "Import",
-    "Import 3D Model",
-    "Import SVG",
+    "Import 3D Model as layer",
+    "Import full project",
+    "Import image as layer",
+    "Import SVG as layer",
     "New Project",
     "Open Project",
+    "Redo",
     "Reload All Textures",
     "Reset Canvas Transform",
     "Save Project",
+    "Settings",
+    "Shortcuts",
+    "Source code",
+    "Undo",
   ]);
   await input.fill("xyz-nothing");
   await expect(dialog.locator('[data-testid="action-palette-empty"]')).toBeVisible();
@@ -5674,7 +5680,7 @@ test("Crop All Cells to Canvas crops every cell at once", async ({ page }) => {
   await setImportCleanup(page, "none");
   await stubAsepritePicker(page, "crop.xcf", bytes);
   await page.getByRole("button", { name: "File" }).click();
-  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import", exact: true }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import full project", exact: true }).click();
   await expect(page.locator('gnumarus-shell [data-testid="toast"]')).toContainText("Imported crop.xcf (2 layers)");
   let state = await getLayers(page);
   expect(state.layers[1]?.transform).toMatchObject({ x: 2, y: 2 });
@@ -7656,7 +7662,7 @@ test("File > Import loads layers, frames and durations from .ase", async ({ page
   await page.waitForSelector("gnumarus-shell");
   await stubAsepritePicker(page, "hero.ase", await buildAsepriteBytes(page));
   await page.getByRole("button", { name: "File" }).click();
-  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import", exact: true }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import full project", exact: true }).click();
   const toast = page.locator('gnumarus-shell [data-testid="toast"]');
   await expect(toast).toBeVisible();
   await expect(toast).toContainText("Imported hero.ase (2 layers, 2 frames)");
@@ -7690,7 +7696,7 @@ test("File > Import loads frame tags as named animations", async ({ page }) => {
     await buildAsepriteBytes(page, [{ name: "wave", from: 1, to: 1, loop: 2, repeat: 0 }]),
   );
   await page.getByRole("button", { name: "File" }).click();
-  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import", exact: true }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import full project", exact: true }).click();
   const toast = page.locator('gnumarus-shell [data-testid="toast"]');
   await expect(toast).toBeVisible();
   await expect(toast).toContainText("Imported tagged.ase (2 layers, 2 frames, 1 animation)");
@@ -7930,7 +7936,7 @@ test("File > Import loads layers and pixels from .xcf", async ({ page }) => {
   await page.waitForSelector("gnumarus-shell");
   await stubAsepritePicker(page, "art.xcf", bytes);
   await page.getByRole("button", { name: "File" }).click();
-  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import", exact: true }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import full project", exact: true }).click();
   const toast = page.locator('gnumarus-shell [data-testid="toast"]');
   await expect(toast).toBeVisible();
   await expect(toast).toContainText("Imported art.xcf (2 layers)");
@@ -8006,7 +8012,7 @@ test("File > Import loads layers, pixels and frames from .kra", async ({ page })
   await setImportCleanup(page, "none");
   await stubAsepritePicker(page, "art.kra", bytes);
   await page.getByRole("button", { name: "File" }).click();
-  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import", exact: true }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import full project", exact: true }).click();
   const toast = page.locator('gnumarus-shell [data-testid="toast"]');
   await expect(toast).toBeVisible();
   await expect(toast).toContainText("Imported art.kra (2 layers, 2 frames)");
@@ -8051,7 +8057,7 @@ test("File > Import loads layers and pixels from .psd", async ({ page }) => {
   await page.waitForSelector("gnumarus-shell");
   await stubAsepritePicker(page, "art.psd", bytes);
   await page.getByRole("button", { name: "File" }).click();
-  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import", exact: true }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import full project", exact: true }).click();
   const toast = page.locator('gnumarus-shell [data-testid="toast"]');
   await expect(toast).toBeVisible();
   await expect(toast).toContainText("Imported art.psd (2 layers)");
@@ -8081,7 +8087,7 @@ test("File > Import falls back to the composite image for flattened .psd", async
   await page.waitForSelector("gnumarus-shell");
   await stubAsepritePicker(page, "flat.psd", bytes);
   await page.getByRole("button", { name: "File" }).click();
-  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import", exact: true }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import full project", exact: true }).click();
   const toast = page.locator('gnumarus-shell [data-testid="toast"]');
   await expect(toast).toBeVisible();
   await expect(toast).toContainText("Imported flat.psd (1 layer)");
@@ -8101,7 +8107,7 @@ test("File > Import rejects corrupt files with an error toast", async ({ page })
   await page.waitForSelector("gnumarus-shell");
   await stubAsepritePicker(page, "broken.ase", new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7]));
   await page.getByRole("button", { name: "File" }).click();
-  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import", exact: true }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import full project", exact: true }).click();
   const toast = page.locator('gnumarus-shell [data-testid="toast"]');
   await expect(toast).toBeVisible();
   await expect(toast).toContainText("Import failed");
@@ -8118,7 +8124,7 @@ test("File > Import cancellation stays silent", async ({ page }) => {
     };
   });
   await page.getByRole("button", { name: "File" }).click();
-  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import", exact: true }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import full project", exact: true }).click();
   await expect(page.locator('gnumarus-shell [data-testid="toast"]')).toBeHidden();
 });
 
@@ -10407,7 +10413,7 @@ test("import svg renders into an empty cell", async ({ page }) => {
   await page.waitForSelector("gnumarus-shell canvas");
   await stubSvgPicker(page, "red.svg", SIMPLE_SVG);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import SVG" }).click();
+  await page.getByRole("button", { name: "Import SVG as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText('Vector graphic "red" imported');
   const svgId = await cellSvgId(page, "layer0", 0);
   expect(typeof svgId).toBe("string");
@@ -10422,7 +10428,7 @@ test("import svg refuses an occupied cell", async ({ page }) => {
   await paintCenter(page);
   await stubSvgPicker(page, "red.svg", SIMPLE_SVG);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import SVG" }).click();
+  await page.getByRole("button", { name: "Import SVG as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("already has content");
   expect(await cellSvgId(page, "layer0", 0)).toBeNull();
 });
@@ -10432,7 +10438,7 @@ test("import svg warns about filters but still imports", async ({ page }) => {
   await page.waitForSelector("gnumarus-shell canvas");
   await stubSvgPicker(page, "fx.svg", FILTER_SVG);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import SVG" }).click();
+  await page.getByRole("button", { name: "Import SVG as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("ignored: filters, path effects");
   const svgId = await cellSvgId(page, "layer0", 0);
   expect(typeof svgId).toBe("string");
@@ -10446,7 +10452,7 @@ test("import svg rejects invalid documents", async ({ page }) => {
   await page.waitForSelector("gnumarus-shell canvas");
   await stubSvgPicker(page, "bad.svg", "not xml at all <>>");
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import SVG" }).click();
+  await page.getByRole("button", { name: "Import SVG as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("not a valid SVG document");
   expect(await cellSvgId(page, "layer0", 0)).toBeNull();
 });
@@ -10456,7 +10462,7 @@ test("import svgz gunzips before decoding", async ({ page }) => {
   await page.waitForSelector("gnumarus-shell canvas");
   await stubSvgPicker(page, "zipped.svgz", Array.from(gzipSync(new TextEncoder().encode(SIMPLE_SVG))));
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import SVG" }).click();
+  await page.getByRole("button", { name: "Import SVG as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText('Vector graphic "zipped" imported');
   expect(typeof (await cellSvgId(page, "layer0", 0))).toBe("string");
 });
@@ -10466,7 +10472,7 @@ test("import svg rejects invalid archives", async ({ page }) => {
   await page.waitForSelector("gnumarus-shell canvas");
   await stubSvgPicker(page, "bad.svgz", [1, 2, 3, 4]);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import SVG" }).click();
+  await page.getByRole("button", { name: "Import SVG as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("not a valid SVG archive");
   expect(await cellSvgId(page, "layer0", 0)).toBeNull();
 });
@@ -10476,7 +10482,7 @@ test("vector storage compressed saves archives and reopens", async ({ page }) =>
   await page.waitForSelector("gnumarus-shell canvas");
   await stubSvgPicker(page, "red.svg", SIMPLE_SVG);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import SVG" }).click();
+  await page.getByRole("button", { name: "Import SVG as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("imported");
   const svgId = await cellSvgId(page, "layer0", 0);
   expect(typeof svgId).toBe("string");
@@ -10503,7 +10509,7 @@ test("vector storage raw and embedded round-trip with stale cleanup", async ({ p
   await page.waitForSelector("gnumarus-shell canvas");
   await stubSvgPicker(page, "red.svg", SIMPLE_SVG);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import SVG" }).click();
+  await page.getByRole("button", { name: "Import SVG as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("imported");
   const svgId = await cellSvgId(page, "layer0", 0);
   expect(typeof svgId).toBe("string");
@@ -10832,7 +10838,7 @@ test("import 3d model renders into an empty cell", async ({ page }) => {
   await page.waitForSelector("gnumarus-shell canvas");
   await stubModelPicker(page, "tri.stl", SIMPLE_STL);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await page.getByRole("button", { name: "Import 3D Model as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText('3D model "tri" imported');
   const modelId = await cellModel3dId(page, "layer0", 0);
   expect(typeof modelId).toBe("string");
@@ -10847,7 +10853,7 @@ test("import 3d model refuses an occupied cell", async ({ page }) => {
   await paintCenter(page);
   await stubModelPicker(page, "tri.stl", SIMPLE_STL);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await page.getByRole("button", { name: "Import 3D Model as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("already has content");
   expect(await cellModel3dId(page, "layer0", 0)).toBeNull();
 });
@@ -10857,7 +10863,7 @@ test("import 3d model rejects unsupported extensions", async ({ page }) => {
   await page.waitForSelector("gnumarus-shell canvas");
   await stubModelPicker(page, "notes.txt", "hello");
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await page.getByRole("button", { name: "Import 3D Model as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("not supported");
   expect(await cellModel3dId(page, "layer0", 0)).toBeNull();
 });
@@ -10867,7 +10873,7 @@ test("import 3d model rejects corrupt files", async ({ page }) => {
   await page.waitForSelector("gnumarus-shell canvas");
   await stubModelPicker(page, "bad.stl", [1, 2, 3, 4]);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await page.getByRole("button", { name: "Import 3D Model as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("not a valid 3D model");
   expect(await cellModel3dId(page, "layer0", 0)).toBeNull();
 });
@@ -10877,7 +10883,7 @@ test("3d models save as raw files and reopen", async ({ page }) => {
   await page.waitForSelector("gnumarus-shell canvas");
   await stubModelPicker(page, "tri.stl", SIMPLE_STL);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await page.getByRole("button", { name: "Import 3D Model as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("imported");
   const modelId = await cellModel3dId(page, "layer0", 0);
   expect(typeof modelId).toBe("string");
@@ -11059,7 +11065,7 @@ test("3d model transform orbits, commits and reopens", async ({ page }) => {
   await page.waitForSelector("gnumarus-shell canvas");
   await stubModelPicker(page, "tri.stl", SIMPLE_STL);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await page.getByRole("button", { name: "Import 3D Model as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("imported");
   const modelId = await cellModel3dId(page, "layer0", 0);
   expect(typeof modelId).toBe("string");
@@ -11105,7 +11111,7 @@ test("3d model transform cancels and resets the view", async ({ page }) => {
   await page.waitForSelector("gnumarus-shell canvas");
   await stubModelPicker(page, "tri.stl", SIMPLE_STL);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await page.getByRole("button", { name: "Import 3D Model as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("imported");
   const modelId = await cellModel3dId(page, "layer0", 0);
   expect(typeof modelId).toBe("string");
@@ -11153,7 +11159,7 @@ test("3d model transform wheel up zooms in and wheel down zooms out @recent", as
   await page.waitForSelector("gnumarus-shell canvas");
   await stubModelPicker(page, "tri.stl", SIMPLE_STL);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await page.getByRole("button", { name: "Import 3D Model as layer" }).click();
   const modelId = await cellModel3dId(page, "layer0", 0);
   expect(typeof modelId).toBe("string");
   const before = await modelViewOf(page, modelId as string);
@@ -11218,7 +11224,7 @@ test("3d model transform drag orbits inverted on both axes @recent", async ({ pa
   await page.waitForSelector("gnumarus-shell canvas");
   await stubModelPicker(page, "tri.stl", SIMPLE_STL);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await page.getByRole("button", { name: "Import 3D Model as layer" }).click();
   const modelId = await cellModel3dId(page, "layer0", 0);
   expect(typeof modelId).toBe("string");
   const before = await modelViewOf(page, modelId as string);
@@ -11254,7 +11260,7 @@ test("model lighting default leaves imported models alone until a 3D tool touche
   await page.waitForSelector("gnumarus-shell canvas");
   await stubModelPicker(page, "tri.stl", SIMPLE_STL);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await page.getByRole("button", { name: "Import 3D Model as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText('3D model "tri" imported');
   const lightingOf = (): Promise<string | null> =>
     page.evaluate(() => {
@@ -11309,7 +11315,7 @@ test("fly camera applies the editor lighting default to the flown model @recent"
   await page.waitForSelector("gnumarus-shell canvas");
   await stubModelPicker(page, "tri.stl", SIMPLE_STL);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await page.getByRole("button", { name: "Import 3D Model as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText('3D model "tri" imported');
   await page.locator("gnumarus-shell [data-testid='editor-options'] select#modelLighting").selectOption("lit");
   await selectTool(page, "Fly camera");
@@ -11355,7 +11361,7 @@ test("fly camera flies, looks, orbits and resets @recent", async ({ page }) => {
   await page.waitForSelector("gnumarus-shell canvas");
   await stubModelPicker(page, "tri.stl", SIMPLE_STL);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await page.getByRole("button", { name: "Import 3D Model as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("imported");
   await selectTool(page, "Fly camera");
   await expect(page.locator("gnumarus-shell [data-testid='flycam-readout']")).toBeVisible();
@@ -11392,7 +11398,7 @@ test("fly camera suppresses editor shortcuts and exits with Escape @recent", asy
   await page.waitForSelector("gnumarus-shell canvas");
   await stubModelPicker(page, "tri.stl", SIMPLE_STL);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await page.getByRole("button", { name: "Import 3D Model as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("imported");
   await selectTool(page, "Fly camera");
   await expect(page.locator("gnumarus-shell [data-testid='flycam-readout']")).toBeVisible();
@@ -11410,7 +11416,7 @@ test("fly camera resumes the saved pose when reopened @recent", async ({ page })
   await page.waitForSelector("gnumarus-shell canvas");
   await stubModelPicker(page, "tri.stl", SIMPLE_STL);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await page.getByRole("button", { name: "Import 3D Model as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("imported");
   await selectTool(page, "Fly camera");
   await page.keyboard.press("w");
@@ -11429,7 +11435,7 @@ test("fly camera pose survives save and reopen @recent", async ({ page }) => {
   await page.waitForSelector("gnumarus-shell canvas");
   await stubModelPicker(page, "tri.stl", SIMPLE_STL);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await page.getByRole("button", { name: "Import 3D Model as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("imported");
   await selectTool(page, "Fly camera");
   await page.keyboard.press("w");
@@ -11454,7 +11460,7 @@ test("fly camera drag up looks up and drag down looks down @recent", async ({ pa
   await page.waitForSelector("gnumarus-shell canvas");
   await stubModelPicker(page, "tri.stl", SIMPLE_STL);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await page.getByRole("button", { name: "Import 3D Model as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("imported");
   await selectTool(page, "Fly camera");
   const before = await flyPoseOf(page);
@@ -11485,7 +11491,7 @@ test("fly camera turns with J/L and pitches with I/K within plus-minus 89 degree
   await page.waitForSelector("gnumarus-shell canvas");
   await stubModelPicker(page, "tri.stl", SIMPLE_STL);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await page.getByRole("button", { name: "Import 3D Model as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("imported");
   await selectTool(page, "Fly camera");
   const before = await flyPoseOf(page);
@@ -11518,7 +11524,7 @@ test("fly camera keeps moving while a key is held and stops on release @recent",
   await page.waitForSelector("gnumarus-shell canvas");
   await stubModelPicker(page, "tri.stl", SIMPLE_STL);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Import 3D Model" }).click();
+  await page.getByRole("button", { name: "Import 3D Model as layer" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("imported");
   await selectTool(page, "Fly camera");
   const before = await flyPoseOf(page);
@@ -11535,4 +11541,147 @@ test("fly camera keeps moving while a key is held and stops on release @recent",
   const settled = await flyPoseOf(page);
   await page.waitForTimeout(300);
   expect(await flyPoseOf(page)).toEqual(settled);
+});
+
+async function stubImagePicker(page: import("@playwright/test").Page, fileName: string, bytes: number[]): Promise<void> {
+  await page.evaluate(
+    ([name, payload]: [string, number[]]) => {
+      const root = window as unknown as {
+        showOpenFilePicker?: () => Promise<Array<{ getFile(): Promise<File> }>>;
+      };
+      root.showOpenFilePicker = async () => [
+        {
+          getFile: async () => new File([new Uint8Array(payload)], name, { type: "image/png" }),
+        },
+      ];
+    },
+    [fileName, bytes] as [string, number[]],
+  );
+}
+
+async function borderedPngBytes(page: import("@playwright/test").Page, size: number): Promise<number[]> {
+  return page.evaluate(async (side: number) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = side;
+    canvas.height = side;
+    const context = canvas.getContext("2d");
+    if (context === null) {
+      throw new Error("2D canvas unavailable");
+    }
+    context.clearRect(0, 0, side, side);
+    context.fillStyle = "#ff0000";
+    context.fillRect(Math.floor(side / 2), Math.floor(side / 2), 1, 1);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (blob === null) {
+      throw new Error("PNG encode failed");
+    }
+    return Array.from(new Uint8Array(await blob.arrayBuffer()));
+  }, size);
+}
+
+async function layerCount(page: import("@playwright/test").Page): Promise<number> {
+  return page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { getLayers(): unknown[] } } };
+    return root.__gnumarus?.engine?.getLayers().length ?? -1;
+  });
+}
+
+test("file menu shows renamed import items with tooltips @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "File" }).click();
+  const dropdown = page.locator("gnumarus-shell .menubar .dropdown");
+  await expect(dropdown.getByRole("button", { name: "Import full project", exact: true })).toHaveAttribute(
+    "title",
+    "Import entire projects from different application (photoshop, krita, aseprite etc)",
+  );
+  await expect(dropdown.getByRole("button", { name: "Import SVG as layer" })).toBeVisible();
+  await expect(dropdown.getByRole("button", { name: "Import 3D Model as layer" })).toBeVisible();
+  await expect(dropdown.getByRole("button", { name: "Import image as layer" })).toHaveAttribute(
+    "title",
+    "Import a raster image into the current layer (or a new layer above it)",
+  );
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Edit" }).click();
+  const edit = page.locator("gnumarus-shell .menubar .dropdown");
+  await expect(edit.getByRole("button", { name: "Undo" })).toHaveAttribute("title", "Undo the last change (Ctrl+Z)");
+  await expect(edit.getByRole("button", { name: "Settings" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Help" }).click();
+  const help = page.locator("gnumarus-shell .menubar .dropdown");
+  await expect(help.getByRole("button", { name: "Shortcuts" })).toHaveAttribute(
+    "title",
+    "List every keyboard shortcut",
+  );
+  await expect(help.getByRole("button", { name: "Source code" })).toHaveAttribute(
+    "title",
+    "Open the project source code page",
+  );
+});
+
+test("run action dialog lists and runs the new menu actions @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.keyboard.press("Control+Shift+P");
+  const dialog = page.locator("gnumarus-shell dialog#actionPaletteDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator('[data-testid="action-palette-input"]').fill("undo");
+  await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveText(["Undo"]);
+  await page.keyboard.press("Enter");
+  await expect(page.locator("gnumarus-shell")).toContainText("Nothing to undo");
+  await page.keyboard.press("Control+Shift+P");
+  await expect(dialog).toBeVisible();
+  await dialog.locator('[data-testid="action-palette-input"]').fill("settings");
+  await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveText(["Settings"]);
+  await page.keyboard.press("Enter");
+  await expect(page.locator('gnumarus-shell dialog#settingsDialog')).toBeVisible();
+  await page.keyboard.press("Escape");
+});
+
+test("import image as layer lands on the current layer when the cell is empty @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubImagePicker(page, "red.png", await redPngBytes(page, 8));
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import image as layer" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText('Image "red" imported as layer "L1"');
+  expect(await layerCount(page)).toBe(1);
+  expect(await getLayers(page)).toMatchObject({ layers: [{ width: 8, height: 8 }] });
+  expect(await readPixel(page, 0, 0)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("import image as layer skips fit and crop cleanup @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubImagePicker(page, "dot.png", await borderedPngBytes(page, 8));
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import image as layer" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText('Image "dot" imported as layer "L1"');
+  // Default cleanup is crop+fit: a fit would trim the transparent border to
+  // 1x1, so keeping 8x8 proves no automatic cleanup ran on image import.
+  expect(await getLayers(page)).toMatchObject({ layers: [{ width: 8, height: 8 }] });
+});
+
+test("import image as layer creates a layer above when the cell is occupied @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#00ff00");
+  await paintCenter(page);
+  await stubImagePicker(page, "red.png", await redPngBytes(page, 8));
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import image as layer" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText('Image "red" imported as layer "L2"');
+  expect(await layerCount(page)).toBe(2);
+  expect(await getLayers(page)).toMatchObject({ layers: [{ width: 64, height: 64 }, { width: 8, height: 8 }] });
+});
+
+test("import image as layer rejects invalid files @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubImagePicker(page, "nope.png", Array.from(new TextEncoder().encode("definitely not an image")));
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Import image as layer" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("not a valid image");
+  expect(await layerCount(page)).toBe(1);
+  expect(await getLayers(page)).toMatchObject({ layers: [{ width: 64, height: 64 }] });
 });

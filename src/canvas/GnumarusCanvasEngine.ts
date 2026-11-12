@@ -3022,6 +3022,109 @@ export class GnumarusCanvasEngine {
   }
 
   /**
+   * Store a decoded raster image as a new paintable texture content in the
+   * cell. Follows the SVG/model convention: an existing empty content (or
+   * one holding only a blank texture, dropped when unshared) is reused,
+   * anything else refuses with null so existing work is never destroyed.
+   */
+  ensureImageContent(
+    layerId: string,
+    frame: number,
+    width: number,
+    height: number,
+    buffer: Uint8ClampedArray,
+    name?: string,
+  ): { contentId: string; textureId: string } | null {
+    if (this.findLayer(layerId) === null) {
+      return null;
+    }
+    if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
+      return null;
+    }
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
+      return null;
+    }
+    if (buffer.length !== width * height * 4) {
+      return null;
+    }
+    const key = animationCellKey(layerId, frame);
+    const contentId = this.cells.get(key);
+    const content = contentId === undefined ? undefined : this.contents.get(contentId);
+    if (content !== undefined) {
+      if (
+        content.textId !== null ||
+        content.svgId !== null ||
+        content.model3dId !== null ||
+        content.tilemapId !== null
+      ) {
+        return null;
+      }
+      if (content.textureId !== null) {
+        if (!this.isTextureBlank(content.textureId)) {
+          return null;
+        }
+        let shared = false;
+        for (const other of this.contents.values()) {
+          if (other !== content && other.textureId === content.textureId) {
+            shared = true;
+            break;
+          }
+        }
+        if (!shared) {
+          this.textures.delete(content.textureId);
+        }
+        content.textureId = null;
+      }
+      const textureId = this.nextTextureId();
+      this.textures.set(textureId, {
+        id: textureId,
+        name: this.nextTextureName(),
+        width,
+        height,
+        buffer: new Uint8ClampedArray(buffer),
+      });
+      content.textureId = textureId;
+      if (name !== undefined && name !== "") {
+        content.name = name;
+      }
+      this.syncAllLayerRenders();
+      this.refreshLayerStacking();
+      this.render();
+      this.onPixelsChanged();
+      this.onLayersChanged?.();
+      return { contentId: content.id, textureId };
+    }
+    const textureId = this.nextTextureId();
+    this.textures.set(textureId, {
+      id: textureId,
+      name: this.nextTextureName(),
+      width,
+      height,
+      buffer: new Uint8ClampedArray(buffer),
+    });
+    const createdId = this.nextContentId();
+    this.contents.set(createdId, {
+      id: createdId,
+      name: name ?? `C${this.contentCounter - 1}`,
+      textureId,
+      textId: null,
+      svgId: null,
+      model3dId: null,
+      flyCam: null,
+      tilemapId: null,
+      transform: { ...IDENTITY_LAYER_TRANSFORM },
+    });
+    this.cells.set(key, createdId);
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return { contentId: createdId, textureId };
+  }
+
+  /**
    * Kick off the asynchronous raster decode for a vector entry (no-op when
    * cached or already in flight). Refreshes the canvas when it arrives.
    */

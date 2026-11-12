@@ -154,6 +154,35 @@ export async function pickModel3dFile(): Promise<GnumarusFileHandle | null> {
 }
 
 /**
+ * Open the operating system file dialog to pick a raster image (PNG, JPEG,
+ * WebP, GIF or BMP — anything the browser decodes natively). Returns null
+ * when the dialog API is missing; throws AbortError when the user cancels
+ * (silent for callers).
+ */
+export async function pickImageFile(): Promise<GnumarusFileHandle | null> {
+  const showPicker = pickerWindow().showOpenFilePicker;
+  if (showPicker === undefined) {
+    return null;
+  }
+  const handles = await showPicker.call(window, {
+    multiple: false,
+    types: [
+      {
+        description: "Raster images",
+        accept: {
+          "image/png": [".png"],
+          "image/jpeg": [".jpg", ".jpeg"],
+          "image/webp": [".webp"],
+          "image/gif": [".gif"],
+          "image/bmp": [".bmp"],
+        },
+      },
+    ],
+  });
+  return handles[0] ?? null;
+}
+
+/**
  * Save one blob through the OS save dialog. Returns the written handle, or
  * null when the API is missing (callers fall back to a plain download).
  * Throws AbortError when the user cancels (callers treat it as silent).
