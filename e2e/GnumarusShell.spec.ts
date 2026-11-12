@@ -3355,7 +3355,7 @@ test("import cleanup setting is configurable and persists", async ({ page }) => 
   await expect(dialog.locator("select#importCleanup")).toHaveValue("crop+fit");
 });
 
-test("import cleanup fit trims transparent borders on open", async ({ page }) => {
+test("native project open keeps textures exact despite cleanup setting @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -3364,28 +3364,32 @@ test("import cleanup fit trims transparent borders on open", async ({ page }) =>
   await page.getByRole("button", { name: "File" }).click();
   await page.getByRole("button", { name: "Save Project" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
-  await setImportCleanup(page, "fit");
-  await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Open Project" }).click();
-  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject (fitted 1)");
-  expect(await textureDims(page)).toEqual({ width: 1, height: 1 });
-  expect(await paintedPixelCount(page)).toBe(1);
-});
-
-test("import cleanup none imports textures as-is", async ({ page }) => {
-  await page.goto("/");
-  await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
-  await paintCenter(page);
-  await stubProjectDirectory(page);
-  await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
-  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
-  await setImportCleanup(page, "none");
+  // Default cleanup is crop+fit, which would trim the dot to 1x1 — native
+  // opens must no longer apply it, so the texture stays project-sized.
   await page.getByRole("button", { name: "File" }).click();
   await page.getByRole("button", { name: "Open Project" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject");
+  await expect(page.locator("gnumarus-shell")).not.toContainText("(fitted");
+  await expect(page.locator("gnumarus-shell")).not.toContainText("(cropped");
   expect(await textureDims(page)).toEqual({ width: 64, height: 64 });
+  expect(await paintedPixelCount(page)).toBe(1);
+});
+
+test("import cleanup none imports full projects as-is", async ({ page }) => {
+  const bytes = buildXcfBytes(4, 4, [
+    { name: "Top", width: 4, height: 4, offsetX: 2, offsetY: 2, rgba: [0, 255, 0, 255] },
+    { name: "Bottom", width: 4, height: 4, offsetX: 0, offsetY: 0, rgba: [0, 0, 255, 255] },
+  ]);
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell");
+  await setImportCleanup(page, "none");
+  await stubAsepritePicker(page, "crop.xcf", bytes);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import full project", exact: true }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Imported crop.xcf (2 layers)");
+  const state = await getLayers(page);
+  expect(state.layers[1]?.transform).toMatchObject({ x: 2, y: 2 });
+  expect(state.layers[1]?.width).toBe(4);
 });
 
 async function redPngBytes(page: import("@playwright/test").Page, size: number): Promise<number[]> {
@@ -3407,38 +3411,22 @@ async function redPngBytes(page: import("@playwright/test").Page, size: number):
   }, size);
 }
 
-test("import cleanup crop trims textures to the canvas", async ({ page }) => {
+test("import cleanup crop trims to canvas on full project import @recent", async ({ page }) => {
+  const bytes = buildXcfBytes(4, 4, [
+    { name: "Top", width: 4, height: 4, offsetX: 2, offsetY: 2, rgba: [0, 255, 0, 255] },
+    { name: "Bottom", width: 4, height: 4, offsetX: 0, offsetY: 0, rgba: [0, 0, 255, 255] },
+  ]);
   await page.goto("/");
-  await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
-  await paintCenter(page);
-  const project = await stubProjectDirectory(page);
-  await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
-  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
-  const metaText = await project.writtenProject();
-  expect(metaText).not.toBeNull();
-  const meta = JSON.parse(metaText as string) as {
-    animation: { textures: Array<{ id: string; name: string; width: number; height: number; file: string }> };
-  };
-  const texture = meta.animation.textures[0];
-  if (texture === undefined) {
-    throw new Error("saved project has no texture");
-  }
-  texture.width = 128;
-  texture.height = 128;
-  texture.file = "textures/big.png";
-  await project.seedFile(
-    "project.gpa",
-    Array.from(zipSync({ "project.json": new TextEncoder().encode(JSON.stringify(meta)) }, { level: 9 })),
-  );
-  await project.seedFile("textures/big.png", await redPngBytes(page, 128));
+  await page.waitForSelector("gnumarus-shell");
   await setImportCleanup(page, "crop");
+  await stubAsepritePicker(page, "crop.xcf", bytes);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Open Project" }).click();
-  await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject (cropped 1)");
-  expect(await textureDims(page)).toEqual({ width: 64, height: 64 });
-  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import full project", exact: true }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Imported crop.xcf (2 layers) (cropped 1)");
+  const state = await getLayers(page);
+  expect(state.layers[1]?.transform).toMatchObject({ x: 1, y: 1 });
+  expect(state.layers[1]?.width).toBe(2);
+  expect(state.layers[1]?.height).toBe(2);
 });
 
 test("brush quality setting persists and tips archive as JXL", async ({ page }) => {
@@ -10422,15 +10410,17 @@ test("import svg renders into an empty cell", async ({ page }) => {
     .toBeGreaterThan(0);
 });
 
-test("import svg refuses an occupied cell", async ({ page }) => {
+test("import svg creates a layer above when the cell is occupied @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await paintCenter(page);
   await stubSvgPicker(page, "red.svg", SIMPLE_SVG);
   await page.getByRole("button", { name: "File" }).click();
   await page.getByRole("button", { name: "Import SVG as layer" }).click();
-  await expect(page.locator("gnumarus-shell")).toContainText("already has content");
+  await expect(page.locator("gnumarus-shell")).toContainText('Vector graphic "red" imported');
   expect(await cellSvgId(page, "layer0", 0)).toBeNull();
+  const svgId = await cellSvgId(page, "layer1", 0);
+  expect(typeof svgId).toBe("string");
 });
 
 test("import svg warns about filters but still imports", async ({ page }) => {
@@ -10847,15 +10837,17 @@ test("import 3d model renders into an empty cell", async ({ page }) => {
     .toBeGreaterThan(0);
 });
 
-test("import 3d model refuses an occupied cell", async ({ page }) => {
+test("import 3d model creates a layer above when the cell is occupied @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await paintCenter(page);
   await stubModelPicker(page, "tri.stl", SIMPLE_STL);
   await page.getByRole("button", { name: "File" }).click();
   await page.getByRole("button", { name: "Import 3D Model as layer" }).click();
-  await expect(page.locator("gnumarus-shell")).toContainText("already has content");
+  await expect(page.locator("gnumarus-shell")).toContainText('3D model "tri" imported');
   expect(await cellModel3dId(page, "layer0", 0)).toBeNull();
+  const modelId = await cellModel3dId(page, "layer1", 0);
+  expect(typeof modelId).toBe("string");
 });
 
 test("import 3d model rejects unsupported extensions", async ({ page }) => {

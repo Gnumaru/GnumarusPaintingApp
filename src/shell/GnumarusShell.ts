@@ -11469,11 +11469,7 @@ export class GnumarusShell extends LitElement {
       this.projectName = dir.name;
       this.dirty = false;
       this.selectSingleFrame(this.engine?.getCurrentFrame() ?? 0);
-      const openedCleanup = this.applyImportCleanup();
-      if (openedCleanup !== "") {
-        this.dirty = true;
-      }
-      this.statusMessage = tr("status.opened", { dir: dir.name, cleanup: openedCleanup });
+      this.statusMessage = tr("status.opened", { dir: dir.name, cleanup: "" });
     } catch (error) {
       this.statusMessage = error instanceof Error ? tr("status.openFailed", { reason: error.message }) : tr("status.openFailedPlain");
     }
@@ -11496,12 +11492,11 @@ export class GnumarusShell extends LitElement {
       return;
     }
     this.stopPlayback();
-    const layerId = this.engine.getActiveLayerId();
+    let layerId = this.engine.getActiveLayerId();
     const frame = this.engine.getCurrentFrame();
     if (!this.engine.isCellContentEmpty(layerId, frame)) {
-      this.statusMessage = tr("status.svgCellOccupied");
-      this.showToast(tr("status.svgCellOccupied"));
-      return;
+      layerId = this.engine.insertLayerAboveActive();
+      this.refreshLayers();
     }
     let handle;
     try {
@@ -11577,12 +11572,11 @@ export class GnumarusShell extends LitElement {
       return;
     }
     this.stopPlayback();
-    const layerId = this.engine.getActiveLayerId();
+    let layerId = this.engine.getActiveLayerId();
     const frame = this.engine.getCurrentFrame();
     if (!this.engine.isCellContentEmpty(layerId, frame)) {
-      this.statusMessage = tr("status.model3dCellOccupied");
-      this.showToast(tr("status.model3dCellOccupied"));
-      return;
+      layerId = this.engine.insertLayerAboveActive();
+      this.refreshLayers();
     }
     let handle;
     try {
