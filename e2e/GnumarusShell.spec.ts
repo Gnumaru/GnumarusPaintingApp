@@ -12396,3 +12396,41 @@ test("adjust colors dialog applies brightness and undoes @recent", async ({ page
   await page.keyboard.press("Control+z");
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
+
+test("drawer flyout renders above the canvas instead of clipped @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.locator('gnumarus-shell [data-testid="paint-drawer"] > button').click({ button: "right" });
+  const flyout = page.locator('gnumarus-shell [data-testid="paint-flyout"]');
+  await expect(flyout).toBeVisible();
+  const toolbarBox = await page.locator("gnumarus-shell .toolbar").boundingBox();
+  const flyBox = await flyout.boundingBox();
+  if (toolbarBox === null || flyBox === null) {
+    throw new Error("toolbar or flyout has no bounding box");
+  }
+  // The flyout expands past the toolbar into the canvas area.
+  expect(flyBox.x + flyBox.width).toBeGreaterThan(toolbarBox.x + toolbarBox.width);
+  // Fully inside the viewport (no spill that forces unreachable buttons).
+  expect(flyBox.x).toBeGreaterThanOrEqual(0);
+  expect(flyBox.y).toBeGreaterThanOrEqual(0);
+  expect(flyBox.x + flyBox.width).toBeLessThanOrEqual(1280);
+  expect(flyBox.y + flyBox.height).toBeLessThanOrEqual(720);
+  // Hit test: the flyout center must resolve inside the flyout, proving the
+  // canvas (or anything else) does not paint over or clip it.
+  // (document.elementFromPoint retargets to the host here, so pierce via the
+  // shell shadow root, which reports the deepest shadow-tree node.)
+  const hit = await page.evaluate(([x, y]: [number, number]) => {
+    const root = document.querySelector("gnumarus-shell")?.shadowRoot ?? null;
+    const picker = root as unknown as { elementFromPoint(a: number, b: number): Element | null } | null;
+    const el = picker?.elementFromPoint(x, y) as HTMLElement | null;
+    if (el === null || el === undefined) {
+      return "none";
+    }
+    return el.closest('[data-testid="paint-flyout"]') !== null ? "flyout" : el.tagName;
+  }, [flyBox.x + flyBox.width / 2, flyBox.y + flyBox.height / 2] as [number, number]);
+  expect(hit).toBe("flyout");
+  // The flyout still picks tools and closes.
+  await flyout.getByRole("button", { name: "Curve" }).click();
+  await expect(flyout).toBeHidden();
+  await expect(page.locator("gnumarus-shell")).toContainText("curve");
+});

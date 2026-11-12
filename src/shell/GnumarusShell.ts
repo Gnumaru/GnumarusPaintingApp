@@ -579,9 +579,7 @@ export class GnumarusShell extends LitElement {
       position: relative;
     }
     .tool-flyout {
-      position: absolute;
-      left: calc(100% + 4px);
-      top: 0;
+      position: fixed;
       display: flex;
       flex-direction: row;
       gap: 4px;
@@ -1591,6 +1589,7 @@ export class GnumarusShell extends LitElement {
     brushTipKind: { type: String },
     drawerFront: { type: Object },
     drawerOpen: { type: String },
+    drawerFlyoutPos: { attribute: false },
     colorThreshold: { type: Number },
     colorContiguous: { type: Boolean },
     brushHardness: { type: Number },
@@ -1647,6 +1646,8 @@ export class GnumarusShell extends LitElement {
   declare tool: GnumarusCanvasTool;
   declare drawerFront: Record<string, GnumarusCanvasTool>;
   declare drawerOpen: string | null;
+  /** Viewport position of the open drawer flyout (fixed, escapes toolbar overflow). */
+  declare drawerFlyoutPos: { left: number; top: number } | null;
   declare colorThreshold: number;
   declare colorContiguous: boolean;
   declare actionPaletteQuery: string;
@@ -1855,6 +1856,7 @@ export class GnumarusShell extends LitElement {
       model: "modeltransform",
     };
     this.drawerOpen = null;
+    this.drawerFlyoutPos = null;
     this.colorThreshold = 10;
     this.colorContiguous = true;
     this.actionPaletteQuery = "";
@@ -2109,7 +2111,15 @@ export class GnumarusShell extends LitElement {
       ${this.renderEditorOptions()}
       ${this.renderToolOptions()}
       <div class="body">
-        <div class="toolbar" ?hidden=${this.uiHidden}>
+        <div
+          class="toolbar"
+          ?hidden=${this.uiHidden}
+          @scroll=${(): void => {
+            if (this.drawerOpen !== null) {
+              this.closeDrawerFlyout();
+            }
+          }}
+        >
           ${this.renderToolDrawer("paint")}
           <button
             class=${this.tool === "loupe" ? "active" : ""}
@@ -3936,6 +3946,11 @@ export class GnumarusShell extends LitElement {
   }
 
   /** Drawer helpers: the front tool doubles as the drawer button. */
+  /** Close the open drawer flyout, if any. */
+  private closeDrawerFlyout(): void {
+    this.drawerOpen = null;
+    this.drawerFlyoutPos = null;
+  }
   /** One toolbar drawer: front button activates, right-click opens the flyout. */
   private renderToolDrawer(id: string): unknown {
     const def = GNUMARUS_TOOL_DRAWERS.find((entry) => entry.id === id);
@@ -3953,13 +3968,51 @@ export class GnumarusShell extends LitElement {
           @click=${(): void => this.selectDrawerTool(id, front)}
           @contextmenu=${(event: MouseEvent): void => {
             event.preventDefault();
-            this.drawerOpen = open ? null : id;
+            if (open) {
+              this.closeDrawerFlyout();
+              return;
+            }
+            const anchor = event.currentTarget as HTMLElement | null;
+            const rect = anchor?.getBoundingClientRect();
+            this.drawerFlyoutPos =
+              rect === undefined
+                ? null
+                : { left: rect.right + 4, top: Math.max(8, rect.top) };
+            this.drawerOpen = id;
+            // The flyout content varies per drawer, so re-measure after
+            // render and pull it back when it would spill out of the viewport.
+            void this.updateComplete.then(() => {
+              if (this.drawerOpen !== id || this.drawerFlyoutPos === null) {
+                return;
+              }
+              const flyout = this.shadowRoot?.querySelector(
+                `[data-testid="${id}-flyout"]`,
+              ) as HTMLElement | null;
+              if (flyout === null) {
+                return;
+              }
+              const box = flyout.getBoundingClientRect();
+              const overflowX = box.right - window.innerWidth + 8;
+              const overflowY = box.bottom - window.innerHeight + 8;
+              if (overflowX > 0 || overflowY > 0) {
+                this.drawerFlyoutPos = {
+                  left: Math.max(8, this.drawerFlyoutPos.left - Math.max(0, overflowX)),
+                  top: Math.max(8, this.drawerFlyoutPos.top - Math.max(0, overflowY)),
+                };
+              }
+            });
           }}
         >
           <span class="tool-icon">${this.drawerToolGlyph(front)}</span>
         </button>
         ${open
-          ? html`<div class="tool-flyout" data-testid=${`${id}-flyout`}>
+          ? html`<div
+              class="tool-flyout"
+              data-testid=${`${id}-flyout`}
+              style=${this.drawerFlyoutPos === null
+                ? ""
+                : `left: ${this.drawerFlyoutPos.left}px; top: ${this.drawerFlyoutPos.top}px;`}
+            >
               ${def.tools.map(
                 (name) => html`<button
                   class=${front === name ? "active" : ""}
@@ -3974,11 +4027,11 @@ export class GnumarusShell extends LitElement {
             <div
               class="drawer-blocker"
               @click=${(): void => {
-                this.drawerOpen = null;
+                this.closeDrawerFlyout();
               }}
               @contextmenu=${(event: Event): void => {
                 event.preventDefault();
-                this.drawerOpen = null;
+                this.closeDrawerFlyout();
               }}
             ></div>`
           : html``}
@@ -4236,7 +4289,7 @@ export class GnumarusShell extends LitElement {
   private selectDrawerTool(id: string, tool: GnumarusCanvasTool, close = false): void {
     if (tool === "flycam") {
       if (close) {
-        this.drawerOpen = null;
+        this.closeDrawerFlyout();
       }
       this.activateFlycamTool(id);
       return;
@@ -4245,7 +4298,7 @@ export class GnumarusShell extends LitElement {
     this.tool = tool;
     this.engine?.setTool(tool);
     if (close) {
-      this.drawerOpen = null;
+      this.closeDrawerFlyout();
     }
   }
 
@@ -5543,7 +5596,7 @@ export class GnumarusShell extends LitElement {
     this.fileMenuOpen = false;
     this.editMenuOpen = false;
     this.helpMenuOpen = false;
-    this.drawerOpen = null;
+    this.closeDrawerFlyout();
   }
 
   /** Header click toggles one menu, closing the others. */
