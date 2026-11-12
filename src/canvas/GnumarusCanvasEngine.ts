@@ -37,6 +37,7 @@ import {
   normalizePointerPressure,
   parseBrushShape,
   parsePressureResponse,
+  pressureSizeInRange,
   parseBlendMode,
   parseChannelLock,
   parseHexColor,
@@ -830,6 +831,8 @@ export class GnumarusCanvasEngine {
   private blendBeforeEraser: GnumarusBlendMode = "normal";
   private accumulate = true;
   private brushSize = 1;
+  /** Minimum pencil size: pen pressure interpolates min→max, otherwise max paints. */
+  private brushSizeMin = 1;
   private brushShape: GnumarusBrushShape = "circle";
   private brushTipKind: GnumarusBrushTipKind = "pixel";
   private brushHardness = DEFAULT_BRUSH_HARDNESS;
@@ -899,10 +902,12 @@ export class GnumarusCanvasEngine {
   private stabilizerTarget: { x: number; y: number } | null = null;
   private followLoopId: number | null = null;
   private lineWidth = 1;
+  private lineWidthMin = 1;
   private lineShape: GnumarusBrushShape = "circle";
   private lineAntialias = false;
   private lineAnchor: { x: number; y: number; clientX: number; clientY: number } | null = null;
   private curveWidth = 1;
+  private curveWidthMin = 1;
   private curveShape: GnumarusBrushShape = "circle";
   private curveAntialias = false;
   private curvePhase: "idle" | "dragging" | "awaitC1" | "awaitC2" = "idle";
@@ -6786,6 +6791,24 @@ export class GnumarusCanvasEngine {
       return false;
     }
     this.brushSize = clamped;
+    if (this.brushSizeMin > clamped) {
+      this.brushSizeMin = clamped;
+    }
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  getBrushSizeMin(): number {
+    return this.brushSizeMin;
+  }
+
+  setBrushSizeMin(size: number): boolean {
+    const clamped = Math.min(clampBrushSizeFloat(size), this.brushSize);
+    if (clamped === this.brushSizeMin) {
+      return false;
+    }
+    this.brushSizeMin = clamped;
     this.emitStats();
     this.updatePreviews();
     return true;
@@ -7425,9 +7448,12 @@ export class GnumarusCanvasEngine {
 
   /** Pencil size scaled by the current stroke pressure and tilt when enabled. */
   private pressureBrushSize(): number {
-    const pressureActive = this.pressureResponse === "size" || this.pressureResponse === "size+opacity";
-    const pressureGain = pressureActive ? evalPressureCurve(this.pressureSizeCurve, this.strokePressure) : 1;
-    return clampBrushSizeFloat(this.brushSize * pressureGain * paintTiltSizeGain(this.strokeTiltMag, this.tiltSizeAmount));
+    const pressureGain =
+      this.pressureResponse === "size" || this.pressureResponse === "size+opacity"
+        ? evalPressureCurve(this.pressureSizeCurve, this.strokePressure)
+        : 1;
+    const ranged = pressureSizeInRange(this.pressureResponse, pressureGain, this.brushSizeMin, this.brushSize);
+    return clampBrushSizeFloat(ranged * paintTiltSizeGain(this.strokeTiltMag, this.tiltSizeAmount));
   }
 
   /** Pencil color with alpha scaled by the current stroke pressure when enabled. */
@@ -7490,6 +7516,7 @@ export class GnumarusCanvasEngine {
     return (
       this.pencilPixelPerfect &&
       this.brushTipKind === "pixel" &&
+      this.brushSizeMin === 1 &&
       this.brushSize === 1 &&
       !this.pencilAntialias &&
       this.wrapMode === "off"
@@ -7497,7 +7524,13 @@ export class GnumarusCanvasEngine {
   }
 
   private curvePixelPerfectActive(): boolean {
-    return this.curvePixelPerfect && this.curveWidth === 1 && !this.curveAntialias && this.wrapMode === "off";
+    return (
+      this.curvePixelPerfect &&
+      this.curveWidthMin === 1 &&
+      this.curveWidth === 1 &&
+      !this.curveAntialias &&
+      this.wrapMode === "off"
+    );
   }
 
   private resetPencilPixelPerfect(): void {
@@ -7599,6 +7632,24 @@ export class GnumarusCanvasEngine {
       return false;
     }
     this.lineWidth = clamped;
+    if (this.lineWidthMin > clamped) {
+      this.lineWidthMin = clamped;
+    }
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  getLineWidthMin(): number {
+    return this.lineWidthMin;
+  }
+
+  setLineWidthMin(size: number): boolean {
+    const clamped = Math.min(clampBrushSizeFloat(size), this.lineWidth);
+    if (clamped === this.lineWidthMin) {
+      return false;
+    }
+    this.lineWidthMin = clamped;
     this.emitStats();
     this.updatePreviews();
     return true;
@@ -7658,6 +7709,24 @@ export class GnumarusCanvasEngine {
       return false;
     }
     this.curveWidth = clamped;
+    if (this.curveWidthMin > clamped) {
+      this.curveWidthMin = clamped;
+    }
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  getCurveWidthMin(): number {
+    return this.curveWidthMin;
+  }
+
+  setCurveWidthMin(size: number): boolean {
+    const clamped = Math.min(clampBrushSizeFloat(size), this.curveWidth);
+    if (clamped === this.curveWidthMin) {
+      return false;
+    }
+    this.curveWidthMin = clamped;
     this.emitStats();
     this.updatePreviews();
     return true;

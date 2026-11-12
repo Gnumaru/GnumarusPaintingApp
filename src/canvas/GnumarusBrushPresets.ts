@@ -18,6 +18,8 @@ export interface GnumarusBrushPreset {
   version: 1;
   name: string;
   brushSize: number;
+  /** Minimum pressure size; absent in older files means a fixed brushSize. */
+  brushSizeMin?: number;
   brushShape: GnumarusBrushShape;
   brushTipKind: GnumarusBrushTipKind;
   brushHardness: number;
@@ -109,6 +111,7 @@ export function parseBrushPreset(jsonText: string): GnumarusBrushPreset {
   }
   const numbers: Array<[string, number, number]> = [
     ["brushSize", 0.1, 64],
+    ["brushSizeMin", 0.1, 64],
     ["brushHardness", 0, 1],
     ["brushSpacing", 0.05, 4],
     ["brushFlow", 0.01, 1],
@@ -126,6 +129,9 @@ export function parseBrushPreset(jsonText: string): GnumarusBrushPreset {
   const numeric: Record<string, number> = {};
   for (const [field, min, max] of numbers) {
     const value = parsed[field];
+    if (value === undefined && field === "brushSizeMin") {
+      continue;
+    }
     if (!isFiniteNumber(value) || value < min || value > max) {
       throw new GnumarusBrushPresetError(`preset has an invalid ${field}`);
     }
@@ -139,6 +145,7 @@ export function parseBrushPreset(jsonText: string): GnumarusBrushPreset {
     version: 1,
     name,
     brushSize: numeric["brushSize"] ?? 1,
+    brushSizeMin: numeric["brushSizeMin"] ?? numeric["brushSize"] ?? 1,
     brushShape: checkString(parsed["brushShape"], "brushShape", ["square", "circle"]) as GnumarusBrushShape,
     brushTipKind: checkString(parsed["brushTipKind"], "brushTipKind", ["pixel", "soft", "image"]) as GnumarusBrushTipKind,
     brushHardness: numeric["brushHardness"] ?? 0.5,
@@ -207,6 +214,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     version: 1,
     name: "Pixel Hard",
     brushSize: 1,
+    brushSizeMin: 1,
     brushShape: "circle",
     brushTipKind: "pixel",
     brushHardness: 0.5,
@@ -235,6 +243,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     version: 1,
     name: "Soft Round",
     brushSize: 16,
+    brushSizeMin: 4,
     brushShape: "circle",
     brushTipKind: "soft",
     brushHardness: 0.5,
@@ -263,6 +272,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     version: 1,
     name: "Chalk",
     brushSize: 20,
+    brushSizeMin: 6,
     brushShape: "circle",
     brushTipKind: "soft",
     brushHardness: 0.7,
@@ -291,6 +301,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     version: 1,
     name: "Ink",
     brushSize: 8,
+    brushSizeMin: 2,
     brushShape: "circle",
     brushTipKind: "soft",
     brushHardness: 0.8,
@@ -319,6 +330,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     version: 1,
     name: "Airbrush",
     brushSize: 32,
+    brushSizeMin: 8,
     brushShape: "circle",
     brushTipKind: "soft",
     brushHardness: 0,
@@ -347,6 +359,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     version: 1,
     name: "Smudge",
     brushSize: 24,
+    brushSizeMin: 8,
     brushShape: "circle",
     brushTipKind: "soft",
     brushHardness: 0.3,

@@ -25,6 +25,7 @@ import {
   parseHexColor,
   parsePressureResponse,
   pressureAlphaMultiplier,
+  pressureSizeInRange,
   pressureSizeMultiplier,
   roundBrushSizeForAliased,
   setPixel,
@@ -607,5 +608,16 @@ describe("GnumarusPixelBuffer", () => {
     expect(pressureAlphaMultiplier("opacity", 0.5)).toBe(0.5);
     expect(pressureAlphaMultiplier("size+opacity", 0.5)).toBe(0.5);
     expect(pressureAlphaMultiplier("size", 0.5)).toBe(1);
+  });
+
+  it("maps pressure gain into a min/max size range", () => {
+    expect(pressureSizeInRange("size", 0, 2, 10)).toBe(2);
+    expect(pressureSizeInRange("size", 1, 2, 10)).toBe(10);
+    expect(pressureSizeInRange("size", 0.5, 2, 10)).toBe(6);
+    expect(pressureSizeInRange("size+opacity", 0.25, 1, 5)).toBe(2);
+    expect(pressureSizeInRange("none", 0.5, 2, 10)).toBe(10);
+    expect(pressureSizeInRange("opacity", 0.5, 2, 10)).toBe(10);
+    expect(pressureSizeInRange("size", 0.5, 10, 10)).toBe(10);
+    expect(pressureSizeInRange("size", Number.NaN, 2, 10)).toBe(10);
   });
 });

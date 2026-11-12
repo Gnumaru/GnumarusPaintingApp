@@ -66,7 +66,7 @@ test("shell boots with menu, toolbar, canvas host and status bar", async ({ page
   await page.getByRole("button", { name: "File" }).click();
   await expect(page.getByRole("button", { name: "New Project" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Open Project" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Save Project" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save Project", exact: true })).toBeVisible();
 
   await expect(page.locator("gnumarus-shell")).toContainText("64 x 64");
   await expect(page.locator("gnumarus-shell")).toContainText("pencil");
@@ -104,7 +104,7 @@ test("File > New preset fills dimensions and WebP lossless storage", async ({ pa
   expect(persisted).toContain('"lossless": true');
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   const files = await project.writtenBlobs();
   expect(Object.keys(files).sort()).toEqual(["project.gpa", "textures/t1.webp"]);
@@ -2509,7 +2509,7 @@ test("pencil brush size and shape paint thick strokes", async ({ page }) => {
     });
   await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toContainText("Brush size");
   await page.locator("gnumarus-shell input#brushSize").fill("3");
-  await expect(page.locator("gnumarus-shell")).toContainText("Brush size: 3");
+  await expect(page.locator("gnumarus-shell")).toContainText("Brush size: 1 – 3");
   expect(await brushOf()).toEqual({ size: 3, shape: "circle" });
   await page.locator("gnumarus-shell select#brushShape").selectOption("square");
   await expect(page.locator("gnumarus-shell")).toContainText("Brush shape: Square");
@@ -3362,7 +3362,7 @@ test("native project open keeps textures exact despite cleanup setting @recent",
   await paintCenter(page);
   await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   // Default cleanup is crop+fit, which would trim the dot to 1x1 — native
   // opens must no longer apply it, so the texture stays project-sized.
@@ -4012,7 +4012,7 @@ test("brush and line widths accept floats with AA-dependent rounding", async ({ 
   await expect(page.locator("gnumarus-shell")).toContainText("Brush size: 0.1");
   await page.locator("gnumarus-shell input#brushSize").fill("1.5");
   expect(await brushOf()).toBeCloseTo(1.5, 5);
-  await expect(page.locator("gnumarus-shell")).toContainText("Brush size: 1.5");
+  await expect(page.locator("gnumarus-shell")).toContainText("Brush size: 0.1 – 1.5");
   const canvas = page.locator("gnumarus-shell canvas");
   const box = await canvas.boundingBox();
   if (box === null) {
@@ -4669,7 +4669,7 @@ test("shift-drag adjusts the pencil brush size live without painting", async ({ 
   await page.mouse.up();
   await page.keyboard.up("Shift");
   expect(await sizeOf()).toBeCloseTo(3, 5);
-  await expect(page.locator("gnumarus-shell")).toContainText("Brush size: 3");
+  await expect(page.locator("gnumarus-shell")).toContainText("Brush size: 1 – 3");
   // No painting happened during the size drag.
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
 });
@@ -4696,7 +4696,7 @@ test("shift-drag adjusts line and curve widths", async ({ page }) => {
     return root.__gnumarus?.engine?.getLineWidth() ?? 0;
   });
   expect(lineWidth).toBeCloseTo(1 + 60 / 20, 5);
-  await expect(page.locator("gnumarus-shell")).toContainText(`Line width: ${lineWidth}`);
+  await expect(page.locator("gnumarus-shell")).toContainText("Line width: 1 – 4");
   await selectTool(page, 'Curve');
   await page.mouse.move(cx, cy);
   await page.keyboard.down("Shift");
@@ -4792,6 +4792,7 @@ test("pencil pressure size scales the stroke", async ({ page }) => {
   await stubPenPointerCapture(page);
   await page.getByRole("button", { name: "Pencil" }).click();
   await page.locator("gnumarus-shell input#brushSize").fill("10");
+  await page.locator("gnumarus-shell input#brushSizeMin").fill("2");
   await page.locator("gnumarus-shell select#pressureResponse").selectOption("size");
   await expect(page.locator("gnumarus-shell")).toContainText("Pressure response: Size");
   const center = await canvasCenter(page);
@@ -5543,6 +5544,7 @@ test("quick action palette filters and runs actions", async ({ page }) => {
     "Reload All Textures",
     "Reset Canvas Transform",
     "Save Project",
+    "Save project as",
     "Settings",
     "Shortcuts",
     "Source code",
@@ -8844,12 +8846,13 @@ test("File > Export JPEG quality changes the file size", async ({ page }) => {
 
 async function stubProjectDirectory(
   page: import("@playwright/test").Page,
+  dirName = "MockProject",
 ): Promise<{
   writtenBlobs: () => Promise<Record<string, number[]>>;
   writtenProject: () => Promise<string | null>;
   seedFile: (path: string, bytes: number[]) => Promise<void>;
 }> {
-  await page.evaluate(() => {
+  await page.evaluate((dir: string) => {
     const root = window as unknown as {
       showDirectoryPicker?: () => Promise<unknown>;
       __gnumarusProjectTest?: { files: Record<string, Blob> };
@@ -8857,7 +8860,7 @@ async function stubProjectDirectory(
     const state: { files: Record<string, Blob> } = { files: {} };
     root.__gnumarusProjectTest = state;
     root.showDirectoryPicker = async () => ({
-      name: "MockProject",
+      name: dir,
       removeEntry: async (name: string): Promise<void> => {
         if (state.files[name] === undefined) {
           throw new DOMException("File not found", "NotFoundError");
@@ -8917,7 +8920,7 @@ async function stubProjectDirectory(
         },
       }),
     });
-  });
+  }, dirName);
   return {
     writtenBlobs: (): Promise<Record<string, number[]>> =>
       page.evaluate(async () => {
@@ -8984,7 +8987,7 @@ test("project textures save as lossless JXL named tN and reopen", async ({ page 
   await paintCenter(page);
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   const meta = await project.writtenProject();
   expect(meta).toContain('"textures/t1.jxl"');
@@ -9021,7 +9024,7 @@ test("project texture lossy setting is honored and persists", async ({ page }) =
   await paintCenter(page);
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   const files = await project.writtenBlobs();
   expect(files["textures/t1.jxl"]?.slice(0, 2)).toEqual([0xff, 0x0a]);
@@ -9086,7 +9089,7 @@ test("project textures save as PNG with a compression level and reopen", async (
   await dialog.getByRole("button", { name: "Close" }).click();
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   const meta = await project.writtenProject();
   expect(meta).toContain('"textures/t1.png"');
@@ -9117,7 +9120,7 @@ test("project textures save as JPEG with a grayscale alpha companion", async ({ 
   await dialog.getByRole("button", { name: "Close" }).click();
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   const meta = await project.writtenProject();
   expect(meta).toContain('"textures/t1.jpg"');
@@ -9156,7 +9159,7 @@ test("project meta saves zipped by default and reopens", async ({ page }) => {
   await paintCenter(page);
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   const files = await project.writtenBlobs();
   expect(Object.keys(files).sort()).toEqual(["project.gpa", "textures/t1.jxl"]);
@@ -9180,7 +9183,7 @@ test("project meta plain mode writes project.json and removes project.gpa", asyn
   await paintCenter(page);
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   expect(Object.keys(await project.writtenBlobs()).sort()).toEqual(["project.gpa", "textures/t1.jxl"]);
   await page.getByRole("button", { name: "Edit" }).click();
@@ -9192,7 +9195,7 @@ test("project meta plain mode writes project.json and removes project.gpa", asyn
   const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.storage.v1"));
   expect(persisted).toContain('"projectFile": "json"');
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   expect(Object.keys(await project.writtenBlobs()).sort()).toEqual(["project.json", "textures/t1.jxl"]);
   expect(await project.writtenProject()).toContain('"textures/t1.jxl"');
@@ -9201,7 +9204,7 @@ test("project meta plain mode writes project.json and removes project.gpa", asyn
   await page.locator("gnumarus-shell dialog#settingsDialog select#storageProjectFile").selectOption("gpa");
   await page.locator("gnumarus-shell dialog#settingsDialog").getByRole("button", { name: "Close" }).click();
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   expect(Object.keys(await project.writtenBlobs()).sort()).toEqual(["project.gpa", "textures/t1.jxl"]);
   await page.getByRole("button", { name: "File" }).click();
@@ -9222,7 +9225,7 @@ test("changing texture storage removes stale texture files", async ({ page }) =>
   const project = await stubProjectDirectory(page);
   const save = async (): Promise<void> => {
     await page.getByRole("button", { name: "File" }).click();
-    await page.getByRole("button", { name: "Save Project" }).click();
+    await page.getByRole("button", { name: "Save Project", exact: true }).click();
     await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   };
   const setFormat = async (format: string): Promise<void> => {
@@ -9350,7 +9353,7 @@ test("project textures save as lossless WebP and reopen", async ({ page }) => {
   await dialog.getByRole("button", { name: "Close" }).click();
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   const meta = await project.writtenProject();
   expect(meta).toContain('"textures/t1.webp"');
@@ -10155,7 +10158,7 @@ test("text survives save and reopen", async ({ page }) => {
   await expect(page.locator("gnumarus-shell")).toContainText("Text updated");
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   const saved = await project.writtenProject();
   expect(saved).toContain('"texts"');
@@ -10273,7 +10276,7 @@ test("text storage html saves raw files and reopens", async ({ page }) => {
   await dialog.getByRole("button", { name: "Close" }).click();
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   expect(Object.keys(await project.writtenBlobs()).sort()).toEqual(
     ["project.gpa", `texts/${textId}.html`, "textures/t1.jxl"].sort(),
@@ -10296,7 +10299,7 @@ test("text storage htmlZip saves archives and reopens", async ({ page }) => {
   await setTextStorage(page, "htmlZip");
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   expect(Object.keys(await project.writtenBlobs()).sort()).toEqual(
     ["project.gpa", `texts/${textId}.zip`, "textures/t1.jxl"].sort(),
@@ -10319,18 +10322,18 @@ test("switching text storage removes stale text files", async ({ page }) => {
   await setTextStorage(page, "html");
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   expect(Object.keys(await project.writtenBlobs())).toContain(`texts/${textId}.html`);
   await setTextStorage(page, "embedded");
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   expect(Object.keys(await project.writtenBlobs())).not.toContain(`texts/${textId}.html`);
   expect(await project.writtenProject()).toContain('"document"');
   await setTextStorage(page, "htmlZip");
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   const files = Object.keys(await project.writtenBlobs());
   expect(files).toContain(`texts/${textId}.zip`);
@@ -10348,7 +10351,7 @@ test("corrupt text archive fails to open with a clear error", async ({ page }) =
   await setTextStorage(page, "htmlZip");
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   await project.seedFile(`texts/${textId}.zip`, [1, 2, 3, 4]);
   await page.getByRole("button", { name: "File" }).click();
@@ -10478,7 +10481,7 @@ test("vector storage compressed saves archives and reopens", async ({ page }) =>
   expect(typeof svgId).toBe("string");
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   expect(Object.keys(await project.writtenBlobs()).sort()).toEqual(
     ["project.gpa", `svgs/${svgId}.zip`].sort(),
@@ -10511,12 +10514,12 @@ test("vector storage raw and embedded round-trip with stale cleanup", async ({ p
   await settingsDialog.getByRole("button", { name: "Close" }).click();
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   expect(Object.keys(await project.writtenBlobs())).toContain(`svgs/${svgId}.svg`);
   await setSvgStorage(page, "embedded");
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   const files = Object.keys(await project.writtenBlobs());
   expect(files).not.toContain(`svgs/${svgId}.svg`);
@@ -10881,7 +10884,7 @@ test("3d models save as raw files and reopen", async ({ page }) => {
   expect(typeof modelId).toBe("string");
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   expect(Object.keys(await project.writtenBlobs()).sort()).toEqual(
     ["project.gpa", `3dmodels/${modelId}.stl`].sort(),
@@ -11010,7 +11013,7 @@ test("tilemaps save and reopen with placements", async ({ page }) => {
   expect(await tilemapTiles(page)).toHaveLength(1);
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   const saved = await project.writtenProject();
   expect(saved).toContain('"tilemaps"');
@@ -11084,7 +11087,7 @@ test("3d model transform orbits, commits and reopens", async ({ page }) => {
   expect(Math.abs((committed?.azimuth ?? 0) - (before?.azimuth ?? 0))).toBeGreaterThan(5);
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   expect(await project.writtenProject()).toContain('"view"');
   await page.getByRole("button", { name: "File" }).click();
@@ -11273,7 +11276,7 @@ test("model lighting default leaves imported models alone until a 3D tool touche
   await expect(modelPaintedPixels(page)).resolves.toBe(before);
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   expect(await project.writtenProject()).toContain('"lighting": "unlit"');
   // The settings dialog mirrors the same default.
@@ -11290,14 +11293,14 @@ test("model lighting default leaves imported models alone until a 3D tool touche
   await selectTool(page, "3D model transform");
   await page.keyboard.press("r");
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   expect(await project.writtenProject()).toContain('"lighting": "lit"');
   await page.getByRole("button", { name: "File" }).click();
   await page.getByRole("button", { name: "Open Project" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Opened MockProject");
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   expect(await project.writtenProject()).toContain('"lighting": "lit"');
 });
@@ -11314,7 +11317,7 @@ test("fly camera applies the editor lighting default to the flown model @recent"
   await expect(page.locator("gnumarus-shell [data-testid='flycam-readout']")).toBeVisible();
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   expect(await project.writtenProject()).toContain('"lighting": "lit"');
 });
@@ -11436,7 +11439,7 @@ test("fly camera pose survives save and reopen @recent", async ({ page }) => {
   expect(before?.x ?? 0).toBeLessThan(1.95);
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   expect(await project.writtenProject()).toContain('"flyCam"');
   await page.getByRole("button", { name: "File" }).click();
@@ -11676,4 +11679,82 @@ test("import image as layer rejects invalid files @recent", async ({ page }) => 
   await expect(page.locator("gnumarus-shell")).toContainText("not a valid image");
   expect(await layerCount(page)).toBe(1);
   expect(await getLayers(page)).toMatchObject({ layers: [{ width: 64, height: 64 }] });
+});
+
+test("save project as writes to a new directory and switches to it @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await stubProjectDirectory(page, "MockProject");
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  const second = await stubProjectDirectory(page, "MockProject2");
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save project as" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject2");
+  expect(Object.keys(await second.writtenBlobs())).toContain("project.gpa");
+  await page.keyboard.press("Control+s");
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject2");
+});
+
+test("save project as lists its action and tooltip @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "File" }).click();
+  await expect(
+    page.locator("gnumarus-shell .menubar .dropdown").getByRole("button", { name: "Save project as" }),
+  ).toHaveAttribute("title", "Save the project into a new directory");
+  await page.keyboard.press("Control+Shift+P");
+  const dialog = page.locator("gnumarus-shell dialog#actionPaletteDialog");
+  await dialog.locator('[data-testid="action-palette-input"]').fill("save project as");
+  await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveText(["Save project as"]);
+});
+
+test("brush size range paints max without pressure response @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Pencil" }).click();
+  await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toContainText("Min size");
+  await page.locator("gnumarus-shell input#brushSize").fill("8");
+  await page.locator("gnumarus-shell input#brushSizeMin").fill("2");
+  await expect(page.locator("gnumarus-shell")).toContainText("Brush size: 2 – 8");
+  // Without pressure response the max always paints, even for light pen touches.
+  await expect(page.locator("gnumarus-shell select#pressureResponse")).toHaveValue("none");
+  const center = await canvasCenter(page);
+  await stubPenPointerCapture(page);
+  await penDot(page, center.x, center.y, 0.1);
+  const painted = await paintedPixelCount(page);
+  await page.keyboard.press("Control+z");
+  await page.locator("gnumarus-shell input#brushSizeMin").fill("8");
+  await expect(page.locator("gnumarus-shell")).toContainText("Brush size: 8");
+  await penDot(page, center.x, center.y, 0.1);
+  expect(await paintedPixelCount(page)).toBe(painted);
+});
+
+test("brush min size clamps to the max @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.locator("gnumarus-shell input#brushSize").fill("4");
+  await page.locator("gnumarus-shell input#brushSizeMin").fill("99");
+  expect(await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { getBrushSizeMin?(): number } } };
+    return root.__gnumarus?.engine?.getBrushSizeMin?.() ?? -1;
+  })).toBe(4);
+  await expect(page.locator("gnumarus-shell")).toContainText("Brush size: 4");
+});
+
+test("pixel perfect requires min and max size of 1 @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Pencil" }).click();
+  const box = page.locator('gnumarus-shell input#pencilPixelPerfect');
+  await expect(box).toBeEnabled();
+  await page.locator("gnumarus-shell input#brushSize").fill("4");
+  await page.locator("gnumarus-shell input#brushSizeMin").fill("1");
+  await expect(box).toBeDisabled();
+  await page.locator("gnumarus-shell input#brushSize").fill("1");
+  await expect(box).toBeEnabled();
+  await page.locator("gnumarus-shell input#brushSizeMin").fill("0.5");
+  await expect(box).toBeDisabled();
 });

@@ -1700,6 +1700,7 @@ export class GnumarusShell extends LitElement {
   /** Anchor frame for Shift+click range selection (not reactive by itself). */
   private frameAnchor: number | null = null;
   declare brushSize: number;
+  declare brushSizeMin: number;
   declare brushShape: GnumarusBrushShape;
   declare presetName: string;
   declare brushPresets: GnumarusBrushPreset[];
@@ -1734,9 +1735,11 @@ export class GnumarusShell extends LitElement {
   declare blendMode: GnumarusBlendMode;
   declare accumulate: boolean;
   declare lineWidth: number;
+  declare lineWidthMin: number;
   declare lineShape: GnumarusBrushShape;
   declare lineAntialias: boolean;
   declare curveWidth: number;
+  declare curveWidthMin: number;
   declare curveShape: GnumarusBrushShape;
   declare curveAntialias: boolean;
 
@@ -1875,6 +1878,7 @@ export class GnumarusShell extends LitElement {
     this.deleteFramesTarget = null;
     this.frameAnchor = null;
     this.brushSize = 1;
+    this.brushSizeMin = 1;
     this.brushShape = "circle";
     this.presetName = "";
     this.brushPresets = [];
@@ -1909,9 +1913,11 @@ export class GnumarusShell extends LitElement {
     this.blendMode = "normal";
     this.accumulate = true;
     this.lineWidth = 1;
+    this.lineWidthMin = 1;
     this.lineShape = "circle";
     this.lineAntialias = false;
     this.curveWidth = 1;
+    this.curveWidthMin = 1;
     this.curveShape = "circle";
     this.curveAntialias = false;
   }
@@ -1933,6 +1939,7 @@ export class GnumarusShell extends LitElement {
                   <button title=${tr("menu.newProjectTitle")} @click=${(): void => void this.runAction("new-project")}>${tr("menu.newProject")}</button>
                   <button title=${tr("menu.openProjectTitle")} @click=${(): void => void this.runAction("open-project")}>${tr("menu.openProject")}</button>
                   <button title=${tr("menu.saveTitle")} @click=${(): void => void this.runAction("save-project")}>${tr("menu.saveProject")}</button>
+                  <button title=${tr("menu.saveProjectAsTitle")} @click=${(): void => void this.runAction("save-project-as")}>${tr("menu.saveProjectAs")}</button>
                   <button title=${tr("menu.importTitle")} @click=${(): void => void this.runAction("import")}>${tr("menu.import")}</button>
                   <button title=${tr("menu.importSvgTitle")} @click=${(): void => void this.runAction("import-svg")}>${tr("menu.importSvg")}</button>
                   <button title=${tr("menu.importModel3dTitle")} @click=${(): void => void this.runAction("import-3d-model")}>${tr("menu.importModel3d")}</button>
@@ -4106,6 +4113,18 @@ export class GnumarusShell extends LitElement {
               @input=${(): void => this.applyBrushSizeFromDialog()}
             />
           </label>
+          <label title=${tr("opt.brushSizeMinHint")}
+            >${tr("opt.brushSizeMin")}
+            <input
+              type="number"
+              id="brushSizeMin"
+              min="0.1"
+              max="64"
+              step="0.1"
+              .value=${String(this.brushSizeMin)}
+              @input=${(): void => this.applyBrushSizeMinFromDialog()}
+            />
+          </label>
           <label title=${tr("opt.brushShapeHint")}
             >${tr("opt.brushShape")}
             <select id="brushShape" .value=${this.brushShape} @change=${(): void => this.applyBrushShapeFromDialog()}>
@@ -4359,7 +4378,7 @@ export class GnumarusShell extends LitElement {
               type="checkbox"
               id="pencilPixelPerfect"
               .checked=${this.pencilPixelPerfect}
-              ?disabled=${this.brushSize !== 1 || this.pencilAntialias || this.wrapMode !== "off"}
+              ?disabled=${this.brushSize !== 1 || this.brushSizeMin !== 1 || this.pencilAntialias || this.wrapMode !== "off"}
               @change=${(): void => this.applyPencilPixelPerfectFromDialog()}
             />
             ${tr("opt.pixelPerfect")}
@@ -4381,6 +4400,18 @@ export class GnumarusShell extends LitElement {
               step="0.1"
               .value=${String(this.lineWidth)}
               @input=${(): void => this.applyLineWidthFromDialog()}
+            />
+          </label>
+          <label title=${tr("opt.lineWidthMinHint")}
+            >${tr("opt.lineWidthMin")}
+            <input
+              type="number"
+              id="lineWidthMin"
+              min="0.1"
+              max="64"
+              step="0.1"
+              .value=${String(this.lineWidthMin)}
+              @input=${(): void => this.applyLineWidthMinFromDialog()}
             />
           </label>
           <label
@@ -4418,6 +4449,18 @@ export class GnumarusShell extends LitElement {
               @input=${(): void => this.applyCurveWidthFromDialog()}
             />
           </label>
+          <label title=${tr("opt.curveWidthMinHint")}
+            >${tr("opt.curveWidthMin")}
+            <input
+              type="number"
+              id="curveWidthMin"
+              min="0.1"
+              max="64"
+              step="0.1"
+              .value=${String(this.curveWidthMin)}
+              @input=${(): void => this.applyCurveWidthMinFromDialog()}
+            />
+          </label>
           <label
             >${tr("opt.curveShape")}
             <select id="curveShape" .value=${this.curveShape} @change=${(): void => this.applyCurveShapeFromDialog()}>
@@ -4439,7 +4482,7 @@ export class GnumarusShell extends LitElement {
               type="checkbox"
               id="curvePixelPerfect"
               .checked=${this.curvePixelPerfect}
-              ?disabled=${this.curveWidth !== 1 || this.curveAntialias || this.wrapMode !== "off"}
+              ?disabled=${this.curveWidth !== 1 || this.curveWidthMin !== 1 || this.curveAntialias || this.wrapMode !== "off"}
               @change=${(): void => this.applyCurvePixelPerfectFromDialog()}
             />
             ${tr("opt.pixelPerfect")}
@@ -4954,13 +4997,22 @@ export class GnumarusShell extends LitElement {
         onToolSizeChanged: (kind, size): void => {
           if (kind === "brush") {
             this.brushSize = size;
-            this.statusMessage = tr("status.brushSize", { value: size });
+            if (this.brushSizeMin > size) {
+              this.brushSizeMin = size;
+            }
+            this.statusMessage = this.brushSizeStatus();
           } else if (kind === "line") {
             this.lineWidth = size;
-            this.statusMessage = tr("status.lineWidth", { value: size });
+            if (this.lineWidthMin > size) {
+              this.lineWidthMin = size;
+            }
+            this.statusMessage = this.lineWidthStatus();
           } else {
             this.curveWidth = size;
-            this.statusMessage = tr("status.curveWidth", { value: size });
+            if (this.curveWidthMin > size) {
+              this.curveWidthMin = size;
+            }
+            this.statusMessage = this.curveWidthStatus();
           }
         },
       });
@@ -5493,6 +5545,14 @@ export class GnumarusShell extends LitElement {
       requirements: [],
       run: (): void => {
         void this.saveProject();
+      },
+    });
+    this.actionRegistry.register({
+      id: "save-project-as",
+      name: tr("menu.saveProjectAs"),
+      requirements: [],
+      run: (): void => {
+        void this.saveProjectAs();
       },
     });
     this.actionRegistry.register({
@@ -6654,8 +6714,20 @@ export class GnumarusShell extends LitElement {
   setBrushSize(size: number): void {
     const clamped = clampBrushSizeFloat(size);
     this.brushSize = clamped;
+    if (this.brushSizeMin > clamped) {
+      this.brushSizeMin = clamped;
+      this.engine?.setBrushSizeMin(clamped);
+    }
     this.engine?.setBrushSize(clamped);
-    this.statusMessage = tr("status.brushSize", { value: clamped });
+    this.statusMessage = this.brushSizeStatus();
+  }
+
+  /** Test hook: set the minimum brush size (floats 0.1..max, clamped). */
+  setBrushSizeMin(size: number): void {
+    const clamped = Math.min(clampBrushSizeFloat(size), this.brushSize);
+    this.brushSizeMin = clamped;
+    this.engine?.setBrushSizeMin(clamped);
+    this.statusMessage = this.brushSizeStatus();
   }
 
   /** Test hook: set the brush shape (square/circle, defaults to circle). */
@@ -6873,11 +6945,46 @@ export class GnumarusShell extends LitElement {
     return parseBrushShape(select?.value ?? "square");
   }
 
+  private brushSizeStatus(): string {
+    return this.brushSizeMin === this.brushSize
+      ? tr("status.brushSize", { value: this.brushSize })
+      : tr("status.brushSizeRange", { min: this.brushSizeMin, max: this.brushSize });
+  }
+
+  private lineWidthStatus(): string {
+    return this.lineWidthMin === this.lineWidth
+      ? tr("status.lineWidth", { value: this.lineWidth })
+      : tr("status.lineWidthRange", { min: this.lineWidthMin, max: this.lineWidth });
+  }
+
+  private curveWidthStatus(): string {
+    return this.curveWidthMin === this.curveWidth
+      ? tr("status.curveWidth", { value: this.curveWidth })
+      : tr("status.curveWidthRange", { min: this.curveWidthMin, max: this.curveWidth });
+  }
+
   private applyBrushSizeFromDialog(): void {
     const size = this.currentDialogBrushSize();
     this.brushSize = size;
+    if (this.brushSizeMin > size) {
+      this.brushSizeMin = size;
+      this.engine?.setBrushSizeMin(size);
+    }
     this.engine?.setBrushSize(size);
-    this.statusMessage = tr("status.brushSize", { value: size });
+    this.statusMessage = this.brushSizeStatus();
+  }
+
+  private currentDialogBrushSizeMin(): number {
+    const input = this.shadowRoot?.getElementById("brushSizeMin") as HTMLInputElement | null;
+    const parsed = Number(input?.value ?? "1");
+    return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1);
+  }
+
+  private applyBrushSizeMinFromDialog(): void {
+    const size = Math.min(this.currentDialogBrushSizeMin(), this.brushSize);
+    this.brushSizeMin = size;
+    this.engine?.setBrushSizeMin(size);
+    this.statusMessage = this.brushSizeStatus();
   }
 
   private applyColorThresholdFromDialog(): void {
@@ -7175,6 +7282,7 @@ export class GnumarusShell extends LitElement {
     return {
       version: 1,
       name,      brushSize: this.brushSize,
+      brushSizeMin: this.brushSizeMin,
       brushShape: this.brushShape,
       brushTipKind: this.brushTipKind,
       brushHardness: this.brushHardness,
@@ -7205,6 +7313,8 @@ export class GnumarusShell extends LitElement {
   private applyBrushPreset(preset: GnumarusBrushPreset): void {
     this.brushSize = preset.brushSize;
     this.engine?.setBrushSize(preset.brushSize);
+    this.brushSizeMin = preset.brushSizeMin ?? preset.brushSize;
+    this.engine?.setBrushSizeMin(preset.brushSizeMin ?? preset.brushSize);
     this.brushShape = preset.brushShape;
     this.engine?.setBrushShape(preset.brushShape);
     this.brushTipKind = preset.brushTipKind;
@@ -7692,8 +7802,20 @@ export class GnumarusShell extends LitElement {
   setLineWidth(size: number): void {
     const clamped = clampBrushSizeFloat(size);
     this.lineWidth = clamped;
+    if (this.lineWidthMin > clamped) {
+      this.lineWidthMin = clamped;
+      this.engine?.setLineWidthMin(clamped);
+    }
     this.engine?.setLineWidth(clamped);
-    this.statusMessage = tr("status.lineWidth", { value: clamped });
+    this.statusMessage = this.lineWidthStatus();
+  }
+
+  /** Test hook: set the minimum line width (floats 0.1..max, clamped). */
+  setLineWidthMin(size: number): void {
+    const clamped = Math.min(clampBrushSizeFloat(size), this.lineWidth);
+    this.lineWidthMin = clamped;
+    this.engine?.setLineWidthMin(clamped);
+    this.statusMessage = this.lineWidthStatus();
   }
 
   /** Test hook: set the line shape (square/circle, defaults to circle). */
@@ -7731,8 +7853,25 @@ export class GnumarusShell extends LitElement {
   private applyLineWidthFromDialog(): void {
     const size = this.currentDialogLineWidth();
     this.lineWidth = size;
+    if (this.lineWidthMin > size) {
+      this.lineWidthMin = size;
+      this.engine?.setLineWidthMin(size);
+    }
     this.engine?.setLineWidth(size);
-    this.statusMessage = tr("status.lineWidth", { value: size });
+    this.statusMessage = this.lineWidthStatus();
+  }
+
+  private currentDialogLineWidthMin(): number {
+    const input = this.shadowRoot?.getElementById("lineWidthMin") as HTMLInputElement | null;
+    const parsed = Number(input?.value ?? "1");
+    return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1);
+  }
+
+  private applyLineWidthMinFromDialog(): void {
+    const size = Math.min(this.currentDialogLineWidthMin(), this.lineWidth);
+    this.lineWidthMin = size;
+    this.engine?.setLineWidthMin(size);
+    this.statusMessage = this.lineWidthStatus();
   }
 
   private applyLineShapeFromDialog(): void {
@@ -7753,8 +7892,20 @@ export class GnumarusShell extends LitElement {
   setCurveWidth(size: number): void {
     const clamped = clampBrushSizeFloat(size);
     this.curveWidth = clamped;
+    if (this.curveWidthMin > clamped) {
+      this.curveWidthMin = clamped;
+      this.engine?.setCurveWidthMin(clamped);
+    }
     this.engine?.setCurveWidth(clamped);
-    this.statusMessage = tr("status.curveWidth", { value: clamped });
+    this.statusMessage = this.curveWidthStatus();
+  }
+
+  /** Test hook: set the minimum curve width (floats 0.1..max, clamped). */
+  setCurveWidthMin(size: number): void {
+    const clamped = Math.min(clampBrushSizeFloat(size), this.curveWidth);
+    this.curveWidthMin = clamped;
+    this.engine?.setCurveWidthMin(clamped);
+    this.statusMessage = this.curveWidthStatus();
   }
 
   /** Test hook: set the curve shape (square/circle, defaults to circle). */
@@ -7792,8 +7943,25 @@ export class GnumarusShell extends LitElement {
   private applyCurveWidthFromDialog(): void {
     const size = this.currentDialogCurveWidth();
     this.curveWidth = size;
+    if (this.curveWidthMin > size) {
+      this.curveWidthMin = size;
+      this.engine?.setCurveWidthMin(size);
+    }
     this.engine?.setCurveWidth(size);
-    this.statusMessage = tr("status.curveWidth", { value: size });
+    this.statusMessage = this.curveWidthStatus();
+  }
+
+  private currentDialogCurveWidthMin(): number {
+    const input = this.shadowRoot?.getElementById("curveWidthMin") as HTMLInputElement | null;
+    const parsed = Number(input?.value ?? "1");
+    return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1);
+  }
+
+  private applyCurveWidthMinFromDialog(): void {
+    const size = Math.min(this.currentDialogCurveWidthMin(), this.curveWidth);
+    this.curveWidthMin = size;
+    this.engine?.setCurveWidthMin(size);
+    this.statusMessage = this.curveWidthStatus();
   }
 
   private applyCurveShapeFromDialog(): void {
@@ -11968,7 +12136,7 @@ export class GnumarusShell extends LitElement {
     this.showToast(summary);
   }
 
-  private async saveProject(): Promise<void> {
+  private async saveProject(pickNewDirectory = false): Promise<void> {
     this.fileMenuOpen = false;
     if (this.engine === null) {
       return;
@@ -11979,7 +12147,10 @@ export class GnumarusShell extends LitElement {
     }
     try {
       this.statusMessage = tr("status.saving");
-      const dir = this.directoryHandle ?? (await pickProjectDirectory());
+      const dir =
+        pickNewDirectory || this.directoryHandle === null
+          ? await pickProjectDirectory()
+          : this.directoryHandle;
       let oldPaths = new Set<string>();
       try {
         oldPaths = await readOldProjectFileReferences(dir);
@@ -12242,8 +12413,17 @@ export class GnumarusShell extends LitElement {
       this.dirty = false;
       this.statusMessage = tr("status.saved", { dir: dir.name });
     } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        this.statusMessage = tr("status.ready");
+        return;
+      }
       this.statusMessage = error instanceof Error ? tr("status.saveFailed", { reason: error.message }) : tr("status.saveFailedPlain");
     }
+  }
+
+  /** Save the project into a new user-chosen directory (always prompts). */
+  private async saveProjectAs(): Promise<void> {
+    await this.saveProject(true);
   }
 }
 

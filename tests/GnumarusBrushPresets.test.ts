@@ -39,6 +39,17 @@ describe("GnumarusBrushPresets", () => {
     expect(parseBrushPresetList("[]")).toEqual([]);
   });
 
+  it("defaults a missing brushSizeMin to brushSize", () => {
+    const first = BUILT_IN_BRUSH_PRESETS[0];
+    if (first === undefined) {
+      throw new Error("missing built-in preset");
+    }
+    const base = JSON.parse(serializeBrushPreset(first)) as Record<string, unknown>;
+    delete base["brushSizeMin"];
+    const parsed = parseBrushPreset(JSON.stringify(base));
+    expect(parsed.brushSizeMin).toBe(parsed.brushSize);
+  });
+
   it("rejects invalid presets", () => {
     expect(() => parseBrushPreset("not json")).toThrow(GnumarusBrushPresetError);
     expect(() => parseBrushPreset("{}")).toThrow(GnumarusBrushPresetError);

@@ -569,6 +569,26 @@ export function pressureSizeMultiplier(response: GnumarusPressureResponse, press
   return response === "size" || response === "size+opacity" ? pressure : 1;
 }
 
+/**
+ * Pen-pressure size inside a min/max range. `gain` is the 0..1 curve output
+ * (1 = full pressure); size-active modes interpolate min→max, other modes
+ * always paint the max. Out-of-range gains and swapped bounds are clamped.
+ */
+export function pressureSizeInRange(
+  response: GnumarusPressureResponse,
+  gain: number,
+  min: number,
+  max: number,
+): number {
+  const lo = Math.min(min, max);
+  const hi = Math.max(min, max);
+  if (!(response === "size" || response === "size+opacity")) {
+    return hi;
+  }
+  const clamped = Number.isFinite(gain) ? Math.min(1, Math.max(0, gain)) : 1;
+  return lo + (hi - lo) * clamped;
+}
+
 /** Stroke alpha multiplier for a pressure mode (max pressure paints full alpha). */
 export function pressureAlphaMultiplier(response: GnumarusPressureResponse, pressure: number): number {
   return response === "opacity" || response === "size+opacity" ? pressure : 1;
