@@ -8760,10 +8760,48 @@ export class GnumarusCanvasEngine {
         (current.image.data as Uint8ClampedArray).set(ghost);
         current.needsUpdate = true;
       }
-      this.writePlaneMatrix(slot.mesh, width, height, { ...IDENTITY_LAYER_TRANSFORM }, 0);
       slot.mesh.renderOrder = 900 + side.index;
       slot.mesh.visible = true;
     }
+    this.syncOnionPlanes();
+  }
+
+  /** Reposition the onion ghost planes for the current view transform. */
+  private syncOnionPlanes(): void {
+    const width = Math.max(1, Math.floor(this.imageWidth));
+    const height = Math.max(1, Math.floor(this.imageHeight));
+    for (const slot of this.onionPlanes) {
+      this.writePlaneMatrix(slot.mesh, width, height, { ...IDENTITY_LAYER_TRANSFORM }, 0);
+    }
+  }
+
+  /** Client bounding box of a visible onion ghost plane for tests. */
+  getOnionGhostBox(which: "past" | "future"): { x: number; y: number; width: number; height: number } | null {
+    const plane = this.onionPlanes[which === "past" ? 0 : 1];
+    if (plane === undefined || !plane.mesh.visible) {
+      return null;
+    }
+    const rect = this.container.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return null;
+    }
+    const e = plane.mesh.matrix.elements;
+    const toClient = (u: number, v: number): { x: number; y: number } => {
+      const worldX = (e[12] ?? 0) + u * (e[0] ?? 0) + v * (e[4] ?? 0);
+      const worldY = (e[13] ?? 0) + u * (e[1] ?? 0) + v * (e[5] ?? 0);
+      return { x: worldX + rect.width / 2, y: rect.height / 2 - worldY };
+    };
+    const corners = [toClient(0, 0), toClient(1, 0), toClient(0, 1), toClient(1, 1)];
+    const xs = corners.map((corner) => corner.x);
+    const ys = corners.map((corner) => corner.y);
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    return {
+      x: minX,
+      y: minY,
+      width: Math.max(...xs) - minX,
+      height: Math.max(...ys) - minY,
+    };
   }
 
   setGradientDither(enabled: boolean): boolean {
@@ -16218,6 +16256,7 @@ export class GnumarusCanvasEngine {
     this.updateGrid();
     this.syncFloatingPlane();
     this.syncShapePreview();
+    this.syncOnionPlanes();
     this.updateAxisOverlay();
   }
 

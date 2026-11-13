@@ -12870,6 +12870,81 @@ test("relink cell content action shares one content across cells @recent", async
   expect(contents[0]).toBe(contents[1]);
 });
 
+async function onionGhostBox(
+  page: import("@playwright/test").Page,
+  which: "past" | "future",
+): Promise<{ x: number; y: number; width: number; height: number } | null> {
+  return page.evaluate((side: "past" | "future") => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getOnionGhostBox(which: "past" | "future"): { x: number; y: number; width: number; height: number } | null } };
+    };
+    return root.__gnumarus?.engine?.getOnionGhostBox(side) ?? null;
+  }, which);
+}
+
+test("onion toggle looks pressed while enabled @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const toggle = page.locator('gnumarus-shell [data-testid="onion-toggle"]');
+  await expect(toggle).not.toHaveClass(/active/);
+  await toggle.click();
+  await expect(toggle).toHaveClass(/active/);
+  await expect(page.locator("gnumarus-shell")).toContainText("Onion skin on");
+  await toggle.click();
+  await expect(toggle).not.toHaveClass(/active/);
+});
+
+test("onion ghosts follow canvas pan, zoom and rotation @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await paintCenter(page);
+  await page.getByRole("button", { name: "Add frame", exact: true }).click();
+  await page.locator('gnumarus-shell [data-testid="onion-toggle"]').click();
+  expect(await onionVisible(page)).toEqual({ past: true, future: false });
+  const before = await onionGhostBox(page, "past");
+  expect(before).not.toBeNull();
+  // Pan with Space+drag moves the ghost by the same screen delta.
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const startX = box.x + box.width / 2;
+  const startY = box.y + box.height / 2;
+  await page.keyboard.down("Space");
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + 40, startY + 24, { steps: 5 });
+  await page.mouse.up();
+  await page.keyboard.up("Space");
+  const panned = await onionGhostBox(page, "past");
+  expect(panned).not.toBeNull();
+  expect(Math.abs((panned?.x ?? 0) - (before?.x ?? 0) - 40)).toBeLessThan(6);
+  expect(Math.abs((panned?.y ?? 0) - (before?.y ?? 0) - 24)).toBeLessThan(6);
+  // Doubling the zoom doubles the ghost size around the same center.
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { getViewState(): { zoom: number }; setZoom(zoom: number): void } } };
+    const engine = root.__gnumarus?.engine;
+    const zoom = engine?.getViewState().zoom ?? 1;
+    engine?.setZoom(zoom * 2);
+  });
+  const zoomed = await onionGhostBox(page, "past");
+  expect(zoomed).not.toBeNull();
+  expect(Math.abs((zoomed?.width ?? 0) - (panned?.width ?? 0) * 2)).toBeLessThan(12);
+  expect(Math.abs((zoomed?.height ?? 0) - (panned?.height ?? 0) * 2)).toBeLessThan(12);
+  // A quarter turn swaps the ghost extents.
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { setRotation(radians: number): void } } };
+    root.__gnumarus?.engine?.setRotation(Math.PI / 2);
+  });
+  const rotated = await onionGhostBox(page, "past");
+  expect(rotated).not.toBeNull();
+  expect(Math.abs((rotated?.width ?? 0) - (zoomed?.height ?? 0))).toBeLessThan(12);
+  expect(Math.abs((rotated?.height ?? 0) - (zoomed?.width ?? 0))).toBeLessThan(12);
+});
+
 test("onion toggle tooltip and single-line animation controls @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

@@ -965,6 +965,10 @@ export class GnumarusShell extends LitElement {
     .anim-corner button:hover {
       background: #3a3a3a;
     }
+    .anim-corner button.active {
+      background: #0e639c;
+      border-color: #0e639c;
+    }
     .anim-corner select {
       background: #2b2b2b;
       color: #e6e6e6;
