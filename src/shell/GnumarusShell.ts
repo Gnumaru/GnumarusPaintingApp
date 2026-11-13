@@ -13,6 +13,14 @@ import {
   unionSelectedFrameRange,
   unionSelectedIdRange,
 } from "../canvas/GnumarusSelectionBoolean";
+import {
+  formatContentBytes,
+  modelMeta,
+  searchManagedItems,
+  textureMeta,
+  type GnumarusContentSnapshot,
+  type GnumarusManagedItem,
+} from "../content/GnumarusContentManager";
 import { gunzipSync } from "fflate";
 import {
   detectUnsupportedSvgFeatures,
@@ -1406,6 +1414,46 @@ export class GnumarusShell extends LitElement {
       text-transform: uppercase;
       letter-spacing: 0.04em;
     }
+    #contentManagerDialog {
+      min-width: min(640px, 90vw);
+    }
+    #contentManagerDialog input[type="search"] {
+      width: 100%;
+      box-sizing: border-box;
+      margin: 4px 0 8px;
+    }
+    .manager-item {
+      cursor: default;
+      min-height: 0;
+    }
+    .manager-item:hover {
+      background: #1e1e1e;
+      border-color: #555;
+    }
+    .manager-meta {
+      font-size: 10px;
+      color: #9a9a9a;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .manager-cells {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 2px;
+      justify-content: center;
+      max-width: 100%;
+    }
+    .manager-cell {
+      font-size: 10px;
+      background: #0e639c;
+      color: #e6e6e6;
+      border-radius: 3px;
+      padding: 0 4px;
+      line-height: 1.6;
+      white-space: nowrap;
+    }
     .tile-window-body {
       flex: 1 1 auto;
       overflow: auto;
@@ -1632,6 +1680,8 @@ export class GnumarusShell extends LitElement {
     selectedLayers: { type: Array },
     selectedCells: { type: Array },
     contentPickerMode: { type: String },
+    contentManagerOpen: { type: Boolean },
+    contentManagerQuery: { type: String },
     deleteFramesTarget: { type: Array },
     brushSize: { type: Number },
     brushSizeMin: { type: Number },
@@ -1834,6 +1884,12 @@ export class GnumarusShell extends LitElement {
   declare selectedLayers: string[];
   declare selectedCells: Array<{ layerId: string; frame: number }>;
   declare contentPickerMode: "single" | "relink";
+  declare contentManagerOpen: boolean;
+  declare contentManagerQuery: string;
+  /** Read-only snapshot behind the content manager dialog. */
+  private contentManagerData: GnumarusContentSnapshot | null = null;
+  /** Resolved 3D-model vertex counts (absent while decoding). */
+  private contentManagerVerts = new Map<string, number | null>();
   /** Cells to relink while the content picker runs in relink mode. */
   private relinkTargets: Array<{ layerId: string; frame: number }> | null = null;
   declare deleteFramesTarget: number[] | null;
@@ -2044,6 +2100,8 @@ export class GnumarusShell extends LitElement {
     this.selectedLayers = [];
     this.selectedCells = [];
     this.contentPickerMode = "single";
+    this.contentManagerOpen = false;
+    this.contentManagerQuery = "";
     this.layerAnchor = null;
     this.contextMenuLayerIds = null;
     this.deleteFramesTarget = null;
@@ -2128,6 +2186,7 @@ export class GnumarusShell extends LitElement {
                   <button title=${tr("menu.importSvgTitle")} @click=${(): void => void this.runAction("import-svg")}>${tr("menu.importSvg")}</button>
                   <button title=${tr("menu.importModel3dTitle")} @click=${(): void => void this.runAction("import-3d-model")}>${tr("menu.importModel3d")}</button>
                   <button title=${tr("menu.importImageTitle")} @click=${(): void => void this.runAction("import-image")}>${tr("menu.importImage")}</button>
+                  <button title=${tr("menu.contentManagerTitle")} @click=${(): void => void this.runAction("content-manager")}>${tr("menu.contentManager")}</button>
                   <button title=${tr("menu.exportTitle")} @click=${(): void => void this.runAction("export")}>${tr("menu.export")}</button>
                 </div>
               `
@@ -3927,6 +3986,7 @@ export class GnumarusShell extends LitElement {
         </div>
       </dialog>
       ${this.contentPickerTarget !== null || this.contentPickerMode === "relink" ? this.renderContentPickerDialog() : html``}
+      ${this.contentManagerOpen ? this.renderContentManagerDialog() : html``}
       ${this.texturePickerContentId !== null || this.texturePickerTileset ? this.renderTexturePickerDialog() : html``}
       ${this.tileWindowOpen && this.tool === "tilebrush" ? this.renderTileWindow() : html``}
       ${this.textPickerTarget !== null ? this.renderTextPickerDialog() : html``}
@@ -6321,6 +6381,14 @@ export class GnumarusShell extends LitElement {
       requirements: [],
       run: (): void => {
         void this.importImageAsLayerFile();
+      },
+    });
+    this.actionRegistry.register({
+      id: "content-manager",
+      name: tr("menu.contentManager"),
+      requirements: [],
+      run: (): void => {
+        this.openContentManager();
       },
     });
     this.actionRegistry.register({
@@ -10008,6 +10076,259 @@ export class GnumarusShell extends LitElement {
     } catch {
       return null;
     }
+  }
+
+  /** Open the read-only content manager dialog with a fresh snapshot. */
+  private openContentManager(): void {
+    if (this.engine === null) {
+      return;
+    }
+    this.closeAllMenus();
+    this.contentManagerData = this.engine.getContentManagerData();
+    this.contentManagerVerts = new Map();
+    this.contentManagerQuery = "";
+    this.contentManagerOpen = true;
+    const engine = this.engine;
+    for (const model of this.contentManagerData.models) {
+      void engine.countModel3dVertices(model.id).then((count) => {
+        this.contentManagerVerts.set(model.id, count);
+        if (this.contentManagerOpen) {
+          this.requestUpdate();
+        }
+      });
+    }
+    this.requestUpdate();
+    void this.updateComplete.then(() => {
+      const dialog = this.shadowRoot?.getElementById("contentManagerDialog") as HTMLDialogElement | null;
+      dialog?.showModal();
+    });
+  }
+
+  private closeContentManager(): void {
+    const dialog = this.shadowRoot?.getElementById("contentManagerDialog") as HTMLDialogElement | null;
+    dialog?.close();
+    this.contentManagerOpen = false;
+  }
+
+  private onContentManagerClosed(): void {
+    this.contentManagerOpen = false;
+    this.contentManagerData = null;
+  }
+
+  /** Translated kind label for a cell content record. */
+  private contentKindLabel(kind: string): string {
+    switch (kind) {
+      case "texture":
+        return tr("dialog.kindTexture");
+      case "text":
+        return tr("dialog.kindText");
+      case "svg":
+        return tr("dialog.kindVector");
+      case "model3d":
+        return tr("dialog.kindModel3d");
+      case "tilemap":
+        return tr("dialog.kindTilemap");
+      default:
+        return tr("dialog.kindEmpty");
+    }
+  }
+
+  /** Every managed row, unfiltered (the dialog filters by the query). */
+  private contentManagerItems(): GnumarusManagedItem[] {
+    const data = this.contentManagerData;
+    if (data === null) {
+      return [];
+    }
+    const items: GnumarusManagedItem[] = [];
+    for (const texture of data.textures) {
+      const cells = data.usage.textures[texture.id] ?? [];
+      items.push({
+        kind: "texture",
+        id: texture.id,
+        name: texture.name,
+        sizeBytes: texture.sizeBytes,
+        meta: textureMeta(texture.width, texture.height),
+        usage: { count: cells.length, cells },
+      });
+    }
+    for (const content of data.contents) {
+      const cells = data.usage.contents[content.id] ?? [];
+      items.push({
+        kind: "content",
+        id: content.id,
+        name: content.name,
+        sizeBytes: content.sizeBytes,
+        meta: this.contentKindLabel(content.kindLabel),
+        usage: { count: cells.length, cells },
+      });
+    }
+    for (const text of data.texts) {
+      const cells = data.usage.texts[text.id] ?? [];
+      items.push({
+        kind: "text",
+        id: text.id,
+        name: text.name,
+        sizeBytes: text.sizeBytes,
+        meta: tr("manager.metaChars", { count: text.charCount }),
+        usage: { count: cells.length, cells },
+      });
+    }
+    for (const svg of data.svgs) {
+      const cells = data.usage.svgs[svg.id] ?? [];
+      items.push({
+        kind: "svg",
+        id: svg.id,
+        name: svg.name,
+        sizeBytes: svg.sizeBytes,
+        meta: tr("manager.metaElements", { count: svg.elementCount }),
+        usage: { count: cells.length, cells },
+      });
+    }
+    for (const model of data.models) {
+      const cells = data.usage.models[model.id] ?? [];
+      let meta = modelMeta(model.ext);
+      const verts = this.contentManagerVerts.get(model.id);
+      meta += verts === undefined ? " · …" : verts === null ? "" : ` · ${tr("manager.metaVertices", { count: verts })}`;
+      items.push({
+        kind: "model3d",
+        id: model.id,
+        name: model.name,
+        sizeBytes: model.sizeBytes,
+        meta,
+        usage: { count: cells.length, cells },
+      });
+    }
+    for (const tilemap of data.tilemaps) {
+      const cells = data.usage.tilemaps[tilemap.id] ?? [];
+      items.push({
+        kind: "tilemap",
+        id: tilemap.id,
+        name: tilemap.name,
+        sizeBytes: tilemap.sizeBytes,
+        meta: `${tr("manager.metaTiles", { count: tilemap.tileCount })} · ${tilemap.tileWidth}×${tilemap.tileHeight}`,
+        usage: { count: cells.length, cells },
+      });
+    }
+    return items;
+  }
+
+  /** Thumbnail for a managed row (null until the raster decodes). */
+  private contentManagerThumb(item: GnumarusManagedItem): string | null {
+    switch (item.kind) {
+      case "texture":
+        return this.thumbnailDataUrl(item.id);
+      case "text":
+        return this.textThumbnailDataUrl(item.id);
+      case "svg":
+        return this.svgThumbnailDataUrl(item.id);
+      case "model3d":
+        return this.model3dThumbnailDataUrl(item.id);
+      case "tilemap":
+        return this.tilemapThumbnailDataUrl(item.id);
+      case "content": {
+        const record = this.contentManagerData?.contents.find((entry) => entry.id === item.id);
+        if (record?.refId === undefined || record.refId === null) {
+          return null;
+        }
+        switch (record.kindLabel) {
+          case "texture":
+            return this.thumbnailDataUrl(record.refId);
+          case "text":
+            return this.textThumbnailDataUrl(record.refId);
+          case "svg":
+            return this.svgThumbnailDataUrl(record.refId);
+          case "model3d":
+            return this.model3dThumbnailDataUrl(record.refId);
+          case "tilemap":
+            return this.tilemapThumbnailDataUrl(record.refId);
+          default:
+            return null;
+        }
+      }
+      default:
+        return null;
+    }
+  }
+
+  private renderContentManagerDialog() {
+    const data = this.contentManagerData;
+    const all = this.contentManagerItems();
+    const filtered = searchManagedItems(all, this.contentManagerQuery);
+    const sections: Array<{ kind: GnumarusManagedItem["kind"]; title: string }> = [
+      { kind: "texture", title: tr("manager.textures") },
+      { kind: "content", title: tr("manager.contents") },
+      { kind: "text", title: tr("manager.texts") },
+      { kind: "svg", title: tr("manager.vectors") },
+      { kind: "model3d", title: tr("manager.models") },
+      { kind: "tilemap", title: tr("manager.tilemaps") },
+    ];
+    return html`
+      <dialog id="contentManagerDialog" data-testid="content-manager-dialog" @close=${(): void => this.onContentManagerClosed()}>
+        <h3>${tr("manager.title")}</h3>
+        <input
+          type="search"
+          data-testid="content-manager-search"
+          placeholder=${tr("manager.searchPlaceholder")}
+          .value=${this.contentManagerQuery}
+          @input=${(event: Event): void => {
+            const input = event.target as HTMLInputElement | null;
+            this.contentManagerQuery = input?.value ?? "";
+          }}
+        />
+        ${data === null
+          ? html``
+          : filtered.length === 0
+            ? html`<p data-testid="content-manager-empty">${tr("manager.noResults")}</p>`
+            : sections.map((section) => {
+                const rows = filtered.filter((item) => item.kind === section.kind);
+                if (rows.length === 0) {
+                  return html``;
+                }
+                return html`
+                  <h4 data-testid="content-manager-section" data-kind=${section.kind}>
+                    ${section.title} (${rows.length})
+                  </h4>
+                  <div class="picker-grid" data-testid="content-manager-grid" data-kind=${section.kind}>
+                    ${rows.map((item) => {
+                      const thumb = this.contentManagerThumb(item);
+                      return html`
+                        <div
+                          class="picker-item manager-item"
+                          data-testid="content-manager-item"
+                          data-kind=${item.kind}
+                          data-item-id=${item.id}
+                          title=${item.name}
+                        >
+                          ${thumb !== null
+                            ? html`<img class="picker-thumb" src=${thumb} alt="" />`
+                            : html`<span class="picker-empty" aria-hidden="true">∅</span>`}
+                          <span class="picker-name">${item.name}</span>
+                          <span class="manager-meta">${item.meta} · ${formatContentBytes(item.sizeBytes)}</span>
+                          <span class="manager-meta">
+                            ${item.usage.count > 0
+                              ? tr("manager.usedIn", { count: item.usage.count })
+                              : tr("manager.unused")}
+                          </span>
+                          ${item.usage.cells.length > 0
+                            ? html`<span class="manager-cells">
+                                ${item.usage.cells.map(
+                                  (cell) => html`<span class="manager-cell" data-testid="content-manager-cell"
+                                    >${tr("manager.cellRef", { layer: cell.layerName, frame: cell.frame + 1 })}</span
+                                  >`,
+                                )}
+                              </span>`
+                            : html``}
+                        </div>
+                      `;
+                    })}
+                  </div>
+                `;
+              })}
+        <div class="dialog-actions">
+          <button @click=${(): void => this.closeContentManager()}>${tr("btn.close")}</button>
+        </div>
+      </dialog>
+    `;
   }
 
   private renderContentPickerDialog() {

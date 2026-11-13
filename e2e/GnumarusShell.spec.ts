@@ -5537,6 +5537,7 @@ test("quick action palette filters and runs actions", async ({ page }) => {
   await expect(input).toBeFocused();
   await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveText([
     "Adjust colors…",
+    "Content manager",
     "Crop All Cells to Canvas",
     "Export project",
     "Fit All Textures to Size",
@@ -12886,6 +12887,55 @@ test("onion toggle tooltip and single-line animation controls @recent", async ({
     return Math.max(...boxes.map((box) => box.top)) < Math.min(...boxes.map((box) => box.bottom));
   });
   expect(overlap).toBe(true);
+});
+
+test("content manager dialog lists every project content @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await paintCenter(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Content manager" }).click();
+  const dialog = page.locator('gnumarus-shell dialog#contentManagerDialog');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('[data-testid="content-manager-section"]')).toHaveText(["Textures (1)", "Cell contents (1)"]);
+  const textureItem = dialog.locator('[data-testid="content-manager-item"][data-kind="texture"]');
+  await expect(textureItem).toHaveCount(1);
+  await expect(textureItem).toContainText("64 × 64");
+  await expect(textureItem).toContainText("Used in 1 cells");
+  await expect(textureItem.locator('[data-testid="content-manager-cell"]')).toHaveText(["L1 · F1"]);
+  const contentItem = dialog.locator('[data-testid="content-manager-item"][data-kind="content"]');
+  await expect(contentItem).toHaveCount(1);
+  await expect(contentItem).toContainText("Used in 1 cells");
+});
+
+test("content manager search filters by name similarity @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await paintCenter(page);
+  await page.keyboard.press("Control+Shift+P");
+  const palette = page.locator("gnumarus-shell dialog#actionPaletteDialog");
+  await palette.locator('[data-testid="action-palette-input"]').fill("content manager");
+  await palette.locator('[data-testid="action-palette-item"][data-action-id="content-manager"]').click();
+  const dialog = page.locator('gnumarus-shell dialog#contentManagerDialog');
+  await expect(dialog).toBeVisible();
+  const search = dialog.locator('[data-testid="content-manager-search"]');
+  await search.fill("zzz-nothing-matches");
+  await expect(dialog.locator('[data-testid="content-manager-empty"]')).toBeVisible();
+  await expect(dialog.locator('[data-testid="content-manager-item"]')).toHaveCount(0);
+  const textureName = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getContentManagerData(): { textures: Array<{ name: string }> } } };
+    };
+    return root.__gnumarus?.engine?.getContentManagerData()?.textures[0]?.name ?? "";
+  });
+  expect(textureName).not.toBe("");
+  await search.fill(textureName);
+  await expect(dialog.locator('[data-testid="content-manager-item"]')).toHaveCount(1);
+  await expect(dialog.locator('[data-testid="content-manager-section"]')).toHaveText(["Textures (1)"]);
 });
 
 test("Ctrl+Shift+Arrows create layers and frames @recent", async ({ page }) => {

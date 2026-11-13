@@ -133,7 +133,7 @@ function isWordStart(name: string, index: number): boolean {
   return index === 0 || name[index - 1] === " " || name[index - 1] === "-" || name[index - 1] === "_";
 }
 
-function similarityScore(query: string, name: string): number {
+export function similarityScore(query: string, name: string): number {
   const q = query.toLowerCase();
   const n = name.toLowerCase();
   if (q === n) {

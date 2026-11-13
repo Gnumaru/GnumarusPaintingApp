@@ -17,6 +17,11 @@ import { GNUMARUS_MODEL3D_DEFAULT_VIEW, parseModel3dView, type GnumarusModel3dVi
 import type { GnumarusSvgEntry } from "../vector/GnumarusSvg";
 import { tileLineCells, tileRectCells, wrappedTileBlits, type GnumarusTilePlacement, type GnumarusTileRotation } from "../tilemap/GnumarusTilemap";
 import {
+  countSvgElements,
+  type GnumarusContentSnapshot,
+  type GnumarusManagedUsageCell,
+} from "../content/GnumarusContentManager";
+import {
   paintCurveStroke,
   paintEllipseFilled,
   paintEllipseOutline,
@@ -2591,6 +2596,178 @@ export class GnumarusCanvasEngine {
         height: texture.height,
       })),
     };
+  }
+
+  /**
+   * Read-only whole-project snapshot for the content manager dialog: every
+   * texture, cell content, text, SVG, 3D model and tilemap with payload
+   * sizes plus the cells each one is used in (textures also collect cells
+   * reaching them through a tilemap tileset). Vertex counts stay out (async
+   * decode, see `countModel3dVertices`).
+   */
+  getContentManagerData(): GnumarusContentSnapshot {
+    const encoder = new TextEncoder();
+    const cellsByContent = new Map<string, GnumarusManagedUsageCell[]>();
+    for (const layer of [...this.layers].reverse()) {
+      for (let frame = 0; frame < this.frameCount; frame += 1) {
+        const contentId = this.cells.get(animationCellKey(layer.id, frame));
+        if (contentId === undefined) {
+          continue;
+        }
+        const list = cellsByContent.get(contentId) ?? [];
+        list.push({ layerId: layer.id, layerName: layer.name, frame });
+        cellsByContent.set(contentId, list);
+      }
+    }
+    const contentsByTexture = new Map<string, string[]>();
+    const contentsByText = new Map<string, string[]>();
+    const contentsBySvg = new Map<string, string[]>();
+    const contentsByModel = new Map<string, string[]>();
+    const contentsByTilemap = new Map<string, string[]>();
+    const link = (map: Map<string, string[]>, key: string | null, contentId: string): void => {
+      if (key === null) {
+        return;
+      }
+      const list = map.get(key) ?? [];
+      list.push(contentId);
+      map.set(key, list);
+    };
+    for (const content of this.contents.values()) {
+      link(contentsByTexture, content.textureId, content.id);
+      link(contentsByText, content.textId, content.id);
+      link(contentsBySvg, content.svgId, content.id);
+      link(contentsByModel, content.model3dId, content.id);
+      link(contentsByTilemap, content.tilemapId, content.id);
+    }
+    const cellsForContents = (contentIds: string[]): GnumarusManagedUsageCell[] => {
+      const out: GnumarusManagedUsageCell[] = [];
+      for (const contentId of contentIds) {
+        out.push(...(cellsByContent.get(contentId) ?? []));
+      }
+      return out;
+    };
+    const tilemapsByTileset = new Map<string, string[]>();
+    for (const tilemap of this.tilemaps.values()) {
+      const list = tilemapsByTileset.get(tilemap.tilesetId) ?? [];
+      list.push(tilemap.id);
+      tilemapsByTileset.set(tilemap.tilesetId, list);
+    }
+    const usageForTilemap = (tilemapId: string): GnumarusManagedUsageCell[] =>
+      cellsForContents(contentsByTilemap.get(tilemapId) ?? []);
+    const usageForTexture = (textureId: string): GnumarusManagedUsageCell[] => {
+      const direct = cellsForContents(contentsByTexture.get(textureId) ?? []);
+      for (const tilemapId of tilemapsByTileset.get(textureId) ?? []) {
+        direct.push(...usageForTilemap(tilemapId));
+      }
+      return direct;
+    };
+    return {
+      textures: [...this.textures.values()].map((texture) => ({
+        id: texture.id,
+        name: texture.name,
+        width: texture.width,
+        height: texture.height,
+        sizeBytes: texture.buffer.byteLength,
+      })),
+      contents: [...this.contents.values()].map((content) => {
+        const kind = content.textureId !== null ? "texture"
+          : content.textId !== null ? "text"
+          : content.svgId !== null ? "svg"
+          : content.model3dId !== null ? "model3d"
+          : content.tilemapId !== null ? "tilemap"
+          : "empty";
+        return {
+          id: content.id,
+          name: content.name,
+          kindLabel: kind,
+          refId: content.textureId ?? content.textId ?? content.svgId ?? content.model3dId ?? content.tilemapId,
+          sizeBytes: encoder.encode(JSON.stringify(content)).length,
+        };
+      }),
+      texts: [...this.texts.values()].map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        sizeBytes: encoder.encode(entry.document.html).length,
+        charCount: entry.document.html.length,
+      })),
+      svgs: [...this.svgs.values()].map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        sizeBytes: encoder.encode(entry.svg).length,
+        elementCount: countSvgElements(entry.svg),
+      })),
+      models: [...this.models3d.values()].map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        ext: entry.ext,
+        sizeBytes: entry.bytes.byteLength,
+      })),
+      tilemaps: [...this.tilemaps.values()].map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        tilesetId: entry.tilesetId,
+        tileWidth: entry.tileWidth,
+        tileHeight: entry.tileHeight,
+        tileCount: entry.tiles.length,
+        sizeBytes: encoder.encode(JSON.stringify(entry.tiles)).length,
+      })),
+      usage: {
+        textures: Object.fromEntries(
+          [...this.textures.values()].map((texture) => [texture.id, usageForTexture(texture.id)]),
+        ),
+        contents: Object.fromEntries(
+          [...this.contents.values()].map((content) => [content.id, cellsByContent.get(content.id) ?? []]),
+        ),
+        texts: Object.fromEntries(
+          [...this.texts.values()].map((entry) => [entry.id, cellsForContents(contentsByText.get(entry.id) ?? [])]),
+        ),
+        svgs: Object.fromEntries(
+          [...this.svgs.values()].map((entry) => [entry.id, cellsForContents(contentsBySvg.get(entry.id) ?? [])]),
+        ),
+        models: Object.fromEntries(
+          [...this.models3d.values()].map((entry) => [entry.id, cellsForContents(contentsByModel.get(entry.id) ?? [])]),
+        ),
+        tilemaps: Object.fromEntries(
+          [...this.tilemaps.values()].map((entry) => [entry.id, usageForTilemap(entry.id)]),
+        ),
+      },
+    };
+  }
+
+  /** In-flight 3D-model vertex count requests (deduped per dialog opening). */
+  private modelVertexRequests = new Map<string, Promise<number | null>>();
+
+  /**
+   * Vertex count of a 3D model by decoding it (cached per id, null when the
+   * format is unsupported or the decode fails). Async for GLTF parsing.
+   */
+  countModel3dVertices(modelId: string): Promise<number | null> {
+    const pending = this.modelVertexRequests.get(modelId);
+    if (pending !== undefined) {
+      return pending;
+    }
+    const entry = this.models3d.get(modelId);
+    if (entry === undefined) {
+      return Promise.resolve(null);
+    }
+    const request = this.loadModel3dObject(entry.ext, entry.bytes).then((object) => {
+      if (object === null) {
+        return null;
+      }
+      let total = 0;
+      object.traverse((node: THREE.Object3D) => {
+        const mesh = node as unknown as {
+          geometry?: { getAttribute?: (name: string) => { count?: unknown } | null } | null;
+        };
+        const position = mesh.geometry?.getAttribute?.("position");
+        if (typeof position?.count === "number") {
+          total += position.count;
+        }
+      });
+      return total;
+    }).catch(() => null);
+    this.modelVertexRequests.set(modelId, request);
+    return request;
   }
 
   /** Create fresh content with a new empty project-sized texture and attach it to the cell. */
