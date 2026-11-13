@@ -486,6 +486,42 @@ export function selectionMaskBox(mask: Uint8Array, width: number, height: number
   return isEmptySelectionRect(box) ? null : box;
 }
 
+/** Clamped ellipse drag preview: the exact commit mask over its layer box. */
+export interface GnumarusEllipsePreview {
+  minX: number;
+  minY: number;
+  width: number;
+  height: number;
+  mask: Uint8Array;
+}
+
+/**
+ * The ellipse selection a drag would commit: drag corners normalized,
+ * clamped to the texture, masked with the true ellipse test. Null when the
+ * clamped box is empty. Sharing this between the drag preview and the
+ * pointer-up commit keeps them pixel-identical by construction.
+ */
+export function previewEllipseSelection(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  textureWidth: number,
+  textureHeight: number,
+): GnumarusEllipsePreview | null {
+  const box = clampSelectionRect(
+    normalizeSelectionRect(Math.floor(x0), Math.floor(y0), Math.floor(x1), Math.floor(y1)),
+    textureWidth,
+    textureHeight,
+  );
+  if (box === null) {
+    return null;
+  }
+  const width = box.maxX - box.minX;
+  const height = box.maxY - box.minY;
+  return { minX: box.minX, minY: box.minY, width, height, mask: ellipseSelectMask(box) };
+}
+
 /** One axis-aligned boundary run in buffer-local pixel coords. */
 export interface GnumarusSelectionBoundaryRun {
   ax: number;

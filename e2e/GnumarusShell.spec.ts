@@ -6514,7 +6514,7 @@ test("tool tooltips start with the selection shortcut", async ({ page }) => {
     { label: "Bucket fill", title: expect.stringMatching(/^G or F: Bucket fill \(/) },
     { label: "Eyedropper", title: expect.stringMatching(/^Ctrl \(hold\): Eyedropper \(/) },
     { label: "Text", title: expect.stringMatching(/^X: Text \(/) },
-    { label: "Tile brush", title: "Tile brush (click an empty cell to create a tilemap, click a tilemap cell to place the selected tile; right-click erases)" },
+    { label: "Tile brush", title: "Tile brush (click an empty cell to create a tilemap, click a tilemap cell to place the selected tile; right-click erases; drag paints a stroke; Shift+click draws a tile line from the last tile; Ctrl+Shift+click fills a tile rectangle)" },
     { label: "Rectangle", title: expect.stringMatching(/^D: Rectangle \(/) },
     { label: "3D model transform", title: expect.stringMatching(/^3D model transform \(drag to orbit/) },
     { label: "Rectangular selection", title: expect.stringMatching(/^R: Rectangular selection \(/) },
@@ -11013,6 +11013,162 @@ test("tile brush erases with right-click and supports undo", async ({ page }) =>
   expect(await tilemapTiles(page)).toHaveLength(1);
   await page.keyboard.press("Control+y");
   expect(await tilemapTiles(page)).toEqual([]);
+});
+
+async function setupTileBrushStroke(page: import("@playwright/test").Page): Promise<void> {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await paintCenter(page);
+  await page.getByRole("button", { name: "Add frame", exact: true }).click();
+  await page.locator('gnumarus-shell [data-testid="anim-frame"][data-frame="1"]').click();
+  await page.locator('gnumarus-shell [data-testid="tool-tilebrush"]').click();
+  await page.locator('gnumarus-shell [data-testid="tile-tileset"]').click();
+  await page.locator('gnumarus-shell [data-testid="texture-picker-item"]').first().click();
+  await paintCenter(page);
+  expect(await tilemapTiles(page)).toHaveLength(1);
+}
+
+async function tileRubberState(page: import("@playwright/test").Page): Promise<{ display: string; cells: number } | null> {
+  return page.evaluate(() => {
+    const root = document.querySelector("gnumarus-shell")?.shadowRoot;
+    const rubber = root?.querySelector('[data-testid="tile-rubber"]');
+    if (rubber === null || rubber === undefined) {
+      return null;
+    }
+    return { display: (rubber as SVGGElement).style.display, cells: rubber.childElementCount };
+  });
+}
+
+function tileKeys(tiles: Array<Record<string, number | boolean>> | null): string[] {
+  return (tiles ?? []).map((tile) => `${String(tile["x"])},${String(tile["y"])}`).sort();
+}
+
+test("tile brush drag paints a stroke with single undo @recent", async ({ page }) => {
+  await setupTileBrushStroke(page);
+  const from = await layerScreenTarget(page, 40, 40);
+  const to = await layerScreenTarget(page, 56, 40);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 5 });
+  await page.mouse.up();
+  expect(tileKeys(await tilemapTiles(page))).toEqual(["2,2", "3,2"]);
+  await page.keyboard.press("Control+z");
+  expect(await tilemapTiles(page)).toHaveLength(1);
+  await page.keyboard.press("Control+y");
+  expect(tileKeys(await tilemapTiles(page))).toEqual(["2,2", "3,2"]);
+  // Right-drag erases the same stroke, again as one undo entry.
+  await page.mouse.move(to.x, to.y);
+  await page.mouse.down({ button: "right" });
+  await page.mouse.move(from.x, from.y, { steps: 5 });
+  await page.mouse.up({ button: "right" });
+  expect(await tilemapTiles(page)).toEqual([]);
+  await page.keyboard.press("Control+z");
+  expect(tileKeys(await tilemapTiles(page))).toEqual(["2,2", "3,2"]);
+});
+
+test("tile brush shift+click paints a tile line with preview @recent", async ({ page }) => {
+  await setupTileBrushStroke(page);
+  const to = await layerScreenTarget(page, 8, 8);
+  await page.keyboard.down("Shift");
+  await page.mouse.move(to.x, to.y);
+  const rubber = await tileRubberState(page);
+  expect(rubber?.display).toBe("block");
+  expect(rubber?.cells).toBe(3);
+  await page.mouse.click(to.x, to.y);
+  await page.keyboard.up("Shift");
+  expect(tileKeys(await tilemapTiles(page))).toEqual(["0,0", "1,1", "2,2"]);
+  await page.keyboard.press("Control+z");
+  expect(await tilemapTiles(page)).toHaveLength(1);
+});
+
+test("tile brush ctrl+shift+click paints a filled tile rectangle @recent", async ({ page }) => {
+  await setupTileBrushStroke(page);
+  const to = await layerScreenTarget(page, 8, 8);
+  await page.keyboard.down("Control");
+  await page.keyboard.down("Shift");
+  await page.mouse.move(to.x, to.y);
+  const rubber = await tileRubberState(page);
+  expect(rubber?.display).toBe("block");
+  expect(rubber?.cells).toBe(1);
+  await page.mouse.click(to.x, to.y);
+  await page.keyboard.up("Shift");
+  await page.keyboard.up("Control");
+  expect(tileKeys(await tilemapTiles(page))).toEqual([
+    "0,0",
+    "0,1",
+    "0,2",
+    "1,0",
+    "1,1",
+    "1,2",
+    "2,0",
+    "2,1",
+    "2,2",
+  ]);
+  await page.keyboard.press("Control+z");
+  expect(await tilemapTiles(page)).toHaveLength(1);
+});
+
+test("ellipse selection preview matches the committed mask @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  const corner = await layerScreenTarget(page, 0, 0);
+  await page.mouse.click(corner.x, corner.y);
+  await page.keyboard.press("o");
+  const from = await layerScreenTarget(page, 10, 10);
+  const to = await layerScreenTarget(page, 30, 26);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 5 });
+  expect(await selectionMaskDisplay(page)).toBe("block");
+  const preview = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          getEllipsePreviewMask(): { minX: number; minY: number; width: number; height: number; mask: number[] } | null;
+        };
+      };
+    };
+    return root.__gnumarus?.engine?.getEllipsePreviewMask() ?? null;
+  });
+  expect(preview).not.toBeNull();
+  await page.mouse.up();
+  const committed = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          getFloatingSelectionMask(): { x: number; y: number; width: number; height: number; mask: number[] } | null;
+        };
+      };
+    };
+    return root.__gnumarus?.engine?.getFloatingSelectionMask() ?? null;
+  });
+  expect(committed).not.toBeNull();
+  const previewPixels = new Set<string>();
+  if (preview !== null) {
+    for (let y = 0; y < preview.height; y += 1) {
+      for (let x = 0; x < preview.width; x += 1) {
+        if ((preview.mask[y * preview.width + x] ?? 0) !== 0) {
+          previewPixels.add(`${preview.minX + x},${preview.minY + y}`);
+        }
+      }
+    }
+  }
+  const committedPixels = new Set<string>();
+  if (committed !== null) {
+    for (let y = 0; y < committed.height; y += 1) {
+      for (let x = 0; x < committed.width; x += 1) {
+        if ((committed.mask[y * committed.width + x] ?? 0) !== 0) {
+          committedPixels.add(`${committed.x + x},${committed.y + y}`);
+        }
+      }
+    }
+  }
+  expect(previewPixels.size).toBeGreaterThan(0);
+  expect([...previewPixels].sort()).toEqual([...committedPixels].sort());
 });
 
 test("tilemaps save and reopen with placements", async ({ page }) => {

@@ -15,7 +15,7 @@ import {
 } from "../vector/GnumarusSvg";
 import { GNUMARUS_MODEL3D_DEFAULT_VIEW, parseModel3dView, type GnumarusModel3dView } from "../project/GnumarusProjectFormat";
 import type { GnumarusSvgEntry } from "../vector/GnumarusSvg";
-import { wrappedTileBlits, type GnumarusTilePlacement, type GnumarusTileRotation } from "../tilemap/GnumarusTilemap";
+import { tileLineCells, tileRectCells, wrappedTileBlits, type GnumarusTilePlacement, type GnumarusTileRotation } from "../tilemap/GnumarusTilemap";
 import {
   paintCurveStroke,
   paintEllipseFilled,
@@ -146,7 +146,6 @@ import {
   colorSelectTolerance,
   countSelectionMask,
   dilateSelectionMask,
-  ellipseSelectMask,
   erodeSelectionMask,
   floodSelectMask,
   globalSelectMask,
@@ -154,6 +153,7 @@ import {
   isEmptySelectionRect,
   normalizeSelectionRect,
   polygonSelectMask,
+  previewEllipseSelection,
   selectionMaskBoundaryRuns,
   selectionMaskBox,
   unionSelectionBox,
@@ -842,6 +842,19 @@ export class GnumarusCanvasEngine {
     stageW: number;
     stageH: number;
   } = { tilesetId: null, tx: 0, ty: 0, flipH: false, flipV: false, rot: 0, stageW: 16, stageH: 16 };
+  /** Active tile-brush stroke (drag paint), or null outside one. */
+  private tileDrag: {
+    tilemapId: string;
+    button: 0 | 2;
+    before: GnumarusTilePlacement[];
+    lastCell: { x: number; y: number };
+    painted: Set<string>;
+  } | null = null;
+  /** Last stamped tile cell (line/rect anchor), with its tilemap. */
+  private tileAnchor: { tilemapId: string; x: number; y: number } | null = null;
+  /** Modifier snapshot for the tile line/rect rubber preview. */
+  private tileModShift = false;
+  private tileModCtrl = false;
   /** Shared offscreen renderer for 3D model thumbnails (lazy). */
   private modelRenderer: THREE.WebGLRenderer | null = null;
   private frameCount = 1;
@@ -1044,6 +1057,8 @@ export class GnumarusCanvasEngine {
   /** Marching ants tracing the true masked boundary (non-rect selections). */
   private readonly previewSelectMaskWhite: SVGPathElement;
   private readonly previewSelectMaskBlack: SVGPathElement;
+  /** Rubber preview of the armed tile line/rectangle (one rect per cell). */
+  private readonly previewTileRubber: SVGGElement;
   private readonly selectionHandles: Array<{ id: GnumarusSelectionHandleId; group: SVGGElement }> = [];
   /** 3D gizmo ring halves (front solid, back dashed) per rotation axis. */
   private readonly rot3dRings: Record<"x" | "y" | "z", { front: SVGPathElement; back: SVGPathElement }>;
@@ -1431,6 +1446,11 @@ export class GnumarusCanvasEngine {
     };
     this.previewSelectMaskWhite = makeSelectionAntsPath("selection-mask", "#ffffff", "-20");
     this.previewSelectMaskBlack = makeSelectionAntsPath(null, "#000000", "-10");
+    this.previewTileRubber = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    this.previewTileRubber.setAttribute("data-testid", "tile-rubber");
+    this.previewTileRubber.style.display = "none";
+    this.previewTileRubber.style.pointerEvents = "none";
+    this.previewSvg.appendChild(this.previewTileRubber);
     const svgNamespace = "http://www.w3.org/2000/svg";
     const appendShape = (group: SVGGElement, tag: string, attributes: Record<string, string>): SVGElement => {
       const shape = document.createElementNS(svgNamespace, tag) as SVGElement;
@@ -4589,112 +4609,295 @@ export class GnumarusCanvasEngine {
    * status for the shell toast: placed / erased / no-tileset / occupied /
    * nothing.
    */
-  tileBrushClick(clientX: number, clientY: number, button: 0 | 2): "placed" | "erased" | "no-tileset" | "occupied" | "nothing" {
+  /**
+   * Stamp one tile grid cell: left button places the staged tile (requires
+   * a tileset), right button erases. No history, no re-render; callers
+   * batch stamps into one stroke. Returns true when the cell changed.
+   */
+  private stampTileCell(
+    entry: GnumarusTilemapEntry,
+    cell: { x: number; y: number },
+    button: 0 | 2,
+  ): boolean {
+    const index = entry.tiles.findIndex((tile) => tile.x === cell.x && tile.y === cell.y);
+    if (button === 2) {
+      if (index < 0) {
+        return false;
+      }
+      entry.tiles.splice(index, 1);
+      return true;
+    }
+    if (this.tileBrush.tilesetId === null || !this.textures.has(this.tileBrush.tilesetId)) {
+      return false;
+    }
+    const placement: GnumarusTilePlacement = {
+      x: cell.x,
+      y: cell.y,
+      tx: this.tileBrush.tx,
+      ty: this.tileBrush.ty,
+      flipH: this.tileBrush.flipH,
+      flipV: this.tileBrush.flipV,
+      rot: entry.tileWidth === entry.tileHeight ? this.tileBrush.rot : 0,
+    };
+    if (index >= 0) {
+      entry.tiles[index] = placement;
+    } else {
+      entry.tiles.push(placement);
+    }
+    return true;
+  }
+
+  /** Re-render after tile stamps (shared by stroke moves and commits). */
+  private refreshTilemap(entry: GnumarusTilemapEntry): void {
+    entry.revision += 1;
+    this.tileRasters.delete(entry.id);
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.emitStats();
+  }
+
+  /** True when the tile brush can place (a loaded tileset is staged). */
+  private tilePlaceArmed(): boolean {
+    const staged = this.tileBrush.tilesetId;
+    return staged !== null && this.textures.has(staged);
+  }
+
+  /**
+   * Resolve the tilemap under the cursor for stamping: the active cell's
+   * tilemap, or a fresh one on empty cells (left button only, armed
+   * tileset required). Null when the cell holds other content or the
+   * cursor maps to no tile ("occupied" vs "nothing" via the reason).
+   */
+  private resolveTilemapForStamp(
+    clientX: number,
+    clientY: number,
+    button: 0 | 2,
+  ): { entry: GnumarusTilemapEntry } | { reason: "occupied" | "nothing" | "no-tileset" } {
     const layer = this.activeLayer();
     if (layer === null) {
-      return "nothing";
+      return { reason: "nothing" };
     }
     const frame = this.currentFrame;
     const key = animationCellKey(layer.id, frame);
     const contentId = this.cells.get(key);
     const content = contentId === undefined ? undefined : this.contents.get(contentId);
-    const tilemap = content?.tilemapId === undefined || content?.tilemapId === null ? undefined : this.tilemaps.get(content.tilemapId);
-    if (content !== undefined && tilemap === undefined) {
+    const existing =
+      content?.tilemapId === undefined || content?.tilemapId === null
+        ? undefined
+        : this.tilemaps.get(content.tilemapId);
+    if (content !== undefined && existing === undefined) {
       if (
         content.textureId !== null ||
         content.textId !== null ||
         content.svgId !== null ||
         content.model3dId !== null
       ) {
-        return "occupied";
+        return { reason: "occupied" };
       }
     }
-    if (tilemap !== undefined) {
-      const grid = this.tileGridAt(clientX, clientY, tilemap.tileWidth, tilemap.tileHeight);
-      if (grid === null) {
-        return "nothing";
+    if (existing !== undefined) {
+      if (this.tileGridAt(clientX, clientY, existing.tileWidth, existing.tileHeight) === null) {
+        return { reason: "nothing" };
       }
-      const index = tilemap.tiles.findIndex((tile) => tile.x === grid.x && tile.y === grid.y);
-      if (button === 2) {
-        if (index < 0) {
-          return "nothing";
-        }
-        const before = this.cloneTileTiles(tilemap.tiles);
-        tilemap.tiles.splice(index, 1);
-        tilemap.revision += 1;
-        this.tileRasters.delete(tilemap.id);
-        this.history.push({ type: "tilemap", tilemap: { tilemapId: tilemap.id, before, after: this.cloneTileTiles(tilemap.tiles) } });
-        this.syncAllLayerRenders();
-        this.refreshLayerStacking();
-        this.render();
-        this.onPixelsChanged();
-        this.onLayersChanged?.();
-        this.emitStats();
-        return "erased";
+      if (button === 0 && !this.tilePlaceArmed()) {
+        return { reason: "no-tileset" };
       }
-      if (this.tileBrush.tilesetId === null) {
-        return "no-tileset";
-      }
-      const before = this.cloneTileTiles(tilemap.tiles);
-      const placement: GnumarusTilePlacement = {
-        x: grid.x,
-        y: grid.y,
-        tx: this.tileBrush.tx,
-        ty: this.tileBrush.ty,
-        flipH: this.tileBrush.flipH,
-        flipV: this.tileBrush.flipV,
-        rot: tilemap.tileWidth === tilemap.tileHeight ? this.tileBrush.rot : 0,
-      };
-      if (index >= 0) {
-        tilemap.tiles[index] = placement;
-      } else {
-        tilemap.tiles.push(placement);
-      }
-      tilemap.revision += 1;
-      this.tileRasters.delete(tilemap.id);
-      this.history.push({ type: "tilemap", tilemap: { tilemapId: tilemap.id, before, after: this.cloneTileTiles(tilemap.tiles) } });
-      this.syncAllLayerRenders();
-      this.refreshLayerStacking();
-      this.render();
-      this.onPixelsChanged();
-      this.onLayersChanged?.();
-      this.emitStats();
-      return "placed";
+      return { entry: existing };
     }
     if (button === 2) {
-      return "nothing";
+      return { reason: "nothing" };
+    }
+    if (!this.tilePlaceArmed()) {
+      return { reason: "no-tileset" };
     }
     const staged = this.tileBrush.tilesetId;
-    if (staged === null || !this.textures.has(staged)) {
-      return "no-tileset";
+    if (staged === null) {
+      return { reason: "no-tileset" };
+    }
+    const grid = this.tileGridAt(clientX, clientY, this.tileBrush.stageW, this.tileBrush.stageH);
+    if (grid === null) {
+      return { reason: "nothing" };
     }
     const created = this.ensureTilemapForPlacement(layer.id, frame, staged, this.tileBrush.stageW, this.tileBrush.stageH);
     if (created === null) {
-      return "occupied";
+      return { reason: "occupied" };
     }
-    const grid = this.tileGridAt(clientX, clientY, created.tileWidth, created.tileHeight);
+    return { entry: created };
+  }
+
+  /**
+   * Begin a tile-brush stroke: snapshots the tile list, stamps the first
+   * cell, arms the drag. Returns the immediate outcome when no stroke
+   * starts (feedback like the old single click); null when a stroke
+   * began and the outcome is deferred to pointer-up.
+   */
+  private beginTileStroke(
+    clientX: number,
+    clientY: number,
+    button: 0 | 2,
+  ): "placed" | "erased" | "no-tileset" | "occupied" | "nothing" | null {
+    const resolved = this.resolveTilemapForStamp(clientX, clientY, button);
+    if (!("entry" in resolved)) {
+      return resolved.reason;
+    }
+    const entry = resolved.entry;
+    const grid = this.tileGridAt(clientX, clientY, entry.tileWidth, entry.tileHeight);
     if (grid === null) {
       return "nothing";
     }
-    const before = this.cloneTileTiles(created.tiles);
-    created.tiles.push({
-      x: grid.x,
-      y: grid.y,
-      tx: this.tileBrush.tx,
-      ty: this.tileBrush.ty,
-      flipH: this.tileBrush.flipH,
-      flipV: this.tileBrush.flipV,
-      rot: created.tileWidth === created.tileHeight ? this.tileBrush.rot : 0,
+    const before = this.cloneTileTiles(entry.tiles);
+    if (!this.stampTileCell(entry, grid, button)) {
+      return "nothing";
+    }
+    this.refreshTilemap(entry);
+    this.tileDrag = {
+      tilemapId: entry.id,
+      button,
+      before,
+      lastCell: { ...grid },
+      painted: new Set([`${grid.x},${grid.y}`]),
+    };
+    return null;
+  }
+
+  /** Stamp every newly traversed slot along the drag (gap-free via walk). */
+  private moveTileStroke(clientX: number, clientY: number): void {
+    const drag = this.tileDrag;
+    if (drag === null) {
+      return;
+    }
+    const entry = this.tilemaps.get(drag.tilemapId);
+    if (entry === undefined) {
+      this.tileDrag = null;
+      return;
+    }
+    const grid = this.tileGridAt(clientX, clientY, entry.tileWidth, entry.tileHeight);
+    if (grid === null) {
+      return;
+    }
+    if (grid.x === drag.lastCell.x && grid.y === drag.lastCell.y) {
+      return;
+    }
+    let changed = false;
+    for (const cell of tileLineCells(drag.lastCell.x, drag.lastCell.y, grid.x, grid.y)) {
+      const stampKey = `${cell.x},${cell.y}`;
+      if (drag.painted.has(stampKey)) {
+        continue;
+      }
+      drag.painted.add(stampKey);
+      if (this.stampTileCell(entry, cell, drag.button)) {
+        changed = true;
+      }
+    }
+    drag.lastCell = { ...grid };
+    if (changed) {
+      this.refreshTilemap(entry);
+    }
+  }
+
+  /** Commit the active stroke as one undoable history entry. */
+  private commitTileStroke(): void {
+    const drag = this.tileDrag;
+    if (drag === null) {
+      return;
+    }
+    this.tileDrag = null;
+    const entry = this.tilemaps.get(drag.tilemapId);
+    if (entry === undefined) {
+      return;
+    }
+    this.history.push({
+      type: "tilemap",
+      tilemap: { tilemapId: entry.id, before: drag.before, after: this.cloneTileTiles(entry.tiles) },
     });
-    created.revision += 1;
-    this.history.push({ type: "tilemap", tilemap: { tilemapId: created.id, before, after: this.cloneTileTiles(created.tiles) } });
-    this.syncAllLayerRenders();
-    this.refreshLayerStacking();
-    this.render();
-    this.onPixelsChanged();
+    this.tileAnchor = { tilemapId: entry.id, x: drag.lastCell.x, y: drag.lastCell.y };
     this.onLayersChanged?.();
     this.emitStats();
-    return "placed";
+    this.onTileBrushOutcome?.(drag.button === 2 ? "erased" : "placed");
+    this.updatePreviews();
+  }
+
+  /** Cancel the active stroke, restoring the snapshot. True when one ran. */
+  private cancelTileStroke(): boolean {
+    const drag = this.tileDrag;
+    if (drag === null) {
+      return false;
+    }
+    this.tileDrag = null;
+    const entry = this.tilemaps.get(drag.tilemapId);
+    if (entry !== undefined) {
+      entry.tiles = this.cloneTileTiles(drag.before);
+      this.refreshTilemap(entry);
+    }
+    this.updatePreviews();
+    return true;
+  }
+
+  /** Tile placements equal (for the line/rect no-op guard). */
+  private sameTileTiles(a: GnumarusTilePlacement[], b: GnumarusTilePlacement[]): boolean {
+    if (a.length !== b.length) {
+      return false;
+    }
+    const keyOf = (tile: GnumarusTilePlacement): string =>
+      `${tile.x},${tile.y},${tile.tx},${tile.ty},${tile.flipH ? 1 : 0},${tile.flipV ? 1 : 0},${tile.rot}`;
+    const keys = new Set(a.map(keyOf));
+    return b.every((tile) => keys.has(keyOf(tile)));
+  }
+
+  /**
+   * Commit a Shift+click tile line (or Ctrl+Shift+click filled rectangle)
+   * from the anchor to the clicked cell, as one undoable entry. Returns
+   * false when there is no anchor (or it belongs to another tilemap), so
+   * the caller falls back to a normal stroke; every other outcome —
+   * including no-tileset/occupied feedback and no-op anchor updates — is
+   * consumed here.
+   */
+  private commitTileLineRect(clientX: number, clientY: number, mode: "line" | "rect"): boolean {
+    const anchor = this.tileAnchor;
+    if (anchor === null) {
+      return false;
+    }
+    if (!this.tilePlaceArmed()) {
+      return false;
+    }
+    const resolved = this.resolveTilemapForStamp(clientX, clientY, 0);
+    if (!("entry" in resolved)) {
+      return false;
+    }
+    const entry = resolved.entry;
+    if (entry.id !== anchor.tilemapId) {
+      return false;
+    }
+    const end = this.tileGridAt(clientX, clientY, entry.tileWidth, entry.tileHeight);
+    if (end === null) {
+      return false;
+    }
+    const cells =
+      mode === "rect"
+        ? tileRectCells(anchor.x, anchor.y, end.x, end.y)
+        : tileLineCells(anchor.x, anchor.y, end.x, end.y);
+    if (cells.length === 0) {
+      return false;
+    }
+    const before = this.cloneTileTiles(entry.tiles);
+    for (const cell of cells) {
+      this.stampTileCell(entry, cell, 0);
+    }
+    this.refreshTilemap(entry);
+    this.tileAnchor = { tilemapId: entry.id, x: end.x, y: end.y };
+    if (!this.sameTileTiles(before, entry.tiles)) {
+      this.history.push({
+        type: "tilemap",
+        tilemap: { tilemapId: entry.id, before, after: this.cloneTileTiles(entry.tiles) },
+      });
+      this.onLayersChanged?.();
+      this.emitStats();
+      this.onTileBrushOutcome?.("placed");
+    }
+    this.updatePreviews();
+    return true;
   }
 
   /**
@@ -11580,6 +11783,182 @@ export class GnumarusCanvasEngine {
     return d;
   }
 
+  /** Cap for per-cell rubber rects; larger previews collapse to one box. */
+  private static readonly tileRubberCellBudget = 2048;
+  /** Mask-ants area budget (px) for the ellipse drag preview; past it the smooth outline is used. */
+  private static readonly ellipsePreviewMaskBudget = 2000000;
+
+  /** Clear the tile line/rect rubber preview. */
+  private hideTileRubber(): void {
+    const rubber = this.previewTileRubber;
+    if (rubber.style.display !== "none") {
+      rubber.style.display = "none";
+    }
+    while (rubber.firstChild !== null) {
+      rubber.removeChild(rubber.firstChild);
+    }
+  }
+
+  /**
+   * Rubber preview of the armed tile line/rectangle: while Shift (line) or
+   * Ctrl+Shift (filled rect) is held with the tile brush over a cell, draw
+   * one outline per covered slot from the anchor to the hovered cell.
+   * Hidden for every other state; huge areas collapse to one box outline.
+   */
+  private syncTileRubber(): void {
+    if (
+      this.tool !== "tilebrush" ||
+      this.tileDrag !== null ||
+      this.disposed ||
+      !this.tileModShift ||
+      this.lastMouseClient === null
+    ) {
+      this.hideTileRubber();
+      return;
+    }
+    const anchor = this.tileAnchor;
+    const mouse = this.lastMouseClient;
+    if (anchor === null) {
+      this.hideTileRubber();
+      return;
+    }
+    const entry = this.tilemaps.get(anchor.tilemapId);
+    if (entry === undefined) {
+      this.hideTileRubber();
+      return;
+    }
+    const layer = this.activeLayer();
+    if (layer === null) {
+      this.hideTileRubber();
+      return;
+    }
+    const key = animationCellKey(layer.id, this.currentFrame);
+    const contentId = this.cells.get(key);
+    const content = contentId === undefined ? undefined : this.contents.get(contentId);
+    if (content?.tilemapId !== entry.id) {
+      this.hideTileRubber();
+      return;
+    }
+    const hover = this.tileGridAt(mouse.x, mouse.y, entry.tileWidth, entry.tileHeight);
+    if (hover === null) {
+      this.hideTileRubber();
+      return;
+    }
+    const rectMode = this.tileModCtrl;
+    const cells = rectMode
+      ? tileRectCells(anchor.x, anchor.y, hover.x, hover.y)
+      : tileLineCells(anchor.x, anchor.y, hover.x, hover.y);
+    if (cells.length === 0) {
+      this.hideTileRubber();
+      return;
+    }
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      this.hideTileRubber();
+      return;
+    }
+    const toClient = (projectX: number, projectY: number): { x: number; y: number } => {
+      const client = projectToScreen(
+        projectX,
+        projectY,
+        { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+        this.viewTransform(),
+      );
+      return { x: client.x - rect.left, y: client.y - rect.top };
+    };
+    const drawBox = (gx0: number, gy0: number, gx1: number, gy1: number): void => {
+      const a = toClient(gx0 * entry.tileWidth - this.imageWidth / 2, gy0 * entry.tileHeight - this.imageHeight / 2);
+      const b = toClient((gx1 + 1) * entry.tileWidth - this.imageWidth / 2, (gy1 + 1) * entry.tileHeight - this.imageHeight / 2);
+      const shape = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      shape.setAttribute("x", String(Math.min(a.x, b.x)));
+      shape.setAttribute("y", String(Math.min(a.y, b.y)));
+      shape.setAttribute("width", String(Math.max(0.5, Math.abs(b.x - a.x))));
+      shape.setAttribute("height", String(Math.max(0.5, Math.abs(b.y - a.y))));
+      shape.setAttribute("fill", "#ffffff");
+      shape.setAttribute("fill-opacity", "0.12");
+      shape.setAttribute("stroke", "#ffffff");
+      shape.setAttribute("stroke-width", "1.5");
+      shape.setAttribute("opacity", "0.9");
+      this.previewTileRubber.appendChild(shape);
+    };
+    this.hideTileRubber();
+    if (rectMode || cells.length > GnumarusCanvasEngine.tileRubberCellBudget) {
+      // Rectangles (and huge lines) preview as one box outline.
+      let minX = cells[0]?.x ?? 0;
+      let minY = cells[0]?.y ?? 0;
+      let maxX = minX;
+      let maxY = minY;
+      for (const cell of cells) {
+        if (cell.x < minX) {
+          minX = cell.x;
+        }
+        if (cell.y < minY) {
+          minY = cell.y;
+        }
+        if (cell.x > maxX) {
+          maxX = cell.x;
+        }
+        if (cell.y > maxY) {
+          maxY = cell.y;
+        }
+      }
+      drawBox(minX, minY, maxX, maxY);
+    } else {
+      for (const cell of cells) {
+        drawBox(cell.x, cell.y, cell.x, cell.y);
+      }
+    }
+    this.previewSvg.style.display = "block";
+    this.previewTileRubber.style.display = "block";
+  }
+
+  /** Drag preview mask of the ellipse selection tool for tests. */
+  getEllipsePreviewMask(): { minX: number; minY: number; width: number; height: number; mask: number[] } | null {
+    if (this.tool !== "ellipse" || this.ellipseDrag === null) {
+      return null;
+    }
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return null;
+    }
+    const preview = previewEllipseSelection(
+      this.ellipseDrag.x0,
+      this.ellipseDrag.y0,
+      this.ellipseDrag.x1,
+      this.ellipseDrag.y1,
+      layer.width,
+      layer.height,
+    );
+    if (preview === null) {
+      return null;
+    }
+    return {
+      minX: preview.minX,
+      minY: preview.minY,
+      width: preview.width,
+      height: preview.height,
+      mask: Array.from(preview.mask),
+    };
+  }
+
+  /** Mask of the active floating selection in layer pixels for tests. */
+  getFloatingSelectionMask(): { x: number; y: number; width: number; height: number; mask: number[] } | null {
+    const floating = this.floating;
+    if (floating === null || !floating.active) {
+      return null;
+    }
+    if (floating.mask.length !== floating.width * floating.height) {
+      return null;
+    }
+    return {
+      x: Math.round(floating.cx - floating.width / 2),
+      y: Math.round(floating.cy - floating.height / 2),
+      width: floating.width,
+      height: floating.height,
+      mask: Array.from(floating.mask),
+    };
+  }
+
   /** Position the marching-ants selection polygon over the active layer. */
   private updateSelectionOverlay(): void {
     const overlay = this.selectionOverlayQuad();
@@ -11735,7 +12114,8 @@ export class GnumarusCanvasEngine {
     if (
       this.previewStabilizerLine.style.display !== "block" &&
       this.previewSelectWhite.style.display !== "block" &&
-      this.previewSelectMaskWhite.style.display !== "block"
+      this.previewSelectMaskWhite.style.display !== "block" &&
+      this.previewTileRubber.style.display !== "block"
     ) {
       this.previewSvg.style.display = "none";
     }
@@ -12164,6 +12544,7 @@ export class GnumarusCanvasEngine {
       this.previewTip.style.borderRadius = tipShape === "circle" ? "50%" : "0";
     }
     this.updateTilePreview(mouse);
+    this.syncTileRubber();
     this.previewShapeRect.style.display = "none";
     this.cloneTip.style.display = "none";
     this.previewSelectEllipse.style.display = "none";
@@ -12299,35 +12680,70 @@ export class GnumarusCanvasEngine {
       const layer = this.activeLayer();
       if (layer !== null) {
         const drag = this.ellipseDrag;
-        const x0 = Math.min(drag.x0, drag.x1);
-        const y0 = Math.min(drag.y0, drag.y1);
-        const x1 = Math.max(drag.x0, drag.x1) + 1;
-        const y1 = Math.max(drag.y0, drag.y1) + 1;
-        const toClient = (imageX: number, imageY: number): { x: number; y: number } => {
-          const project = layerImageToProject(imageX, imageY, layer.width, layer.height, layer.transform);
-          const client = projectToScreen(
-            project.x,
-            project.y,
-            { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-            this.viewTransform(),
-          );
-          return { x: client.x - rect.left, y: client.y - rect.top };
-        };
-        const center = toClient((x0 + x1) / 2, (y0 + y1) / 2);
-        const edgeX = toClient(x1, (y0 + y1) / 2);
-        const edgeY = toClient((x0 + x1) / 2, y1);
-        const rx = Math.max(1, Math.hypot(edgeX.x - center.x, edgeX.y - center.y));
-        const ry = Math.max(1, Math.hypot(edgeY.x - center.x, edgeY.y - center.y));
-        const angle =
-          (Math.atan2(edgeX.y - center.y, edgeX.x - center.x) * 180) / Math.PI;
-        this.previewSvg.style.display = "block";
-        this.previewSelectEllipse.style.display = "block";
-        this.previewSelectEllipse.setAttribute("cx", String(center.x));
-        this.previewSelectEllipse.setAttribute("cy", String(center.y));
-        this.previewSelectEllipse.setAttribute("rx", String(rx));
-        this.previewSelectEllipse.setAttribute("ry", String(ry));
-        this.previewSelectEllipse.setAttribute("transform", `rotate(${angle} ${center.x} ${center.y})`);
-        return;
+        // Marching ants of the true commit mask (same helper as pointer-up),
+        // so the drag preview shows exactly the pixels that get selected.
+        // Huge drags fall back to the smooth outline past the area budget.
+        const preview = previewEllipseSelection(
+          drag.x0,
+          drag.y0,
+          drag.x1,
+          drag.y1,
+          layer.width,
+          layer.height,
+        );
+        if (preview !== null && preview.width > 0 && preview.height > 0) {
+          const toClient = (imageX: number, imageY: number): { x: number; y: number } => {
+            const project = layerImageToProject(imageX, imageY, layer.width, layer.height, layer.transform);
+            const client = projectToScreen(
+              project.x,
+              project.y,
+              { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+              this.viewTransform(),
+            );
+            return { x: client.x - rect.left, y: client.y - rect.top };
+          };
+          const area = preview.width * preview.height;
+          if (area <= GnumarusCanvasEngine.ellipsePreviewMaskBudget) {
+            const runs = selectionMaskBoundaryRuns(preview.mask, preview.width, preview.height);
+            if (runs.length > 0) {
+              const toXY = (imageX: number, imageY: number): string => {
+                const point = toClient(imageX, imageY);
+                return `${point.x},${point.y}`;
+              };
+              const d = runs
+                .map(
+                  (run) =>
+                    `M${toXY(preview.minX + run.ax, preview.minY + run.ay)}L${toXY(preview.minX + run.bx, preview.minY + run.by)}`,
+                )
+                .join(" ");
+              this.previewSvg.style.display = "block";
+              this.previewSelectMaskWhite.setAttribute("d", d);
+              this.previewSelectMaskWhite.style.display = "block";
+              this.previewSelectMaskBlack.setAttribute("d", d);
+              this.previewSelectMaskBlack.style.display = "block";
+              return;
+            }
+          } else {
+            const x0 = Math.min(drag.x0, drag.x1);
+            const y0 = Math.min(drag.y0, drag.y1);
+            const x1 = Math.max(drag.x0, drag.x1) + 1;
+            const y1 = Math.max(drag.y0, drag.y1) + 1;
+            const center = toClient((x0 + x1) / 2, (y0 + y1) / 2);
+            const edgeX = toClient(x1, (y0 + y1) / 2);
+            const edgeY = toClient((x0 + x1) / 2, y1);
+            const rx = Math.max(1, Math.hypot(edgeX.x - center.x, edgeX.y - center.y));
+            const ry = Math.max(1, Math.hypot(edgeY.x - center.x, edgeY.y - center.y));
+            const angle = (Math.atan2(edgeX.y - center.y, edgeX.x - center.x) * 180) / Math.PI;
+            this.previewSvg.style.display = "block";
+            this.previewSelectEllipse.style.display = "block";
+            this.previewSelectEllipse.setAttribute("cx", String(center.x));
+            this.previewSelectEllipse.setAttribute("cy", String(center.y));
+            this.previewSelectEllipse.setAttribute("rx", String(rx));
+            this.previewSelectEllipse.setAttribute("ry", String(ry));
+            this.previewSelectEllipse.setAttribute("transform", `rotate(${angle} ${center.x} ${center.y})`);
+            return;
+          }
+        }
       }
     }
     if (this.tool === "lasso" && this.lassoPath !== null && this.lassoPath.length > 1) {
@@ -12448,6 +12864,7 @@ export class GnumarusCanvasEngine {
     this.previewSelectBlack.style.display = "none";
     this.previewSelectMaskWhite.style.display = "none";
     this.previewSelectMaskBlack.style.display = "none";
+    this.hideTileRubber();
     this.hideSelectionHandles();
     this.hideRot3dGizmo();
     for (const marker of this.previewMarkers) {
@@ -12849,6 +13266,10 @@ export class GnumarusCanvasEngine {
     this.sizeDrag = null;
     this.rectDrag = null;
     this.ellipseDrag = null;
+    this.cancelTileStroke();
+    this.tileAnchor = null;
+    this.tileModShift = false;
+    this.tileModCtrl = false;
     this.shapeDrag = null;
     this.shapePolygon = null;
     this.cropDrag = null;
@@ -14121,8 +14542,9 @@ export class GnumarusCanvasEngine {
         return;
       }
       if (this.tool === "tilebrush") {
-        // Left-click places the selected tile, right-click erases the tile
-        // under the cursor. Other buttons are ignored.
+        // Left button paints (drag stamps every traversed slot), right
+        // button erases. Shift+click replays the last stamped cell as a
+        // tile line; Ctrl+Shift+click replays it as a filled rectangle.
         const pressed: 0 | 2 = (event.button as number) === 2 ? 2 : 0;
         if (pressed !== 0 && pressed !== 2) {
           return;
@@ -14132,8 +14554,20 @@ export class GnumarusCanvasEngine {
           return;
         }
         this.lastMouseClient = { x: event.clientX, y: event.clientY };
-        const outcome = this.tileBrushClick(event.clientX, event.clientY, pressed);
-        this.onTileBrushOutcome?.(outcome);
+        this.tileModShift = event.shiftKey;
+        this.tileModCtrl = event.ctrlKey || event.metaKey;
+        if (pressed === 0 && event.shiftKey) {
+          const mode: "line" | "rect" = event.ctrlKey || event.metaKey ? "rect" : "line";
+          if (this.commitTileLineRect(event.clientX, event.clientY, mode)) {
+            return;
+          }
+        }
+        const outcome = this.beginTileStroke(event.clientX, event.clientY, pressed);
+        if (outcome !== null) {
+          this.onTileBrushOutcome?.(outcome);
+        } else {
+          canvas.setPointerCapture(event.pointerId);
+        }
         this.updatePreviews();
         return;
       }
@@ -14366,6 +14800,8 @@ export class GnumarusCanvasEngine {
         : this.toImagePixel(event.clientX, event.clientY);
       this.cursor = pixel;
       this.lastMouseClient = { x: event.clientX, y: event.clientY };
+      this.tileModShift = event.shiftKey;
+      this.tileModCtrl = event.ctrlKey || event.metaKey;
       if (this.tool === "curve" && this.curvePhase === "dragging" && pixel !== null) {
         this.curveDragCurrent = {
           x: pixel.x,
@@ -14506,6 +14942,12 @@ export class GnumarusCanvasEngine {
         this.layoutScene();
         this.render();
         this.emitStats();
+        return;
+      }
+      if (this.tileDrag !== null) {
+        this.moveTileStroke(event.clientX, event.clientY);
+        this.lastMouseClient = { x: event.clientX, y: event.clientY };
+        this.updatePreviews();
         return;
       }
       if (this.rectDrag !== null) {
@@ -14763,6 +15205,10 @@ export class GnumarusCanvasEngine {
     };
     canvas.addEventListener("pointerup", endStroke);
     canvas.addEventListener("pointerup", (event: PointerEvent) => {
+      if (this.tileDrag !== null && event.button === this.tileDrag.button) {
+        this.commitTileStroke();
+        return;
+      }
       if (this.retouchStroke !== null && event.button === 0) {
         this.commitRetouchStroke();
         return;
@@ -14886,17 +15332,20 @@ export class GnumarusCanvasEngine {
         this.syncLayerRender(layer);
         this.refreshLayerStacking();
         const tex = ensured.texture;
-        const box = clampSelectionRect(
-          normalizeSelectionRect(drag.x0, drag.y0, drag.x1, drag.y1),
-          tex.width,
-          tex.height,
-        );
-        if (box === null) {
+        // Same helper as the drag preview: preview and commit are identical.
+        const preview = previewEllipseSelection(drag.x0, drag.y0, drag.x1, drag.y1, tex.width, tex.height);
+        if (preview === null) {
           return;
         }
-        const width = box.maxX - box.minX;
-        const height = box.maxY - box.minY;
-        const mask = ellipseSelectMask(box);
+        const box = {
+          minX: preview.minX,
+          minY: preview.minY,
+          maxX: preview.minX + preview.width,
+          maxY: preview.minY + preview.height,
+        };
+        const width = preview.width;
+        const height = preview.height;
+        const mask = preview.mask;
         const mode = this.selectionReleaseMode(event);
         if (mode === null) {
           const tight = selectionMaskBox(mask, width, height);
@@ -14976,6 +15425,7 @@ export class GnumarusCanvasEngine {
       this.layerCenterTap = null;
       this.layerFlipTap = null;
       this.rot3dCenterTap = null;
+      this.cancelTileStroke();
       if (
         this.rectDrag !== null ||
         this.ellipseDrag !== null ||
@@ -15064,16 +15514,25 @@ export class GnumarusCanvasEngine {
           target instanceof HTMLSelectElement
         );
       })();
+      if (event.key === "Shift" || event.key === "Control" || event.key === "Meta") {
+        this.tileModShift = event.shiftKey;
+        this.tileModCtrl = event.ctrlKey || event.metaKey;
+        if (!event.repeat && this.tool === "tilebrush" && !inField) {
+          this.updatePreviews();
+        }
+      }
       if (event.key === "Control" && !event.repeat && !event.altKey && !event.metaKey && !inField) {
         // The Ctrl selection modifiers belong to the selection tools;
-        // summoning the eyedropper there would steal their drags. The fly
-        // camera owns every unmodified key, so it never summons it either.
+        // summoning the eyedropper there would steal their drags. The
+        // tile brush owns Ctrl+Shift for rectangles, and the fly camera
+        // owns every unmodified key, so neither summons it either.
         if (
           this.tool !== "rectselect" &&
           this.tool !== "ellipse" &&
           this.tool !== "lasso" &&
           this.tool !== "polylasso" &&
           this.tool !== "colorselect" &&
+          this.tool !== "tilebrush" &&
           this.tool !== "flycam"
         ) {
           this.beginTempEyedropper();
@@ -15299,6 +15758,16 @@ export class GnumarusCanvasEngine {
           return;
         }
         if (
+          event.key === "Escape" &&
+          this.tool === "tilebrush" &&
+          (this.tileDrag !== null || this.tileAnchor !== null)
+        ) {
+          this.cancelTileStroke();
+          this.tileAnchor = null;
+          this.updatePreviews();
+          return;
+        }
+        if (
           (event.key === "Enter" || event.key === "Return") &&
           this.tool === "polygon" &&
           this.shapePolygon !== null &&
@@ -15359,6 +15828,13 @@ export class GnumarusCanvasEngine {
       }
       if (event.key === "Control") {
         this.endTempEyedropper();
+      }
+      if (event.key === "Shift" || event.key === "Control" || event.key === "Meta") {
+        this.tileModShift = event.shiftKey;
+        this.tileModCtrl = event.ctrlKey || event.metaKey;
+        if (this.tool === "tilebrush") {
+          this.updatePreviews();
+        }
       }
       this.flyReleaseKey(event.code);
     });

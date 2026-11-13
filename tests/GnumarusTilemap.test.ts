@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isValidTilePlacement, wrappedTileBlits } from "../src/tilemap/GnumarusTilemap";
+import { isValidTilePlacement, tileLineCells, tileRectCells, wrappedTileBlits } from "../src/tilemap/GnumarusTilemap";
 
 describe("GnumarusTilemap", () => {
   it("emits a single blit for fully inside tiles", () => {
@@ -44,5 +44,59 @@ describe("GnumarusTilemap", () => {
     expect(isValidTilePlacement({ x: 0, y: 0, tx: 0, ty: 0, flipH: false, flipV: false, rot: 45 })).toBe(false);
     expect(isValidTilePlacement({ x: 0, y: 0, tx: 0, ty: 0, flipH: 0, flipV: false, rot: 0 })).toBe(false);
     expect(isValidTilePlacement(null)).toBe(false);
+  });
+
+  it("walks grid lines with integer bresenham without gaps", () => {
+    expect(tileLineCells(2, 2, 2, 2)).toEqual([{ x: 2, y: 2 }]);
+    expect(tileLineCells(0, 0, 3, 0)).toEqual([
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+      { x: 2, y: 0 },
+      { x: 3, y: 0 },
+    ]);
+    expect(tileLineCells(1, 1, 1, 3)).toEqual([
+      { x: 1, y: 1 },
+      { x: 1, y: 2 },
+      { x: 1, y: 3 },
+    ]);
+    const diagonal = tileLineCells(0, 0, 3, 3);
+    expect(diagonal).toHaveLength(4);
+    expect(diagonal[0]).toEqual({ x: 0, y: 0 });
+    expect(diagonal[3]).toEqual({ x: 3, y: 3 });
+    for (let i = 1; i < diagonal.length; i += 1) {
+      const prev = diagonal[i - 1];
+      const current = diagonal[i];
+      expect(Math.abs((current?.x ?? 0) - (prev?.x ?? 0)) + Math.abs((current?.y ?? 0) - (prev?.y ?? 0))).toBeLessThanOrEqual(2);
+    }
+    // Reversed walks cover the same cells in reverse order.
+    expect(tileLineCells(3, 0, 0, 0)).toEqual([
+      { x: 3, y: 0 },
+      { x: 2, y: 0 },
+      { x: 1, y: 0 },
+      { x: 0, y: 0 },
+    ]);
+    // Steep lines stay 8-connected from start to end.
+    const steep = tileLineCells(0, 0, 2, 5);
+    expect(steep[0]).toEqual({ x: 0, y: 0 });
+    expect(steep[steep.length - 1]).toEqual({ x: 2, y: 5 });
+    for (let i = 1; i < steep.length; i += 1) {
+      const prev = steep[i - 1];
+      const current = steep[i];
+      expect(Math.abs((current?.x ?? 0) - (prev?.x ?? 0))).toBeLessThanOrEqual(1);
+      expect(Math.abs((current?.y ?? 0) - (prev?.y ?? 0))).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("fills grid rectangles inclusive in row-major order", () => {
+    expect(tileRectCells(1, 1, 1, 1)).toEqual([{ x: 1, y: 1 }]);
+    expect(tileRectCells(0, 0, 1, 1)).toEqual([
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+      { x: 0, y: 1 },
+      { x: 1, y: 1 },
+    ]);
+    // Corner order does not matter.
+    expect(tileRectCells(1, 1, 0, 0)).toEqual(tileRectCells(0, 0, 1, 1));
+    expect(tileRectCells(2, 3, 0, 1)).toHaveLength(3 * 3);
   });
 });

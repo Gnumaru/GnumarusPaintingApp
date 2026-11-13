@@ -104,6 +104,64 @@ export function wrappedTileBlits(
   return out;
 }
 
+/** One grid cell address. */
+export interface GnumarusTileCell {
+  x: number;
+  y: number;
+}
+
+/**
+ * Grid cells on the segment from (x0, y0) to (x1, y1), inclusive, walked
+ * with integer Bresenham so fast drags never skip a slot. The endpoints
+ * may be given in any order; the walk always starts at (x0, y0).
+ */
+export function tileLineCells(x0: number, y0: number, x1: number, y1: number): GnumarusTileCell[] {
+  const cells: GnumarusTileCell[] = [];
+  let x = Math.trunc(x0);
+  let y = Math.trunc(y0);
+  const endX = Math.trunc(x1);
+  const endY = Math.trunc(y1);
+  const dx = Math.abs(endX - x);
+  const dy = -Math.abs(endY - y);
+  const sx = x < endX ? 1 : -1;
+  const sy = y < endY ? 1 : -1;
+  let err = dx + dy;
+  for (;;) {
+    cells.push({ x, y });
+    if (x === endX && y === endY) {
+      break;
+    }
+    const doubled = 2 * err;
+    if (doubled >= dy) {
+      err += dy;
+      x += sx;
+    }
+    if (doubled <= dx) {
+      err += dx;
+      y += sy;
+    }
+  }
+  return cells;
+}
+
+/**
+ * Every grid cell inside the filled rectangle with opposite corners
+ * (x0, y0) and (x1, y1), inclusive, in row-major order. Corners may be
+ * given in any order.
+ */
+export function tileRectCells(x0: number, y0: number, x1: number, y1: number): GnumarusTileCell[] {
+  const minX = Math.min(Math.trunc(x0), Math.trunc(x1));
+  const maxX = Math.max(Math.trunc(x0), Math.trunc(x1));
+  const minY = Math.min(Math.trunc(y0), Math.trunc(y1));
+  const maxY = Math.max(Math.trunc(y0), Math.trunc(y1));
+  const cells: GnumarusTileCell[] = [];
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      cells.push({ x, y });
+    }
+  }
+  return cells;
+}
 /** True for plain-object tile placements with valid field types/ranges. */
 export function isValidTilePlacement(value: unknown): value is GnumarusTilePlacement {
   if (typeof value !== "object" || value === null) {

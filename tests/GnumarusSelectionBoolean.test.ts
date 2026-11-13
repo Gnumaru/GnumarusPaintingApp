@@ -15,6 +15,7 @@ import {
   isEmptySelectionRect,
   normalizeSelectionRect,
   polygonSelectMask,
+  previewEllipseSelection,
   selectionMaskBoundaryPath,
   selectionMaskBox,
   toggleSelectedFrame,
@@ -249,5 +250,25 @@ describe("GnumarusMultiSelection", () => {
     expect(unionSelectedIdRange(["a"], "c", "b", order)).toEqual(["a", "b", "c"]);
     expect(unionSelectedIdRange([], null, "b", order)).toBeNull();
     expect(unionSelectedIdRange(["a"], "zzz", "b", order)).toBeNull();
+  });
+
+  it("previews the exact clamped ellipse commit mask", () => {
+    const preview = previewEllipseSelection(10, 10, 20, 20, 64, 64);
+    expect(preview).not.toBeNull();
+    expect(preview?.minX).toBe(10);
+    expect(preview?.minY).toBe(10);
+    expect(preview?.width).toBe(11);
+    expect(preview?.height).toBe(11);
+    // Same mask the commit path would build for the same drag.
+    const box = { minX: 10, minY: 10, maxX: 21, maxY: 21 };
+    expect(Array.from(preview?.mask ?? [])).toEqual(Array.from(ellipseSelectMask(box)));
+    // Drag direction does not matter.
+    const reversed = previewEllipseSelection(20, 20, 10, 10, 64, 64);
+    expect(Array.from(reversed?.mask ?? [])).toEqual(Array.from(preview?.mask ?? []));
+    // Out-of-bounds drags clamp; fully outside is null.
+    const clamped = previewEllipseSelection(-10, -10, 5, 5, 64, 64);
+    expect(clamped?.minX).toBe(0);
+    expect(clamped?.minY).toBe(0);
+    expect(previewEllipseSelection(70, 70, 80, 80, 64, 64)).toBeNull();
   });
 });
