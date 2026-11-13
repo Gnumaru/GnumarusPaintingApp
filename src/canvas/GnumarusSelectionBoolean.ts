@@ -700,3 +700,46 @@ export function unionSelectedIdRange(
   }
   return order.filter((entry) => next.has(entry));
 }
+
+/** One animation-matrix cell address. */
+export interface GnumarusCellAddress {
+  layerId: string;
+  frame: number;
+}
+
+/**
+ * Every cell inside the rectangle with opposite corners `anchor` and
+ * `clicked`: the layer-axis range follows the visual row order, the frame
+ * axis is numeric, both inclusive. Row-major in row order. Empty when either
+ * endpoint is unknown (layer missing from the order or frame out of range).
+ */
+export function cellRectCells(
+  anchor: GnumarusCellAddress,
+  clicked: GnumarusCellAddress,
+  layerOrder: readonly string[],
+  frameCount: number,
+): GnumarusCellAddress[] {
+  const anchorRow = layerOrder.indexOf(anchor.layerId);
+  const clickedRow = layerOrder.indexOf(clicked.layerId);
+  if (anchorRow < 0 || clickedRow < 0 || frameCount < 1) {
+    return [];
+  }
+  const lowRow = Math.min(anchorRow, clickedRow);
+  const highRow = Math.max(anchorRow, clickedRow);
+  const lowFrame = Math.min(anchor.frame, clicked.frame);
+  const highFrame = Math.max(anchor.frame, clicked.frame);
+  if (!Number.isInteger(lowFrame) || !Number.isInteger(highFrame) || lowFrame < 0 || highFrame >= frameCount) {
+    return [];
+  }
+  const cells: GnumarusCellAddress[] = [];
+  for (let row = lowRow; row <= highRow; row += 1) {
+    const layerId = layerOrder[row];
+    if (layerId === undefined) {
+      continue;
+    }
+    for (let frame = lowFrame; frame <= highFrame; frame += 1) {
+      cells.push({ layerId, frame });
+    }
+  }
+  return cells;
+}

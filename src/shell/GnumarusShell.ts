@@ -7,6 +7,7 @@ import {
 } from "../canvas/GnumarusCanvasEngine";
 import { sanitizeTextHtml } from "../text/GnumarusTextSanitize";
 import {
+  cellRectCells,
   toggleSelectedFrame,
   toggleSelectedId,
   unionSelectedFrameRange,
@@ -929,10 +930,19 @@ export class GnumarusShell extends LitElement {
       z-index: 3;
       display: flex;
       align-items: center;
-      justify-content: center;
-      flex-wrap: wrap;
+      justify-content: flex-start;
+      flex-wrap: nowrap;
       gap: 4px;
       padding: 2px;
+    }
+    .anim-corner button {
+      flex: 0 0 auto;
+    }
+    .anim-corner select {
+      min-width: 0;
+      flex: 1 1 auto;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .anim-corner button {
       background: transparent;
@@ -1036,6 +1046,9 @@ export class GnumarusShell extends LitElement {
     }
     .anim-cell.active-cell {
       box-shadow: inset 0 0 0 2px #ffd23f;
+    }
+    .anim-cell.selected {
+      box-shadow: inset 0 0 0 2px #4da3ff;
     }
     .anim-cell .cell-name {
       overflow: hidden;
@@ -1617,6 +1630,8 @@ export class GnumarusShell extends LitElement {
     renamingFrame: { type: Number },
     selectedFrames: { type: Array },
     selectedLayers: { type: Array },
+    selectedCells: { type: Array },
+    contentPickerMode: { type: String },
     deleteFramesTarget: { type: Array },
     brushSize: { type: Number },
     brushSizeMin: { type: Number },
@@ -1739,6 +1754,7 @@ export class GnumarusShell extends LitElement {
   declare contextMenuY: number;
   declare matrixMenu:
     | { kind: "cell"; layerId: string; frame: number; x: number; y: number }
+    | { kind: "cells"; cells: Array<{ layerId: string; frame: number }>; x: number; y: number }
     | { kind: "frame"; frame: number; x: number; y: number }
     | { kind: "frames"; frames: number[]; x: number; y: number }
     | null;
@@ -1816,10 +1832,16 @@ export class GnumarusShell extends LitElement {
   declare renamingFrame: number | null;
   declare selectedFrames: number[];
   declare selectedLayers: string[];
+  declare selectedCells: Array<{ layerId: string; frame: number }>;
+  declare contentPickerMode: "single" | "relink";
+  /** Cells to relink while the content picker runs in relink mode. */
+  private relinkTargets: Array<{ layerId: string; frame: number }> | null = null;
   declare deleteFramesTarget: number[] | null;
   /** Anchor frame for Shift+click range selection (not reactive by itself). */
   private frameAnchor: number | null = null;
   private layerAnchor: string | null = null;
+  /** Anchor cell for Shift+click rectangle selection (not reactive by itself). */
+  private cellAnchor: { layerId: string; frame: number } | null = null;
   declare brushSize: number;
   declare brushSizeMin: number;
   declare brushShape: GnumarusBrushShape;
@@ -2020,10 +2042,13 @@ export class GnumarusShell extends LitElement {
     this.renamingFrame = null;
     this.selectedFrames = [];
     this.selectedLayers = [];
+    this.selectedCells = [];
+    this.contentPickerMode = "single";
     this.layerAnchor = null;
     this.contextMenuLayerIds = null;
     this.deleteFramesTarget = null;
     this.frameAnchor = null;
+    this.cellAnchor = null;
     this.brushSize = 1;
     this.brushSizeMin = 1;
     this.brushShape = "circle";
@@ -3901,7 +3926,7 @@ export class GnumarusShell extends LitElement {
           <button @click=${(): void => this.confirmLayerRename()}>${tr("btn.rename")}</button>
         </div>
       </dialog>
-      ${this.contentPickerTarget !== null ? this.renderContentPickerDialog() : html``}
+      ${this.contentPickerTarget !== null || this.contentPickerMode === "relink" ? this.renderContentPickerDialog() : html``}
       ${this.texturePickerContentId !== null || this.texturePickerTileset ? this.renderTexturePickerDialog() : html``}
       ${this.tileWindowOpen && this.tool === "tilebrush" ? this.renderTileWindow() : html``}
       ${this.textPickerTarget !== null ? this.renderTextPickerDialog() : html``}
@@ -5153,7 +5178,7 @@ export class GnumarusShell extends LitElement {
     if (this.engine === null) {
       return html``;
     }    const matrix = this.engine.getAnimationMatrix();
-    const columns = `120px repeat(${matrix.frameCount}, 76px)`;
+    const columns = `190px repeat(${matrix.frameCount}, 76px)`;
     const activeAnimation = this.engine.getActiveAnimationName();
     const activeFrames =
       activeAnimation === null
@@ -5164,6 +5189,9 @@ export class GnumarusShell extends LitElement {
             ),
           );
     const animationFrameCounts = countAnimationFrames(this.engine.getNamedAnimations());
+    const selectedCellKeys = new Set(
+      this.validSelectedCells().map((cell) => this.cellSelectionKey(cell.layerId, cell.frame)),
+    );
     return html`
       <div class="anim-matrix ${this.matrixHeightPx === null ? "" : "sized"}" data-testid="animation-matrix" aria-label=${tr("matrix.matrixAria")} ?hidden=${this.uiHidden}
         style=${this.matrixHeightPx === null ? "" : `height: ${this.matrixHeightPx}px;`}
@@ -5313,9 +5341,10 @@ export class GnumarusShell extends LitElement {
                   const isCurrent = cell.frame === matrix.currentFrame;
                   const inAnimation = activeFrames !== null && activeFrames.has(cell.frame);
                   const label = cell.contentName ?? tr("matrix.emptyCell");
+                  const cellSelected = selectedCellKeys.has(this.cellSelectionKey(cell.layerId, cell.frame));
                   return html`
                     <div
-                      class="anim-cell ${cell.contentId !== null ? "filled" : ""} ${isCurrent ? "current-frame" : ""} ${isActive ? "active-cell" : ""} ${inAnimation ? "in-animation" : ""}"
+                      class="anim-cell ${cell.contentId !== null ? "filled" : ""} ${isCurrent ? "current-frame" : ""} ${isActive ? "active-cell" : ""} ${inAnimation ? "in-animation" : ""} ${cellSelected ? "selected" : ""}"
                       data-testid="anim-cell"
                       data-matrix-layer=${cell.layerId}
                       data-matrix-frame=${cell.frame}
@@ -5331,7 +5360,8 @@ export class GnumarusShell extends LitElement {
                         frame: cell.frame + 1,
                         label,
                       })}
-                      @click=${(): void => this.onCellClick(cell.layerId, cell.frame)}
+                      @click=${(event: MouseEvent): void =>
+                        this.onSelectCellClick(cell.layerId, cell.frame, event.shiftKey, event.ctrlKey || event.metaKey)}
                       @keydown=${(event: KeyboardEvent): void => {
                         if (event.key === "Enter" || event.key === " ") {
                           event.preventDefault();
@@ -5392,6 +5422,19 @@ export class GnumarusShell extends LitElement {
         </div>
       `;
     }
+    if (this.matrixMenu.kind === "cells") {
+      const cells = this.matrixMenu.cells;
+      return html`
+        <div class="context-blocker" @click=${(): void => this.closeMatrixMenu()} @contextmenu=${(event: Event): void => {
+          event.preventDefault();
+          this.closeMatrixMenu();
+        }}></div>
+        <div class="context-menu" style="left: ${this.matrixMenu.x}px; top: ${this.matrixMenu.y}px;">
+          <button @click=${(): void => this.unlinkCellContent(cells)}>${tr("action.unlinkCells")}</button>
+          <button @click=${(): void => this.openRelinkDialog(cells)}>${tr("action.relinkCells")}</button>
+        </div>
+      `;
+    }
     const menu = this.matrixMenu;
     const cellTextureId =
       menu.kind === "cell" ? this.engine.getCellTextureId(menu.layerId, menu.frame) : null;
@@ -5425,6 +5468,22 @@ export class GnumarusShell extends LitElement {
         </button>
         <button ?disabled=${cellTextureId === null} @click=${(): void => void this.runAction("adjust-invert")}>
           ${tr("ctx.invertColors")}
+        </button>
+        <button @click=${(): void => {
+          const target = this.matrixCellTarget();
+          if (target !== null) {
+            this.unlinkCellContent([target]);
+          }
+        }}>
+          ${tr("action.unlinkCells")}
+        </button>
+        <button @click=${(): void => {
+          const target = this.matrixCellTarget();
+          if (target !== null) {
+            this.openRelinkDialog([target]);
+          }
+        }}>
+          ${tr("action.relinkCells")}
         </button>
       </div>
     `;
@@ -6350,6 +6409,22 @@ export class GnumarusShell extends LitElement {
       requirements: [],
       run: (): void => {
         void this.reloadAllTextures();
+      },
+    });
+    this.actionRegistry.register({
+      id: "unlink-cell-content",
+      name: tr("action.unlinkCells"),
+      requirements: [],
+      run: (): void => {
+        this.unlinkCellContent(this.resolveCellActionTargets());
+      },
+    });
+    this.actionRegistry.register({
+      id: "relink-cell-content",
+      name: tr("action.relinkCells"),
+      requirements: [],
+      run: (): void => {
+        this.openRelinkDialog(this.resolveCellActionTargets());
       },
     });
   }
@@ -9321,32 +9396,10 @@ export class GnumarusShell extends LitElement {
     if (this.engine === null) {
       return;
     }
-    const oldLayer = this.engine.getActiveLayerId();
-    const oldFrame = this.engine.getCurrentFrame();
-    const layerChanged = layerId !== oldLayer;
-    const frameChanged = frame !== oldFrame;
-    if (!layerChanged && !frameChanged) {
-      return;
-    }
-    if (layerChanged) {
-      this.engine.setActiveLayer(layerId);
-      this.selectSingleLayer(layerId);
-    }
-    if (frameChanged) {
-      this.engine.setCurrentFrame(frame);
-      this.selectSingleFrame(frame);
-    }
-    this.refreshLayers();
-    const activeIndex = this.layers.findIndex((layer) => layer.id === this.engine?.getActiveLayerId());
-    const active = activeIndex < 0 ? undefined : this.layers[activeIndex];
-    const count = this.engine.getFrameCount();
-    if (layerChanged && frameChanged && active !== undefined) {
-      this.showToast(`${this.layerToastFor(activeIndex, this.layers.length, active.name)} — ${this.frameToastFor(frame, count)}`);
-    } else if (layerChanged && active !== undefined) {
-      this.showToast(this.layerToastFor(activeIndex, this.layers.length, active.name));
-    } else if (frameChanged) {
-      this.showToast(this.frameToastFor(frame, count));
-    }
+    // A plain click replaces the cell selection, then navigates.
+    this.selectSingleCell(layerId, frame);
+    const { layerChanged, frameChanged } = this.navigateToCell(layerId, frame);
+    this.toastCellNavigation(layerChanged, frameChanged, layerId, frame);
   }
 
   private onSelectFrame(frame: number): void {
@@ -9520,6 +9573,133 @@ export class GnumarusShell extends LitElement {
     }
   }
 
+  /** Key for cell membership tests. */
+  private cellSelectionKey(layerId: string, frame: number): string {
+    return `${layerId}:${frame}`;
+  }
+
+  /** Selected cells restricted to existing layers and frames. */
+  private validSelectedCells(): Array<{ layerId: string; frame: number }> {
+    const ids = new Set(this.layers.map((layer) => layer.id));
+    const count = this.engine?.getFrameCount() ?? 0;
+    return this.selectedCells.filter(
+      (cell) => ids.has(cell.layerId) && Number.isInteger(cell.frame) && cell.frame >= 0 && cell.frame < count,
+    );
+  }
+
+  /** Collapse the cell selection onto one cell (plain click paths). */
+  private selectSingleCell(layerId: string, frame: number): void {
+    this.cellAnchor = { layerId, frame };
+    this.selectedCells = [{ layerId, frame }];
+  }
+
+  /** Move the active layer/frame onto the cell; returns what changed. */
+  private navigateToCell(
+    layerId: string,
+    frame: number,
+  ): { layerChanged: boolean; frameChanged: boolean } {
+    if (this.engine === null) {
+      return { layerChanged: false, frameChanged: false };
+    }
+    const oldLayer = this.engine.getActiveLayerId();
+    const oldFrame = this.engine.getCurrentFrame();
+    const layerChanged = layerId !== oldLayer;
+    const frameChanged = frame !== oldFrame;
+    if (layerChanged) {
+      this.engine.setActiveLayer(layerId);
+      this.selectSingleLayer(layerId);
+    }
+    if (frameChanged) {
+      this.engine.setCurrentFrame(frame);
+      this.selectSingleFrame(frame);
+    }
+    if (layerChanged || frameChanged) {
+      this.refreshLayers();
+    }
+    return { layerChanged, frameChanged };
+  }
+
+  /** Toasts for cell navigation (shared by plain and single-result clicks). */
+  private toastCellNavigation(
+    layerChanged: boolean,
+    frameChanged: boolean,
+    layerId: string,
+    frame: number,
+  ): void {
+    if (!layerChanged && !frameChanged) {
+      return;
+    }
+    const activeIndex = this.layers.findIndex((layer) => layer.id === layerId);
+    const active = activeIndex < 0 ? undefined : this.layers[activeIndex];
+    const count = this.engine?.getFrameCount() ?? frame + 1;
+    if (layerChanged && frameChanged && active !== undefined) {
+      this.showToast(`${this.layerToastFor(activeIndex, this.layers.length, active.name)} — ${this.frameToastFor(frame, count)}`);
+    } else if (layerChanged && active !== undefined) {
+      this.showToast(this.layerToastFor(activeIndex, this.layers.length, active.name));
+    } else if (frameChanged) {
+      this.showToast(this.frameToastFor(frame, count));
+    }
+  }
+
+  /** Status + toast describing the current cell selection. */
+  private reportCellSelection(
+    layerChanged: boolean,
+    frameChanged: boolean,
+    layerId: string,
+    frame: number,
+  ): void {
+    const valid = this.validSelectedCells();
+    if (valid.length > 1) {
+      this.statusMessage = tr("status.cellsSelected", { count: valid.length });
+      this.showToast(tr("status.cellsSelected", { count: valid.length }));
+      return;
+    }
+    this.toastCellNavigation(layerChanged, frameChanged, layerId, frame);
+  }
+
+  /** Click (plain/Ctrl/Shift) on a matrix cell. */
+  private onSelectCellClick(layerId: string, frame: number, shiftKey: boolean, ctrlKey: boolean): void {
+    if (this.engine === null) {
+      return;
+    }
+    if (!shiftKey && !ctrlKey) {
+      this.onCellClick(layerId, frame);
+      return;
+    }
+    const clicked = { layerId, frame };
+    if (ctrlKey && !shiftKey) {
+      // Toggle membership, keeping everything else; the anchor follows so a
+      // later Shift+click extends from the last touched cell.
+      this.cellAnchor = { ...clicked };
+      const key = this.cellSelectionKey(layerId, frame);
+      const valid = this.validSelectedCells();
+      this.selectedCells = valid.some((cell) => this.cellSelectionKey(cell.layerId, cell.frame) === key)
+        ? valid.filter((cell) => this.cellSelectionKey(cell.layerId, cell.frame) !== key)
+        : [...valid, clicked];
+      const { layerChanged, frameChanged } = this.navigateToCell(layerId, frame);
+      this.dirty = true;
+      this.reportCellSelection(layerChanged, frameChanged, layerId, frame);
+      return;
+    }
+    // Shift (with or without Ctrl): replace with the anchor..clicked rectangle;
+    // the anchor follows so consecutive Shift+clicks chain from the last cell.
+    const rows = this.engine.getAnimationMatrix().rows.map((row) => row.layerId);
+    const anchor = this.cellAnchor ?? {
+      layerId: this.engine.getActiveLayerId(),
+      frame: this.engine.getCurrentFrame(),
+    };
+    const rect = cellRectCells(anchor, clicked, rows, this.engine.getFrameCount());
+    if (rect.length === 0) {
+      this.onCellClick(layerId, frame);
+      return;
+    }
+    this.cellAnchor = { ...clicked };
+    this.selectedCells = rect;
+    const { layerChanged, frameChanged } = this.navigateToCell(layerId, frame);
+    this.dirty = true;
+    this.reportCellSelection(layerChanged, frameChanged, layerId, frame);
+  }
+
   private onAddFrame(): void {
     if (this.engine === null) {
       return;
@@ -9576,6 +9756,16 @@ export class GnumarusShell extends LitElement {
 
   private openMatrixCellMenu(layerId: string, frame: number, clientX: number, clientY: number): void {
     this.closeLayerMenu();
+    // Right-clicking a member of a multi-cell selection opens the bulk menu
+    // (only unlink/relink apply to cell sets); otherwise the selection
+    // collapses onto the clicked cell like the frame menu does.
+    const selected = this.validSelectedCells();
+    const key = this.cellSelectionKey(layerId, frame);
+    if (selected.length > 1 && selected.some((cell) => this.cellSelectionKey(cell.layerId, cell.frame) === key)) {
+      this.matrixMenu = { kind: "cells", cells: selected, x: clientX, y: clientY };
+      return;
+    }
+    this.selectSingleCell(layerId, frame);
     this.matrixMenu = { kind: "cell", layerId, frame, x: clientX, y: clientY };
   }
 
@@ -9826,6 +10016,9 @@ export class GnumarusShell extends LitElement {
       <dialog id="contentPickerDialog" @close=${(): void => this.onContentPickerClosed()}>
         <h3>${tr("matrix.selectContent")}</h3>
         <div class="picker-grid" data-testid="content-picker-grid">
+          ${this.contentPickerMode === "relink"
+            ? html``
+            : html`
           <button
             class="picker-item"
             data-testid="content-picker-none"
@@ -9842,6 +10035,7 @@ export class GnumarusShell extends LitElement {
             <span class="picker-empty" aria-hidden="true">+</span>
             <span class="picker-name">${tr("dialog.newContent")}</span>
           </button>
+              `}
           <button
             class="picker-item"
             data-testid="content-picker-new-text"
@@ -9956,6 +10150,64 @@ export class GnumarusShell extends LitElement {
     `;
   }
 
+  /** Targets for cell-content actions: the valid selection, else the current cell. */
+  private resolveCellActionTargets(): Array<{ layerId: string; frame: number }> {
+    const selected = this.validSelectedCells();
+    if (selected.length > 0) {
+      return selected;
+    }
+    if (this.engine === null) {
+      return [];
+    }
+    return [{ layerId: this.engine.getActiveLayerId(), frame: this.engine.getCurrentFrame() }];
+  }
+
+  /**
+   * Dissociate the content of every target cell (bulk menu, single menu and
+   * the run-action palette share this). Single empty cell: error toast.
+   */
+  private unlinkCellContent(targets: Array<{ layerId: string; frame: number }>): void {
+    this.closeMatrixMenu();
+    if (this.engine === null || targets.length === 0) {
+      this.showToast(tr("status.cellEmpty"));
+      return;
+    }
+    let count = 0;
+    for (const target of targets) {
+      if (this.engine.dissociateCellContent(target.layerId, target.frame)) {
+        count += 1;
+      }
+    }
+    this.refreshLayers();
+    this.dirty = true;
+    if (count === 0) {
+      this.showToast(tr(targets.length > 1 ? "status.nothingToUnlink" : "status.cellEmpty"));
+      return;
+    }
+    if (targets.length === 1) {
+      this.statusMessage = tr("status.cellDissociated");
+      return;
+    }
+    this.statusMessage = tr("status.cellsUnlinked", { count });
+    this.showToast(tr("status.cellsUnlinked", { count }));
+  }
+
+  /** Open the content picker in relink mode for the target cells. */
+  private openRelinkDialog(targets: Array<{ layerId: string; frame: number }>): void {
+    this.closeMatrixMenu();
+    if (this.engine === null || targets.length === 0) {
+      this.showToast(tr("status.cellEmpty"));
+      return;
+    }
+    this.relinkTargets = targets.map((target) => ({ ...target }));
+    this.contentPickerMode = "relink";
+    this.requestUpdate();
+    void this.updateComplete.then(() => {
+      const dialog = this.shadowRoot?.getElementById("contentPickerDialog") as HTMLDialogElement | null;
+      dialog?.showModal();
+    });
+  }
+
   private async onOpenContentPicker(): Promise<void> {
     const target = this.matrixCellTarget();
     this.closeMatrixMenu();
@@ -9970,15 +10222,23 @@ export class GnumarusShell extends LitElement {
 
   private onContentPickerClosed(): void {
     this.contentPickerTarget = null;
+    this.contentPickerMode = "single";
+    this.relinkTargets = null;
   }
 
   private closeContentPicker(): void {
     const dialog = this.shadowRoot?.getElementById("contentPickerDialog") as HTMLDialogElement | null;
     dialog?.close();
     this.contentPickerTarget = null;
+    this.contentPickerMode = "single";
+    this.relinkTargets = null;
   }
 
   private onContentPickerSelect(contentId: string): void {
+    if (this.contentPickerMode === "relink") {
+      this.onRelinkPickerSelect(contentId);
+      return;
+    }
     const target = this.contentPickerTarget;
     if (target === null || this.engine === null) {
       this.closeContentPicker();
@@ -10027,6 +10287,62 @@ export class GnumarusShell extends LitElement {
       this.refreshLayers();
       this.dirty = true;
       this.statusMessage = tr("status.contentAssociated");
+    } else {
+      this.statusMessage = tr("status.contentSame");
+    }
+    this.closeContentPicker();
+  }
+
+  /**
+   * Content choice while the picker runs in relink mode: every relink
+   * target ends up sharing the same content. The none/new options are
+   * hidden in this mode; new-text creates on the first target and links
+   * the rest to the created entry.
+   */
+  private onRelinkPickerSelect(contentId: string): void {
+    const targets = this.relinkTargets ?? [];
+    if (targets.length === 0 || this.engine === null) {
+      this.closeContentPicker();
+      return;
+    }
+    if (contentId === "none" || contentId === "new") {
+      this.closeContentPicker();
+      return;
+    }
+    const first = targets[0];
+    if (first === undefined) {
+      this.closeContentPicker();
+      return;
+    }
+    if (contentId === "new-text") {
+      const created = this.engine.createTextContent(first.layerId, first.frame);
+      if (created === null) {
+        this.statusMessage = tr("status.contentCreateFailed");
+        this.closeContentPicker();
+        return;
+      }
+      for (const target of targets.slice(1)) {
+        this.engine.associateCellContent(target.layerId, target.frame, created.contentId);
+      }
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = tr("status.cellsRelinked", { count: targets.length });
+      this.showToast(tr("status.cellsRelinked", { count: targets.length }));
+      this.closeContentPicker();
+      void this.openTextEditor(first.layerId, first.frame, created.contentId, created.textId);
+      return;
+    }
+    let count = 0;
+    for (const target of targets) {
+      if (this.engine.associateCellContent(target.layerId, target.frame, contentId)) {
+        count += 1;
+      }
+    }
+    if (count > 0) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = tr("status.cellsRelinked", { count });
+      this.showToast(tr("status.cellsRelinked", { count }));
     } else {
       this.statusMessage = tr("status.contentSame");
     }

@@ -5548,6 +5548,7 @@ test("quick action palette filters and runs actions", async ({ page }) => {
     "New Project",
     "Open Project",
     "Redo",
+    "Relink cell content",
     "Reload All Textures",
     "Reset Canvas Transform",
     "Save Project",
@@ -5556,6 +5557,7 @@ test("quick action palette filters and runs actions", async ({ page }) => {
     "Shortcuts",
     "Source code",
     "Undo",
+    "Unlink cell content",
   ]);
   await input.fill("xyz-nothing");
   await expect(dialog.locator('[data-testid="action-palette-empty"]')).toBeVisible();
@@ -12756,6 +12758,134 @@ test("bulk delete removes selected layers keeping one @recent", async ({ page })
   await page.locator('gnumarus-shell [data-testid="anim-layer-name"][data-matrix-layer="layer2"]').click({ modifiers: ["Control"] });
   await page.locator('gnumarus-shell [data-testid="anim-layer-name"][data-matrix-layer="layer2"]').click({ button: "right" });
   await expect(page.locator("gnumarus-shell .context-menu").getByRole("button", { name: "Delete layer" })).toBeVisible();
+});
+
+test("matrix cells multi-select with plain, ctrl and shift clicks @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await page.getByRole("button", { name: "Add frame", exact: true }).click();
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  const cell = (layer: string, frame: number): import("@playwright/test").Locator =>
+    matrix.locator(`[data-testid="anim-cell"][data-matrix-layer="${layer}"][data-matrix-frame="${frame}"]`);
+  const selectedCells = page.locator('gnumarus-shell [data-testid="anim-cell"].selected');
+  await cell("layer1", 1).click();
+  await expect(selectedCells).toHaveCount(1);
+  await cell("layer0", 0).click({ modifiers: ["Control"] });
+  await expect(page.locator("gnumarus-shell")).toContainText("2 cells selected");
+  await expect(selectedCells).toHaveCount(2);
+  // Shift+click replaces with the anchor..clicked rectangle (2 layers x 2 frames).
+  await cell("layer1", 1).click({ modifiers: ["Shift"] });
+  await expect(page.locator("gnumarus-shell")).toContainText("4 cells selected");
+  await expect(selectedCells).toHaveCount(4);
+  // Right-clicking a member of a multi-cell selection shows only set actions.
+  await cell("layer0", 0).click({ button: "right" });
+  await expect(page.locator("gnumarus-shell .context-menu").getByRole("button")).toHaveText([
+    "Unlink cell content",
+    "Relink cell content",
+  ]);
+  await page.keyboard.press("Escape");
+  // Right-clicking outside the selection falls back to the single-cell menu.
+  await cell("layer1", 0).click();
+  await expect(selectedCells).toHaveCount(1);
+  await cell("layer0", 1).click({ button: "right" });
+  await expect(
+    page.locator("gnumarus-shell .context-menu").getByRole("button", { name: "Select content" }),
+  ).toBeVisible();
+  await expect(
+    page.locator("gnumarus-shell .context-menu").getByRole("button", { name: "Unlink cell content" }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+});
+
+test("unlink cell content action dissociates selected cells @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await paintCenter(page);
+  await page.getByRole("button", { name: "Add frame", exact: true }).click();
+  await paintCenter(page);
+  let matrixState = await getMatrix(page);
+  expect(matrixState.rows[0]?.cells.map((entry) => entry.contentId !== null)).toEqual([true, true]);
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  const cell = (frame: number): import("@playwright/test").Locator =>
+    matrix.locator(`[data-testid="anim-cell"][data-matrix-layer="layer0"][data-matrix-frame="${frame}"]`);
+  await cell(0).click();
+  await cell(1).click({ modifiers: ["Control"] });
+  await page.keyboard.press("Control+Shift+P");
+  const dialog = page.locator("gnumarus-shell dialog#actionPaletteDialog");
+  await dialog.locator('[data-testid="action-palette-input"]').fill("unlink");
+  await dialog.locator('[data-testid="action-palette-item"][data-action-id="unlink-cell-content"]').click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Unlinked 2 cells");
+  matrixState = await getMatrix(page);
+  expect(matrixState.rows[0]?.cells.map((entry) => entry.contentId)).toEqual([null, null]);
+  // Nothing left to unlink across the still-selected cells.
+  await page.keyboard.press("Control+Shift+P");
+  await dialog.locator('[data-testid="action-palette-input"]').fill("unlink");
+  await dialog.locator('[data-testid="action-palette-item"][data-action-id="unlink-cell-content"]').click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Nothing to unlink");
+  // A single empty current cell reports the empty-cell error.
+  await cell(0).click();
+  await page.keyboard.press("Control+Shift+P");
+  await dialog.locator('[data-testid="action-palette-input"]').fill("unlink");
+  await dialog.locator('[data-testid="action-palette-item"][data-action-id="unlink-cell-content"]').click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Cell is already empty");
+});
+
+test("relink cell content action shares one content across cells @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await paintCenter(page);
+  await page.getByRole("button", { name: "Add frame", exact: true }).click();
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  const cell = (frame: number): import("@playwright/test").Locator =>
+    matrix.locator(`[data-testid="anim-cell"][data-matrix-layer="layer0"][data-matrix-frame="${frame}"]`);
+  // Orphan the frame-0 content so neither target uses it afterwards.
+  await cell(0).click();
+  await page.keyboard.press("Control+Shift+P");
+  const palette = page.locator("gnumarus-shell dialog#actionPaletteDialog");
+  await palette.locator('[data-testid="action-palette-input"]').fill("unlink");
+  await palette.locator('[data-testid="action-palette-item"][data-action-id="unlink-cell-content"]').click();
+  let matrixState = await getMatrix(page);
+  expect(matrixState.rows[0]?.cells.map((entry) => entry.contentId)).toEqual([null, null]);
+  await cell(0).click();
+  await cell(1).click({ modifiers: ["Control"] });
+  await page.keyboard.press("Control+Shift+P");
+  await palette.locator('[data-testid="action-palette-input"]').fill("relink");
+  await palette.locator('[data-testid="action-palette-item"][data-action-id="relink-cell-content"]').click();
+  const picker = page.locator("gnumarus-shell dialog#contentPickerDialog");
+  await expect(picker).toBeVisible();
+  await expect(picker.locator('[data-testid="content-picker-none"]')).toHaveCount(0);
+  await expect(picker.locator('[data-testid="content-picker-new"]')).toHaveCount(0);
+  await picker.locator('[data-testid="content-picker-item"]').first().click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Relinked 2 cells to the same content");
+  matrixState = await getMatrix(page);
+  const contents = matrixState.rows[0]?.cells.map((entry) => entry.contentId) ?? [];
+  expect(contents).toHaveLength(2);
+  expect(contents[0]).not.toBeNull();
+  expect(contents[0]).toBe(contents[1]);
+});
+
+test("onion toggle tooltip and single-line animation controls @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await expect(page.locator('gnumarus-shell [data-testid="onion-toggle"]')).toHaveAttribute("title", "Onion skin");
+  const overlap = await page.evaluate(() => {
+    const root = document.querySelector("gnumarus-shell")?.shadowRoot;
+    const corner = root?.querySelector(".anim-corner");
+    const boxes = Array.from(corner?.children ?? []).map((element) => {
+      const rect = (element as HTMLElement).getBoundingClientRect();
+      return { top: rect.top, bottom: rect.bottom };
+    });
+    if (boxes.length === 0) {
+      return null;
+    }
+    return Math.max(...boxes.map((box) => box.top)) < Math.min(...boxes.map((box) => box.bottom));
+  });
+  expect(overlap).toBe(true);
 });
 
 test("Ctrl+Shift+Arrows create layers and frames @recent", async ({ page }) => {

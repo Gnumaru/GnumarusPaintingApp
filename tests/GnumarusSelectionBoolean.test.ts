@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   blurSelectionMask,
+  cellRectCells,
   clampSelectionRect,
   colorDistanceRGBA,
   colorSelectTolerance,
@@ -270,5 +271,28 @@ describe("GnumarusMultiSelection", () => {
     expect(clamped?.minX).toBe(0);
     expect(clamped?.minY).toBe(0);
     expect(previewEllipseSelection(70, 70, 80, 80, 64, 64)).toBeNull();
+  });
+
+  it("collects cell rectangles in visual row order", () => {
+    const order = ["bottom", "middle", "top"];
+    expect(cellRectCells({ layerId: "middle", frame: 1 }, { layerId: "middle", frame: 1 }, order, 4)).toEqual([
+      { layerId: "middle", frame: 1 },
+    ]);
+    // Corner order does not matter; rows follow the given order.
+    expect(cellRectCells({ layerId: "top", frame: 0 }, { layerId: "bottom", frame: 2 }, order, 4)).toEqual([
+      { layerId: "bottom", frame: 0 },
+      { layerId: "bottom", frame: 1 },
+      { layerId: "bottom", frame: 2 },
+      { layerId: "middle", frame: 0 },
+      { layerId: "middle", frame: 1 },
+      { layerId: "middle", frame: 2 },
+      { layerId: "top", frame: 0 },
+      { layerId: "top", frame: 1 },
+      { layerId: "top", frame: 2 },
+    ]);
+    // Unknown layers or out-of-range frames yield nothing.
+    expect(cellRectCells({ layerId: "ghost", frame: 0 }, { layerId: "top", frame: 0 }, order, 4)).toEqual([]);
+    expect(cellRectCells({ layerId: "top", frame: 0 }, { layerId: "top", frame: 9 }, order, 4)).toEqual([]);
+    expect(cellRectCells({ layerId: "top", frame: 0 }, { layerId: "top", frame: 1 }, order, 0)).toEqual([]);
   });
 });
