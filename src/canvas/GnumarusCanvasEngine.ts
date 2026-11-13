@@ -10420,7 +10420,9 @@ export class GnumarusCanvasEngine {
   ): boolean {
     const floating = this.combinableFloating(tex);
     if (floating === null) {
-      return false;
+      // Combining with nothing yields the drawn shape itself, exactly like
+      // the rectangular tool's cut fallback.
+      return this.cutMaskToFloating(tex, nx, ny, nw, nh, newMask);
     }
     if (nw < 1 || nh < 1 || newMask.length !== nw * nh || countSelectionMask(newMask) === 0) {
       if (mode === "intersect") {
@@ -14509,8 +14511,8 @@ export class GnumarusCanvasEngine {
       if (this.rectDrag !== null) {
         const target = this.clientToLayerImageFloat(event.clientX, event.clientY);
         if (target !== null) {
-          // Shift locks the mark to a perfect square, live per move.
-          const end = event.shiftKey
+          // Alt locks the mark to a perfect square, live per move.
+          const end = event.altKey
             ? constrainSquareDrag(this.rectDrag.x0, this.rectDrag.y0, Math.floor(target.x), Math.floor(target.y))
             : { x1: Math.floor(target.x), y1: Math.floor(target.y) };
           this.rectDrag.x1 = end.x1;
@@ -14523,8 +14525,8 @@ export class GnumarusCanvasEngine {
       if (this.ellipseDrag !== null) {
         const target = this.clientToLayerImageFloat(event.clientX, event.clientY);
         if (target !== null) {
-          // Shift locks the mark to a perfect circle, live per move.
-          const end = event.shiftKey
+          // Alt locks the mark to a perfect circle, live per move.
+          const end = event.altKey
             ? constrainSquareDrag(this.ellipseDrag.x0, this.ellipseDrag.y0, Math.floor(target.x), Math.floor(target.y))
             : { x1: Math.floor(target.x), y1: Math.floor(target.y) };
           this.ellipseDrag.x1 = end.x1;
@@ -14608,9 +14610,9 @@ export class GnumarusCanvasEngine {
       if (this.shapeDrag !== null) {
         const target = this.clientToLayerImageFloat(event.clientX, event.clientY);
         if (target !== null) {
-          // Shift locks rectangle/ellipse to a perfect square/circle, live per move.
+          // Alt locks rectangle/ellipse to a perfect square/circle, live per move.
           const end =
-            event.shiftKey && (this.shapeDrag.tool === "rectangle" || this.shapeDrag.tool === "ellipseShape")
+            event.altKey && (this.shapeDrag.tool === "rectangle" || this.shapeDrag.tool === "ellipseShape")
               ? constrainSquareDrag(this.shapeDrag.x0, this.shapeDrag.y0, target.x, target.y)
               : { x1: target.x, y1: target.y };
           this.shapeDrag.x1 = end.x1;

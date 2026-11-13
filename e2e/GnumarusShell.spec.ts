@@ -13004,7 +13004,7 @@ test("shape preview hides when switching tools mid-drag @recent", async ({ page 
   expect(await paintedPixelCount(page)).toBe(0);
 });
 
-test("rectangular selection with Shift cuts a perfect square @recent", async ({ page }) => {
+test("rectangular selection with Alt cuts a perfect square @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -13014,12 +13014,12 @@ test("rectangular selection with Shift cuts a perfect square @recent", async ({ 
   await page.keyboard.press("r");
   const from = await layerScreenTarget(page, 10, 10);
   const to = await layerScreenTarget(page, 30, 15);
-  await page.keyboard.down("Shift");
+  await page.keyboard.down("Alt");
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   await page.mouse.move(to.x, to.y, { steps: 5 });
   await page.mouse.up();
-  await page.keyboard.up("Shift");
+  await page.keyboard.up("Alt");
   const selection = await getFloatingSelection(page);
   expect(selection).not.toBeNull();
   // Drag spans 20 wide by 5 tall; Shift locks the side to 20 (21px inclusive).
@@ -13027,7 +13027,7 @@ test("rectangular selection with Shift cuts a perfect square @recent", async ({ 
   expect(selection?.height).toBe(21);
 });
 
-test("elliptical selection with Shift cuts a perfect circle @recent", async ({ page }) => {
+test("elliptical selection with Alt cuts a perfect circle @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -13037,14 +13037,12 @@ test("elliptical selection with Shift cuts a perfect circle @recent", async ({ p
   await page.keyboard.press("o");
   const from = await layerScreenTarget(page, 10, 10);
   const to = await layerScreenTarget(page, 30, 15);
-  await page.keyboard.down("Shift");
+  await page.keyboard.down("Alt");
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   await page.mouse.move(to.x, to.y, { steps: 5 });
-  // The lock applied during the moves; release Shift so mouse.up cuts
-  // instead of combining with the (empty) floating selection.
-  await page.keyboard.up("Shift");
   await page.mouse.up();
+  await page.keyboard.up("Alt");
   const selection = await getFloatingSelection(page);
   expect(selection).not.toBeNull();
   expect(selection?.width).toBe(21);
@@ -13052,7 +13050,7 @@ test("elliptical selection with Shift cuts a perfect circle @recent", async ({ p
   expect(selection?.selected ?? 0).toBeGreaterThan(0);
 });
 
-test("rectangle shape with Shift draws a perfect square @recent", async ({ page }) => {
+test("rectangle shape with Alt draws a perfect square @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -13060,18 +13058,18 @@ test("rectangle shape with Shift draws a perfect square @recent", async ({ page 
   await page.locator("gnumarus-shell input#shapeFilled").click();
   const a = await layerToScreen(page, 20, 20);
   const b = await layerToScreen(page, 35, 25);
-  await page.keyboard.down("Shift");
+  await page.keyboard.down("Alt");
   await page.mouse.move(a.x, a.y);
   await page.mouse.down();
   await page.mouse.move(b.x, b.y, { steps: 5 });
   await page.mouse.up();
-  await page.keyboard.up("Shift");
+  await page.keyboard.up("Alt");
   // Without the lock the box would end at y 25; locked it spans 20..35.
   expect(await readPixel(page, 30, 30)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 19, 19)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
 });
 
-test("ellipse shape with Shift draws a perfect circle @recent", async ({ page }) => {
+test("ellipse shape with Alt draws a perfect circle @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await setPencil(page, "#ff0000");
@@ -13079,12 +13077,12 @@ test("ellipse shape with Shift draws a perfect circle @recent", async ({ page })
   await page.locator("gnumarus-shell input#shapeFilled").click();
   const a = await layerToScreen(page, 18, 18);
   const b = await layerToScreen(page, 46, 26);
-  await page.keyboard.down("Shift");
+  await page.keyboard.down("Alt");
   await page.mouse.move(a.x, a.y);
   await page.mouse.down();
   await page.mouse.move(b.x, b.y, { steps: 5 });
   await page.mouse.up();
-  await page.keyboard.up("Shift");
+  await page.keyboard.up("Alt");
   // Without the lock the ellipse would end at y 26; locked it spans 18..46.
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 17, 17)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
