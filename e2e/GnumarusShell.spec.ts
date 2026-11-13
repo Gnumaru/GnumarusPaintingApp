@@ -13087,3 +13087,103 @@ test("ellipse shape with Alt draws a perfect circle @recent", async ({ page }) =
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 17, 17)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
 });
+
+test("menubar menus render above floating windows @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Final preview" }).click();
+  const preview = page.locator("gnumarus-shell [data-testid='final-preview']");
+  await expect(preview).toBeVisible();
+  // Drag the window to the canvas top-left, under the File dropdown.
+  const header = preview.locator(".preview-header");
+  const headerBox = await header.boundingBox();
+  const canvas = page.locator("gnumarus-shell canvas[data-engine]");
+  const canvasBox = await canvas.boundingBox();
+  if (headerBox === null || canvasBox === null) {
+    throw new Error("preview header or canvas has no bounding box");
+  }
+  await page.mouse.move(headerBox.x + headerBox.width / 2, headerBox.y + headerBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(canvasBox.x + 40, canvasBox.y + 10, { steps: 5 });
+  await page.mouse.up();
+  await page.getByRole("button", { name: "File" }).click();
+  const item = page.locator("gnumarus-shell").getByRole("button", { name: "Export project" });
+  await expect(item).toBeVisible();
+  const itemBox = await item.boundingBox();
+  const previewBox = await preview.boundingBox();
+  if (itemBox === null || previewBox === null) {
+    throw new Error("menu item or preview has no bounding box");
+  }
+  const cx = itemBox.x + itemBox.width / 2;
+  const cy = itemBox.y + itemBox.height / 2;
+  // Guard: the geometries really overlap, or the test would pass trivially.
+  expect(cx).toBeGreaterThanOrEqual(previewBox.x);
+  expect(cx).toBeLessThanOrEqual(previewBox.x + previewBox.width);
+  expect(cy).toBeGreaterThanOrEqual(previewBox.y);
+  expect(cy).toBeLessThanOrEqual(previewBox.y + previewBox.height);
+  const hit = await page.evaluate(([x, y]: [number, number]) => {
+    const root = document.querySelector("gnumarus-shell")?.shadowRoot ?? null;
+    const picker = root as unknown as { elementFromPoint(a: number, b: number): Element | null } | null;
+    const el = picker?.elementFromPoint(x, y) as HTMLElement | null;
+    if (el === null || el === undefined) {
+      return "none";
+    }
+    return el.textContent?.trim() ?? el.tagName;
+  }, [cx, cy] as [number, number]);
+  expect(hit).toBe("Export project");
+});
+
+test("tool drawer flyouts render above floating windows @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Final preview" }).click();
+  const preview = page.locator("gnumarus-shell [data-testid='final-preview']");
+  await expect(preview).toBeVisible();
+  await page.locator('gnumarus-shell [data-testid="paint-drawer"] > button').click({ button: "right" });
+  const flyout = page.locator('gnumarus-shell [data-testid="paint-flyout"]');
+  await expect(flyout).toBeVisible();
+  const flyBox = await flyout.boundingBox();
+  if (flyBox === null) {
+    throw new Error("flyout has no bounding box");
+  }
+  // Drag the window over the flyout center (clicks land on the window, which
+  // sits above the drawer blocker, so the flyout stays open).
+  const header = preview.locator(".preview-header");
+  const headerBox = await header.boundingBox();
+  const previewBoxBefore = await preview.boundingBox();
+  if (headerBox === null || previewBoxBefore === null) {
+    throw new Error("preview header or window has no bounding box");
+  }
+  const targetX = flyBox.x + flyBox.width / 2;
+  const targetY = flyBox.y + flyBox.height / 2;
+  await page.mouse.move(headerBox.x + headerBox.width / 2, headerBox.y + headerBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(
+    headerBox.x + headerBox.width / 2 + (targetX - 50 - previewBoxBefore.x),
+    headerBox.y + headerBox.height / 2 + (targetY - 50 - previewBoxBefore.y),
+    { steps: 5 },
+  );
+  await page.mouse.up();
+  await expect(flyout).toBeVisible();
+  const previewBox = await preview.boundingBox();
+  if (previewBox === null) {
+    throw new Error("preview has no bounding box");
+  }
+  const cx = flyBox.x + flyBox.width / 2;
+  const cy = flyBox.y + flyBox.height / 2;
+  // Guard: the geometries really overlap, or the test would pass trivially.
+  expect(cx).toBeGreaterThanOrEqual(previewBox.x);
+  expect(cx).toBeLessThanOrEqual(previewBox.x + previewBox.width);
+  expect(cy).toBeGreaterThanOrEqual(previewBox.y);
+  expect(cy).toBeLessThanOrEqual(previewBox.y + previewBox.height);
+  const hit = await page.evaluate(([x, y]: [number, number]) => {
+    const root = document.querySelector("gnumarus-shell")?.shadowRoot ?? null;
+    const picker = root as unknown as { elementFromPoint(a: number, b: number): Element | null } | null;
+    const el = picker?.elementFromPoint(x, y) as HTMLElement | null;
+    if (el === null || el === undefined) {
+      return "none";
+    }
+    return el.closest('[data-testid="paint-flyout"]') !== null ? "flyout" : el.tagName;
+  }, [cx, cy] as [number, number]);
+  expect(hit).toBe("flyout");
+});

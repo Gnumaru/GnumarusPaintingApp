@@ -4765,7 +4765,7 @@ return ret;
       border: 1px solid #555;
       border-radius: 4px;
       padding: 4px;
-      z-index: 30;
+      z-index: 50;
     }
     .drawer-blocker {
       position: fixed;
@@ -4790,7 +4790,7 @@ return ret;
       border: 1px solid #111;
       border-radius: 4px;
       padding: 4px;
-      z-index: 20;
+      z-index: 50;
     }
     .dropdown button {
       display: block;
@@ -5213,11 +5213,11 @@ return ret;
     .context-blocker {
       position: fixed;
       inset: 0;
-      z-index: 40;
+      z-index: 60;
     }
     .context-menu {
       position: fixed;
-      z-index: 41;
+      z-index: 61;
       min-width: 160px;
       max-width: min(320px, 90vw);
       max-height: 260px;
