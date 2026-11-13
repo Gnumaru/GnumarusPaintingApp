@@ -38,6 +38,7 @@ import {
   pickSvgFile,
   pickSaveFile,
   readFileBytes,
+  readFileSize,
   readOldProjectFileReferences,
   readProjectFiles,
   readProjectMeta,
@@ -1894,6 +1895,8 @@ export class GnumarusShell extends LitElement {
   private contentManagerData: GnumarusContentSnapshot | null = null;
   /** Resolved 3D-model vertex counts (absent while decoding). */
   private contentManagerVerts = new Map<string, number | null>();
+  /** On-disk byte sizes by texture id (unsaved textures fall back to buffer bytes). */
+  private contentManagerDiskSizes = new Map<string, number>();
   /** Cells to relink while the content picker runs in relink mode. */
   private relinkTargets: Array<{ layerId: string; frame: number }> | null = null;
   declare deleteFramesTarget: number[] | null;
@@ -10090,6 +10093,7 @@ export class GnumarusShell extends LitElement {
     this.closeAllMenus();
     this.contentManagerData = this.engine.getContentManagerData();
     this.contentManagerVerts = new Map();
+    this.contentManagerDiskSizes = new Map();
     this.contentManagerQuery = "";
     this.contentManagerOpen = true;
     const engine = this.engine;
@@ -10101,11 +10105,39 @@ export class GnumarusShell extends LitElement {
         }
       });
     }
+    void this.refreshContentManagerDiskSizes();
     this.requestUpdate();
     void this.updateComplete.then(() => {
       const dialog = this.shadowRoot?.getElementById("contentManagerDialog") as HTMLDialogElement | null;
       dialog?.showModal();
     });
+  }
+
+  /** Resolve on-disk byte sizes for saved textures (best effort, silent). */
+  private async refreshContentManagerDiskSizes(): Promise<void> {
+    if (this.engine === null || this.directoryHandle === null) {
+      return;
+    }
+    let files: Array<{ id: string; file: string }>;
+    try {
+      const project = await readProjectMeta(this.directoryHandle);
+      files = project.animation.textures.map((texture) => ({ id: texture.id, file: texture.file }));
+    } catch {
+      return;
+    }
+    for (const file of files) {
+      try {
+        const size = await readFileSize(this.directoryHandle, file.file);
+        if (size !== null) {
+          this.contentManagerDiskSizes.set(file.id, size);
+        }
+      } catch {
+        // Permission or I/O failure: keep the buffer-byte fallback.
+      }
+    }
+    if (this.contentManagerOpen) {
+      this.requestUpdate();
+    }
   }
 
   private closeContentManager(): void {
@@ -10150,7 +10182,7 @@ export class GnumarusShell extends LitElement {
         kind: "texture",
         id: texture.id,
         name: texture.name,
-        sizeBytes: texture.sizeBytes,
+        sizeBytes: this.contentManagerDiskSizes.get(texture.id) ?? texture.sizeBytes,
         meta: textureMeta(texture.width, texture.height),
         usage: { count: cells.length, cells },
       });

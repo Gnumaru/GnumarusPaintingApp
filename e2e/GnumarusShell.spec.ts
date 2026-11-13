@@ -13035,6 +13035,42 @@ test("content manager search filters by name similarity @recent", async ({ page 
   await expect(dialog.locator('[data-testid="content-manager-section"]')).toHaveText(["Textures (1)"]);
 });
 
+test("content manager shows on-disk sizes for saved textures @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await paintCenter(page);
+  const project = await stubProjectDirectory(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Save Project", exact: true }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  const blobs = await project.writtenBlobs();
+  const textureFile = Object.keys(blobs).find((path) => path.startsWith("textures/"));
+  expect(textureFile).toBeDefined();
+  const fileBytes = blobs[textureFile ?? ""]?.length ?? 0;
+  expect(fileBytes).toBeGreaterThan(0);
+  // The encoded file differs from the raw RGBA buffer (64*64*4).
+  expect(fileBytes).not.toBe(64 * 64 * 4);
+  const formatBytes = (bytes: number): string => {
+    if (bytes < 1024) {
+      return `${bytes} B`;
+    }
+    const kb = bytes / 1024;
+    if (kb < 1024) {
+      return `${Math.round(kb * 10) / 10} KB`;
+    }
+    return `${Math.round((kb / 1024) * 10) / 10} MB`;
+  };
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Content manager" }).click();
+  const dialog = page.locator('gnumarus-shell dialog#contentManagerDialog');
+  await expect(dialog).toBeVisible();
+  const item = dialog.locator('[data-testid="content-manager-item"][data-kind="texture"]');
+  await expect(item).toHaveCount(1);
+  await expect(item).toContainText(formatBytes(fileBytes));
+});
+
 test("new project starts with no textures or contents @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

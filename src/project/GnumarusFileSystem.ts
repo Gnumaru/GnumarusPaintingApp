@@ -14,6 +14,7 @@ interface GnumarusWritableStream {
 
 interface GnumarusPickedFile {
   readonly name: string;
+  readonly size: number;
   text(): Promise<string>;
   arrayBuffer(): Promise<ArrayBuffer>;
 }
@@ -235,6 +236,29 @@ export async function readFileBytes(
   }
   try {
     return new Uint8Array(await (await handle.getFile()).arrayBuffer());
+  } catch (error) {
+    if (missing(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/** Read one file's byte size without loading its contents, or null when missing. Other errors throw. */
+export async function readFileSize(root: GnumarusDirectoryHandle, path: string): Promise<number | null> {
+  const missing = (error: unknown): boolean =>
+    error instanceof DOMException && error.name === "NotFoundError";
+  let handle: GnumarusFileHandle;
+  try {
+    handle = await resolveFile(root, path, false);
+  } catch (error) {
+    if (missing(error)) {
+      return null;
+    }
+    throw error;
+  }
+  try {
+    return (await handle.getFile()).size;
   } catch (error) {
     if (missing(error)) {
       return null;
