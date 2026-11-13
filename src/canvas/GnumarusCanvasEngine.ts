@@ -2651,6 +2651,14 @@ export class GnumarusCanvasEngine {
       }
       return direct;
     };
+    const refsForTilemap = (tilemapId: string): string[] => [...(contentsByTilemap.get(tilemapId) ?? [])];
+    const refsForTexture = (textureId: string): string[] => {
+      const direct = [...(contentsByTexture.get(textureId) ?? [])];
+      for (const tilemapId of tilemapsByTileset.get(textureId) ?? []) {
+        direct.push(...refsForTilemap(tilemapId));
+      }
+      return [...new Set(direct)];
+    };
     return {
       textures: [...this.textures.values()].map((texture) => ({
         id: texture.id,
@@ -2719,6 +2727,23 @@ export class GnumarusCanvasEngine {
         ),
         tilemaps: Object.fromEntries(
           [...this.tilemaps.values()].map((entry) => [entry.id, usageForTilemap(entry.id)]),
+        ),
+      },
+      refs: {
+        textures: Object.fromEntries(
+          [...this.textures.values()].map((texture) => [texture.id, refsForTexture(texture.id)]),
+        ),
+        texts: Object.fromEntries(
+          [...this.texts.values()].map((entry) => [entry.id, [...(contentsByText.get(entry.id) ?? [])]]),
+        ),
+        svgs: Object.fromEntries(
+          [...this.svgs.values()].map((entry) => [entry.id, [...(contentsBySvg.get(entry.id) ?? [])]]),
+        ),
+        models: Object.fromEntries(
+          [...this.models3d.values()].map((entry) => [entry.id, [...(contentsByModel.get(entry.id) ?? [])]]),
+        ),
+        tilemaps: Object.fromEntries(
+          [...this.tilemaps.values()].map((entry) => [entry.id, refsForTilemap(entry.id)]),
         ),
       },
     };

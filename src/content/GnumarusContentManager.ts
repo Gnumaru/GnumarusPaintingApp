@@ -28,6 +28,8 @@ export interface GnumarusManagedItem {
   /** Type-specific metadata line (resolution, vertices, tiles, ...). */
   meta: string;
   usage: GnumarusManagedUsage;
+  /** Cell contents referencing this payload (empty for content rows). */
+  contents: Array<{ id: string; name: string }>;
 }
 
 /** Whole-project snapshot feeding the dialog. */
@@ -53,6 +55,14 @@ export interface GnumarusContentSnapshot {
     svgs: Record<string, GnumarusManagedUsageCell[]>;
     models: Record<string, GnumarusManagedUsageCell[]>;
     tilemaps: Record<string, GnumarusManagedUsageCell[]>;
+  };
+  /** Payload id -> ids of the cell contents referencing it. */
+  refs: {
+    textures: Record<string, string[]>;
+    texts: Record<string, string[]>;
+    svgs: Record<string, string[]>;
+    models: Record<string, string[]>;
+    tilemaps: Record<string, string[]>;
   };
 }
 

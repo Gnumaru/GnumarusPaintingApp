@@ -1636,6 +1636,10 @@ export class GnumarusShell extends LitElement {
     durationTargetFrame: { type: Number },
     durationValue: { type: Number },
     animationInput: { type: String },
+    animationCreateName: { type: String },
+    animationCreateLoop: { type: String },
+    animationCreateError: { type: String },
+    animationCreateFrames: { type: Array },
     animationDeleteTarget: { type: String },
     animationError: { type: String },
     exportFrame: { type: Number },
@@ -1839,6 +1843,10 @@ export class GnumarusShell extends LitElement {
   declare durationTargetFrame: number | null;
   declare durationValue: number | null;
   declare animationInput: string;
+  declare animationCreateName: string;
+  declare animationCreateLoop: string;
+  declare animationCreateError: string | null;
+  declare animationCreateFrames: number[] | null;
   declare animationDeleteTarget: string | null;
   declare animationError: string | null;
   declare exportFrame: number;
@@ -2058,6 +2066,10 @@ export class GnumarusShell extends LitElement {
     this.durationValue = null;
     this.animationInput = "";
     this.animationError = null;
+    this.animationCreateName = "";
+    this.animationCreateLoop = "forward";
+    this.animationCreateError = null;
+    this.animationCreateFrames = null;
     this.animationDeleteTarget = null;
     this.exportFrame = 1;
     this.exportFormat = "image/png";
@@ -3697,6 +3709,52 @@ export class GnumarusShell extends LitElement {
             `,
           )}
         </ul>
+      </dialog>
+      <dialog
+        id="animationCreateDialog"
+        data-testid="animation-create-dialog"
+        @close=${(): void => this.closeNewAnimationDialog()}
+      >
+        <h3>${tr("action.newAnimation")}</h3>
+        <label
+          >${tr("dialog.animName")}
+          <input
+            type="text"
+            id="animationCreateName"
+            data-testid="animation-create-name"
+            maxlength="64"
+            .value=${this.animationCreateName}
+            @input=${(event: Event): void => {
+              this.animationCreateName = (event.target as HTMLInputElement).value;
+            }}
+          />
+        </label>
+        <label
+          >${tr("dialog.animLoop")}
+          <select
+            id="animationCreateLoop"
+            data-testid="animation-create-loop"
+            .value=${this.animationCreateLoop}
+            @change=${(event: Event): void => {
+              this.animationCreateLoop = (event.target as HTMLSelectElement).value;
+            }}
+          >
+            <option value="none">none</option>
+            <option value="forward">forward</option>
+            <option value="ping-pong">ping-pong</option>
+          </select>
+        </label>
+        ${this.animationCreateError !== null
+          ? html`<p class="dialog-error" role="alert" data-testid="animation-create-error">${this.animationCreateError}</p>`
+          : html``}
+        <div class="dialog-actions">
+          <button data-testid="animation-create-cancel" @click=${(): void => this.closeNewAnimationDialog()}>
+            ${tr("btn.cancel")}
+          </button>
+          <button data-testid="animation-create-ok" @click=${(): void => this.confirmNewAnimation()}>
+            ${tr("btn.ok")}
+          </button>
+        </div>
       </dialog>
       <dialog id="animationDeleteDialog" @close=${(): void => this.cancelDeleteAnimation()}>
         <h3>${tr("dialog.deleteAnim")}</h3>
@@ -5472,6 +5530,7 @@ export class GnumarusShell extends LitElement {
           <button @click=${(): void => this.onOpenFrameDuration()}>${tr("matrix.setDuration")}</button>
           <button @click=${(): void => this.onRenameFrameFromMenu()}>${tr("matrix.renameFrame")}</button>
           <button ?disabled=${count <= 1} @click=${(): void => this.onRemoveFrame(frame)}>${tr("matrix.removeFrame")}</button>
+          <button @click=${(): void => this.openNewAnimationDialog([frame])}>${tr("action.newAnimation")}</button>
         </div>
       `;
     }
@@ -5486,6 +5545,7 @@ export class GnumarusShell extends LitElement {
           <button @click=${(): void => this.onDeleteFrames([...frames])}>
             ${tr("matrix.deleteFrames", { count: frames.length })}
           </button>
+          <button @click=${(): void => this.openNewAnimationDialog([...frames])}>${tr("action.newAnimation")}</button>
         </div>
       `;
     }
@@ -6476,6 +6536,14 @@ export class GnumarusShell extends LitElement {
       requirements: [],
       run: (): void => {
         this.cropAllCellsToCanvas();
+      },
+    });
+    this.actionRegistry.register({
+      id: "new-animation",
+      name: tr("action.newAnimation"),
+      requirements: [],
+      run: (): void => {
+        this.openNewAnimationDialog([...this.selectedFrameSet()]);
       },
     });
     this.actionRegistry.register({
@@ -10175,6 +10243,9 @@ export class GnumarusShell extends LitElement {
     if (data === null) {
       return [];
     }
+    const contentName = new Map(data.contents.map((content) => [content.id, content.name] as const));
+    const refContents = (ids: string[] | undefined): Array<{ id: string; name: string }> =>
+      (ids ?? []).map((id) => ({ id, name: contentName.get(id) ?? id }));
     const items: GnumarusManagedItem[] = [];
     for (const texture of data.textures) {
       const cells = data.usage.textures[texture.id] ?? [];
@@ -10185,6 +10256,7 @@ export class GnumarusShell extends LitElement {
         sizeBytes: this.contentManagerDiskSizes.get(texture.id) ?? texture.sizeBytes,
         meta: textureMeta(texture.width, texture.height),
         usage: { count: cells.length, cells },
+        contents: refContents(data.refs.textures[texture.id]),
       });
     }
     for (const content of data.contents) {
@@ -10196,6 +10268,7 @@ export class GnumarusShell extends LitElement {
         sizeBytes: content.sizeBytes,
         meta: this.contentKindLabel(content.kindLabel),
         usage: { count: cells.length, cells },
+        contents: [],
       });
     }
     for (const text of data.texts) {
@@ -10207,6 +10280,7 @@ export class GnumarusShell extends LitElement {
         sizeBytes: text.sizeBytes,
         meta: tr("manager.metaChars", { count: text.charCount }),
         usage: { count: cells.length, cells },
+        contents: refContents(data.refs.texts[text.id]),
       });
     }
     for (const svg of data.svgs) {
@@ -10218,6 +10292,7 @@ export class GnumarusShell extends LitElement {
         sizeBytes: svg.sizeBytes,
         meta: tr("manager.metaElements", { count: svg.elementCount }),
         usage: { count: cells.length, cells },
+        contents: refContents(data.refs.svgs[svg.id]),
       });
     }
     for (const model of data.models) {
@@ -10232,6 +10307,7 @@ export class GnumarusShell extends LitElement {
         sizeBytes: model.sizeBytes,
         meta,
         usage: { count: cells.length, cells },
+        contents: refContents(data.refs.models[model.id]),
       });
     }
     for (const tilemap of data.tilemaps) {
@@ -10243,6 +10319,7 @@ export class GnumarusShell extends LitElement {
         sizeBytes: tilemap.sizeBytes,
         meta: `${tr("manager.metaTiles", { count: tilemap.tileCount })} · ${tilemap.tileWidth}×${tilemap.tileHeight}`,
         usage: { count: cells.length, cells },
+        contents: refContents(data.refs.tilemaps[tilemap.id]),
       });
     }
     return items;
@@ -10341,19 +10418,33 @@ export class GnumarusShell extends LitElement {
                           <span class="picker-name">${item.name}</span>
                           <span class="manager-meta">${item.meta} · ${formatContentBytes(item.sizeBytes)}</span>
                           <span class="manager-meta">
-                            ${item.usage.count > 0
-                              ? tr("manager.usedIn", { count: item.usage.count })
-                              : tr("manager.unused")}
+                            ${item.kind === "content"
+                              ? item.usage.count > 0
+                                ? tr("manager.usedIn", { count: item.usage.count })
+                                : tr("manager.unused")
+                              : item.contents.length > 0
+                                ? tr("manager.usedByContents", { count: item.contents.length })
+                                : tr("manager.unused")}
                           </span>
-                          ${item.usage.cells.length > 0
-                            ? html`<span class="manager-cells">
-                                ${item.usage.cells.map(
-                                  (cell) => html`<span class="manager-cell" data-testid="content-manager-cell"
-                                    >${tr("manager.cellRef", { layer: cell.layerName, frame: cell.frame + 1 })}</span
-                                  >`,
-                                )}
-                              </span>`
-                            : html``}
+                          ${item.kind === "content"
+                            ? item.usage.cells.length > 0
+                              ? html`<span class="manager-cells">
+                                  ${item.usage.cells.map(
+                                    (cell) => html`<span class="manager-cell" data-testid="content-manager-cell"
+                                      >${tr("manager.cellRef", { layer: cell.layerName, frame: cell.frame + 1 })}</span
+                                    >`,
+                                  )}
+                                </span>`
+                              : html``
+                            : item.contents.length > 0
+                              ? html`<span class="manager-cells">
+                                  ${item.contents.map(
+                                    (content) => html`<span class="manager-cell" data-testid="content-manager-content" data-content-id=${content.id}
+                                      >${content.name}</span
+                                    >`,
+                                  )}
+                                </span>`
+                              : html``}
                         </div>
                       `;
                     })}
@@ -11875,6 +11966,72 @@ export class GnumarusShell extends LitElement {
       parsed.frames.length === 1
         ? tr("status.animAddedOne", { name: parsed.name })
         : tr("status.animAdded", { name: parsed.name, count: parsed.frames.length });
+  }
+
+  /** Open the New-animation dialog for the given frames (sorted, deduped). */
+  private openNewAnimationDialog(frames: number[]): void {
+    if (this.engine === null) {
+      return;
+    }
+    const count = this.engine.getFrameCount();
+    const valid = [...new Set(frames)]
+      .filter((frame) => Number.isInteger(frame) && frame >= 0 && frame < count)
+      .sort((left, right) => left - right);
+    if (valid.length === 0) {
+      return;
+    }
+    this.closeMatrixMenu();
+    this.animationCreateFrames = valid;
+    this.animationCreateName = "";
+    this.animationCreateLoop = "forward";
+    this.animationCreateError = null;
+    this.requestUpdate();
+    void this.updateComplete.then(() => {
+      const dialog = this.shadowRoot?.getElementById("animationCreateDialog") as HTMLDialogElement | null;
+      dialog?.showModal();
+      const input = this.shadowRoot?.getElementById("animationCreateName") as HTMLInputElement | null;
+      input?.focus();
+    });
+  }
+
+  private closeNewAnimationDialog(): void {
+    const dialog = this.shadowRoot?.getElementById("animationCreateDialog") as HTMLDialogElement | null;
+    dialog?.close();
+    this.animationCreateFrames = null;
+    this.animationCreateError = null;
+  }
+
+  private confirmNewAnimation(): void {
+    const targets = this.animationCreateFrames;
+    if (targets === null || targets.length === 0 || this.engine === null) {
+      this.closeNewAnimationDialog();
+      return;
+    }
+    const name = this.animationCreateName.trim();
+    if (name.length === 0) {
+      this.animationCreateError = tr("dialog.animNameRequired");
+      return;
+    }
+    const loop = this.animationCreateLoop === "none" || this.animationCreateLoop === "ping-pong" ? this.animationCreateLoop : "forward";
+    if (
+      !this.engine.addNamedAnimation({
+        name,
+        loop,
+        frames: targets.map((frame) => ({ frame, duration: null })),
+      })
+    ) {
+      this.animationCreateError = tr("dialog.animExists", { name });
+      return;
+    }
+    this.engine.setActiveAnimation(name);
+    this.refreshLayers();
+    this.dirty = true;
+    this.statusMessage =
+      targets.length === 1
+        ? tr("status.animAddedOne", { name })
+        : tr("status.animAdded", { name, count: targets.length });
+    this.showToast(this.statusMessage);
+    this.closeNewAnimationDialog();
   }
 
   private onDeleteAnimation(name: string): void {

@@ -16,6 +16,7 @@ function item(name: string): GnumarusManagedItem {
     sizeBytes: 10,
     meta: "",
     usage: { count: 0, cells: [] },
+    contents: [],
   };
 }
 
