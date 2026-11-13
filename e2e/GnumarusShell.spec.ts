@@ -1943,7 +1943,7 @@ test("toolbar icons fill buttons without growing them", async ({ page }) => {
       };
     });
   });
-  expect(boxes).toHaveLength(12);
+  expect(boxes).toHaveLength(13);
   const expected: Record<string, { w: number; h: number }> = {
     Pencil: { w: 33, h: 25 },
     Loupe: { w: 30, h: 25 },
@@ -1952,6 +1952,7 @@ test("toolbar icons fill buttons without growing them", async ({ page }) => {
     Text: { w: 32, h: 25 },
     "Tile brush": { w: 34, h: 25 },
     "Rectangle": { w: 33, h: 25 },
+    "Shading": { w: 30, h: 25 },
     "3D model transform": { w: 33, h: 25 },
     "Rectangular selection": { w: 34, h: 25 },
     "Destructive selection transform": { w: 33, h: 25 },
@@ -6516,6 +6517,7 @@ test("tool tooltips start with the selection shortcut", async ({ page }) => {
     { label: "Text", title: expect.stringMatching(/^X: Text \(/) },
     { label: "Tile brush", title: "Tile brush (click an empty cell to create a tilemap, click a tilemap cell to place the selected tile; right-click erases; drag paints a stroke; Shift+click draws a tile line from the last tile; Ctrl+Shift+click fills a tile rectangle)" },
     { label: "Rectangle", title: expect.stringMatching(/^D: Rectangle \(/) },
+    { label: "Shading", title: expect.stringMatching(/^S: Shading \(/) },
     { label: "3D model transform", title: expect.stringMatching(/^3D model transform \(drag to orbit/) },
     { label: "Rectangular selection", title: expect.stringMatching(/^R: Rectangular selection \(/) },
     { label: "Destructive selection transform", title: expect.stringMatching(/^V: Destructive selection transform \(/) },
