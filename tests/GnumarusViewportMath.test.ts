@@ -6,6 +6,7 @@ import {
   clampCropBoxToMin1,
   clampZoom,
   clipSegmentToRect,
+  constrainSquareDrag,
   imageToScreenPixel,
   layerImageToProject,
   layerLinearMatrix,
@@ -495,5 +496,21 @@ describe("scrollIntoViewDelta", () => {
       dTop: 0,
       dLeft: 0,
     });
+  });
+});
+
+describe("constrainSquareDrag", () => {
+  it("locks to the larger side keeping each axis direction", () => {
+    expect(constrainSquareDrag(10, 20, 30, 25)).toEqual({ x1: 30, y1: 40 });
+    expect(constrainSquareDrag(10, 20, 12, 50)).toEqual({ x1: 40, y1: 50 });
+    expect(constrainSquareDrag(30, 30, 10, 5)).toEqual({ x1: 5, y1: 5 });
+    expect(constrainSquareDrag(0, 0, 10, -4)).toEqual({ x1: 10, y1: -10 });
+    expect(constrainSquareDrag(0, 0, -3, 7)).toEqual({ x1: -7, y1: 7 });
+  });
+
+  it("leaves zero movement alone", () => {
+    expect(constrainSquareDrag(5, 5, 5, 5)).toEqual({ x1: 5, y1: 5 });
+    expect(constrainSquareDrag(5, 5, 5, 9)).toEqual({ x1: 5, y1: 9 });
+    expect(constrainSquareDrag(5, 5, 9, 5)).toEqual({ x1: 9, y1: 5 });
   });
 });

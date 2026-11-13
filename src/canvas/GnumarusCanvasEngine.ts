@@ -131,6 +131,7 @@ import {
 } from "./GnumarusPaintBrush";
 import {
   clipSegmentToRect,
+  constrainSquareDrag,
   parseWrapMode,
   wrapLayerPixel,
   wrapTileOffsets,
@@ -14508,8 +14509,12 @@ export class GnumarusCanvasEngine {
       if (this.rectDrag !== null) {
         const target = this.clientToLayerImageFloat(event.clientX, event.clientY);
         if (target !== null) {
-          this.rectDrag.x1 = Math.floor(target.x);
-          this.rectDrag.y1 = Math.floor(target.y);
+          // Shift locks the mark to a perfect square, live per move.
+          const end = event.shiftKey
+            ? constrainSquareDrag(this.rectDrag.x0, this.rectDrag.y0, Math.floor(target.x), Math.floor(target.y))
+            : { x1: Math.floor(target.x), y1: Math.floor(target.y) };
+          this.rectDrag.x1 = end.x1;
+          this.rectDrag.y1 = end.y1;
           this.lastMouseClient = { x: event.clientX, y: event.clientY };
           this.updatePreviews();
         }
@@ -14518,8 +14523,12 @@ export class GnumarusCanvasEngine {
       if (this.ellipseDrag !== null) {
         const target = this.clientToLayerImageFloat(event.clientX, event.clientY);
         if (target !== null) {
-          this.ellipseDrag.x1 = Math.floor(target.x);
-          this.ellipseDrag.y1 = Math.floor(target.y);
+          // Shift locks the mark to a perfect circle, live per move.
+          const end = event.shiftKey
+            ? constrainSquareDrag(this.ellipseDrag.x0, this.ellipseDrag.y0, Math.floor(target.x), Math.floor(target.y))
+            : { x1: Math.floor(target.x), y1: Math.floor(target.y) };
+          this.ellipseDrag.x1 = end.x1;
+          this.ellipseDrag.y1 = end.y1;
           this.lastMouseClient = { x: event.clientX, y: event.clientY };
           this.updatePreviews();
         }
@@ -14599,8 +14608,13 @@ export class GnumarusCanvasEngine {
       if (this.shapeDrag !== null) {
         const target = this.clientToLayerImageFloat(event.clientX, event.clientY);
         if (target !== null) {
-          this.shapeDrag.x1 = target.x;
-          this.shapeDrag.y1 = target.y;
+          // Shift locks rectangle/ellipse to a perfect square/circle, live per move.
+          const end =
+            event.shiftKey && (this.shapeDrag.tool === "rectangle" || this.shapeDrag.tool === "ellipseShape")
+              ? constrainSquareDrag(this.shapeDrag.x0, this.shapeDrag.y0, target.x, target.y)
+              : { x1: target.x, y1: target.y };
+          this.shapeDrag.x1 = end.x1;
+          this.shapeDrag.y1 = end.y1;
           this.lastMouseClient = { x: event.clientX, y: event.clientY };
           this.updatePreviews();
         }

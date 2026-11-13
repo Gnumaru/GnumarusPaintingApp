@@ -682,3 +682,19 @@ export function scrollIntoViewDelta(view: GnumarusScrollView, child: GnumarusScr
   }
   return { dTop, dLeft };
 }
+
+/**
+ * Constrain a corner drag to equal dimensions (perfect square / circle):
+ * the side is the larger of |dx| and |dy|, keeping each axis' own drag
+ * direction so the locked shape follows the dragged quadrant. Zero
+ * movement on an axis stays zero.
+ */
+export function constrainSquareDrag(x0: number, y0: number, x1: number, y1: number): { x1: number; y1: number } {
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const side = Math.max(Math.abs(dx), Math.abs(dy));
+  return {
+    x1: x0 + Math.sign(dx) * side,
+    y1: y0 + Math.sign(dy) * side,
+  };
+}
