@@ -84,7 +84,8 @@ export function applyImageDiff(
 export interface GnumarusMergedLayerSnapshot {
   id: string;
   name: string;
-  textureName: string;
+  /** Owned texture name, or null when the layer had no layer-id texture. */
+  textureName: string | null;
   visible: boolean;
   opacity: number;
   blend: GnumarusLayerBlendMode;
@@ -116,6 +117,8 @@ export interface GnumarusMergeRecord {
 
 export interface GnumarusResizeRecord {
   layerId: string;
+  /** Content texture resized (layer ids double as texture ids in legacy projects). */
+  textureId: string;
   beforeWidth: number;
   beforeHeight: number;
   beforeBuffer: Uint8ClampedArray;
@@ -258,7 +261,7 @@ export class GnumarusHistory {
           continue;
         }
         const ok = applyResize(
-          entry.resize.layerId,
+          entry.resize.textureId,
           entry.resize.beforeWidth,
           entry.resize.beforeHeight,
           entry.resize.beforeBuffer,
@@ -435,7 +438,7 @@ export class GnumarusHistory {
           continue;
         }
         const ok = applyResize(
-          entry.resize.layerId,
+          entry.resize.textureId,
           entry.resize.afterWidth,
           entry.resize.afterHeight,
           entry.resize.afterBuffer,

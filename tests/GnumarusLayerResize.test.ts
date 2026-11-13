@@ -69,6 +69,7 @@ describe("GnumarusLayerResize", () => {
       type: "resize",
       resize: {
         layerId: "layer0",
+        textureId: "tex0",
         beforeWidth: 2,
         beforeHeight: 2,
         beforeBuffer: before.slice(),
@@ -79,7 +80,7 @@ describe("GnumarusLayerResize", () => {
     });
     let current = { width: 4, height: 4, buffer: after.slice() };
     const apply = (id: string, width: number, height: number, buffer: Uint8ClampedArray): boolean => {
-      if (id !== "layer0") {
+      if (id !== "tex0") {
         return false;
       }
       current = { width, height, buffer: buffer.slice() };
@@ -106,6 +107,7 @@ describe("GnumarusLayerResize", () => {
       type: "resize",
       resize: {
         layerId: "gone",
+        textureId: "gone",
         beforeWidth: 2,
         beforeHeight: 2,
         beforeBuffer: before,

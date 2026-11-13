@@ -1732,25 +1732,6 @@ export class GnumarusCanvasEngine {
     this.activeLayerId = first.id;
     this.layerCounter = 1;
     this.textureNameCounter = 1;
-    this.textures.set("layer0", {
-      id: "layer0",
-      name: this.nextTextureName(),
-      width: 64,
-      height: 64,
-      buffer: first.buffer,
-    });
-    this.contents.set("content1", {
-      id: "content1",
-      name: "C1",
-      textureId: "layer0",
-      textId: null,
-      svgId: null,
-      tilemapId: null,
-      model3dId: null,
-      flyCam: null,
-      transform: { ...IDENTITY_LAYER_TRANSFORM },
-    });
-    this.cells.set(animationCellKey("layer0", 0), "content1");
     this.frameCount = 1;
     this.currentFrame = 0;
     this.frameNames = [defaultFrameName(0)];
@@ -1883,10 +1864,16 @@ export class GnumarusCanvasEngine {
 
   private historyTextureFor(id: string): { buffer: Uint8ClampedArray; width: number } | null {
     const entry = this.textures.get(id);
-    if (entry === undefined) {
+    if (entry !== undefined) {
+      return { buffer: entry.buffer, width: entry.width };
+    }
+    // Layer ids own no textures anymore: fall back to the layer itself
+    // (its buffer points at the current cell texture once synced).
+    const layer = this.findLayer(id);
+    if (layer === null) {
       return null;
     }
-    return { buffer: entry.buffer, width: entry.width };
+    return { buffer: layer.buffer, width: layer.width };
   }
 
   private resolveFrame(): Map<string, GnumarusResolvedCell> {
@@ -1997,10 +1984,13 @@ export class GnumarusCanvasEngine {
   private syncLayerRender(layer: GnumarusLayer): void {
     const resolved = this.resolveFrame().get(layer.id);
     if (resolved === undefined || resolved.textureId === null || resolved.buffer === null) {
-      layer.buffer = new Uint8ClampedArray(0);
-      layer.width = 0;
-      layer.height = 0;
-      layer.transform = { ...IDENTITY_LAYER_TRANSFORM };
+      // Empty cell: keep project-sized working dims so every tool maps the
+      // same way (painting materializes at exactly this size), keep tracking
+      // the cell content transform, unpoint the render texture and hide the
+      // plane.
+      layer.width = this.imageWidth;
+      layer.height = this.imageHeight;
+      layer.transform = resolved === undefined ? { ...IDENTITY_LAYER_TRANSFORM } : { ...resolved.transform };
       layer.renderTextureId = null;
       layer.plane.visible = false;
       this.syncWrapTiles();
@@ -5648,18 +5638,9 @@ export class GnumarusCanvasEngine {
     );
     const clamped = Math.min(Math.max(0, Math.floor(at)), this.layers.length);
     this.layers.splice(clamped, 0, layer);
-    this.textures.set(id, {
-      id,
-      name: this.nextTextureName(),
-      width: this.imageWidth,
-      height: this.imageHeight,
-      buffer: layer.buffer,
-    });
     // New layer cells start empty (like new frames): no content is created
-    // and no cell is associated until the user paints or picks a content
-    // via the Select content menu. The owned texture above is kept so
-    // resize/save/undo keep working; painting materializes tex textures
-    // on demand via ensureCellContent.
+    // and no texture is materialized until the user paints, resizes or picks
+    // a content via the Select content menu.
     this.activeLayerId = id;
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
@@ -5766,13 +5747,18 @@ export class GnumarusCanvasEngine {
       { ...snapshot.lockedChannels },
       snapshot.blend,
     );
-    this.textures.set(snapshot.id, {
-      id: snapshot.id,
-      name: snapshot.textureName,
-      width: snapshot.width,
-      height: snapshot.height,
-      buffer,
-    });
+    // Only layers snapshotted with a layer-id texture get one back; fresh
+    // layers own none, and legacy contents still pointing at the layer id
+    // keep resolving through a regenerated entry.
+    if (snapshot.textureName !== null || snapshot.detachedContents.length > 0) {
+      this.textures.set(snapshot.id, {
+        id: snapshot.id,
+        name: snapshot.textureName ?? this.nextTextureName(),
+        width: snapshot.width,
+        height: snapshot.height,
+        buffer,
+      });
+    }
     layer.renderTextureId = snapshot.id;
     const at = Math.min(Math.max(0, snapshot.stackIndex), this.layers.length);
     this.layers.splice(at, 0, layer);
@@ -5821,13 +5807,14 @@ export class GnumarusCanvasEngine {
     const upperContent = currentContentId === null ? undefined : this.contents.get(currentContentId);
     const upperTextureId = upperContent?.textureId ?? null;
     const upperEntry = upperTextureId === null ? undefined : this.textures.get(upperTextureId);
+    // The layer-id texture is legacy: layers created after the decoupling
+    // own no textures entry, so the snapshot falls back to the layer itself.
     const ownedEntry = this.textures.get(id);
     if (
       currentContentId === null ||
       upperContent === undefined ||
       upperTextureId === null ||
-      upperEntry === undefined ||
-      ownedEntry === undefined
+      upperEntry === undefined
     ) {
       return false;
     }
@@ -5879,16 +5866,16 @@ export class GnumarusCanvasEngine {
     const snapshot: GnumarusMergedLayerSnapshot = {
       id: upper.id,
       name: upper.name,
-      textureName: ownedEntry.name,
+      textureName: ownedEntry?.name ?? null,
       visible: upper.visible,
       opacity: upper.opacity,
-      width: ownedEntry.width,
-      height: ownedEntry.height,
+      width: ownedEntry?.width ?? upper.width,
+      height: ownedEntry?.height ?? upper.height,
       transform: { ...upper.transform },
       lockedChannels: { ...upper.lockedChannels },
       blend: upper.blend,
       stackIndex: index,
-      buffer: ownedEntry.buffer.slice(),
+      buffer: (ownedEntry?.buffer ?? upper.buffer).slice(),
       cells: [],
       detachedContents: [],
     };
@@ -5999,23 +5986,24 @@ export class GnumarusCanvasEngine {
   ): boolean {
     const upper = this.findLayer(upperId);
     const lower = this.findLayer(lowerId);
-    const ownedEntry = this.textures.get(upperId);
-    if (upper === null || lower === null || ownedEntry === undefined) {
+    if (upper === null || lower === null) {
       return false;
     }
+    // The layer-id texture is legacy (see mergeDown); fall back to the layer.
+    const ownedEntry = this.textures.get(upperId);
     const snapshot: GnumarusMergedLayerSnapshot = {
       id: upper.id,
       name: upper.name,
-      textureName: ownedEntry.name,
+      textureName: ownedEntry?.name ?? null,
       visible: upper.visible,
       opacity: upper.opacity,
-      width: ownedEntry.width,
-      height: ownedEntry.height,
+      width: ownedEntry?.width ?? upper.width,
+      height: ownedEntry?.height ?? upper.height,
       transform: { ...upper.transform },
       lockedChannels: { ...upper.lockedChannels },
       blend: upper.blend,
       stackIndex: index,
-      buffer: ownedEntry.buffer.slice(),
+      buffer: (ownedEntry?.buffer ?? upper.buffer).slice(),
       cells: [],
       detachedContents: [],
     };
@@ -6287,7 +6275,8 @@ export class GnumarusCanvasEngine {
       id: layer.id,
       width: layer.width,
       height: layer.height,
-      buffer: layer.buffer,
+      // No render texture (empty cell): no pixels, so flattening skips it.
+      buffer: layer.renderTextureId === null ? new Uint8ClampedArray(0) : layer.buffer,
     }));
   }
 
@@ -6406,9 +6395,9 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
-  private applyLayerResize(layerId: string, width: number, height: number, buffer: Uint8ClampedArray): boolean {
+  private applyLayerResize(textureId: string, width: number, height: number, buffer: Uint8ClampedArray): boolean {
     const copy = new Uint8ClampedArray(buffer);
-    if (!this.setTexturePixels(layerId, width, height, copy)) {
+    if (!this.setTexturePixels(textureId, width, height, copy)) {
       return false;
     }
     return true;
@@ -6422,8 +6411,8 @@ export class GnumarusCanvasEngine {
    * Successful resizes are undoable.
    */
   resizeLayer(id: string, newWidth: number, newHeight: number): boolean {
-    const entry = this.textures.get(id);
-    if (entry === undefined) {
+    const layer = this.findLayer(id);
+    if (layer === null) {
       return false;
     }
     if (!Number.isFinite(newWidth) || !Number.isFinite(newHeight)) {
@@ -6431,22 +6420,30 @@ export class GnumarusCanvasEngine {
     }
     const clampedWidth = clampLayerDim(newWidth);
     const clampedHeight = clampLayerDim(newHeight);
-    if (clampedWidth === entry.width && clampedHeight === entry.height) {
+    // Resize targets the layer's current cell texture, materializing an
+    // empty cell on demand; derived contents have no paintable texture.
+    const ensured = this.ensureCellContent(id, this.currentFrame);
+    if (ensured === null) {
       return false;
     }
-    this.commitFloatingIfHomeTexture(id);
-    const beforeWidth = entry.width;
-    const beforeHeight = entry.height;
-    const beforeBuffer = entry.buffer.slice();
-    const nextBuffer = resizePixelBuffer(entry.buffer, entry.width, entry.height, clampedWidth, clampedHeight);
+    const texture = ensured.texture;
+    if (clampedWidth === texture.width && clampedHeight === texture.height) {
+      return false;
+    }
+    this.commitFloatingIfHomeTexture(texture.id);
+    const beforeWidth = texture.width;
+    const beforeHeight = texture.height;
+    const beforeBuffer = texture.buffer.slice();
+    const nextBuffer = resizePixelBuffer(texture.buffer, texture.width, texture.height, clampedWidth, clampedHeight);
     const afterBuffer = nextBuffer.slice();
-    if (!this.setTexturePixels(id, clampedWidth, clampedHeight, nextBuffer)) {
+    if (!this.setTexturePixels(texture.id, clampedWidth, clampedHeight, nextBuffer)) {
       return false;
     }
     this.pushHistory({
       type: "resize",
       resize: {
         layerId: id,
+        textureId: texture.id,
         beforeWidth,
         beforeHeight,
         beforeBuffer,
@@ -6455,7 +6452,7 @@ export class GnumarusCanvasEngine {
         afterBuffer,
       },
     });
-    this.markTextureViewsDirty(id);
+    this.markTextureViewsDirty(texture.id);
     this.refreshLayerStacking();
     this.render();
     this.onPixelsChanged();
@@ -7431,26 +7428,6 @@ export class GnumarusCanvasEngine {
       ...IDENTITY_LAYER_TRANSFORM,
     });
     this.layers.push(first);
-    this.textures.set("layer0", {
-      id: "layer0",
-      name: this.nextTextureName(),
-      width,
-      height,
-      buffer: first.buffer,
-    });
-    first.renderTextureId = "layer0";
-    this.contents.set("content1", {
-      id: "content1",
-      name: "C1",
-      textureId: "layer0",
-      textId: null,
-      svgId: null,
-      tilemapId: null,
-      model3dId: null,
-      flyCam: null,
-      transform: { ...IDENTITY_LAYER_TRANSFORM },
-    });
-    this.cells.set(animationCellKey("layer0", 0), "content1");
     this.activeLayerId = first.id;
     this.layerCounter = 1;
     this.contentCounter = 2;
@@ -13794,7 +13771,8 @@ export class GnumarusCanvasEngine {
     bottom: { ax: number; ay: number; bx: number; by: number };
   } | null {
     const active = this.activeLayer();
-    if (active === null || active.width < 1 || active.height < 1) {
+    if (active === null || active.width < 1 || active.height < 1 || active.renderTextureId === null) {
+      // Empty cells hide the axes (also covers missing layers/canvases).
       return null;
     }
     const rect = this.container.getBoundingClientRect();
@@ -14055,7 +14033,6 @@ export class GnumarusCanvasEngine {
       layer === null ||
       layer.width < 1 ||
       layer.height < 1 ||
-      layer.renderTextureId === null ||
       this.symmetryMode === "off"
     ) {
       return null;
@@ -14918,8 +14895,9 @@ export class GnumarusCanvasEngine {
         if (cursor === null) {
           return;
         }
-        const pixel = this.toImagePixel(event.clientX, event.clientY);
-        if (pixel === null) {
+        // In-bounds gate (what toImagePixel enforced): no accidental
+        // activation outside the layer box; empty cells materialize below.
+        if (cursor.x < 0 || cursor.y < 0 || cursor.x >= layer.width || cursor.y >= layer.height) {
           return;
         }
         if (!this.cutAllToFloating()) {
@@ -16284,7 +16262,7 @@ export class GnumarusCanvasEngine {
 
   readPixel(x: number, y: number): GnumarusRgba | null {
     const layer = this.activeLayer();
-    if (layer === null) {
+    if (layer === null || layer.renderTextureId === null) {
       return null;
     }
     return getPixel(layer.buffer, layer.width, layer.height, x, y);

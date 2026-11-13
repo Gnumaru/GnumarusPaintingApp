@@ -70,7 +70,7 @@ test("shell boots with menu, toolbar, canvas host and status bar", async ({ page
 
   await expect(page.locator("gnumarus-shell")).toContainText("64 x 64");
   await expect(page.locator("gnumarus-shell")).toContainText("pencil");
-  expect(await readPixel(page, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 0, 0)).toBeNull();
   expect(errors).toEqual([]);
 });
 
@@ -107,7 +107,7 @@ test("File > New preset fills dimensions and WebP lossless storage", async ({ pa
   await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   const files = await project.writtenBlobs();
-  expect(Object.keys(files).sort()).toEqual(["project.gpa", "textures/t1.webp"]);
+  expect(Object.keys(files).sort()).toEqual(["project.gpa"]);
 });
 
 test("File > New Notes XLQ preset uses JXL lossy quality 0", async ({ page }) => {
@@ -183,7 +183,7 @@ test("pencil draws a solid pixel on the WebGL2 canvas", async ({ page }) => {
   if (box === null) {
     throw new Error("canvas has no bounding box");
   }
-  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 32, 32)).toBeNull();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width / 2 + 12, box.y + box.height / 2 + 12, { steps: 4 });
@@ -1573,7 +1573,7 @@ test("animation matrix shows one row per layer and one column per frame", async 
   const state = await getMatrix(page);
   expect(state.frameCount).toBe(2);
   expect(state.rows).toHaveLength(1);
-  expect(state.rows[0]?.cells.map((cell) => cell.contentId)).toEqual([expect.any(String), null]);
+  expect(state.rows[0]?.cells.map((cell) => cell.contentId)).toEqual([null, null]);
 });
 
 test("new frames start empty and painting a frame does not leak into others", async ({ page }) => {
@@ -1621,7 +1621,7 @@ test("cell Select content modal creates, dissociates and associates shared conte
   await paintCenter(page);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
   await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
-  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 32, 32)).toBeNull();
   const firstCell = matrix.locator('[data-testid="anim-cell"][data-matrix-frame="0"]');
   await firstCell.click({ button: "right" });
   await page.getByRole("button", { name: "Select content" }).click();
@@ -1654,6 +1654,8 @@ test("new content texture picker offers no, new and existing textures with thumb
   await page.getByRole("button", { name: "Add layer" }).click();
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
   await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  await paintCenter(page);
   const cell = matrix.locator('[data-testid="anim-cell"][data-matrix-layer="layer1"][data-matrix-frame="1"]');
   await expect(cell).toHaveAttribute("aria-label", /empty/);
   await cell.click({ button: "right" });
@@ -1855,6 +1857,7 @@ test("cell transform is stored per content and follows the frame", async ({ page
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await paintCenter(page);
   await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
   await page.evaluate(() => {
     const root = window as unknown as { __gnumarus?: { engine?: { setLayerTransform(id: string, t: unknown): boolean } } };
@@ -3201,6 +3204,7 @@ test("editor bar stays visible across tools and holds wrap", async ({ page }) =>
 test("background grows with wrap tiles", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
   expect(await backgroundPlaneSize(page)).toEqual({ width: 64, height: 64 });
   await page.evaluate(() => {
     const root = window as unknown as {
@@ -3286,6 +3290,7 @@ test("wrap-x paints outside pixels back into the texture", async ({ page }) => {
 test("wrap tiles show only for the active layer", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
   const tilesOf = (): Promise<number> =>
     page.evaluate(() => {
       const root = window as unknown as {
@@ -4402,8 +4407,11 @@ test("Control+E merges down honoring the lower layer transform", async ({ page }
   });
   await page.keyboard.press("Control+e");
   expect((await getLayers(page)).layers.map((layer) => layer.id)).toEqual(["layer0"]);
-  expect(await readPixel(page, 27, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
-  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  // Relink path (lower cell had no texture): the upper texture is linked into
+  // the lower content, keeping its transform — the buffer stays unshifted.
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 27, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect((await getLayers(page)).layers[0]?.transform.x).toBe(5);
   await expect(page.locator("gnumarus-shell")).toContainText("Layers merged");
   await page.keyboard.press("Control+z");
   expect((await getLayers(page)).layers.map((layer) => layer.id)).toEqual(["layer0", "layer1"]);
@@ -4672,7 +4680,7 @@ test("shift-drag adjusts the pencil brush size live without painting", async ({ 
   expect(await sizeOf()).toBeCloseTo(3, 5);
   await expect(page.locator("gnumarus-shell")).toContainText("Brush size: 1 – 3");
   // No painting happened during the size drag.
-  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 32, 32)).toBeNull();
 });
 
 test("shift-drag adjusts line and curve widths", async ({ page }) => {
@@ -4757,7 +4765,7 @@ async function paintedPixelCount(page: import("@playwright/test").Page): Promise
     };
     const buffer = root.__gnumarus?.engine?.exportTextures()[0]?.buffer;
     if (buffer === undefined) {
-      return -1;
+      return 0;
     }
     let count = 0;
     for (let index = 3; index < buffer.length; index += 4) {
@@ -5212,13 +5220,13 @@ test("frame menu adds frames before and after the clicked frame", async ({ page 
   expect(state.frameCount).toBe(3);
   expect(state.currentFrame).toBe(1);
   await expect(page.locator("gnumarus-shell")).toContainText("Frame 2 added");
-  expect(state.rows[0]?.cells.map((cell) => cell.contentId !== null)).toEqual([true, false, true]);
+  expect(state.rows[0]?.cells.map((cell) => cell.contentId !== null)).toEqual([false, false, true]);
   await matrix.locator('[data-testid="anim-frame"][data-frame="2"]').click({ button: "right" });
   await page.getByRole("button", { name: "Add frame before" }).click();
   state = await getMatrix(page);
   expect(state.frameCount).toBe(4);
   expect(state.currentFrame).toBe(2);
-  expect(state.rows[0]?.cells.map((cell) => cell.contentId !== null)).toEqual([true, false, false, true]);
+  expect(state.rows[0]?.cells.map((cell) => cell.contentId !== null)).toEqual([false, false, false, true]);
 });
 
 test("layer menu adds layers above and below the clicked layer", async ({ page }) => {
@@ -5779,12 +5787,19 @@ test("Reload All Textures restores saved files, skips new textures and undoes", 
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await stubDirectoryWithFileStore(page);
+  // Create an empty texture via the pickers so the save records a blank file.
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.locator('[data-testid="anim-cell"][data-matrix-layer="layer0"][data-matrix-frame="0"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Select content" }).click();
+  await page.locator('gnumarus-shell [data-testid="content-picker-new"]').click();
+  await page.locator('gnumarus-shell [data-testid="texture-picker-new"]').click();
   await page.keyboard.press("Control+s");
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockDir");
-  // Paint after saving, then add a layer whose texture has no file on disk.
+  // Paint after saving, then add a layer and paint it (texture with no file on disk).
   await paintCenter(page);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
   await page.getByRole("button", { name: "Add layer" }).click();
+  await paintCenter(page);
   await runPaletteAction(page, "reload all");
   await expect(page.locator("gnumarus-shell")).toContainText("Reloaded 1 texture (1 skipped)");
   // The saved layer is back to its on-disk (blank) pixels.
@@ -6646,6 +6661,7 @@ test("matrix layer names rename layers through a context menu", async ({ page })
 test("canvas shows red X and green Y axis lines following the cell transform", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
   const zoom = (await getViewState(page)).zoom;
   const span = 64 * zoom;
   let axes = await getAxisOverlay(page);
@@ -8246,6 +8262,7 @@ test("layer menu Crop to canvas removes outside excess and stays undoable", asyn
 test("cell menu Crop to canvas reports edge cases", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
   const cell = matrix.locator('[data-testid="anim-cell"][data-matrix-layer="layer0"][data-matrix-frame="0"]');
   await cell.click({ button: "right" });
@@ -8445,6 +8462,7 @@ test("fit texture dialog focuses OK so Enter confirms immediately", async ({ pag
 test("fit alpha threshold default flows into the dialog and persists", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
   await page.getByRole("button", { name: "Edit" }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   const setting = page.locator("gnumarus-shell input#fitDefaultThreshold");
@@ -10233,6 +10251,7 @@ test("text survives save and reopen", async ({ page }) => {
 test("content picker offers new text with kind badges", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
+  await paintCenter(page);
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
   await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
   const cell = matrix.locator('[data-testid="anim-cell"][data-matrix-frame="1"]');
@@ -10301,7 +10320,7 @@ test("text storage html saves raw files and reopens", async ({ page }) => {
   await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   expect(Object.keys(await project.writtenBlobs()).sort()).toEqual(
-    ["project.gpa", `texts/${textId}.html`, "textures/t1.jxl"].sort(),
+    ["project.gpa", `texts/${textId}.html`].sort(),
   );
   const saved = await project.writtenProject();
   expect(saved).toContain(`"file": "texts/${textId}.html"`);
@@ -10324,7 +10343,7 @@ test("text storage htmlZip saves archives and reopens", async ({ page }) => {
   await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   expect(Object.keys(await project.writtenBlobs()).sort()).toEqual(
-    ["project.gpa", `texts/${textId}.zip`, "textures/t1.jxl"].sort(),
+    ["project.gpa", `texts/${textId}.zip`].sort(),
   );
   const saved = await project.writtenProject();
   expect(saved).toContain(`"file": "texts/${textId}.zip"`);
@@ -11379,6 +11398,9 @@ test("tile window draws the project canvas background @recent", async ({ page })
 test("tileset texture picker lists project textures on the canvas background @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await paintCenter(page);
   await page.locator('gnumarus-shell [data-testid="tool-tilebrush"]').click();
   await page.locator('gnumarus-shell [data-testid="tile-tileset"]').click();
   const dialog = page.locator("gnumarus-shell dialog#texturePickerDialog");
@@ -12249,7 +12271,7 @@ test("crop tool refuses an empty cell @recent", async ({ page }) => {
   const box = await canvasBox(page);
   await dragCanvas(page, box.width / 4, box.height / 4, (box.width * 3) / 4, (box.height * 3) / 4);
   await expect(page.locator("gnumarus-shell")).toContainText("no texture");
-  expect(await textureDims(page)).toEqual({ width: 64, height: 64 });
+  expect(await textureDims(page)).toEqual({ width: -1, height: -1 });
 });
 
 async function onionVisible(page: import("@playwright/test").Page): Promise<{ past: boolean; future: boolean }> {
@@ -13011,6 +13033,38 @@ test("content manager search filters by name similarity @recent", async ({ page 
   await search.fill(textureName);
   await expect(dialog.locator('[data-testid="content-manager-item"]')).toHaveCount(1);
   await expect(dialog.locator('[data-testid="content-manager-section"]')).toHaveText(["Textures (1)"]);
+});
+
+test("new project starts with no textures or contents @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.keyboard.press("Control+Shift+P");
+  const palette = page.locator("gnumarus-shell dialog#actionPaletteDialog");
+  await palette.locator('[data-testid="action-palette-input"]').fill("content manager");
+  await palette.locator('[data-testid="action-palette-item"][data-action-id="content-manager"]').click();
+  const dialog = page.locator('gnumarus-shell dialog#contentManagerDialog');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('[data-testid="content-manager-section"]')).toHaveCount(0);
+  await expect(dialog.locator('[data-testid="content-manager-item"]')).toHaveCount(0);
+});
+
+test("adding layers and frames creates no textures or contents @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  await paintCenter(page);
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await page.getByRole("button", { name: "Add frame", exact: true }).click();
+  await page.keyboard.press("Control+Shift+P");
+  const palette = page.locator("gnumarus-shell dialog#actionPaletteDialog");
+  await palette.locator('[data-testid="action-palette-input"]').fill("content manager");
+  await palette.locator('[data-testid="action-palette-item"][data-action-id="content-manager"]').click();
+  const dialog = page.locator('gnumarus-shell dialog#contentManagerDialog');
+  await expect(dialog).toBeVisible();
+  // Only the painted cell's texture and content exist.
+  await expect(dialog.locator('[data-testid="content-manager-item"]')).toHaveCount(2);
+  await expect(dialog.locator('[data-testid="content-manager-section"]')).toHaveText(["Textures (1)", "Cell contents (1)"]);
 });
 
 test("Ctrl+Shift+Arrows create layers and frames @recent", async ({ page }) => {
