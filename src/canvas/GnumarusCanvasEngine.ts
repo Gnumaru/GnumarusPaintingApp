@@ -292,6 +292,11 @@ import {
 } from "../settings/GnumarusBackgroundSettings";
 import { rgbaBytesToHex } from "../color/GnumarusColorModels";
 import {
+  adjustPixel,
+  clampAdjustLevels,
+  type GnumarusAdjustLevels,
+} from "../color/GnumarusAdjustments";
+import {
   computeImageDiff,
   GnumarusHistory,
   type GnumarusFitRecord,
@@ -3914,6 +3919,188 @@ export class GnumarusCanvasEngine {
     this.emitStats();
     this.updatePreviews();
     return "adjusted";
+  }
+
+  /** Live brightness/contrast dialog session: dialog-open snapshot plus rebase point. */
+  private bcSession: {
+    textureId: string;
+    original: Uint8ClampedArray;
+    base: Uint8ClampedArray;
+    locked: GnumarusChannelLock;
+  } | null = null;
+
+  /**
+   * Begin a live brightness/contrast session on the active cell texture.
+   * Snapshots the pixels so slider previews can re-apply from a stable
+   * base; the session keys the texture id so a mid-dialog layer switch
+   * cannot retarget it. False when there is nothing to adjust.
+   */
+  startBrightnessContrast(): boolean {
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return false;
+    }
+    if (this.isCellContentEmpty(layer.id, this.currentFrame)) {
+      return false;
+    }
+    if (this.denyPaintOnDerived()) {
+      return false;
+    }
+    const ensured = this.ensureCellContent(layer.id, this.currentFrame);
+    if (ensured === null) {
+      return false;
+    }
+    const tex = ensured.texture;
+    this.bcSession = {
+      textureId: tex.id,
+      original: tex.buffer.slice(),
+      base: tex.buffer.slice(),
+      locked: { ...layer.lockedChannels },
+    };
+    return true;
+  }
+
+  /**
+   * Re-apply brightness/contrast levels over the session rebase point and
+   * show the result on canvas (preview, no history entry). Out-of-range
+   * levels are clamped. False when no session is active.
+   */
+  previewBrightnessContrast(brightness: number, contrast: number): boolean {
+    const session = this.bcSession;
+    if (session === null) {
+      return false;
+    }
+    const tex = this.textures.get(session.textureId);
+    if (tex === undefined || tex.buffer.length !== session.base.length) {
+      return false;
+    }
+    const levels = clampAdjustLevels({ brightness, contrast });
+    this.applyAdjustLevels(tex.buffer, session.base, session.base, levels, session.locked);
+    this.markTextureViewsDirty(tex.id);
+    this.render();
+    this.updatePreviews();
+    this.emitStats();
+    return true;
+  }
+
+  /**
+   * Map every pixel of `dst` from `src` through brightness/contrast levels,
+   * then restore locked channels from `ref` (same masking as Delete's
+   * clear and `adjustCurrentCellPixels`).
+   */
+  private applyAdjustLevels(
+    dst: Uint8ClampedArray,
+    src: Uint8ClampedArray,
+    ref: Uint8ClampedArray,
+    levels: GnumarusAdjustLevels,
+    locked: GnumarusChannelLock,
+  ): void {
+    for (let i = 0; i < dst.length; i += 4) {
+      const out = adjustPixel(
+        src[i] as number,
+        src[i + 1] as number,
+        src[i + 2] as number,
+        src[i + 3] as number,
+        levels,
+      );
+      dst[i] = out[0];
+      dst[i + 1] = out[1];
+      dst[i + 2] = out[2];
+      dst[i + 3] = out[3];
+    }
+    if (locked.r || locked.g || locked.b || locked.a) {
+      for (let i = 0; i < dst.length; i += 4) {
+        if (locked.r) {
+          dst[i] = ref[i] as number;
+        }
+        if (locked.g) {
+          dst[i + 1] = ref[i + 1] as number;
+        }
+        if (locked.b) {
+          dst[i + 2] = ref[i + 2] as number;
+        }
+        if (locked.a) {
+          dst[i + 3] = ref[i + 3] as number;
+        }
+      }
+    }
+  }
+
+  /**
+   * Rebase the session: the current pixels become the new preview base
+   * (Apply keeps the visible change and resets the sliders to a no-op).
+   * No history entry; OK commits the whole session at once.
+   */
+  rebaseBrightnessContrast(): boolean {
+    const session = this.bcSession;
+    if (session === null) {
+      return false;
+    }
+    const tex = this.textures.get(session.textureId);
+    if (tex === undefined || tex.buffer.length !== session.base.length) {
+      return false;
+    }
+    session.base = tex.buffer.slice();
+    return true;
+  }
+
+  /**
+   * Commit the session: one undoable history entry from the dialog-open
+   * snapshot to the current pixels. Clears the session.
+   */
+  commitBrightnessContrast(): "adjusted" | "unchanged" | "empty" {
+    const session = this.bcSession;
+    this.bcSession = null;
+    if (session === null) {
+      return "empty";
+    }
+    const tex = this.textures.get(session.textureId);
+    if (tex === undefined || tex.buffer.length !== session.original.length) {
+      return "empty";
+    }
+    const diff = computeImageDiff(session.original, tex.buffer, tex.width, tex.height);
+    if (diff === null) {
+      this.syncAllLayerRenders();
+      this.refreshLayerStacking();
+      this.render();
+      this.updatePreviews();
+      this.emitStats();
+      return "unchanged";
+    }
+    this.history.push({ type: "stroke", layerId: tex.id, diff });
+    this.syncAllLayerRenders();
+    this.markTextureViewsDirty(tex.id);
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    this.updatePreviews();
+    return "adjusted";
+  }
+
+  /**
+   * Revert to the dialog-open snapshot and clear the session (Cancel or
+   * dialog dismiss). No history entry. False when no session is active.
+   */
+  cancelBrightnessContrast(): boolean {
+    const session = this.bcSession;
+    this.bcSession = null;
+    if (session === null) {
+      return false;
+    }
+    const tex = this.textures.get(session.textureId);
+    if (tex === undefined || tex.buffer.length !== session.original.length) {
+      return false;
+    }
+    tex.buffer.set(session.original);
+    this.syncAllLayerRenders();
+    this.markTextureViewsDirty(tex.id);
+    this.refreshLayerStacking();
+    this.render();
+    this.updatePreviews();
+    this.emitStats();
+    return true;
   }
 
   /** True while an orbit gesture has uncommitted changes. */

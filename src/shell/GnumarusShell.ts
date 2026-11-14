@@ -1677,6 +1677,9 @@ export class GnumarusShell extends LitElement {
     adjustBrightness: { type: Number },
     adjustContrast: { type: Number },
     adjustPosterize: { type: Number },
+    bcBrightness: { type: Number },
+    bcContrast: { type: Number },
+    bcOpen: { type: Boolean },
     checkerColorA: { type: String },
     checkerColorB: { type: String },
     defaultFrameDuration: { type: Number },
@@ -1886,6 +1889,9 @@ export class GnumarusShell extends LitElement {
   declare adjustBrightness: number;
   declare adjustContrast: number;
   declare adjustPosterize: number;
+  declare bcBrightness: number;
+  declare bcContrast: number;
+  declare bcOpen: boolean;
   declare checkerColorA: string;
   declare checkerColorB: string;
   declare defaultFrameDuration: number;
@@ -2110,6 +2116,9 @@ export class GnumarusShell extends LitElement {
     this.adjustBrightness = 0;
     this.adjustContrast = 0;
     this.adjustPosterize = 0;
+    this.bcBrightness = 0;
+    this.bcContrast = 0;
+    this.bcOpen = false;
     this.checkerColorA = DEFAULT_CHECKER_SETTINGS.colorA;
     this.checkerColorB = DEFAULT_CHECKER_SETTINGS.colorB;
     this.defaultFrameDuration = DEFAULT_ANIMATION_FRAME_DURATION;
@@ -2277,6 +2286,7 @@ export class GnumarusShell extends LitElement {
                   <button title=${tr("menu.undoTitle")} ?disabled=${!this.canUndo} @click=${(): void => void this.runAction("undo")}>${tr("menu.undo")}</button>
                   <button title=${tr("menu.redoTitle")} ?disabled=${!this.canRedo} @click=${(): void => void this.runAction("redo")}>${tr("menu.redo")}</button>
                   <button title=${tr("menu.settingsTitle")} @click=${(): void => void this.runAction("settings")}>${tr("menu.settings")}</button>
+                  <button title=${tr("menu.adjustBrightnessContrastTitle")} @click=${(): void => void this.runAction("adjust-brightness-contrast")}>${tr("menu.adjustBrightnessContrast")}</button>
                   <button
                     title=${tr("menu.resetCanvasTransformTitle")}
                     @click=${(): void => {
@@ -2995,6 +3005,51 @@ export class GnumarusShell extends LitElement {
         <div class="dialog-actions">
           <button @click=${(): void => this.closeAdjustColorsDialog()}>${tr("btn.cancel")}</button>
           <button id="adjustColorsOk" @click=${(): void => this.confirmAdjustColors()}>${tr("btn.ok")}</button>
+        </div>
+      </dialog>
+      <dialog id="brightnessContrastDialog" @close=${(): void => this.onBrightnessContrastClosed()}>
+        <h3>${tr("dialog.bcTitle")}</h3>
+        <p>${tr("dialog.bcHint")}</p>
+        <label
+          >${tr("dialog.brightness")} <span data-testid="bc-brightness-value">${this.bcBrightness}</span>
+          <input
+            type="range"
+            id="bcBrightness"
+            min="-100"
+            max="100"
+            step="1"
+            .value=${String(this.bcBrightness)}
+            @input=${(event: Event): void => {
+              const target = event.target as HTMLInputElement | null;
+              if (target !== null) {
+                this.bcBrightness = Math.min(100, Math.max(-100, Math.round(Number(target.value) || 0)));
+              }
+            }}
+            @change=${(): void => this.previewBrightnessContrast()}
+          />
+        </label>
+        <label
+          >${tr("dialog.contrast")} <span data-testid="bc-contrast-value">${this.bcContrast}</span>
+          <input
+            type="range"
+            id="bcContrast"
+            min="-100"
+            max="100"
+            step="1"
+            .value=${String(this.bcContrast)}
+            @input=${(event: Event): void => {
+              const target = event.target as HTMLInputElement | null;
+              if (target !== null) {
+                this.bcContrast = Math.min(100, Math.max(-100, Math.round(Number(target.value) || 0)));
+              }
+            }}
+            @change=${(): void => this.previewBrightnessContrast()}
+          />
+        </label>
+        <div class="dialog-actions">
+          <button @click=${(): void => this.cancelBrightnessContrast()}>${tr("btn.cancel")}</button>
+          <button id="brightnessContrastApply" @click=${(): void => this.applyBrightnessContrast()}>${tr("btn.apply")}</button>
+          <button id="brightnessContrastOk" @click=${(): void => this.confirmBrightnessContrast()}>${tr("btn.ok")}</button>
         </div>
       </dialog>
       <dialog id="shortcutsDialog">
@@ -6668,6 +6723,14 @@ export class GnumarusShell extends LitElement {
       requirements: [],
       run: (): void => {
         void this.openAdjustColorsDialog();
+      },
+    });
+    this.actionRegistry.register({
+      id: "adjust-brightness-contrast",
+      name: tr("action.brightnessContrast"),
+      requirements: [],
+      run: (): void => {
+        void this.openBrightnessContrastDialog();
       },
     });
     this.actionRegistry.register({
@@ -13539,6 +13602,102 @@ export class GnumarusShell extends LitElement {
       return;
     }
     const outcome = this.engine.adjustCurrentCellPixels((r, g, b, a) => adjustPixel(r, g, b, a, levels));
+    if (outcome === "adjusted") {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = tr("status.adjusted");
+    } else if (outcome === "empty") {
+      this.statusMessage = tr("status.adjustEmpty");
+      this.showToast(tr("status.adjustEmpty"));
+    }
+  }
+
+  /** Open the live brightness/contrast dialog (two sliders + Cancel/Apply/OK). */
+  private async openBrightnessContrastDialog(): Promise<void> {
+    if (this.engine === null) {
+      return;
+    }
+    if (!this.engine.startBrightnessContrast()) {
+      this.statusMessage = tr("status.adjustEmpty");
+      this.showToast(tr("status.adjustEmpty"));
+      return;
+    }
+    this.closeAllMenus();
+    this.bcBrightness = 0;
+    this.bcContrast = 0;
+    this.bcOpen = true;
+    await this.updateComplete;
+    const dialog = this.shadowRoot?.getElementById("brightnessContrastDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+    const ok = this.shadowRoot?.getElementById("brightnessContrastOk") as HTMLButtonElement | null;
+    ok?.focus();
+  }
+
+  /** Clamped slider levels currently shown in the dialog. */
+  private currentBcLevels(): { brightness: number; contrast: number } {
+    const num = (id: string): number => {
+      const input = this.shadowRoot?.getElementById(id) as HTMLInputElement | null;
+      const raw = Math.round(Number(input?.value ?? "0"));
+      return Number.isFinite(raw) ? Math.min(100, Math.max(-100, raw)) : 0;
+    };
+    return { brightness: num("bcBrightness"), contrast: num("bcContrast") };
+  }
+
+  /** Slider released: re-apply the dialog levels over the session base (preview, no history). */
+  private previewBrightnessContrast(): void {
+    if (this.engine === null || !this.bcOpen) {
+      return;
+    }
+    const levels = this.currentBcLevels();
+    this.bcBrightness = levels.brightness;
+    this.bcContrast = levels.contrast;
+    this.engine.previewBrightnessContrast(levels.brightness, levels.contrast);
+  }
+
+  /** Cancel: revert to the dialog-open snapshot with no history entry. */
+  private cancelBrightnessContrast(): void {
+    this.bcOpen = false;
+    this.engine?.cancelBrightnessContrast();
+    const dialog = this.shadowRoot?.getElementById("brightnessContrastDialog") as HTMLDialogElement | null;
+    dialog?.close();
+  }
+
+  /** Dialog dismissed (Esc/X) counts as Cancel unless already resolved by a button. */
+  private onBrightnessContrastClosed(): void {
+    if (!this.bcOpen) {
+      return;
+    }
+    this.bcOpen = false;
+    this.engine?.cancelBrightnessContrast();
+  }
+
+  /** Apply: keep the visible change, rebase the session and reset the sliders (dialog stays open). */
+  private applyBrightnessContrast(): void {
+    if (this.engine === null || !this.bcOpen) {
+      return;
+    }
+    const levels = this.currentBcLevels();
+    this.engine.previewBrightnessContrast(levels.brightness, levels.contrast);
+    this.engine.rebaseBrightnessContrast();
+    this.bcBrightness = 0;
+    this.bcContrast = 0;
+    this.statusMessage = tr("status.adjusted");
+  }
+
+  /** OK: one undoable entry from the dialog-open snapshot to the current pixels. */
+  private confirmBrightnessContrast(): void {
+    if (!this.bcOpen) {
+      const dialog = this.shadowRoot?.getElementById("brightnessContrastDialog") as HTMLDialogElement | null;
+      dialog?.close();
+      return;
+    }
+    this.bcOpen = false;
+    const dialog = this.shadowRoot?.getElementById("brightnessContrastDialog") as HTMLDialogElement | null;
+    dialog?.close();
+    if (this.engine === null) {
+      return;
+    }
+    const outcome = this.engine.commitBrightnessContrast();
     if (outcome === "adjusted") {
       this.refreshLayers();
       this.dirty = true;
