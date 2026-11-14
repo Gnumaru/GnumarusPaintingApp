@@ -1365,6 +1365,9 @@ export class GnumarusShell extends LitElement {
       align-items: center;
       margin: 6px 0;
     }
+    .adjust-body label > .adjust-name {
+      flex: 0 0 96px;
+    }
     .adjust-body input[type="range"] {
       flex: 1 1 auto;
       min-width: 0;
@@ -2672,6 +2675,300 @@ export class GnumarusShell extends LitElement {
                 </div>
               `
             : html``}
+          ${this.bcOpen
+            ? html`
+              <div
+                class="preview-window adjust-window"
+                style="left: ${this.bcWindowX}px; top: ${this.bcWindowY}px;"
+                data-testid="bc-window"
+                @keydown=${(event: KeyboardEvent): void => {
+                  if (event.key === "Escape") {
+                    event.stopPropagation();
+                    this.cancelBrightnessContrast();
+                  }
+                }}
+              >
+                <div class="preview-header" @pointerdown=${(event: PointerEvent): void => this.onAdjustWindowDragStart(event, "bc")}>
+                  <span>${tr("dialog.bcTitle")}</span>
+                  <span class="spacer"></span>
+                  <button aria-label=${tr("btn.close")} title=${tr("btn.close")} @click=${(): void => this.cancelBrightnessContrast()}>
+                    ×
+                  </button>
+                </div>
+                <div class="adjust-body">
+                  <p>${tr("dialog.bcHint")}</p>
+                  <label
+                    ><span class="adjust-name">${tr("dialog.brightness")}</span>
+                    <input
+                      type="range"
+                      id="bcBrightness"
+                      min="-100"
+                      max="100"
+                      step="1"
+                      .value=${String(this.bcBrightness)}
+                      @input=${(event: Event): void => {
+                        const target = event.target as HTMLInputElement | null;
+                        if (target !== null) {
+                          this.bcBrightness = Math.min(100, Math.max(-100, Math.round(Number(target.value) || 0)));
+                        }
+                      }}
+                      @change=${(): void => this.previewBrightnessContrast()}
+                    />
+                    <input
+                      type="number"
+                      id="bcBrightnessNum"
+                      min="-100"
+                      max="100"
+                      step="1"
+                      .value=${String(this.bcBrightness)}
+                      @input=${(event: Event): void => {
+                        const target = event.target as HTMLInputElement | null;
+                        if (target !== null && /^-?\d+$/.test(target.value)) {
+                          this.bcBrightness = Math.min(100, Math.max(-100, parseInt(target.value, 10)));
+                        }
+                      }}
+                      @change=${(): void => this.previewBrightnessContrast()}
+                    />
+                  </label>
+                  <label
+                    ><span class="adjust-name">${tr("dialog.contrast")}</span>
+                    <input
+                      type="range"
+                      id="bcContrast"
+                      min="-100"
+                      max="100"
+                      step="1"
+                      .value=${String(this.bcContrast)}
+                      @input=${(event: Event): void => {
+                        const target = event.target as HTMLInputElement | null;
+                        if (target !== null) {
+                          this.bcContrast = Math.min(100, Math.max(-100, Math.round(Number(target.value) || 0)));
+                        }
+                      }}
+                      @change=${(): void => this.previewBrightnessContrast()}
+                    />
+                    <input
+                      type="number"
+                      id="bcContrastNum"
+                      min="-100"
+                      max="100"
+                      step="1"
+                      .value=${String(this.bcContrast)}
+                      @input=${(event: Event): void => {
+                        const target = event.target as HTMLInputElement | null;
+                        if (target !== null && /^-?\d+$/.test(target.value)) {
+                          this.bcContrast = Math.min(100, Math.max(-100, parseInt(target.value, 10)));
+                        }
+                      }}
+                      @change=${(): void => this.previewBrightnessContrast()}
+                    />
+                  </label>
+                  <div class="dialog-actions">
+                    <button @click=${(): void => this.cancelBrightnessContrast()}>${tr("btn.cancel")}</button>
+                    <button id="brightnessContrastApply" @click=${(): void => this.applyBrightnessContrast()}>${tr("btn.apply")}</button>
+                    <button id="brightnessContrastOk" @click=${(): void => this.confirmBrightnessContrast()}>${tr("btn.ok")}</button>
+                  </div>
+                </div>
+              </div>
+            `
+            : html``}
+          ${this.hsOpen
+            ? html`
+              <div
+                class="preview-window adjust-window"
+                style="left: ${this.hsWindowX}px; top: ${this.hsWindowY}px;"
+                data-testid="hs-window"
+                @keydown=${(event: KeyboardEvent): void => {
+                  if (event.key === "Escape") {
+                    event.stopPropagation();
+                    this.cancelHslAdjust();
+                  }
+                }}
+              >
+                <div class="preview-header" @pointerdown=${(event: PointerEvent): void => this.onAdjustWindowDragStart(event, "hs")}>
+                  <span>${tr("dialog.hsTitle")}</span>
+                  <span class="spacer"></span>
+                  <button aria-label=${tr("btn.close")} title=${tr("btn.close")} @click=${(): void => this.cancelHslAdjust()}>
+                    ×
+                  </button>
+                </div>
+                <div class="adjust-body">
+                  <p>${tr("dialog.hsHint")}</p>
+            <label
+              >${tr("dialog.hsModel")}
+              <select
+                id="hsModel"
+                .value=${this.hsModel}
+                @change=${(event: Event): void => {
+                  const target = event.target as HTMLSelectElement | null;
+                  if (target !== null) {
+                    this.hsModel = parseHslAdjustModel(target.value);
+                    this.previewHslAdjust();
+                  }
+                }}
+              >
+                <option value="hsl">${tr("dialog.hslTraditional")}</option>
+                <option value="okhsl">${tr("dialog.okhsl")}</option>
+              </select>
+            </label>
+            <label
+              >${tr("dialog.hsMode")}
+              <select
+                id="hsMode"
+                .value=${this.hsMode}
+                @change=${(event: Event): void => {
+                  const target = event.target as HTMLSelectElement | null;
+                  if (target !== null) {
+                    this.hsMode = parseHslAdjustMode(target.value);
+                    this.previewHslAdjust();
+                  }
+                }}
+              >
+                <option value="additive">${tr("dialog.modeAdditive")}</option>
+                <option value="proportional">${tr("dialog.modeProportional")}</option>
+              </select>
+            </label>
+            <label
+              ><span class="adjust-name">${tr("color.hue")}</span>
+              <input
+                type="range"
+                id="hsHue"
+                min="-180"
+                max="180"
+                step="1"
+                .value=${String(this.hsHue)}
+                @input=${(event: Event): void => {
+                  const target = event.target as HTMLInputElement | null;
+                  if (target !== null) {
+                    this.hsHue = Math.min(180, Math.max(-180, Math.round(Number(target.value) || 0)));
+                  }
+                }}
+                @change=${(): void => this.previewHslAdjust()}
+              />
+              <input
+                type="number"
+                id="hsHueNum"
+                min="-180"
+                max="180"
+                step="1"
+                .value=${String(this.hsHue)}
+                @input=${(event: Event): void => {
+                  const target = event.target as HTMLInputElement | null;
+                  if (target !== null && /^-?\d+$/.test(target.value)) {
+                    this.hsHue = Math.min(180, Math.max(-180, parseInt(target.value, 10)));
+                  }
+                }}
+                @change=${(): void => this.previewHslAdjust()}
+              />
+            </label>
+            <label
+              ><span class="adjust-name">${tr("color.saturation")}</span>
+              <input
+                type="range"
+                id="hsSaturation"
+                min="-100"
+                max="100"
+                step="1"
+                .value=${String(this.hsSaturation)}
+                @input=${(event: Event): void => {
+                  const target = event.target as HTMLInputElement | null;
+                  if (target !== null) {
+                    this.hsSaturation = Math.min(100, Math.max(-100, Math.round(Number(target.value) || 0)));
+                  }
+                }}
+                @change=${(): void => this.previewHslAdjust()}
+              />
+              <input
+                type="number"
+                id="hsSaturationNum"
+                min="-100"
+                max="100"
+                step="1"
+                .value=${String(this.hsSaturation)}
+                @input=${(event: Event): void => {
+                  const target = event.target as HTMLInputElement | null;
+                  if (target !== null && /^-?\d+$/.test(target.value)) {
+                    this.hsSaturation = Math.min(100, Math.max(-100, parseInt(target.value, 10)));
+                  }
+                }}
+                @change=${(): void => this.previewHslAdjust()}
+              />
+            </label>
+            <label
+              ><span class="adjust-name">${tr("color.lightness")}</span>
+              <input
+                type="range"
+                id="hsLightness"
+                min="-100"
+                max="100"
+                step="1"
+                .value=${String(this.hsLightness)}
+                @input=${(event: Event): void => {
+                  const target = event.target as HTMLInputElement | null;
+                  if (target !== null) {
+                    this.hsLightness = Math.min(100, Math.max(-100, Math.round(Number(target.value) || 0)));
+                  }
+                }}
+                @change=${(): void => this.previewHslAdjust()}
+              />
+              <input
+                type="number"
+                id="hsLightnessNum"
+                min="-100"
+                max="100"
+                step="1"
+                .value=${String(this.hsLightness)}
+                @input=${(event: Event): void => {
+                  const target = event.target as HTMLInputElement | null;
+                  if (target !== null && /^-?\d+$/.test(target.value)) {
+                    this.hsLightness = Math.min(100, Math.max(-100, parseInt(target.value, 10)));
+                  }
+                }}
+                @change=${(): void => this.previewHslAdjust()}
+              />
+            </label>
+            <label
+              ><span class="adjust-name">${tr("color.alpha")}</span>
+              <input
+                type="range"
+                id="hsAlpha"
+                min="-100"
+                max="100"
+                step="1"
+                .value=${String(this.hsAlpha)}
+                @input=${(event: Event): void => {
+                  const target = event.target as HTMLInputElement | null;
+                  if (target !== null) {
+                    this.hsAlpha = Math.min(100, Math.max(-100, Math.round(Number(target.value) || 0)));
+                  }
+                }}
+                @change=${(): void => this.previewHslAdjust()}
+              />
+              <input
+                type="number"
+                id="hsAlphaNum"
+                min="-100"
+                max="100"
+                step="1"
+                .value=${String(this.hsAlpha)}
+                @input=${(event: Event): void => {
+                  const target = event.target as HTMLInputElement | null;
+                  if (target !== null && /^-?\d+$/.test(target.value)) {
+                    this.hsAlpha = Math.min(100, Math.max(-100, parseInt(target.value, 10)));
+                  }
+                }}
+                @change=${(): void => this.previewHslAdjust()}
+              />
+            </label>
+                  <div class="dialog-actions">
+                    <button @click=${(): void => this.cancelHslAdjust()}>${tr("btn.cancel")}</button>
+                    <button id="hueSaturationApply" @click=${(): void => this.applyHslAdjust()}>${tr("btn.apply")}</button>
+                    <button id="hueSaturationOk" @click=${(): void => this.confirmHslAdjust()}>${tr("btn.ok")}</button>
+                  </div>
+                </div>
+              </div>
+            `
+            : html``}
           ${this.toastMessage !== ""
             ? html`<div class="toast" data-testid="toast">${this.toastMessage}</div>`
             : html``}
@@ -3133,300 +3430,6 @@ export class GnumarusShell extends LitElement {
           <button id="adjustColorsOk" @click=${(): void => this.confirmAdjustColors()}>${tr("btn.ok")}</button>
         </div>
       </dialog>
-      ${this.bcOpen
-        ? html`
-          <div
-            class="preview-window adjust-window"
-            style="left: ${this.bcWindowX}px; top: ${this.bcWindowY}px;"
-            data-testid="bc-window"
-            @keydown=${(event: KeyboardEvent): void => {
-              if (event.key === "Escape") {
-                event.stopPropagation();
-                this.cancelBrightnessContrast();
-              }
-            }}
-          >
-            <div class="preview-header" @pointerdown=${(event: PointerEvent): void => this.onAdjustWindowDragStart(event, "bc")}>
-              <span>${tr("dialog.bcTitle")}</span>
-              <span class="spacer"></span>
-              <button aria-label=${tr("btn.close")} title=${tr("btn.close")} @click=${(): void => this.cancelBrightnessContrast()}>
-                ×
-              </button>
-            </div>
-            <div class="adjust-body">
-              <p>${tr("dialog.bcHint")}</p>
-              <label
-                >${tr("dialog.brightness")} <span data-testid="bc-brightness-value">${this.bcBrightness}</span>
-                <input
-                  type="range"
-                  id="bcBrightness"
-                  min="-100"
-                  max="100"
-                  step="1"
-                  .value=${String(this.bcBrightness)}
-                  @input=${(event: Event): void => {
-                    const target = event.target as HTMLInputElement | null;
-                    if (target !== null) {
-                      this.bcBrightness = Math.min(100, Math.max(-100, Math.round(Number(target.value) || 0)));
-                    }
-                  }}
-                  @change=${(): void => this.previewBrightnessContrast()}
-                />
-                <input
-                  type="number"
-                  id="bcBrightnessNum"
-                  min="-100"
-                  max="100"
-                  step="1"
-                  .value=${String(this.bcBrightness)}
-                  @input=${(event: Event): void => {
-                    const target = event.target as HTMLInputElement | null;
-                    if (target !== null && /^-?\d+$/.test(target.value)) {
-                      this.bcBrightness = Math.min(100, Math.max(-100, parseInt(target.value, 10)));
-                    }
-                  }}
-                  @change=${(): void => this.previewBrightnessContrast()}
-                />
-              </label>
-              <label
-                >${tr("dialog.contrast")} <span data-testid="bc-contrast-value">${this.bcContrast}</span>
-                <input
-                  type="range"
-                  id="bcContrast"
-                  min="-100"
-                  max="100"
-                  step="1"
-                  .value=${String(this.bcContrast)}
-                  @input=${(event: Event): void => {
-                    const target = event.target as HTMLInputElement | null;
-                    if (target !== null) {
-                      this.bcContrast = Math.min(100, Math.max(-100, Math.round(Number(target.value) || 0)));
-                    }
-                  }}
-                  @change=${(): void => this.previewBrightnessContrast()}
-                />
-                <input
-                  type="number"
-                  id="bcContrastNum"
-                  min="-100"
-                  max="100"
-                  step="1"
-                  .value=${String(this.bcContrast)}
-                  @input=${(event: Event): void => {
-                    const target = event.target as HTMLInputElement | null;
-                    if (target !== null && /^-?\d+$/.test(target.value)) {
-                      this.bcContrast = Math.min(100, Math.max(-100, parseInt(target.value, 10)));
-                    }
-                  }}
-                  @change=${(): void => this.previewBrightnessContrast()}
-                />
-              </label>
-              <div class="dialog-actions">
-                <button @click=${(): void => this.cancelBrightnessContrast()}>${tr("btn.cancel")}</button>
-                <button id="brightnessContrastApply" @click=${(): void => this.applyBrightnessContrast()}>${tr("btn.apply")}</button>
-                <button id="brightnessContrastOk" @click=${(): void => this.confirmBrightnessContrast()}>${tr("btn.ok")}</button>
-              </div>
-            </div>
-          </div>
-        `
-        : html``}
-      ${this.hsOpen
-        ? html`
-          <div
-            class="preview-window adjust-window"
-            style="left: ${this.hsWindowX}px; top: ${this.hsWindowY}px;"
-            data-testid="hs-window"
-            @keydown=${(event: KeyboardEvent): void => {
-              if (event.key === "Escape") {
-                event.stopPropagation();
-                this.cancelHslAdjust();
-              }
-            }}
-          >
-            <div class="preview-header" @pointerdown=${(event: PointerEvent): void => this.onAdjustWindowDragStart(event, "hs")}>
-              <span>${tr("dialog.hsTitle")}</span>
-              <span class="spacer"></span>
-              <button aria-label=${tr("btn.close")} title=${tr("btn.close")} @click=${(): void => this.cancelHslAdjust()}>
-                ×
-              </button>
-            </div>
-            <div class="adjust-body">
-              <p>${tr("dialog.hsHint")}</p>
-        <label
-          >${tr("dialog.hsModel")}
-          <select
-            id="hsModel"
-            .value=${this.hsModel}
-            @change=${(event: Event): void => {
-              const target = event.target as HTMLSelectElement | null;
-              if (target !== null) {
-                this.hsModel = parseHslAdjustModel(target.value);
-                this.previewHslAdjust();
-              }
-            }}
-          >
-            <option value="hsl">${tr("dialog.hslTraditional")}</option>
-            <option value="okhsl">${tr("dialog.okhsl")}</option>
-          </select>
-        </label>
-        <label
-          >${tr("dialog.hsMode")}
-          <select
-            id="hsMode"
-            .value=${this.hsMode}
-            @change=${(event: Event): void => {
-              const target = event.target as HTMLSelectElement | null;
-              if (target !== null) {
-                this.hsMode = parseHslAdjustMode(target.value);
-                this.previewHslAdjust();
-              }
-            }}
-          >
-            <option value="additive">${tr("dialog.modeAdditive")}</option>
-            <option value="proportional">${tr("dialog.modeProportional")}</option>
-          </select>
-        </label>
-        <label
-          >${tr("color.hue")} <span data-testid="hs-hue-value">${this.hsHue}</span>
-          <input
-            type="range"
-            id="hsHue"
-            min="-100"
-            max="100"
-            step="1"
-            .value=${String(this.hsHue)}
-            @input=${(event: Event): void => {
-              const target = event.target as HTMLInputElement | null;
-              if (target !== null) {
-                this.hsHue = Math.min(100, Math.max(-100, Math.round(Number(target.value) || 0)));
-              }
-            }}
-            @change=${(): void => this.previewHslAdjust()}
-          />
-          <input
-            type="number"
-            id="hsHueNum"
-            min="-100"
-            max="100"
-            step="1"
-            .value=${String(this.hsHue)}
-            @input=${(event: Event): void => {
-              const target = event.target as HTMLInputElement | null;
-              if (target !== null && /^-?\d+$/.test(target.value)) {
-                this.hsHue = Math.min(100, Math.max(-100, parseInt(target.value, 10)));
-              }
-            }}
-            @change=${(): void => this.previewHslAdjust()}
-          />
-        </label>
-        <label
-          >${tr("color.saturation")} <span data-testid="hs-saturation-value">${this.hsSaturation}</span>
-          <input
-            type="range"
-            id="hsSaturation"
-            min="-100"
-            max="100"
-            step="1"
-            .value=${String(this.hsSaturation)}
-            @input=${(event: Event): void => {
-              const target = event.target as HTMLInputElement | null;
-              if (target !== null) {
-                this.hsSaturation = Math.min(100, Math.max(-100, Math.round(Number(target.value) || 0)));
-              }
-            }}
-            @change=${(): void => this.previewHslAdjust()}
-          />
-          <input
-            type="number"
-            id="hsSaturationNum"
-            min="-100"
-            max="100"
-            step="1"
-            .value=${String(this.hsSaturation)}
-            @input=${(event: Event): void => {
-              const target = event.target as HTMLInputElement | null;
-              if (target !== null && /^-?\d+$/.test(target.value)) {
-                this.hsSaturation = Math.min(100, Math.max(-100, parseInt(target.value, 10)));
-              }
-            }}
-            @change=${(): void => this.previewHslAdjust()}
-          />
-        </label>
-        <label
-          >${tr("color.lightness")} <span data-testid="hs-lightness-value">${this.hsLightness}</span>
-          <input
-            type="range"
-            id="hsLightness"
-            min="-100"
-            max="100"
-            step="1"
-            .value=${String(this.hsLightness)}
-            @input=${(event: Event): void => {
-              const target = event.target as HTMLInputElement | null;
-              if (target !== null) {
-                this.hsLightness = Math.min(100, Math.max(-100, Math.round(Number(target.value) || 0)));
-              }
-            }}
-            @change=${(): void => this.previewHslAdjust()}
-          />
-          <input
-            type="number"
-            id="hsLightnessNum"
-            min="-100"
-            max="100"
-            step="1"
-            .value=${String(this.hsLightness)}
-            @input=${(event: Event): void => {
-              const target = event.target as HTMLInputElement | null;
-              if (target !== null && /^-?\d+$/.test(target.value)) {
-                this.hsLightness = Math.min(100, Math.max(-100, parseInt(target.value, 10)));
-              }
-            }}
-            @change=${(): void => this.previewHslAdjust()}
-          />
-        </label>
-        <label
-          >${tr("color.alpha")} <span data-testid="hs-alpha-value">${this.hsAlpha}</span>
-          <input
-            type="range"
-            id="hsAlpha"
-            min="-100"
-            max="100"
-            step="1"
-            .value=${String(this.hsAlpha)}
-            @input=${(event: Event): void => {
-              const target = event.target as HTMLInputElement | null;
-              if (target !== null) {
-                this.hsAlpha = Math.min(100, Math.max(-100, Math.round(Number(target.value) || 0)));
-              }
-            }}
-            @change=${(): void => this.previewHslAdjust()}
-          />
-          <input
-            type="number"
-            id="hsAlphaNum"
-            min="-100"
-            max="100"
-            step="1"
-            .value=${String(this.hsAlpha)}
-            @input=${(event: Event): void => {
-              const target = event.target as HTMLInputElement | null;
-              if (target !== null && /^-?\d+$/.test(target.value)) {
-                this.hsAlpha = Math.min(100, Math.max(-100, parseInt(target.value, 10)));
-              }
-            }}
-            @change=${(): void => this.previewHslAdjust()}
-          />
-        </label>
-              <div class="dialog-actions">
-                <button @click=${(): void => this.cancelHslAdjust()}>${tr("btn.cancel")}</button>
-                <button id="hueSaturationApply" @click=${(): void => this.applyHslAdjust()}>${tr("btn.apply")}</button>
-                <button id="hueSaturationOk" @click=${(): void => this.confirmHslAdjust()}>${tr("btn.ok")}</button>
-              </div>
-            </div>
-          </div>
-        `
-        : html``}
       <dialog id="shortcutsDialog">
         <h3>${tr("dialog.shortcuts")}</h3>
         <div class="shortcuts-list">
@@ -6784,6 +6787,12 @@ export class GnumarusShell extends LitElement {
       }
       if (this.renamingId !== null) {
         this.renamingId = null;
+      }
+      // Floating adjust windows have no native Esc handling: revert them
+      // here when no modal dialog is open (a modal consumes Esc itself).
+      if (this.shadowRoot?.querySelector("dialog[open]") === null) {
+        this.cancelBrightnessContrast();
+        this.cancelHslAdjust();
       }
       return;
     }

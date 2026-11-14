@@ -12811,6 +12811,14 @@ test("adjust brightness/contrast window drags and header-close reverts @recent",
   if (headerBox === null) {
     throw new Error("adjust window header has no bounding box");
   }
+  // Both sliders share the same x and width (fixed-width name labels).
+  const brightnessBox = await dialog.locator("#bcBrightness").boundingBox();
+  const contrastBox = await dialog.locator("#bcContrast").boundingBox();
+  if (brightnessBox === null || contrastBox === null) {
+    throw new Error("adjust sliders have no bounding box");
+  }
+  expect(contrastBox.x).toBeCloseTo(brightnessBox.x, 0);
+  expect(contrastBox.width).toBeCloseTo(brightnessBox.width, 0);
   await page.mouse.move(headerBox.x + headerBox.width / 2, headerBox.y + 6);
   await page.mouse.down();
   await page.mouse.move(headerBox.x + headerBox.width / 2 + 60, headerBox.y + 6 + 40, { steps: 5 });
@@ -12963,6 +12971,49 @@ test("adjust hue/saturation from Edit menu commits, applies and undoes @recent",
   await expect(page.locator("gnumarus-shell")).toContainText("Colors adjusted");
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 0, a: 255 });
   await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("hue slider spans -180 to 180 @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintLayerRect(page, "#ff0000", 24, 24, 39, 39);
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { runAction(id: string): boolean } } };
+    root.__gnumarus?.shell?.runAction("adjust-hue-saturation");
+  });
+  const dialog = page.locator('gnumarus-shell [data-testid="hs-window"]');
+  await expect(dialog).toBeVisible();
+  await dialog.locator("#hsHue").fill("180");
+  await dialog.locator("#hsHue").evaluate((el: HTMLElement) => el.blur());
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 255, b: 255, a: 255 });
+  await dialog.locator("#hsHueNum").fill("-180");
+  await dialog.locator("#hsHueNum").evaluate((el: HTMLElement) => el.blur());
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 255, b: 255, a: 255 });
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("escape with focus outside the adjust window reverts @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintLayerRect(page, "#ff0000", 24, 24, 39, 39);
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { runAction(id: string): boolean } } };
+    root.__gnumarus?.shell?.runAction("adjust-brightness-contrast");
+  });
+  const dialog = page.locator('gnumarus-shell [data-testid="bc-window"]');
+  await expect(dialog).toBeVisible();
+  await dialog.locator("#bcBrightness").fill("100");
+  await dialog.locator("#bcBrightness").evaluate((el: HTMLElement) => el.blur());
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
+  // Focusing other chrome does not commit: the preview stands.
+  await page.getByRole("button", { name: "Pencil" }).click();
+  await expect(dialog).toBeVisible();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
+  // Global Esc reverts even though the window itself is not focused.
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 

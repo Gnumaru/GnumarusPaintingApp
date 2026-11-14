@@ -50,11 +50,12 @@ describe("GnumarusAdjustments", () => {
   it("clamps HSL levels and parses model/mode", () => {
     expect(clampHslAdjustLevels({})).toEqual({ hue: 0, saturation: 0, lightness: 0, alpha: 0 });
     expect(clampHslAdjustLevels({ hue: 500, saturation: -500, lightness: 12.6, alpha: Number.NaN })).toEqual({
-      hue: 100,
+      hue: 180,
       saturation: -100,
       lightness: 13,
       alpha: 0,
     });
+    expect(clampHslAdjustLevels({ hue: -500 })).toMatchObject({ hue: -180 });
     expect(parseHslAdjustModel("okhsl")).toBe("okhsl");
     expect(parseHslAdjustModel("hsl")).toBe("hsl");
     expect(parseHslAdjustModel("nope")).toBe("hsl");

@@ -83,7 +83,7 @@ export function parseHslAdjustMode(value: unknown): GnumarusHslAdjustMode {
   return value === "proportional" ? "proportional" : "additive";
 }
 
-/** HSL slider levels, each -100..100 (0 is identity). */
+/** HSL slider levels: hue -180..180, the rest -100..100 (0 is identity). */
 export interface GnumarusHslAdjustLevels {
   /** Hue offset in degrees (wraps at 360). */
   hue: number;
@@ -95,18 +95,23 @@ export interface GnumarusHslAdjustLevels {
   alpha: number;
 }
 
-/** Clamp HSL slider levels to integers in -100..100. */
+/** Clamp HSL slider levels to integers (hue -180..180, the rest -100..100). */
 export function clampHslAdjustLevels(levels: {
   hue?: unknown;
   saturation?: unknown;
   lightness?: unknown;
   alpha?: unknown;
 }): GnumarusHslAdjustLevels {
-  const num = (value: unknown): number => {
+  const ranged = (value: unknown, min: number, max: number): number => {
     const n = typeof value === "number" && Number.isFinite(value) ? Math.round(value) : 0;
-    return Math.min(100, Math.max(-100, n));
+    return Math.min(max, Math.max(min, n));
   };
-  return { hue: num(levels.hue), saturation: num(levels.saturation), lightness: num(levels.lightness), alpha: num(levels.alpha) };
+  return {
+    hue: ranged(levels.hue, -180, 180),
+    saturation: ranged(levels.saturation, -100, 100),
+    lightness: ranged(levels.lightness, -100, 100),
+    alpha: ranged(levels.alpha, -100, 100),
+  };
 }
 
 function clamp01(value: number): number {
