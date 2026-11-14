@@ -293,8 +293,12 @@ import {
 import { rgbaBytesToHex } from "../color/GnumarusColorModels";
 import {
   adjustPixel,
+  adjustPixelHsl,
   clampAdjustLevels,
+  clampHslAdjustLevels,
   type GnumarusAdjustLevels,
+  type GnumarusHslAdjustModel,
+  type GnumarusHslAdjustMode,
 } from "../color/GnumarusAdjustments";
 import {
   computeImageDiff,
@@ -4086,6 +4090,181 @@ export class GnumarusCanvasEngine {
   cancelBrightnessContrast(): boolean {
     const session = this.bcSession;
     this.bcSession = null;
+    if (session === null) {
+      return false;
+    }
+    const tex = this.textures.get(session.textureId);
+    if (tex === undefined || tex.buffer.length !== session.original.length) {
+      return false;
+    }
+    tex.buffer.set(session.original);
+    this.syncAllLayerRenders();
+    this.markTextureViewsDirty(tex.id);
+    this.refreshLayerStacking();
+    this.render();
+    this.updatePreviews();
+    this.emitStats();
+    return true;
+  }
+
+  /** Live hue/saturation dialog session (dialog-open snapshot plus rebase point). */
+  private hsSession: {
+    textureId: string;
+    original: Uint8ClampedArray;
+    base: Uint8ClampedArray;
+    locked: GnumarusChannelLock;
+  } | null = null;
+
+  /**
+   * Begin a live hue/saturation session on the active cell texture.
+   * Same guards and snapshot semantics as `startBrightnessContrast`.
+   */
+  startHslAdjust(): boolean {
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return false;
+    }
+    if (this.isCellContentEmpty(layer.id, this.currentFrame)) {
+      return false;
+    }
+    if (this.denyPaintOnDerived()) {
+      return false;
+    }
+    const ensured = this.ensureCellContent(layer.id, this.currentFrame);
+    if (ensured === null) {
+      return false;
+    }
+    const tex = ensured.texture;
+    this.hsSession = {
+      textureId: tex.id,
+      original: tex.buffer.slice(),
+      base: tex.buffer.slice(),
+      locked: { ...layer.lockedChannels },
+    };
+    return true;
+  }
+
+  /**
+   * Re-apply hue/saturation/lightness/alpha offsets over the session
+   * rebase point and show the result on canvas (preview, no history
+   * entry). Out-of-range levels are clamped. False when no session.
+   */
+  previewHslAdjust(
+    hue: number,
+    saturation: number,
+    lightness: number,
+    alpha: number,
+    model: GnumarusHslAdjustModel,
+    mode: GnumarusHslAdjustMode,
+  ): boolean {
+    const session = this.hsSession;
+    if (session === null) {
+      return false;
+    }
+    const tex = this.textures.get(session.textureId);
+    if (tex === undefined || tex.buffer.length !== session.base.length) {
+      return false;
+    }
+    const levels = clampHslAdjustLevels({ hue, saturation, lightness, alpha });
+    for (let i = 0; i < tex.buffer.length; i += 4) {
+      const out = adjustPixelHsl(
+        session.base[i] as number,
+        session.base[i + 1] as number,
+        session.base[i + 2] as number,
+        session.base[i + 3] as number,
+        levels,
+        model,
+        mode,
+      );
+      tex.buffer[i] = out[0];
+      tex.buffer[i + 1] = out[1];
+      tex.buffer[i + 2] = out[2];
+      tex.buffer[i + 3] = out[3];
+    }
+    const locked = session.locked;
+    if (locked.r || locked.g || locked.b || locked.a) {
+      for (let i = 0; i < tex.buffer.length; i += 4) {
+        if (locked.r) {
+          tex.buffer[i] = session.base[i] as number;
+        }
+        if (locked.g) {
+          tex.buffer[i + 1] = session.base[i + 1] as number;
+        }
+        if (locked.b) {
+          tex.buffer[i + 2] = session.base[i + 2] as number;
+        }
+        if (locked.a) {
+          tex.buffer[i + 3] = session.base[i + 3] as number;
+        }
+      }
+    }
+    this.markTextureViewsDirty(tex.id);
+    this.render();
+    this.updatePreviews();
+    this.emitStats();
+    return true;
+  }
+
+  /**
+   * Rebase the session: the current pixels become the new preview base
+   * (Apply keeps the visible change and resets the sliders to a no-op).
+   * No history entry; OK commits the whole session at once.
+   */
+  rebaseHslAdjust(): boolean {
+    const session = this.hsSession;
+    if (session === null) {
+      return false;
+    }
+    const tex = this.textures.get(session.textureId);
+    if (tex === undefined || tex.buffer.length !== session.base.length) {
+      return false;
+    }
+    session.base = tex.buffer.slice();
+    return true;
+  }
+
+  /**
+   * Commit the session: one undoable history entry from the dialog-open
+   * snapshot to the current pixels. Clears the session.
+   */
+  commitHslAdjust(): "adjusted" | "unchanged" | "empty" {
+    const session = this.hsSession;
+    this.hsSession = null;
+    if (session === null) {
+      return "empty";
+    }
+    const tex = this.textures.get(session.textureId);
+    if (tex === undefined || tex.buffer.length !== session.original.length) {
+      return "empty";
+    }
+    const diff = computeImageDiff(session.original, tex.buffer, tex.width, tex.height);
+    if (diff === null) {
+      this.syncAllLayerRenders();
+      this.refreshLayerStacking();
+      this.render();
+      this.updatePreviews();
+      this.emitStats();
+      return "unchanged";
+    }
+    this.history.push({ type: "stroke", layerId: tex.id, diff });
+    this.syncAllLayerRenders();
+    this.markTextureViewsDirty(tex.id);
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    this.updatePreviews();
+    return "adjusted";
+  }
+
+  /**
+   * Revert to the dialog-open snapshot and clear the session (Cancel or
+   * dialog dismiss). No history entry. False when no session is active.
+   */
+  cancelHslAdjust(): boolean {
+    const session = this.hsSession;
+    this.hsSession = null;
     if (session === null) {
       return false;
     }

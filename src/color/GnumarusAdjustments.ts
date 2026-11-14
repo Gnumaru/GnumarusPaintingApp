@@ -1,3 +1,13 @@
+import {
+  clampHue,
+  hslToRgb01,
+  linearToSrgbByte,
+  linearSrgbToOkhsl,
+  okhslToLinearSrgb,
+  rgb01ToHsl,
+  srgbByteToLinear,
+} from "./GnumarusColorModels";
+
 /**
  * Per-pixel color adjustments (brightness/contrast/posterize/invert).
  * Pure math on 0..255 bytes; the engine applies the chosen mapping to the
@@ -55,4 +65,120 @@ export function adjustPixel(
 /** Invert RGB channels (alpha kept). */
 export function invertPixel(r: number, g: number, b: number, a: number): [number, number, number, number] {
   return [255 - Math.round(r), 255 - Math.round(g), 255 - Math.round(b), Math.round(a)];
+}
+
+/** HSL adjustment color model: traditional HSL or perceptual OKHSL. */
+export type GnumarusHslAdjustModel = "hsl" | "okhsl";
+
+/** Parse an HSL adjustment model, defaulting to traditional HSL. */
+export function parseHslAdjustModel(value: unknown): GnumarusHslAdjustModel {
+  return value === "okhsl" ? "okhsl" : "hsl";
+}
+
+/** HSL adjustment mode: absolute offsets or percent-of-value offsets. */
+export type GnumarusHslAdjustMode = "additive" | "proportional";
+
+/** Parse an HSL adjustment mode, defaulting to additive. */
+export function parseHslAdjustMode(value: unknown): GnumarusHslAdjustMode {
+  return value === "proportional" ? "proportional" : "additive";
+}
+
+/** HSL slider levels, each -100..100 (0 is identity). */
+export interface GnumarusHslAdjustLevels {
+  /** Hue offset in degrees (wraps at 360). */
+  hue: number;
+  /** Saturation offset in percent points (classic and perceptual scales alike). */
+  saturation: number;
+  /** Lightness offset in percent points. */
+  lightness: number;
+  /** Alpha offset in absolute 0..255 units. */
+  alpha: number;
+}
+
+/** Clamp HSL slider levels to integers in -100..100. */
+export function clampHslAdjustLevels(levels: {
+  hue?: unknown;
+  saturation?: unknown;
+  lightness?: unknown;
+  alpha?: unknown;
+}): GnumarusHslAdjustLevels {
+  const num = (value: unknown): number => {
+    const n = typeof value === "number" && Number.isFinite(value) ? Math.round(value) : 0;
+    return Math.min(100, Math.max(-100, n));
+  };
+  return { hue: num(levels.hue), saturation: num(levels.saturation), lightness: num(levels.lightness), alpha: num(levels.alpha) };
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+/**
+ * Shift one 0..1 component by a -100..100 slider: additive sums the
+ * percent points exactly (`0.05 + 14` points), proportional adds that
+ * percent of the value itself (`0.20 + 10%` is `0.22`; zeros stay zero).
+ */
+function shiftHslComponent(value: number, slider: number, mode: GnumarusHslAdjustMode): number {
+  if (mode === "proportional") {
+    return clamp01(value + (value * slider) / 100);
+  }
+  return clamp01(value + slider / 100);
+}
+
+/**
+ * Map one RGBA pixel through hue/saturation/lightness/alpha offsets in
+ * the chosen model and mode (alpha channel kept linear, units 0..255).
+ * Traditional HSL works in sRGB directly; OKHSL goes through linear
+ * light so equal slider steps look perceptually even.
+ */
+export function adjustPixelHsl(
+  r: number,
+  g: number,
+  b: number,
+  a: number,
+  levels: GnumarusHslAdjustLevels,
+  model: GnumarusHslAdjustModel,
+  mode: GnumarusHslAdjustMode,
+): [number, number, number, number] {
+  let h: number;
+  let s: number;
+  let l: number;
+  if (model === "okhsl") {
+    const hsl = linearSrgbToOkhsl(srgbByteToLinear(r), srgbByteToLinear(g), srgbByteToLinear(b));
+    h = hsl.h;
+    s = hsl.s;
+    l = hsl.l;
+  } else {
+    const hsl = rgb01ToHsl(
+      Math.min(255, Math.max(0, r)) / 255,
+      Math.min(255, Math.max(0, g)) / 255,
+      Math.min(255, Math.max(0, b)) / 255,
+    );
+    h = hsl.h;
+    s = hsl.s;
+    l = hsl.l;
+  }
+  const nextH =
+    mode === "proportional" ? (((h + (h * levels.hue) / 100) % 360) + 360) % 360 : clampHue(h + levels.hue);
+  const nextS = shiftHslComponent(s, levels.saturation, mode);
+  const nextL = shiftHslComponent(l, levels.lightness, mode);
+  let outR: number;
+  let outG: number;
+  let outB: number;
+  if (model === "okhsl") {
+    const linear = okhslToLinearSrgb(nextH, nextS, nextL);
+    outR = linearToSrgbByte(linear.r);
+    outG = linearToSrgbByte(linear.g);
+    outB = linearToSrgbByte(linear.b);
+  } else {
+    const rgb = hslToRgb01(nextH, nextS, nextL);
+    outR = Math.round(clamp01(rgb.r) * 255);
+    outG = Math.round(clamp01(rgb.g) * 255);
+    outB = Math.round(clamp01(rgb.b) * 255);
+  }
+  const nextA =
+    mode === "proportional"
+      ? Math.min(255, Math.max(0, Math.round(a + (a * levels.alpha) / 100)))
+      : Math.min(255, Math.max(0, Math.round(a + levels.alpha)));
+  return [outR, outG, outB, nextA];
 }

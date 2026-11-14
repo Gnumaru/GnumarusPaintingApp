@@ -5624,6 +5624,7 @@ test("quick action palette filters and runs actions", async ({ page }) => {
   await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveText([
     "Adjust brightness/contrast",
     "Adjust colors…",
+    "Adjust hue/saturation",
     "Content manager",
     "Crop All Cells to Canvas",
     "Export project",
@@ -12782,6 +12783,26 @@ test("adjust brightness/contrast previews on release and cancels to revert @rece
   await expect(dialog.locator("#bcBrightness")).toHaveValue("0");
   await expect(dialog.locator("#bcContrast")).toHaveValue("0");
   await dialog.locator("#bcBrightness").fill("100");
+  await dialog.locator("#bcBrightness").evaluate((el: HTMLElement) => el.blur());
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("adjust brightness/contrast manual inputs preview and revert @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintLayerRect(page, "#ff0000", 24, 24, 39, 39);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { runAction(id: string): boolean } } };
+    root.__gnumarus?.shell?.runAction("adjust-brightness-contrast");
+  });
+  const dialog = page.locator('gnumarus-shell dialog#brightnessContrastDialog[open]');
+  await expect(dialog).toBeVisible();
+  await dialog.locator("#bcBrightnessNum").fill("100");
+  await dialog.locator("#bcBrightnessNum").evaluate((el: HTMLElement) => el.blur());
+  await expect(dialog.locator("#bcBrightness")).toHaveValue("100");
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
   await dialog.getByRole("button", { name: "Cancel" }).click();
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
@@ -12808,6 +12829,83 @@ test("adjust brightness/contrast from Edit menu commits, applies and undoes @rec
   await expect(page.locator("gnumarus-shell")).toContainText("Colors adjusted");
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
   await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("adjust hue/saturation previews on release and cancels to revert @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintLayerRect(page, "#ff0000", 24, 24, 39, 39);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { runAction(id: string): boolean } } };
+    root.__gnumarus?.shell?.runAction("adjust-hue-saturation");
+  });
+  const dialog = page.locator('gnumarus-shell dialog#hueSaturationDialog[open]');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator("#hsHue")).toHaveValue("0");
+  await expect(dialog.locator("#hsSaturation")).toHaveValue("0");
+  await expect(dialog.locator("#hsLightness")).toHaveValue("0");
+  await expect(dialog.locator("#hsAlpha")).toHaveValue("0");
+  await expect(dialog.locator("#hsModel")).toHaveValue("hsl");
+  await expect(dialog.locator("#hsMode")).toHaveValue("additive");
+  await dialog.locator("#hsLightness").fill("100");
+  await dialog.locator("#hsLightness").evaluate((el: HTMLElement) => el.blur());
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("adjust hue/saturation from Edit menu commits, applies and undoes @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintLayerRect(page, "#ff0000", 24, 24, 39, 39);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Adjust hue/saturation" }).click();
+  const dialog = page.locator('gnumarus-shell dialog#hueSaturationDialog[open]');
+  await expect(dialog).toBeVisible();
+  await dialog.locator("#hsHue").fill("60");
+  await dialog.locator("#hsHue").evaluate((el: HTMLElement) => el.blur());
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 0, a: 255 });
+  await dialog.getByRole("button", { name: "Apply" }).click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator("#hsHue")).toHaveValue("0");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 0, a: 255 });
+  await dialog.getByRole("button", { name: "OK" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator("gnumarus-shell")).toContainText("Colors adjusted");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 0, a: 255 });
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("adjust hue/saturation proportional mode and manual inputs @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintLayerRect(page, "#ff0000", 24, 24, 39, 39);
+  await paintLayerRect(page, "#000000", 40, 24, 55, 39);
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { runAction(id: string): boolean } } };
+    root.__gnumarus?.shell?.runAction("adjust-hue-saturation");
+  });
+  const dialog = page.locator('gnumarus-shell dialog#hueSaturationDialog[open]');
+  await expect(dialog).toBeVisible();
+  await dialog.locator("#hsMode").selectOption("proportional");
+  // Proportional hue on red (h=0) is a no-op: zeros stay zero.
+  await dialog.locator("#hsHueNum").fill("100");
+  await dialog.locator("#hsHueNum").evaluate((el: HTMLElement) => el.blur());
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  // Manual lightness input to +100 doubles L=50% to white.
+  await dialog.locator("#hsLightnessNum").fill("100");
+  await dialog.locator("#hsLightnessNum").evaluate((el: HTMLElement) => el.blur());
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
+  // Black never moves in proportional mode.
+  expect(await readPixel(page, 47, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  // Switching the model keeps the dialog alive and still previews.
+  await dialog.locator("#hsModel").selectOption("okhsl");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 

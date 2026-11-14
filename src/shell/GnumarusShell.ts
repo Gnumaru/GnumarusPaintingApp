@@ -238,7 +238,15 @@ import { decodePngToBuffer, encodeBufferToPngBlob } from "../project/GnumarusPng
 import { parseAsepriteFile } from "../project/GnumarusAseprite";
 import { parsePsdFile } from "../project/GnumarusPsd";
 import { parseXcfFile } from "../project/GnumarusXcf";
-import { adjustPixel, clampAdjustLevels, invertPixel } from "../color/GnumarusAdjustments";
+import {
+  adjustPixel,
+  clampAdjustLevels,
+  invertPixel,
+  parseHslAdjustMode,
+  parseHslAdjustModel,
+  type GnumarusHslAdjustMode,
+  type GnumarusHslAdjustModel,
+} from "../color/GnumarusAdjustments";
 import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
 import {
   applyAlphaPlane,
@@ -1680,6 +1688,13 @@ export class GnumarusShell extends LitElement {
     bcBrightness: { type: Number },
     bcContrast: { type: Number },
     bcOpen: { type: Boolean },
+    hsHue: { type: Number },
+    hsSaturation: { type: Number },
+    hsLightness: { type: Number },
+    hsAlpha: { type: Number },
+    hsModel: { type: String },
+    hsMode: { type: String },
+    hsOpen: { type: Boolean },
     checkerColorA: { type: String },
     checkerColorB: { type: String },
     defaultFrameDuration: { type: Number },
@@ -1892,6 +1907,13 @@ export class GnumarusShell extends LitElement {
   declare bcBrightness: number;
   declare bcContrast: number;
   declare bcOpen: boolean;
+  declare hsHue: number;
+  declare hsSaturation: number;
+  declare hsLightness: number;
+  declare hsAlpha: number;
+  declare hsModel: GnumarusHslAdjustModel;
+  declare hsMode: GnumarusHslAdjustMode;
+  declare hsOpen: boolean;
   declare checkerColorA: string;
   declare checkerColorB: string;
   declare defaultFrameDuration: number;
@@ -2119,6 +2141,13 @@ export class GnumarusShell extends LitElement {
     this.bcBrightness = 0;
     this.bcContrast = 0;
     this.bcOpen = false;
+    this.hsHue = 0;
+    this.hsSaturation = 0;
+    this.hsLightness = 0;
+    this.hsAlpha = 0;
+    this.hsModel = "hsl";
+    this.hsMode = "additive";
+    this.hsOpen = false;
     this.checkerColorA = DEFAULT_CHECKER_SETTINGS.colorA;
     this.checkerColorB = DEFAULT_CHECKER_SETTINGS.colorB;
     this.defaultFrameDuration = DEFAULT_ANIMATION_FRAME_DURATION;
@@ -2287,6 +2316,7 @@ export class GnumarusShell extends LitElement {
                   <button title=${tr("menu.redoTitle")} ?disabled=${!this.canRedo} @click=${(): void => void this.runAction("redo")}>${tr("menu.redo")}</button>
                   <button title=${tr("menu.settingsTitle")} @click=${(): void => void this.runAction("settings")}>${tr("menu.settings")}</button>
                   <button title=${tr("menu.adjustBrightnessContrastTitle")} @click=${(): void => void this.runAction("adjust-brightness-contrast")}>${tr("menu.adjustBrightnessContrast")}</button>
+                  <button title=${tr("menu.adjustHueSaturationTitle")} @click=${(): void => void this.runAction("adjust-hue-saturation")}>${tr("menu.adjustHueSaturation")}</button>
                   <button
                     title=${tr("menu.resetCanvasTransformTitle")}
                     @click=${(): void => {
@@ -3027,6 +3057,21 @@ export class GnumarusShell extends LitElement {
             }}
             @change=${(): void => this.previewBrightnessContrast()}
           />
+          <input
+            type="number"
+            id="bcBrightnessNum"
+            min="-100"
+            max="100"
+            step="1"
+            .value=${String(this.bcBrightness)}
+            @input=${(event: Event): void => {
+              const target = event.target as HTMLInputElement | null;
+              if (target !== null && /^-?\d+$/.test(target.value)) {
+                this.bcBrightness = Math.min(100, Math.max(-100, parseInt(target.value, 10)));
+              }
+            }}
+            @change=${(): void => this.previewBrightnessContrast()}
+          />
         </label>
         <label
           >${tr("dialog.contrast")} <span data-testid="bc-contrast-value">${this.bcContrast}</span>
@@ -3045,11 +3090,201 @@ export class GnumarusShell extends LitElement {
             }}
             @change=${(): void => this.previewBrightnessContrast()}
           />
+          <input
+            type="number"
+            id="bcContrastNum"
+            min="-100"
+            max="100"
+            step="1"
+            .value=${String(this.bcContrast)}
+            @input=${(event: Event): void => {
+              const target = event.target as HTMLInputElement | null;
+              if (target !== null && /^-?\d+$/.test(target.value)) {
+                this.bcContrast = Math.min(100, Math.max(-100, parseInt(target.value, 10)));
+              }
+            }}
+            @change=${(): void => this.previewBrightnessContrast()}
+          />
         </label>
         <div class="dialog-actions">
           <button @click=${(): void => this.cancelBrightnessContrast()}>${tr("btn.cancel")}</button>
           <button id="brightnessContrastApply" @click=${(): void => this.applyBrightnessContrast()}>${tr("btn.apply")}</button>
           <button id="brightnessContrastOk" @click=${(): void => this.confirmBrightnessContrast()}>${tr("btn.ok")}</button>
+        </div>
+      </dialog>
+      <dialog id="hueSaturationDialog" @close=${(): void => this.onHslAdjustClosed()}>
+        <h3>${tr("dialog.hsTitle")}</h3>
+        <p>${tr("dialog.hsHint")}</p>
+        <label
+          >${tr("dialog.hsModel")}
+          <select
+            id="hsModel"
+            .value=${this.hsModel}
+            @change=${(event: Event): void => {
+              const target = event.target as HTMLSelectElement | null;
+              if (target !== null) {
+                this.hsModel = parseHslAdjustModel(target.value);
+                this.previewHslAdjust();
+              }
+            }}
+          >
+            <option value="hsl">${tr("dialog.hslTraditional")}</option>
+            <option value="okhsl">${tr("dialog.okhsl")}</option>
+          </select>
+        </label>
+        <label
+          >${tr("dialog.hsMode")}
+          <select
+            id="hsMode"
+            .value=${this.hsMode}
+            @change=${(event: Event): void => {
+              const target = event.target as HTMLSelectElement | null;
+              if (target !== null) {
+                this.hsMode = parseHslAdjustMode(target.value);
+                this.previewHslAdjust();
+              }
+            }}
+          >
+            <option value="additive">${tr("dialog.modeAdditive")}</option>
+            <option value="proportional">${tr("dialog.modeProportional")}</option>
+          </select>
+        </label>
+        <label
+          >${tr("color.hue")} <span data-testid="hs-hue-value">${this.hsHue}</span>
+          <input
+            type="range"
+            id="hsHue"
+            min="-100"
+            max="100"
+            step="1"
+            .value=${String(this.hsHue)}
+            @input=${(event: Event): void => {
+              const target = event.target as HTMLInputElement | null;
+              if (target !== null) {
+                this.hsHue = Math.min(100, Math.max(-100, Math.round(Number(target.value) || 0)));
+              }
+            }}
+            @change=${(): void => this.previewHslAdjust()}
+          />
+          <input
+            type="number"
+            id="hsHueNum"
+            min="-100"
+            max="100"
+            step="1"
+            .value=${String(this.hsHue)}
+            @input=${(event: Event): void => {
+              const target = event.target as HTMLInputElement | null;
+              if (target !== null && /^-?\d+$/.test(target.value)) {
+                this.hsHue = Math.min(100, Math.max(-100, parseInt(target.value, 10)));
+              }
+            }}
+            @change=${(): void => this.previewHslAdjust()}
+          />
+        </label>
+        <label
+          >${tr("color.saturation")} <span data-testid="hs-saturation-value">${this.hsSaturation}</span>
+          <input
+            type="range"
+            id="hsSaturation"
+            min="-100"
+            max="100"
+            step="1"
+            .value=${String(this.hsSaturation)}
+            @input=${(event: Event): void => {
+              const target = event.target as HTMLInputElement | null;
+              if (target !== null) {
+                this.hsSaturation = Math.min(100, Math.max(-100, Math.round(Number(target.value) || 0)));
+              }
+            }}
+            @change=${(): void => this.previewHslAdjust()}
+          />
+          <input
+            type="number"
+            id="hsSaturationNum"
+            min="-100"
+            max="100"
+            step="1"
+            .value=${String(this.hsSaturation)}
+            @input=${(event: Event): void => {
+              const target = event.target as HTMLInputElement | null;
+              if (target !== null && /^-?\d+$/.test(target.value)) {
+                this.hsSaturation = Math.min(100, Math.max(-100, parseInt(target.value, 10)));
+              }
+            }}
+            @change=${(): void => this.previewHslAdjust()}
+          />
+        </label>
+        <label
+          >${tr("color.lightness")} <span data-testid="hs-lightness-value">${this.hsLightness}</span>
+          <input
+            type="range"
+            id="hsLightness"
+            min="-100"
+            max="100"
+            step="1"
+            .value=${String(this.hsLightness)}
+            @input=${(event: Event): void => {
+              const target = event.target as HTMLInputElement | null;
+              if (target !== null) {
+                this.hsLightness = Math.min(100, Math.max(-100, Math.round(Number(target.value) || 0)));
+              }
+            }}
+            @change=${(): void => this.previewHslAdjust()}
+          />
+          <input
+            type="number"
+            id="hsLightnessNum"
+            min="-100"
+            max="100"
+            step="1"
+            .value=${String(this.hsLightness)}
+            @input=${(event: Event): void => {
+              const target = event.target as HTMLInputElement | null;
+              if (target !== null && /^-?\d+$/.test(target.value)) {
+                this.hsLightness = Math.min(100, Math.max(-100, parseInt(target.value, 10)));
+              }
+            }}
+            @change=${(): void => this.previewHslAdjust()}
+          />
+        </label>
+        <label
+          >${tr("color.alpha")} <span data-testid="hs-alpha-value">${this.hsAlpha}</span>
+          <input
+            type="range"
+            id="hsAlpha"
+            min="-100"
+            max="100"
+            step="1"
+            .value=${String(this.hsAlpha)}
+            @input=${(event: Event): void => {
+              const target = event.target as HTMLInputElement | null;
+              if (target !== null) {
+                this.hsAlpha = Math.min(100, Math.max(-100, Math.round(Number(target.value) || 0)));
+              }
+            }}
+            @change=${(): void => this.previewHslAdjust()}
+          />
+          <input
+            type="number"
+            id="hsAlphaNum"
+            min="-100"
+            max="100"
+            step="1"
+            .value=${String(this.hsAlpha)}
+            @input=${(event: Event): void => {
+              const target = event.target as HTMLInputElement | null;
+              if (target !== null && /^-?\d+$/.test(target.value)) {
+                this.hsAlpha = Math.min(100, Math.max(-100, parseInt(target.value, 10)));
+              }
+            }}
+            @change=${(): void => this.previewHslAdjust()}
+          />
+        </label>
+        <div class="dialog-actions">
+          <button @click=${(): void => this.cancelHslAdjust()}>${tr("btn.cancel")}</button>
+          <button id="hueSaturationApply" @click=${(): void => this.applyHslAdjust()}>${tr("btn.apply")}</button>
+          <button id="hueSaturationOk" @click=${(): void => this.confirmHslAdjust()}>${tr("btn.ok")}</button>
         </div>
       </dialog>
       <dialog id="shortcutsDialog">
@@ -6731,6 +6966,14 @@ export class GnumarusShell extends LitElement {
       requirements: [],
       run: (): void => {
         void this.openBrightnessContrastDialog();
+      },
+    });
+    this.actionRegistry.register({
+      id: "adjust-hue-saturation",
+      name: tr("action.hueSaturation"),
+      requirements: [],
+      run: (): void => {
+        void this.openHslAdjustDialog();
       },
     });
     this.actionRegistry.register({
@@ -13635,12 +13878,9 @@ export class GnumarusShell extends LitElement {
 
   /** Clamped slider levels currently shown in the dialog. */
   private currentBcLevels(): { brightness: number; contrast: number } {
-    const num = (id: string): number => {
-      const input = this.shadowRoot?.getElementById(id) as HTMLInputElement | null;
-      const raw = Math.round(Number(input?.value ?? "0"));
-      return Number.isFinite(raw) ? Math.min(100, Math.max(-100, raw)) : 0;
-    };
-    return { brightness: num("bcBrightness"), contrast: num("bcContrast") };
+    // Read reactive state (updated synchronously on input), not the DOM:
+    // `change` fires before Lit re-renders the paired control.
+    return { brightness: this.bcBrightness, contrast: this.bcContrast };
   }
 
   /** Slider released: re-apply the dialog levels over the session base (preview, no history). */
@@ -13698,6 +13938,137 @@ export class GnumarusShell extends LitElement {
       return;
     }
     const outcome = this.engine.commitBrightnessContrast();
+    if (outcome === "adjusted") {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = tr("status.adjusted");
+    } else if (outcome === "empty") {
+      this.statusMessage = tr("status.adjustEmpty");
+      this.showToast(tr("status.adjustEmpty"));
+    }
+  }
+
+  /** Open the live hue/saturation dialog (four sliders + model/mode + Cancel/Apply/OK). */
+  private async openHslAdjustDialog(): Promise<void> {
+    if (this.engine === null) {
+      return;
+    }
+    if (!this.engine.startHslAdjust()) {
+      this.statusMessage = tr("status.adjustEmpty");
+      this.showToast(tr("status.adjustEmpty"));
+      return;
+    }
+    this.closeAllMenus();
+    this.hsHue = 0;
+    this.hsSaturation = 0;
+    this.hsLightness = 0;
+    this.hsAlpha = 0;
+    this.hsModel = "hsl";
+    this.hsMode = "additive";
+    this.hsOpen = true;
+    await this.updateComplete;
+    const dialog = this.shadowRoot?.getElementById("hueSaturationDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+    const ok = this.shadowRoot?.getElementById("hueSaturationOk") as HTMLButtonElement | null;
+    ok?.focus();
+  }
+
+  /** Clamped slider levels plus the model/mode dropdowns currently shown in the dialog. */
+  private currentHslLevels(): {
+    hue: number;
+    saturation: number;
+    lightness: number;
+    alpha: number;
+    model: GnumarusHslAdjustModel;
+    mode: GnumarusHslAdjustMode;
+  } {
+    // Read reactive state (updated synchronously on input), not the DOM:
+    // `change` fires before Lit re-renders the paired control.
+    return {
+      hue: this.hsHue,
+      saturation: this.hsSaturation,
+      lightness: this.hsLightness,
+      alpha: this.hsAlpha,
+      model: this.hsModel,
+      mode: this.hsMode,
+    };
+  }
+
+  /** Slider released (or model/mode switched): re-apply over the session base (preview, no history). */
+  private previewHslAdjust(): void {
+    if (this.engine === null || !this.hsOpen) {
+      return;
+    }
+    const levels = this.currentHslLevels();
+    this.hsHue = levels.hue;
+    this.hsSaturation = levels.saturation;
+    this.hsLightness = levels.lightness;
+    this.hsAlpha = levels.alpha;
+    this.hsModel = levels.model;
+    this.hsMode = levels.mode;
+    this.engine.previewHslAdjust(
+      levels.hue,
+      levels.saturation,
+      levels.lightness,
+      levels.alpha,
+      levels.model,
+      levels.mode,
+    );
+  }
+
+  /** Cancel: revert to the dialog-open snapshot with no history entry. */
+  private cancelHslAdjust(): void {
+    this.hsOpen = false;
+    this.engine?.cancelHslAdjust();
+    const dialog = this.shadowRoot?.getElementById("hueSaturationDialog") as HTMLDialogElement | null;
+    dialog?.close();
+  }
+
+  /** Dialog dismissed (Esc/X) counts as Cancel unless already resolved by a button. */
+  private onHslAdjustClosed(): void {
+    if (!this.hsOpen) {
+      return;
+    }
+    this.hsOpen = false;
+    this.engine?.cancelHslAdjust();
+  }
+
+  /** Apply: keep the visible change, rebase the session and reset the sliders (dialog stays open). */
+  private applyHslAdjust(): void {
+    if (this.engine === null || !this.hsOpen) {
+      return;
+    }
+    const levels = this.currentHslLevels();
+    this.engine.previewHslAdjust(
+      levels.hue,
+      levels.saturation,
+      levels.lightness,
+      levels.alpha,
+      levels.model,
+      levels.mode,
+    );
+    this.engine.rebaseHslAdjust();
+    this.hsHue = 0;
+    this.hsSaturation = 0;
+    this.hsLightness = 0;
+    this.hsAlpha = 0;
+    this.statusMessage = tr("status.adjusted");
+  }
+
+  /** OK: one undoable entry from the dialog-open snapshot to the current pixels. */
+  private confirmHslAdjust(): void {
+    if (!this.hsOpen) {
+      const dialog = this.shadowRoot?.getElementById("hueSaturationDialog") as HTMLDialogElement | null;
+      dialog?.close();
+      return;
+    }
+    this.hsOpen = false;
+    const dialog = this.shadowRoot?.getElementById("hueSaturationDialog") as HTMLDialogElement | null;
+    dialog?.close();
+    if (this.engine === null) {
+      return;
+    }
+    const outcome = this.engine.commitHslAdjust();
     if (outcome === "adjusted") {
       this.refreshLayers();
       this.dirty = true;
