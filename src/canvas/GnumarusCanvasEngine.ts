@@ -14,6 +14,10 @@ import {
   withSvgSize,
 } from "../vector/GnumarusSvg";
 import { GNUMARUS_MODEL3D_DEFAULT_VIEW, parseModel3dView, type GnumarusModel3dView } from "../project/GnumarusProjectFormat";
+import {
+  applyNewProjectPreset,
+  DEFAULT_NEW_PROJECT_PRESET,
+} from "../settings/GnumarusNewProjectPresets";
 import type { GnumarusSvgEntry } from "../vector/GnumarusSvg";
 import { tileLineCells, tileRectCells, wrappedTileBlits, type GnumarusTilePlacement, type GnumarusTileRotation } from "../tilemap/GnumarusTilemap";
 import {
@@ -203,6 +207,7 @@ import {
   rotatedBounds,
   screenToLayerPixel,
   screenToProject,
+  GNUMARUS_MAX_LAYER_DIMENSION,
 } from "./GnumarusViewportMath";
 import type {
   GnumarusCropBox,
@@ -1286,8 +1291,12 @@ export class GnumarusCanvasEngine {
       options.gridOpacityPercent ?? DEFAULT_GRID_SETTINGS.opacityPercent,
     );
     this.viewMinZoom = normalizeViewMinZoom(options.viewMinZoom ?? 0.01);
-    this.imageWidth = 64;
-    this.imageHeight = 64;
+    // Fresh projects start from the default new-project preset, so opening
+    // the app already applies it (dimensions included); empty cells track
+    // these dims in syncLayerRender, so both must come from the preset.
+    const initial = applyNewProjectPreset(DEFAULT_NEW_PROJECT_PRESET);
+    this.imageWidth = initial?.width ?? 64;
+    this.imageHeight = initial?.height ?? 64;
     this.zoom = 8;
 
     let renderer: THREE.WebGLRenderer;
@@ -1735,7 +1744,11 @@ export class GnumarusCanvasEngine {
       this.scene.add(line);
       this.symmetryLines.push(line);
     }
-    const first = this.createLayerInternal("layer0", "L1", true, 1, createPixelBuffer(64, 64), 64, 64, {
+    // Fresh projects start from the default new-project preset, so opening
+    // the app already applies it (dimensions included).
+    const initialWidth = initial?.width ?? 64;
+    const initialHeight = initial?.height ?? 64;
+    const first = this.createLayerInternal("layer0", "L1", true, 1, createPixelBuffer(initialWidth, initialHeight), initialWidth, initialHeight, {
       ...IDENTITY_LAYER_TRANSFORM,
     });
     this.layers.push(first);
@@ -6352,18 +6365,25 @@ export class GnumarusCanvasEngine {
       ensured.transform.flipY = transform.flipY;
     }
     if (transform.scaleX !== undefined || transform.scaleY !== undefined) {
-      // Keep at least 1px (and at most 1024px) of effective dimension per
-      // axis; non-finite or non-positive scales fall back to the minimum.
+      // Keep at least 1px (and at most GNUMARUS_MAX_LAYER_DIMENSION) of
+      // effective dimension per axis; non-finite or non-positive scales
+      // fall back to the minimum.
       const layer = this.findLayer(id);
       const width = layer === null ? 64 : Math.max(1, layer.width);
       const height = layer === null ? 64 : Math.max(1, layer.height);
       if (transform.scaleX !== undefined) {
         const raw = Number.isFinite(transform.scaleX) ? (transform.scaleX as number) : 0;
-        ensured.transform.scaleX = Math.min(1024 / width, Math.max(1 / width, raw));
+        ensured.transform.scaleX = Math.min(
+          GNUMARUS_MAX_LAYER_DIMENSION / width,
+          Math.max(1 / width, raw),
+        );
       }
       if (transform.scaleY !== undefined) {
         const raw = Number.isFinite(transform.scaleY) ? (transform.scaleY as number) : 0;
-        ensured.transform.scaleY = Math.min(1024 / height, Math.max(1 / height, raw));
+        ensured.transform.scaleY = Math.min(
+          GNUMARUS_MAX_LAYER_DIMENSION / height,
+          Math.max(1 / height, raw),
+        );
       }
     }
     if (transform.skewX !== undefined) {
@@ -9771,8 +9791,14 @@ export class GnumarusCanvasEngine {
           scaleY = gesture.startScaleY * (local.y - halfH - anchorCY) / denomY;
         }
       }
-      scaleX = Math.min(1024 / floating.width, Math.max(1 / floating.width, scaleX));
-      scaleY = Math.min(1024 / floating.height, Math.max(1 / floating.height, scaleY));
+      scaleX = Math.min(
+        GNUMARUS_MAX_LAYER_DIMENSION / floating.width,
+        Math.max(1 / floating.width, scaleX),
+      );
+      scaleY = Math.min(
+        GNUMARUS_MAX_LAYER_DIMENSION / floating.height,
+        Math.max(1 / floating.height, scaleY),
+      );
       floating.scaleX = scaleX;
       floating.scaleY = scaleY;
       const matrix = selectionLinearMatrix({ ...gesture.placement, scaleX, scaleY });
@@ -10060,8 +10086,14 @@ export class GnumarusCanvasEngine {
           scaleY = (gesture.startScaleY * (cursor.y - halfH - anchorCY)) / denomY;
         }
       }
-      scaleX = Math.min(1024 / layer.width, Math.max(1 / layer.width, scaleX));
-      scaleY = Math.min(1024 / layer.height, Math.max(1 / layer.height, scaleY));
+      scaleX = Math.min(
+        GNUMARUS_MAX_LAYER_DIMENSION / layer.width,
+        Math.max(1 / layer.width, scaleX),
+      );
+      scaleY = Math.min(
+        GNUMARUS_MAX_LAYER_DIMENSION / layer.height,
+        Math.max(1 / layer.height, scaleY),
+      );
       const matrix = layerLinearMatrix({ ...gesture.snapshot, scaleX, scaleY });
       this.setLayerTransform(layer.id, {
         scaleX,

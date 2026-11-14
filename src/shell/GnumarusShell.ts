@@ -600,10 +600,11 @@ export class GnumarusShell extends LitElement {
       height: 32px;
       flex: 0 0 auto;
     }
-    .paint-well {
+    .toolbar .paint-wells .paint-well {
       position: absolute;
       width: 20px;
       height: 20px;
+      box-sizing: border-box;
       border: 1px solid #111;
       border-radius: 4px;
       padding: 0;
@@ -618,12 +619,13 @@ export class GnumarusShell extends LitElement {
       top: 0;
       cursor: default;
     }
-    .paint-swap {
+    .toolbar .paint-swap {
       position: absolute;
       right: 0;
       top: 0;
       width: 16px;
       height: 16px;
+      box-sizing: border-box;
       padding: 0;
       font-size: 11px;
       line-height: 1;

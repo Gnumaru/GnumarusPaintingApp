@@ -303,6 +303,13 @@ export function clampZoom(zoom: number): number {
   return Math.min(64, Math.max(0.5, zoom));
 }
 
+/**
+ * Largest layer/texture dimension in pixels (matches the maximum project
+ * and import size): transform clamps keep at least 1px and at most this
+ * many effective pixels per axis.
+ */
+export const GNUMARUS_MAX_LAYER_DIMENSION = 16384;
+
 /** Normalize radians to (-PI, PI]. */
 export function normalizeRotation(radians: number): number {
   const twoPi = Math.PI * 2;
