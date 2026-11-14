@@ -1316,6 +1316,51 @@ export class GnumarusShell extends LitElement {
       flex: 0 0 auto;
       margin: auto;
     }
+    .adjust-window {
+      width: 308px;
+      height: auto;
+      min-height: 0;
+      resize: none;
+    }
+    .adjust-body {
+      padding: 2px 12px 10px;
+      display: flex;
+      flex-direction: column;
+      overflow: auto;
+      font-size: 13px;
+    }
+    .adjust-body > p {
+      margin: 6px 0;
+      font-size: 12px;
+      color: #b0b0b0;
+    }
+    .adjust-body label {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin: 6px 0;
+    }
+    .adjust-body input[type="range"] {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .adjust-body input[type="number"] {
+      width: 64px;
+      flex: 0 0 auto;
+      background: #1e1e1e;
+      color: #e6e6e6;
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 4px 6px;
+    }
+    .adjust-body select {
+      background: #1e1e1e;
+      color: #e6e6e6;
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 4px 6px;
+      max-width: 220px;
+    }
     .toast {
       position: absolute;
       left: 50%;
@@ -1688,6 +1733,8 @@ export class GnumarusShell extends LitElement {
     bcBrightness: { type: Number },
     bcContrast: { type: Number },
     bcOpen: { type: Boolean },
+    bcWindowX: { type: Number },
+    bcWindowY: { type: Number },
     hsHue: { type: Number },
     hsSaturation: { type: Number },
     hsLightness: { type: Number },
@@ -1695,6 +1742,8 @@ export class GnumarusShell extends LitElement {
     hsModel: { type: String },
     hsMode: { type: String },
     hsOpen: { type: Boolean },
+    hsWindowX: { type: Number },
+    hsWindowY: { type: Number },
     checkerColorA: { type: String },
     checkerColorB: { type: String },
     defaultFrameDuration: { type: Number },
@@ -1907,6 +1956,8 @@ export class GnumarusShell extends LitElement {
   declare bcBrightness: number;
   declare bcContrast: number;
   declare bcOpen: boolean;
+  declare bcWindowX: number;
+  declare bcWindowY: number;
   declare hsHue: number;
   declare hsSaturation: number;
   declare hsLightness: number;
@@ -1914,6 +1965,8 @@ export class GnumarusShell extends LitElement {
   declare hsModel: GnumarusHslAdjustModel;
   declare hsMode: GnumarusHslAdjustMode;
   declare hsOpen: boolean;
+  declare hsWindowX: number;
+  declare hsWindowY: number;
   declare checkerColorA: string;
   declare checkerColorB: string;
   declare defaultFrameDuration: number;
@@ -2141,6 +2194,8 @@ export class GnumarusShell extends LitElement {
     this.bcBrightness = 0;
     this.bcContrast = 0;
     this.bcOpen = false;
+    this.bcWindowX = 16;
+    this.bcWindowY = 16;
     this.hsHue = 0;
     this.hsSaturation = 0;
     this.hsLightness = 0;
@@ -2148,6 +2203,8 @@ export class GnumarusShell extends LitElement {
     this.hsModel = "hsl";
     this.hsMode = "additive";
     this.hsOpen = false;
+    this.hsWindowX = 340;
+    this.hsWindowY = 16;
     this.checkerColorA = DEFAULT_CHECKER_SETTINGS.colorA;
     this.checkerColorB = DEFAULT_CHECKER_SETTINGS.colorB;
     this.defaultFrameDuration = DEFAULT_ANIMATION_FRAME_DURATION;
@@ -3037,84 +3094,125 @@ export class GnumarusShell extends LitElement {
           <button id="adjustColorsOk" @click=${(): void => this.confirmAdjustColors()}>${tr("btn.ok")}</button>
         </div>
       </dialog>
-      <dialog id="brightnessContrastDialog" @close=${(): void => this.onBrightnessContrastClosed()}>
-        <h3>${tr("dialog.bcTitle")}</h3>
-        <p>${tr("dialog.bcHint")}</p>
-        <label
-          >${tr("dialog.brightness")} <span data-testid="bc-brightness-value">${this.bcBrightness}</span>
-          <input
-            type="range"
-            id="bcBrightness"
-            min="-100"
-            max="100"
-            step="1"
-            .value=${String(this.bcBrightness)}
-            @input=${(event: Event): void => {
-              const target = event.target as HTMLInputElement | null;
-              if (target !== null) {
-                this.bcBrightness = Math.min(100, Math.max(-100, Math.round(Number(target.value) || 0)));
+      ${this.bcOpen
+        ? html`
+          <div
+            class="preview-window adjust-window"
+            style="left: ${this.bcWindowX}px; top: ${this.bcWindowY}px;"
+            data-testid="bc-window"
+            @keydown=${(event: KeyboardEvent): void => {
+              if (event.key === "Escape") {
+                event.stopPropagation();
+                this.cancelBrightnessContrast();
               }
             }}
-            @change=${(): void => this.previewBrightnessContrast()}
-          />
-          <input
-            type="number"
-            id="bcBrightnessNum"
-            min="-100"
-            max="100"
-            step="1"
-            .value=${String(this.bcBrightness)}
-            @input=${(event: Event): void => {
-              const target = event.target as HTMLInputElement | null;
-              if (target !== null && /^-?\d+$/.test(target.value)) {
-                this.bcBrightness = Math.min(100, Math.max(-100, parseInt(target.value, 10)));
+          >
+            <div class="preview-header" @pointerdown=${(event: PointerEvent): void => this.onAdjustWindowDragStart(event, "bc")}>
+              <span>${tr("dialog.bcTitle")}</span>
+              <span class="spacer"></span>
+              <button aria-label=${tr("btn.close")} title=${tr("btn.close")} @click=${(): void => this.cancelBrightnessContrast()}>
+                ×
+              </button>
+            </div>
+            <div class="adjust-body">
+              <p>${tr("dialog.bcHint")}</p>
+              <label
+                >${tr("dialog.brightness")} <span data-testid="bc-brightness-value">${this.bcBrightness}</span>
+                <input
+                  type="range"
+                  id="bcBrightness"
+                  min="-100"
+                  max="100"
+                  step="1"
+                  .value=${String(this.bcBrightness)}
+                  @input=${(event: Event): void => {
+                    const target = event.target as HTMLInputElement | null;
+                    if (target !== null) {
+                      this.bcBrightness = Math.min(100, Math.max(-100, Math.round(Number(target.value) || 0)));
+                    }
+                  }}
+                  @change=${(): void => this.previewBrightnessContrast()}
+                />
+                <input
+                  type="number"
+                  id="bcBrightnessNum"
+                  min="-100"
+                  max="100"
+                  step="1"
+                  .value=${String(this.bcBrightness)}
+                  @input=${(event: Event): void => {
+                    const target = event.target as HTMLInputElement | null;
+                    if (target !== null && /^-?\d+$/.test(target.value)) {
+                      this.bcBrightness = Math.min(100, Math.max(-100, parseInt(target.value, 10)));
+                    }
+                  }}
+                  @change=${(): void => this.previewBrightnessContrast()}
+                />
+              </label>
+              <label
+                >${tr("dialog.contrast")} <span data-testid="bc-contrast-value">${this.bcContrast}</span>
+                <input
+                  type="range"
+                  id="bcContrast"
+                  min="-100"
+                  max="100"
+                  step="1"
+                  .value=${String(this.bcContrast)}
+                  @input=${(event: Event): void => {
+                    const target = event.target as HTMLInputElement | null;
+                    if (target !== null) {
+                      this.bcContrast = Math.min(100, Math.max(-100, Math.round(Number(target.value) || 0)));
+                    }
+                  }}
+                  @change=${(): void => this.previewBrightnessContrast()}
+                />
+                <input
+                  type="number"
+                  id="bcContrastNum"
+                  min="-100"
+                  max="100"
+                  step="1"
+                  .value=${String(this.bcContrast)}
+                  @input=${(event: Event): void => {
+                    const target = event.target as HTMLInputElement | null;
+                    if (target !== null && /^-?\d+$/.test(target.value)) {
+                      this.bcContrast = Math.min(100, Math.max(-100, parseInt(target.value, 10)));
+                    }
+                  }}
+                  @change=${(): void => this.previewBrightnessContrast()}
+                />
+              </label>
+              <div class="dialog-actions">
+                <button @click=${(): void => this.cancelBrightnessContrast()}>${tr("btn.cancel")}</button>
+                <button id="brightnessContrastApply" @click=${(): void => this.applyBrightnessContrast()}>${tr("btn.apply")}</button>
+                <button id="brightnessContrastOk" @click=${(): void => this.confirmBrightnessContrast()}>${tr("btn.ok")}</button>
+              </div>
+            </div>
+          </div>
+        `
+        : html``}
+      ${this.hsOpen
+        ? html`
+          <div
+            class="preview-window adjust-window"
+            style="left: ${this.hsWindowX}px; top: ${this.hsWindowY}px;"
+            data-testid="hs-window"
+            @keydown=${(event: KeyboardEvent): void => {
+              if (event.key === "Escape") {
+                event.stopPropagation();
+                this.cancelHslAdjust();
               }
             }}
-            @change=${(): void => this.previewBrightnessContrast()}
-          />
-        </label>
-        <label
-          >${tr("dialog.contrast")} <span data-testid="bc-contrast-value">${this.bcContrast}</span>
-          <input
-            type="range"
-            id="bcContrast"
-            min="-100"
-            max="100"
-            step="1"
-            .value=${String(this.bcContrast)}
-            @input=${(event: Event): void => {
-              const target = event.target as HTMLInputElement | null;
-              if (target !== null) {
-                this.bcContrast = Math.min(100, Math.max(-100, Math.round(Number(target.value) || 0)));
-              }
-            }}
-            @change=${(): void => this.previewBrightnessContrast()}
-          />
-          <input
-            type="number"
-            id="bcContrastNum"
-            min="-100"
-            max="100"
-            step="1"
-            .value=${String(this.bcContrast)}
-            @input=${(event: Event): void => {
-              const target = event.target as HTMLInputElement | null;
-              if (target !== null && /^-?\d+$/.test(target.value)) {
-                this.bcContrast = Math.min(100, Math.max(-100, parseInt(target.value, 10)));
-              }
-            }}
-            @change=${(): void => this.previewBrightnessContrast()}
-          />
-        </label>
-        <div class="dialog-actions">
-          <button @click=${(): void => this.cancelBrightnessContrast()}>${tr("btn.cancel")}</button>
-          <button id="brightnessContrastApply" @click=${(): void => this.applyBrightnessContrast()}>${tr("btn.apply")}</button>
-          <button id="brightnessContrastOk" @click=${(): void => this.confirmBrightnessContrast()}>${tr("btn.ok")}</button>
-        </div>
-      </dialog>
-      <dialog id="hueSaturationDialog" @close=${(): void => this.onHslAdjustClosed()}>
-        <h3>${tr("dialog.hsTitle")}</h3>
-        <p>${tr("dialog.hsHint")}</p>
+          >
+            <div class="preview-header" @pointerdown=${(event: PointerEvent): void => this.onAdjustWindowDragStart(event, "hs")}>
+              <span>${tr("dialog.hsTitle")}</span>
+              <span class="spacer"></span>
+              <button aria-label=${tr("btn.close")} title=${tr("btn.close")} @click=${(): void => this.cancelHslAdjust()}>
+                ×
+              </button>
+            </div>
+            <div class="adjust-body">
+              <p>${tr("dialog.hsHint")}</p>
         <label
           >${tr("dialog.hsModel")}
           <select
@@ -3281,12 +3379,15 @@ export class GnumarusShell extends LitElement {
             @change=${(): void => this.previewHslAdjust()}
           />
         </label>
-        <div class="dialog-actions">
-          <button @click=${(): void => this.cancelHslAdjust()}>${tr("btn.cancel")}</button>
-          <button id="hueSaturationApply" @click=${(): void => this.applyHslAdjust()}>${tr("btn.apply")}</button>
-          <button id="hueSaturationOk" @click=${(): void => this.confirmHslAdjust()}>${tr("btn.ok")}</button>
-        </div>
-      </dialog>
+              <div class="dialog-actions">
+                <button @click=${(): void => this.cancelHslAdjust()}>${tr("btn.cancel")}</button>
+                <button id="hueSaturationApply" @click=${(): void => this.applyHslAdjust()}>${tr("btn.apply")}</button>
+                <button id="hueSaturationOk" @click=${(): void => this.confirmHslAdjust()}>${tr("btn.ok")}</button>
+              </div>
+            </div>
+          </div>
+        `
+        : html``}
       <dialog id="shortcutsDialog">
         <h3>${tr("dialog.shortcuts")}</h3>
         <div class="shortcuts-list">
@@ -6288,6 +6389,23 @@ export class GnumarusShell extends LitElement {
 
   /** A click outside the menubar dismisses any open menu. */
   private onGlobalPointerDown = (event: PointerEvent): void => {
+    if (this.isAdjustWindowOpen()) {
+      const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+      const inAdjustWindow = path.some(
+        (node) =>
+          node instanceof HTMLElement &&
+          node.closest('[data-testid="bc-window"],[data-testid="hs-window"]') !== null,
+      );
+      if (!inAdjustWindow) {
+        const canvas = this.shadowRoot?.querySelector("#canvasHost > canvas") ?? null;
+        if (canvas !== null && path.includes(canvas)) {
+          // Starting canvas work bakes the live adjustment instead of
+          // letting the next preview wipe the new pixels.
+          this.confirmBrightnessContrast();
+          this.confirmHslAdjust();
+        }
+      }
+    }
     if (!this.anyMenuOpen()) {
       return;
     }
@@ -6307,6 +6425,57 @@ export class GnumarusShell extends LitElement {
     this.editMenuOpen = false;
     this.helpMenuOpen = false;
     this.closeDrawerFlyout();
+  }
+
+  /** Whether a live adjust floating window is open (keyboard behaves as with a modal dialog). */
+  private isAdjustWindowOpen(): boolean {
+    return this.bcOpen || this.hsOpen;
+  }
+
+  /** Drag state for the floating adjust windows (shared like the preview/tile drags). */
+  private adjustWindowDragState: {
+    which: "bc" | "hs";
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null = null;
+
+  /** Header drag moves the floating adjust window (clicks on buttons are ignored). */
+  private onAdjustWindowDragStart(event: PointerEvent, which: "bc" | "hs"): void {
+    const target = event.target as HTMLElement | null;
+    if (target !== null && target.closest("button") !== null) {
+      return;
+    }
+    this.adjustWindowDragState = {
+      which,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: which === "bc" ? this.bcWindowX : this.hsWindowX,
+      originY: which === "bc" ? this.bcWindowY : this.hsWindowY,
+    };
+    const move = (moveEvent: PointerEvent): void => {
+      const state = this.adjustWindowDragState;
+      if (state === null) {
+        return;
+      }
+      const x = Math.max(0, state.originX + (moveEvent.clientX - state.startX));
+      const y = Math.max(0, state.originY + (moveEvent.clientY - state.startY));
+      if (state.which === "bc") {
+        this.bcWindowX = x;
+        this.bcWindowY = y;
+      } else {
+        this.hsWindowX = x;
+        this.hsWindowY = y;
+      }
+    };
+    const up = (): void => {
+      this.adjustWindowDragState = null;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
   }
 
   /** Header click toggles one menu, closing the others. */
@@ -6355,7 +6524,8 @@ export class GnumarusShell extends LitElement {
       if (
         this.eventInField(event) ||
         this.eventInColorPicker(event) ||
-        this.shadowRoot?.querySelector("dialog[open]") !== null
+        this.shadowRoot?.querySelector("dialog[open]") !== null ||
+        this.isAdjustWindowOpen()
       ) {
         return;
       }
@@ -6384,7 +6554,8 @@ export class GnumarusShell extends LitElement {
       if (
         this.eventInField(event) ||
         this.eventInColorPicker(event) ||
-        this.shadowRoot?.querySelector("dialog[open]") !== null
+        this.shadowRoot?.querySelector("dialog[open]") !== null ||
+        this.isAdjustWindowOpen()
       ) {
         return;
       }
@@ -6413,7 +6584,8 @@ export class GnumarusShell extends LitElement {
       this.tool === "flycam" &&
       !this.eventInField(event) &&
       !this.eventInColorPicker(event) &&
-      this.shadowRoot?.querySelector("dialog[open]") === null
+      this.shadowRoot?.querySelector("dialog[open]") === null &&
+      !this.isAdjustWindowOpen()
     ) {
       // Fly-camera mode owns every plain key: WASDQE fly, ZC orbit, JL
       // turn, IK pitch, R resets, Esc exits. Dialogs and text fields keep working above it.
@@ -6431,7 +6603,8 @@ export class GnumarusShell extends LitElement {
       if (
         !this.eventInField(event) &&
         !this.eventInColorPicker(event) &&
-        this.shadowRoot?.querySelector("dialog[open]") === null
+        this.shadowRoot?.querySelector("dialog[open]") === null &&
+        !this.isAdjustWindowOpen()
       ) {
         this.swapPaintColors();
         event.preventDefault();
@@ -6440,7 +6613,11 @@ export class GnumarusShell extends LitElement {
       }
     }
     if (event.key === "Tab") {
-      if (this.shadowRoot?.querySelector("dialog[open]") !== null || this.eventInField(event)) {
+      if (
+        this.shadowRoot?.querySelector("dialog[open]") !== null ||
+        this.isAdjustWindowOpen() ||
+        this.eventInField(event)
+      ) {
         return;
       }
       event.preventDefault();
@@ -6465,7 +6642,7 @@ export class GnumarusShell extends LitElement {
     if (event.ctrlKey || event.altKey || event.metaKey) {
       return;
     }
-    if (this.shadowRoot?.querySelector("dialog[open]") !== null) {
+    if (this.shadowRoot?.querySelector("dialog[open]") !== null || this.isAdjustWindowOpen()) {
       return;
     }
     if (this.eventInField(event)) {
@@ -7070,7 +7247,7 @@ export class GnumarusShell extends LitElement {
       this.closeActionPalette();
       return;
     }
-    if (this.shadowRoot?.querySelector("dialog[open]") !== null) {
+    if (this.shadowRoot?.querySelector("dialog[open]") !== null || this.isAdjustWindowOpen()) {
       return;
     }
     this.openActionPalette();
@@ -13855,7 +14032,7 @@ export class GnumarusShell extends LitElement {
     }
   }
 
-  /** Open the live brightness/contrast dialog (two sliders + Cancel/Apply/OK). */
+  /** Open the live brightness/contrast floating window (two sliders + Cancel/Apply/OK). */
   private async openBrightnessContrastDialog(): Promise<void> {
     if (this.engine === null) {
       return;
@@ -13870,10 +14047,6 @@ export class GnumarusShell extends LitElement {
     this.bcContrast = 0;
     this.bcOpen = true;
     await this.updateComplete;
-    const dialog = this.shadowRoot?.getElementById("brightnessContrastDialog") as HTMLDialogElement | null;
-    dialog?.showModal();
-    const ok = this.shadowRoot?.getElementById("brightnessContrastOk") as HTMLButtonElement | null;
-    ok?.focus();
   }
 
   /** Clamped slider levels currently shown in the dialog. */
@@ -13898,17 +14071,6 @@ export class GnumarusShell extends LitElement {
   private cancelBrightnessContrast(): void {
     this.bcOpen = false;
     this.engine?.cancelBrightnessContrast();
-    const dialog = this.shadowRoot?.getElementById("brightnessContrastDialog") as HTMLDialogElement | null;
-    dialog?.close();
-  }
-
-  /** Dialog dismissed (Esc/X) counts as Cancel unless already resolved by a button. */
-  private onBrightnessContrastClosed(): void {
-    if (!this.bcOpen) {
-      return;
-    }
-    this.bcOpen = false;
-    this.engine?.cancelBrightnessContrast();
   }
 
   /** Apply: keep the visible change, rebase the session and reset the sliders (dialog stays open). */
@@ -13927,13 +14089,9 @@ export class GnumarusShell extends LitElement {
   /** OK: one undoable entry from the dialog-open snapshot to the current pixels. */
   private confirmBrightnessContrast(): void {
     if (!this.bcOpen) {
-      const dialog = this.shadowRoot?.getElementById("brightnessContrastDialog") as HTMLDialogElement | null;
-      dialog?.close();
       return;
     }
     this.bcOpen = false;
-    const dialog = this.shadowRoot?.getElementById("brightnessContrastDialog") as HTMLDialogElement | null;
-    dialog?.close();
     if (this.engine === null) {
       return;
     }
@@ -13948,7 +14106,7 @@ export class GnumarusShell extends LitElement {
     }
   }
 
-  /** Open the live hue/saturation dialog (four sliders + model/mode + Cancel/Apply/OK). */
+  /** Open the live hue/saturation floating window (four sliders + model/mode + Cancel/Apply/OK). */
   private async openHslAdjustDialog(): Promise<void> {
     if (this.engine === null) {
       return;
@@ -13967,10 +14125,6 @@ export class GnumarusShell extends LitElement {
     this.hsMode = "additive";
     this.hsOpen = true;
     await this.updateComplete;
-    const dialog = this.shadowRoot?.getElementById("hueSaturationDialog") as HTMLDialogElement | null;
-    dialog?.showModal();
-    const ok = this.shadowRoot?.getElementById("hueSaturationOk") as HTMLButtonElement | null;
-    ok?.focus();
   }
 
   /** Clamped slider levels plus the model/mode dropdowns currently shown in the dialog. */
@@ -14020,17 +14174,6 @@ export class GnumarusShell extends LitElement {
   private cancelHslAdjust(): void {
     this.hsOpen = false;
     this.engine?.cancelHslAdjust();
-    const dialog = this.shadowRoot?.getElementById("hueSaturationDialog") as HTMLDialogElement | null;
-    dialog?.close();
-  }
-
-  /** Dialog dismissed (Esc/X) counts as Cancel unless already resolved by a button. */
-  private onHslAdjustClosed(): void {
-    if (!this.hsOpen) {
-      return;
-    }
-    this.hsOpen = false;
-    this.engine?.cancelHslAdjust();
   }
 
   /** Apply: keep the visible change, rebase the session and reset the sliders (dialog stays open). */
@@ -14058,13 +14201,9 @@ export class GnumarusShell extends LitElement {
   /** OK: one undoable entry from the dialog-open snapshot to the current pixels. */
   private confirmHslAdjust(): void {
     if (!this.hsOpen) {
-      const dialog = this.shadowRoot?.getElementById("hueSaturationDialog") as HTMLDialogElement | null;
-      dialog?.close();
       return;
     }
     this.hsOpen = false;
-    const dialog = this.shadowRoot?.getElementById("hueSaturationDialog") as HTMLDialogElement | null;
-    dialog?.close();
     if (this.engine === null) {
       return;
     }

@@ -12778,7 +12778,7 @@ test("adjust brightness/contrast previews on release and cancels to revert @rece
     const root = window as unknown as { __gnumarus?: { shell?: { runAction(id: string): boolean } } };
     root.__gnumarus?.shell?.runAction("adjust-brightness-contrast");
   });
-  const dialog = page.locator('gnumarus-shell dialog#brightnessContrastDialog[open]');
+  const dialog = page.locator('gnumarus-shell [data-testid="bc-window"]');
   await expect(dialog).toBeVisible();
   await expect(dialog.locator("#bcBrightness")).toHaveValue("0");
   await expect(dialog.locator("#bcContrast")).toHaveValue("0");
@@ -12786,6 +12786,45 @@ test("adjust brightness/contrast previews on release and cancels to revert @rece
   await dialog.locator("#bcBrightness").evaluate((el: HTMLElement) => el.blur());
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
   await dialog.getByRole("button", { name: "Cancel" }).click();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("adjust brightness/contrast window drags and header-close reverts @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintLayerRect(page, "#ff0000", 24, 24, 39, 39);
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { runAction(id: string): boolean } } };
+    root.__gnumarus?.shell?.runAction("adjust-brightness-contrast");
+  });
+  const dialog = page.locator('gnumarus-shell [data-testid="bc-window"]');
+  await expect(dialog).toBeVisible();
+  await dialog.locator("#bcBrightness").fill("100");
+  await dialog.locator("#bcBrightness").evaluate((el: HTMLElement) => el.blur());
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
+  const before = await dialog.boundingBox();
+  if (before === null) {
+    throw new Error("adjust window has no bounding box");
+  }
+  const header = dialog.locator(".preview-header");
+  const headerBox = await header.boundingBox();
+  if (headerBox === null) {
+    throw new Error("adjust window header has no bounding box");
+  }
+  await page.mouse.move(headerBox.x + headerBox.width / 2, headerBox.y + 6);
+  await page.mouse.down();
+  await page.mouse.move(headerBox.x + headerBox.width / 2 + 60, headerBox.y + 6 + 40, { steps: 5 });
+  await page.mouse.up();
+  const after = await dialog.boundingBox();
+  if (after === null) {
+    throw new Error("adjust window has no bounding box after drag");
+  }
+  expect(after.x).toBeGreaterThan(before.x + 40);
+  expect(after.y).toBeGreaterThan(before.y + 20);
+  // Dragging never commits: the preview is intact and the × button still reverts.
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
+  await dialog.locator('.preview-header button[aria-label="Close"]').click();
+  await expect(dialog).toBeHidden();
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
@@ -12798,7 +12837,7 @@ test("adjust brightness/contrast manual inputs preview and revert @recent", asyn
     const root = window as unknown as { __gnumarus?: { shell?: { runAction(id: string): boolean } } };
     root.__gnumarus?.shell?.runAction("adjust-brightness-contrast");
   });
-  const dialog = page.locator('gnumarus-shell dialog#brightnessContrastDialog[open]');
+  const dialog = page.locator('gnumarus-shell [data-testid="bc-window"]');
   await expect(dialog).toBeVisible();
   await dialog.locator("#bcBrightnessNum").fill("100");
   await dialog.locator("#bcBrightnessNum").evaluate((el: HTMLElement) => el.blur());
@@ -12815,7 +12854,7 @@ test("adjust brightness/contrast from Edit menu commits, applies and undoes @rec
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   await page.getByRole("button", { name: "Edit" }).click();
   await page.getByRole("button", { name: "Adjust brightness/contrast" }).click();
-  const dialog = page.locator('gnumarus-shell dialog#brightnessContrastDialog[open]');
+  const dialog = page.locator('gnumarus-shell [data-testid="bc-window"]');
   await expect(dialog).toBeVisible();
   await dialog.locator("#bcBrightness").fill("100");
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
@@ -12832,6 +12871,53 @@ test("adjust brightness/contrast from Edit menu commits, applies and undoes @rec
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
+test("painting on canvas with adjust window open bakes the adjustment @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintLayerRect(page, "#ff0000", 24, 24, 39, 39);
+  await page.getByRole("button", { name: "Pencil" }).click();
+  await setPencil(page, "#0000ff");
+  expect(await readPixel(page, 960, 540)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { runAction(id: string): boolean } } };
+    root.__gnumarus?.shell?.runAction("adjust-brightness-contrast");
+  });
+  const dialog = page.locator('gnumarus-shell [data-testid="bc-window"]');
+  await expect(dialog).toBeVisible();
+  await dialog.locator("#bcBrightness").fill("100");
+  await dialog.locator("#bcBrightness").evaluate((el: HTMLElement) => el.blur());
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const size = await layerSize(page);
+  const state = await getViewState(page);
+  const view = { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false };
+  const layer = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 };
+  const rect = { left: box.x, top: box.y, width: box.width, height: box.height };
+  const at = (lx: number, ly: number): { x: number; y: number } =>
+    layerPixelToScreen(lx, ly, rect, size.width, size.height, view, layer);
+  const p0 = at(960, 540);
+  const p1 = at(966, 546);
+  await page.mouse.move(p0.x, p0.y);
+  await page.mouse.down();
+  await page.mouse.move(p1.x, p1.y, { steps: 3 });
+  await page.mouse.up();
+  // Starting canvas work bakes the preview instead of losing it.
+  await expect(dialog).toBeHidden();
+  expect(await readPixel(page, 960, 540)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
+  await page.keyboard.press("Control+z");
+  // The stroke is undone; the baked preview stays (transparent pixels keep
+  // the previewed RGB with alpha 0, like the existing adjust path).
+  expect(await readPixel(page, 960, 540)).toEqual({ r: 255, g: 255, b: 255, a: 0 });
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
 test("adjust hue/saturation previews on release and cancels to revert @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
@@ -12841,7 +12927,7 @@ test("adjust hue/saturation previews on release and cancels to revert @recent", 
     const root = window as unknown as { __gnumarus?: { shell?: { runAction(id: string): boolean } } };
     root.__gnumarus?.shell?.runAction("adjust-hue-saturation");
   });
-  const dialog = page.locator('gnumarus-shell dialog#hueSaturationDialog[open]');
+  const dialog = page.locator('gnumarus-shell [data-testid="hs-window"]');
   await expect(dialog).toBeVisible();
   await expect(dialog.locator("#hsHue")).toHaveValue("0");
   await expect(dialog.locator("#hsSaturation")).toHaveValue("0");
@@ -12863,7 +12949,7 @@ test("adjust hue/saturation from Edit menu commits, applies and undoes @recent",
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   await page.getByRole("button", { name: "Edit" }).click();
   await page.getByRole("button", { name: "Adjust hue/saturation" }).click();
-  const dialog = page.locator('gnumarus-shell dialog#hueSaturationDialog[open]');
+  const dialog = page.locator('gnumarus-shell [data-testid="hs-window"]');
   await expect(dialog).toBeVisible();
   await dialog.locator("#hsHue").fill("60");
   await dialog.locator("#hsHue").evaluate((el: HTMLElement) => el.blur());
@@ -12889,7 +12975,7 @@ test("adjust hue/saturation proportional mode and manual inputs @recent", async 
     const root = window as unknown as { __gnumarus?: { shell?: { runAction(id: string): boolean } } };
     root.__gnumarus?.shell?.runAction("adjust-hue-saturation");
   });
-  const dialog = page.locator('gnumarus-shell dialog#hueSaturationDialog[open]');
+  const dialog = page.locator('gnumarus-shell [data-testid="hs-window"]');
   await expect(dialog).toBeVisible();
   await dialog.locator("#hsMode").selectOption("proportional");
   // Proportional hue on red (h=0) is a no-op: zeros stay zero.
