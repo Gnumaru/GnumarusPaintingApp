@@ -6172,6 +6172,30 @@ async function getFloatingSelection(page: import("@playwright/test").Page): Prom
   });
 }
 
+/** Read one pixel out of the active floating selection buffer (local coordinates). */
+async function readFloatingPixel(page: import("@playwright/test").Page, x: number, y: number): Promise<GnumarusPixel | null> {
+  return page.evaluate(([px, py]: number[]) => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: Record<string, unknown>;
+      };
+    };
+    const floating = (root.__gnumarus?.engine as unknown as {
+      floating?: { buffer: Uint8ClampedArray; width: number; height: number; active: boolean } | null;
+    } | undefined)?.floating ?? null;
+    if (floating === null || !floating.active || px < 0 || py < 0 || px >= floating.width || py >= floating.height) {
+      return null;
+    }
+    const at = (py * floating.width + px) * 4;
+    return {
+      r: floating.buffer[at] as number,
+      g: floating.buffer[at + 1] as number,
+      b: floating.buffer[at + 2] as number,
+      a: floating.buffer[at + 3] as number,
+    };
+  }, [x, y]);
+}
+
 async function dragRect(
   page: import("@playwright/test").Page,
   x0: number,
@@ -13121,6 +13145,89 @@ test("escape with focus outside the adjust window reverts @recent", async ({ pag
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("adjust brightness/contrast applies to the floating selection only @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintLayerRect(page, "#ff0000", 24, 24, 39, 39);
+  await selectTool(page, "Rectangular selection");
+  await dragRect(page, 28, 28, 35, 35);
+  expect(await getFloatingSelection(page)).toEqual({ x: 28, y: 28, width: 8, height: 8, selected: 64 });
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { runAction(id: string): boolean } } };
+    return root.__gnumarus?.shell?.runAction("adjust-brightness-contrast");
+  });
+  const dialog = page.locator('gnumarus-shell [data-testid="bc-window"]');
+  await expect(dialog).toBeVisible();
+  await dialog.locator("#bcBrightness").fill("100");
+  await dialog.locator("#bcBrightness").evaluate((el: HTMLElement) => el.blur());
+  // The cell texture is untouched: hole stays transparent, ring stays red.
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 26, 26)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await dialog.getByRole("button", { name: "OK" }).click();
+  await expect(dialog).toBeHidden();
+  // Nothing merged yet: the floating selection is still active.
+  expect(await getFloatingSelection(page)).not.toBeNull();
+  await selectTool(page, "Destructive selection transform");
+  await page.getByRole("button", { name: "Commit selection" }).click();
+  expect(await getFloatingSelection(page)).toBeNull();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
+  expect(await readPixel(page, 26, 26)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 26, 26)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("adjust hue/saturation applies to the floating selection, cancel reverts @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintLayerRect(page, "#ff0000", 24, 24, 39, 39);
+  await selectTool(page, "Rectangular selection");
+  await dragRect(page, 28, 28, 35, 35);
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { runAction(id: string): boolean } } };
+    root.__gnumarus?.shell?.runAction("adjust-hue-saturation");
+  });
+  const dialog = page.locator('gnumarus-shell [data-testid="hs-window"]');
+  await expect(dialog).toBeVisible();
+  await fillHsAndWait(dialog, "#hsHue", "60");
+  // The cell texture is untouched while the preview lands on the floating content.
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 26, 26)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readFloatingPixel(page, 4, 4)).toEqual({ r: 255, g: 255, b: 0, a: 255 });
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toBeHidden();
+  expect(await getFloatingSelection(page)).not.toBeNull();
+  await selectTool(page, "Destructive selection transform");
+  await page.getByRole("button", { name: "Commit selection" }).click();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 26, 26)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("hue/saturation OK on a floating selection merges adjusted colors @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintLayerRect(page, "#ff0000", 24, 24, 39, 39);
+  await selectTool(page, "Rectangular selection");
+  await dragRect(page, 28, 28, 35, 35);
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { runAction(id: string): boolean } } };
+    root.__gnumarus?.shell?.runAction("adjust-hue-saturation");
+  });
+  const dialog = page.locator('gnumarus-shell [data-testid="hs-window"]');
+  await expect(dialog).toBeVisible();
+  await fillHsAndWait(dialog, "#hsHue", "120");
+  await expect(dialog.locator("#hsHue")).toHaveValue("120");
+  await dialog.getByRole("button", { name: "Apply" }).click();
+  await expect(dialog.locator("#hsHue")).toHaveValue("0");
+  await dialog.getByRole("button", { name: "OK" }).click();
+  await expect(dialog).toBeHidden();
+  await selectTool(page, "Destructive selection transform");
+  await page.getByRole("button", { name: "Commit selection" }).click();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 255, b: 0, a: 255 });
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
 });
 
 test("adjust hue/saturation proportional mode and manual inputs @recent", async ({ page }) => {

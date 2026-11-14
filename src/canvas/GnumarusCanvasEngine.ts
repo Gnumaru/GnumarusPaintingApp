@@ -462,6 +462,34 @@ export interface GnumarusLayerPixels {
   buffer: Uint8ClampedArray;
 }
 
+/**
+ * Live adjust dialog session (brightness/contrast or hue/saturation):
+ * dialog-open snapshot plus rebase point. Targets either a cell texture
+ * (undoable via history) or the active floating selection content (baked
+ * into the floating buffer like feather/grow, undoable via the merge).
+ */
+interface GnumarusAdjustSession {
+  /** True when the session targets the floating selection content. */
+  floating: boolean;
+  /** Owning texture for cell targets; null for floating targets. */
+  textureId: string | null;
+  original: Uint8ClampedArray;
+  base: Uint8ClampedArray;
+  /** Channel locks at session start; floating targets ignore locks (like cut/merge). */
+  locked: GnumarusChannelLock;
+}
+
+/** Resolved live adjust target: pixel buffer plus selection mask, if any. */
+interface GnumarusAdjustTarget {
+  buffer: Uint8ClampedArray;
+  width: number;
+  height: number;
+  /** Selection mask (0..255) for floating targets; null paints the whole buffer. */
+  mask: Uint8Array | null;
+  /** Owning texture for cell targets; null for floating targets (no history). */
+  textureId: string | null;
+}
+
 interface GnumarusLayer extends GnumarusLayerInfo {
   buffer: Uint8ClampedArray;
   texture: THREE.DataTexture;
@@ -3926,20 +3954,49 @@ export class GnumarusCanvasEngine {
   }
 
   /** Live brightness/contrast dialog session: dialog-open snapshot plus rebase point. */
-  private bcSession: {
-    textureId: string;
-    original: Uint8ClampedArray;
-    base: Uint8ClampedArray;
-    locked: GnumarusChannelLock;
-  } | null = null;
+  private bcSession: GnumarusAdjustSession | null = null;
+
+  /** Live hue/saturation dialog session: dialog-open snapshot plus rebase point. */
+  private hsSession: GnumarusAdjustSession | null = null;
 
   /**
-   * Begin a live brightness/contrast session on the active cell texture.
-   * Snapshots the pixels so slider previews can re-apply from a stable
-   * base; the session keys the texture id so a mid-dialog layer switch
-   * cannot retarget it. False when there is nothing to adjust.
+   * Begin a live adjust session for the brightness/contrast dialog.
+   * When a floating selection is active on the current cell, the session
+   * targets the floating content only; otherwise it targets the whole
+   * cell texture. False when there is nothing to adjust.
    */
   startBrightnessContrast(): boolean {
+    return this.beginAdjustSession("bc");
+  }
+
+  /**
+   * Begin a live adjust session shared by both adjust dialogs: snapshot
+   * the target pixels so slider previews can re-apply from a stable base.
+   * A floating selection on the current cell wins over the cell texture.
+   */
+  private beginAdjustSession(into: "bc" | "hs"): boolean {
+    const floating = this.floating;
+    if (floating !== null && floating.active && this.floatingHomeVisible()) {
+      if (
+        floating.buffer.length !== floating.width * floating.height * 4 ||
+        floating.mask.length !== floating.width * floating.height
+      ) {
+        return false;
+      }
+      const session: GnumarusAdjustSession = {
+        floating: true,
+        textureId: null,
+        original: floating.buffer.slice(),
+        base: floating.buffer.slice(),
+        locked: { r: false, g: false, b: false, a: false },
+      };
+      if (into === "bc") {
+        this.bcSession = session;
+      } else {
+        this.hsSession = session;
+      }
+      return true;
+    }
     const layer = this.activeLayer();
     if (layer === null) {
       return false;
@@ -3955,13 +4012,67 @@ export class GnumarusCanvasEngine {
       return false;
     }
     const tex = ensured.texture;
-    this.bcSession = {
+    const session: GnumarusAdjustSession = {
+      floating: false,
       textureId: tex.id,
       original: tex.buffer.slice(),
       base: tex.buffer.slice(),
       locked: { ...layer.lockedChannels },
     };
+    if (into === "bc") {
+      this.bcSession = session;
+    } else {
+      this.hsSession = session;
+    }
     return true;
+  }
+
+  /**
+   * Resolve a session to its live pixel buffer, or null when the target
+   * is gone or was resized/replaced mid-dialog (e.g. a padded floating
+   * selection). Sessions snapshot their pixels, never live references.
+   */
+  private resolveAdjustTarget(session: GnumarusAdjustSession): GnumarusAdjustTarget | null {
+    if (!session.floating) {
+      const tex = session.textureId === null ? undefined : this.textures.get(session.textureId);
+      if (tex === undefined || tex.buffer.length !== session.base.length) {
+        return null;
+      }
+      return { buffer: tex.buffer, width: tex.width, height: tex.height, mask: null, textureId: tex.id };
+    }
+    const floating = this.floating;
+    if (
+      floating === null ||
+      !floating.active ||
+      floating.buffer.length !== session.base.length ||
+      floating.buffer.length !== floating.width * floating.height * 4 ||
+      floating.mask.length !== floating.width * floating.height
+    ) {
+      return null;
+    }
+    return {
+      buffer: floating.buffer,
+      width: floating.width,
+      height: floating.height,
+      mask: floating.mask,
+      textureId: null,
+    };
+  }
+
+  /** Re-render a session target after its pixels changed (no history). */
+  private refreshAdjustTarget(target: GnumarusAdjustTarget): void {
+    if (target.textureId !== null) {
+      this.markTextureViewsDirty(target.textureId);
+      this.render();
+      this.updatePreviews();
+      this.emitStats();
+      return;
+    }
+    this.uploadFloatingAdjustTarget(target);
+    this.syncFloatingPlane();
+    this.render();
+    this.updatePreviews();
+    this.emitStats();
   }
 
   /**
@@ -3974,23 +4085,21 @@ export class GnumarusCanvasEngine {
     if (session === null) {
       return false;
     }
-    const tex = this.textures.get(session.textureId);
-    if (tex === undefined || tex.buffer.length !== session.base.length) {
+    const target = this.resolveAdjustTarget(session);
+    if (target === null) {
       return false;
     }
     const levels = clampAdjustLevels({ brightness, contrast });
-    this.applyAdjustLevels(tex.buffer, session.base, session.base, levels, session.locked);
-    this.markTextureViewsDirty(tex.id);
-    this.render();
-    this.updatePreviews();
-    this.emitStats();
+    this.applyAdjustLevels(target.buffer, session.base, session.base, levels, session.locked, target.mask);
+    this.refreshAdjustTarget(target);
     return true;
   }
 
   /**
    * Map every pixel of `dst` from `src` through brightness/contrast levels,
    * then restore locked channels from `ref` (same masking as Delete's
-   * clear and `adjustCurrentCellPixels`).
+   * clear and `adjustCurrentCellPixels`). A non-null selection mask limits
+   * the mapping (and the lock restore) to masked pixels.
    */
   private applyAdjustLevels(
     dst: Uint8ClampedArray,
@@ -3998,8 +4107,15 @@ export class GnumarusCanvasEngine {
     ref: Uint8ClampedArray,
     levels: GnumarusAdjustLevels,
     locked: GnumarusChannelLock,
+    mask: Uint8Array | null = null,
   ): void {
-    for (let i = 0; i < dst.length; i += 4) {
+    if (mask !== null) {
+      dst.set(src);
+    }
+    for (let i = 0, at = 0; i < dst.length; i += 4, at += 1) {
+      if (mask !== null && (mask[at] ?? 0) === 0) {
+        continue;
+      }
       const out = adjustPixel(
         src[i] as number,
         src[i + 1] as number,
@@ -4013,7 +4129,10 @@ export class GnumarusCanvasEngine {
       dst[i + 3] = out[3];
     }
     if (locked.r || locked.g || locked.b || locked.a) {
-      for (let i = 0; i < dst.length; i += 4) {
+      for (let i = 0, at = 0; i < dst.length; i += 4, at += 1) {
+        if (mask !== null && (mask[at] ?? 0) === 0) {
+          continue;
+        }
         if (locked.r) {
           dst[i] = ref[i] as number;
         }
@@ -4040,17 +4159,19 @@ export class GnumarusCanvasEngine {
     if (session === null) {
       return false;
     }
-    const tex = this.textures.get(session.textureId);
-    if (tex === undefined || tex.buffer.length !== session.base.length) {
+    const target = this.resolveAdjustTarget(session);
+    if (target === null) {
       return false;
     }
-    session.base = tex.buffer.slice();
+    session.base = target.buffer.slice();
     return true;
   }
 
   /**
-   * Commit the session: one undoable history entry from the dialog-open
-   * snapshot to the current pixels. Clears the session.
+   * Commit the session: cell targets get one undoable history entry from
+   * the dialog-open snapshot to the current pixels; floating targets stay
+   * floating (the eventual merge bakes one undo entry, like feather/grow).
+   * Clears the session.
    */
   commitBrightnessContrast(): "adjusted" | "unchanged" | "empty" {
     const session = this.bcSession;
@@ -4058,29 +4179,7 @@ export class GnumarusCanvasEngine {
     if (session === null) {
       return "empty";
     }
-    const tex = this.textures.get(session.textureId);
-    if (tex === undefined || tex.buffer.length !== session.original.length) {
-      return "empty";
-    }
-    const diff = computeImageDiff(session.original, tex.buffer, tex.width, tex.height);
-    if (diff === null) {
-      this.syncAllLayerRenders();
-      this.refreshLayerStacking();
-      this.render();
-      this.updatePreviews();
-      this.emitStats();
-      return "unchanged";
-    }
-    this.history.push({ type: "stroke", layerId: tex.id, diff });
-    this.syncAllLayerRenders();
-    this.markTextureViewsDirty(tex.id);
-    this.refreshLayerStacking();
-    this.render();
-    this.onPixelsChanged();
-    this.onLayersChanged?.();
-    this.emitStats();
-    this.updatePreviews();
-    return "adjusted";
+    return this.commitAdjustSession(session);
   }
 
   /**
@@ -4093,55 +4192,114 @@ export class GnumarusCanvasEngine {
     if (session === null) {
       return false;
     }
-    const tex = this.textures.get(session.textureId);
-    if (tex === undefined || tex.buffer.length !== session.original.length) {
+    return this.cancelAdjustSession(session);
+  }
+
+  /**
+   * Commit a resolved session: diff the dialog-open snapshot against the
+   * current pixels. Cell textures push one undoable history entry;
+   * floating selections stay floating (merge bakes the undo entry).
+   */
+  private commitAdjustSession(session: GnumarusAdjustSession): "adjusted" | "unchanged" | "empty" {
+    const target = this.resolveAdjustTarget(session);
+    if (target === null) {
+      return "empty";
+    }
+    const diff = computeImageDiff(session.original, target.buffer, target.width, target.height);
+    if (diff === null) {
+      if (target.textureId !== null) {
+        this.syncAllLayerRenders();
+        this.refreshLayerStacking();
+      } else {
+        this.uploadFloatingAdjustTarget(target);
+        this.syncFloatingPlane();
+      }
+      this.render();
+      this.updatePreviews();
+      this.emitStats();
+      return "unchanged";
+    }
+    if (target.textureId === null) {
+      this.uploadFloatingAdjustTarget(target);
+      this.syncFloatingPlane();
+      this.render();
+      this.updatePreviews();
+      this.emitStats();
+      return "adjusted";
+    }
+    this.history.push({ type: "stroke", layerId: target.textureId, diff });
+    this.syncAllLayerRenders();
+    this.markTextureViewsDirty(target.textureId);
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    this.updatePreviews();
+    return "adjusted";
+  }
+
+  /**
+   * Revert a resolved session to its dialog-open snapshot (no history).
+   * False when the target is gone.
+   */
+  private cancelAdjustSession(session: GnumarusAdjustSession): boolean {
+    const target = this.resolveAdjustTarget(session);
+    if (target === null) {
       return false;
     }
-    tex.buffer.set(session.original);
-    this.syncAllLayerRenders();
-    this.markTextureViewsDirty(tex.id);
-    this.refreshLayerStacking();
+    target.buffer.set(session.original);
+    if (target.textureId !== null) {
+      this.syncAllLayerRenders();
+      this.markTextureViewsDirty(target.textureId);
+      this.refreshLayerStacking();
+    } else {
+      this.uploadFloatingAdjustTarget(target);
+      this.syncFloatingPlane();
+    }
     this.render();
     this.updatePreviews();
     this.emitStats();
     return true;
   }
 
-  /** Live hue/saturation dialog session (dialog-open snapshot plus rebase point). */
-  private hsSession: {
-    textureId: string;
-    original: Uint8ClampedArray;
-    base: Uint8ClampedArray;
-    locked: GnumarusChannelLock;
-  } | null = null;
+  /**
+   * Rebase a resolved session: the current pixels become the new preview
+   * base (Apply). False when the target is gone.
+   */
+  private rebaseAdjustSession(session: GnumarusAdjustSession): boolean {
+    const target = this.resolveAdjustTarget(session);
+    if (target === null) {
+      return false;
+    }
+    session.base = target.buffer.slice();
+    return true;
+  }
 
   /**
-   * Begin a live hue/saturation session on the active cell texture.
-   * Same guards and snapshot semantics as `startBrightnessContrast`.
+   * Upload floating adjust pixels to the floating plane (recreating it
+   * when the buffer object was replaced mid-session).
+   */
+  private uploadFloatingAdjustTarget(target: GnumarusAdjustTarget): void {
+    if (
+      this.floatingTexture !== null &&
+      this.floatingPlaneFor === this.floating &&
+      this.floating !== null &&
+      (this.floatingTexture.image as unknown as { data?: unknown }).data === target.buffer
+    ) {
+      this.floatingTexture.needsUpdate = true;
+      return;
+    }
+    this.disposeFloatingPlane();
+  }
+
+  /**
+   * Begin a live hue/saturation session. When a floating selection is
+   * active on the current cell the session targets the floating content
+   * only; otherwise it targets the whole cell texture.
    */
   startHslAdjust(): boolean {
-    const layer = this.activeLayer();
-    if (layer === null) {
-      return false;
-    }
-    if (this.isCellContentEmpty(layer.id, this.currentFrame)) {
-      return false;
-    }
-    if (this.denyPaintOnDerived()) {
-      return false;
-    }
-    const ensured = this.ensureCellContent(layer.id, this.currentFrame);
-    if (ensured === null) {
-      return false;
-    }
-    const tex = ensured.texture;
-    this.hsSession = {
-      textureId: tex.id,
-      original: tex.buffer.slice(),
-      base: tex.buffer.slice(),
-      locked: { ...layer.lockedChannels },
-    };
-    return true;
+    return this.beginAdjustSession("hs");
   }
 
   /**
@@ -4161,47 +4319,56 @@ export class GnumarusCanvasEngine {
     if (session === null) {
       return false;
     }
-    const tex = this.textures.get(session.textureId);
-    if (tex === undefined || tex.buffer.length !== session.base.length) {
+    const target = this.resolveAdjustTarget(session);
+    if (target === null) {
       return false;
     }
     const levels = clampHslAdjustLevels({ hue, saturation, lightness, alpha });
-    for (let i = 0; i < tex.buffer.length; i += 4) {
+    const dst = target.buffer;
+    const src = session.base;
+    const mask = target.mask;
+    if (mask !== null) {
+      dst.set(src);
+    }
+    for (let i = 0, at = 0; i < dst.length; i += 4, at += 1) {
+      if (mask !== null && (mask[at] ?? 0) === 0) {
+        continue;
+      }
       const out = adjustPixelHsl(
-        session.base[i] as number,
-        session.base[i + 1] as number,
-        session.base[i + 2] as number,
-        session.base[i + 3] as number,
+        src[i] as number,
+        src[i + 1] as number,
+        src[i + 2] as number,
+        src[i + 3] as number,
         levels,
         model,
         mode,
       );
-      tex.buffer[i] = out[0];
-      tex.buffer[i + 1] = out[1];
-      tex.buffer[i + 2] = out[2];
-      tex.buffer[i + 3] = out[3];
+      dst[i] = out[0];
+      dst[i + 1] = out[1];
+      dst[i + 2] = out[2];
+      dst[i + 3] = out[3];
     }
     const locked = session.locked;
     if (locked.r || locked.g || locked.b || locked.a) {
-      for (let i = 0; i < tex.buffer.length; i += 4) {
+      for (let i = 0, at = 0; i < dst.length; i += 4, at += 1) {
+        if (mask !== null && (mask[at] ?? 0) === 0) {
+          continue;
+        }
         if (locked.r) {
-          tex.buffer[i] = session.base[i] as number;
+          dst[i] = src[i] as number;
         }
         if (locked.g) {
-          tex.buffer[i + 1] = session.base[i + 1] as number;
+          dst[i + 1] = src[i + 1] as number;
         }
         if (locked.b) {
-          tex.buffer[i + 2] = session.base[i + 2] as number;
+          dst[i + 2] = src[i + 2] as number;
         }
         if (locked.a) {
-          tex.buffer[i + 3] = session.base[i + 3] as number;
+          dst[i + 3] = src[i + 3] as number;
         }
       }
     }
-    this.markTextureViewsDirty(tex.id);
-    this.render();
-    this.updatePreviews();
-    this.emitStats();
+    this.refreshAdjustTarget(target);
     return true;
   }
 
@@ -4212,20 +4379,13 @@ export class GnumarusCanvasEngine {
    */
   rebaseHslAdjust(): boolean {
     const session = this.hsSession;
-    if (session === null) {
-      return false;
-    }
-    const tex = this.textures.get(session.textureId);
-    if (tex === undefined || tex.buffer.length !== session.base.length) {
-      return false;
-    }
-    session.base = tex.buffer.slice();
-    return true;
+    return session !== null && this.rebaseAdjustSession(session);
   }
 
   /**
-   * Commit the session: one undoable history entry from the dialog-open
-   * snapshot to the current pixels. Clears the session.
+   * Commit the session: cell textures get one undoable history entry;
+   * floating selections stay floating (the merge bakes the undo entry).
+   * Clears the session.
    */
   commitHslAdjust(): "adjusted" | "unchanged" | "empty" {
     const session = this.hsSession;
@@ -4233,29 +4393,7 @@ export class GnumarusCanvasEngine {
     if (session === null) {
       return "empty";
     }
-    const tex = this.textures.get(session.textureId);
-    if (tex === undefined || tex.buffer.length !== session.original.length) {
-      return "empty";
-    }
-    const diff = computeImageDiff(session.original, tex.buffer, tex.width, tex.height);
-    if (diff === null) {
-      this.syncAllLayerRenders();
-      this.refreshLayerStacking();
-      this.render();
-      this.updatePreviews();
-      this.emitStats();
-      return "unchanged";
-    }
-    this.history.push({ type: "stroke", layerId: tex.id, diff });
-    this.syncAllLayerRenders();
-    this.markTextureViewsDirty(tex.id);
-    this.refreshLayerStacking();
-    this.render();
-    this.onPixelsChanged();
-    this.onLayersChanged?.();
-    this.emitStats();
-    this.updatePreviews();
-    return "adjusted";
+    return this.commitAdjustSession(session);
   }
 
   /**
@@ -4268,18 +4406,7 @@ export class GnumarusCanvasEngine {
     if (session === null) {
       return false;
     }
-    const tex = this.textures.get(session.textureId);
-    if (tex === undefined || tex.buffer.length !== session.original.length) {
-      return false;
-    }
-    tex.buffer.set(session.original);
-    this.syncAllLayerRenders();
-    this.markTextureViewsDirty(tex.id);
-    this.refreshLayerStacking();
-    this.render();
-    this.updatePreviews();
-    this.emitStats();
-    return true;
+    return this.cancelAdjustSession(session);
   }
 
   /** True while an orbit gesture has uncommitted changes. */
@@ -10954,6 +11081,9 @@ export class GnumarusCanvasEngine {
       return;
     }
     this.floating = null;
+    // Live adjust sessions target the floating content: dropping it ends them.
+    this.bcSession = null;
+    this.hsSession = null;
     this.clearTransformGestures();
     this.disposeFloatingPlane();
     this.updatePreviews();
@@ -10974,6 +11104,10 @@ export class GnumarusCanvasEngine {
     const tex = this.textures.get(floating.textureId);
     if (tex === undefined) {
       this.floating = null;
+      // Live adjust sessions target the floating content: without a home
+      // texture the floating selection is gone, so end them as well.
+      this.bcSession = null;
+      this.hsSession = null;
       this.clearTransformGestures();
       this.disposeFloatingPlane();
       this.updatePreviews();
@@ -11026,6 +11160,10 @@ export class GnumarusCanvasEngine {
       }
     }
     this.floating = null;
+    // Live adjust sessions target the floating content: merging it bakes
+    // the previewed pixels, so the sessions end here (no separate history).
+    this.bcSession = null;
+    this.hsSession = null;
     this.clearTransformGestures();
     this.disposeFloatingPlane();
     const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
@@ -11180,6 +11318,10 @@ export class GnumarusCanvasEngine {
     }
     if (countSelectionMask(floating.mask) === 0) {
       this.floating = null;
+      // Live adjust sessions target the floating content: shrinking it
+      // away ends them as well.
+      this.bcSession = null;
+      this.hsSession = null;
       this.clearTransformGestures();
       this.disposeFloatingPlane();
       this.updatePreviews();

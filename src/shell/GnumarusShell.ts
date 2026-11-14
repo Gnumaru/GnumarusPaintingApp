@@ -5770,7 +5770,9 @@ export class GnumarusShell extends LitElement {
               step="1"
               .value=${String(this.featherRadius)}
               ?disabled=${!this.floatingActive}
-              @change=${(): void => this.applyFeatherFromDialog()}
+              @change=${(): void => {
+                void this.applyFeatherFromDialog();
+              }}
             />
           </label>
           <label title=${tr("opt.growShrinkHint")}
@@ -5787,10 +5789,14 @@ export class GnumarusShell extends LitElement {
               @change=${(): void => this.applyGrowShrinkFromDialog()}
             />
           </label>
-          <button data-testid="selection-grow" ?disabled=${!this.floatingActive} title=${tr("opt.growHint")} @click=${(): void => this.reshapeFloatingSelection(1)}>
+          <button data-testid="selection-grow" ?disabled=${!this.floatingActive} title=${tr("opt.growHint")} @click=${(): void => {
+            void this.reshapeFloatingSelection(1);
+          }}>
             ${tr("opt.grow")}
           </button>
-          <button data-testid="selection-shrink" ?disabled=${!this.floatingActive} title=${tr("opt.shrinkHint")} @click=${(): void => this.reshapeFloatingSelection(-1)}>
+          <button data-testid="selection-shrink" ?disabled=${!this.floatingActive} title=${tr("opt.shrinkHint")} @click=${(): void => {
+            void this.reshapeFloatingSelection(-1);
+          }}>
             ${tr("opt.shrink")}
           </button>
         </div>
@@ -14174,7 +14180,14 @@ export class GnumarusShell extends LitElement {
   }
 
   /** Feather the floating mask by the dialog radius (no undo until merge). */
-  private applyFeatherFromDialog(): void {
+  private async applyFeatherFromDialog(): Promise<void> {
+    // Baking a live adjust first keeps the previewed pixels (a reshape
+    // replaces the floating buffer, which would orphan the session).
+    await this.confirmBrightnessContrast();
+    await this.confirmHslAdjust();
+    if (this.engine === null) {
+      return;
+    }
     const input = this.shadowRoot?.getElementById("featherRadius") as HTMLInputElement | null;
     const parsed = Math.floor(Number(input?.value ?? "0"));
     const radius = Number.isFinite(parsed) ? Math.min(32, Math.max(0, parsed)) : 0;
@@ -14185,7 +14198,14 @@ export class GnumarusShell extends LitElement {
   }
 
   /** Grow (+1) or shrink (-1) the floating mask by the dialog pixel count. */
-  private reshapeFloatingSelection(direction: 1 | -1): void {
+  private async reshapeFloatingSelection(direction: 1 | -1): Promise<void> {
+    // Bake a live adjust first (a reshape replaces the floating buffer,
+    // which would orphan the session).
+    await this.confirmBrightnessContrast();
+    await this.confirmHslAdjust();
+    if (this.engine === null) {
+      return;
+    }
     const input = this.shadowRoot?.getElementById("growShrinkPx") as HTMLInputElement | null;
     const parsed = Math.floor(Number(input?.value ?? "1"));
     const px = Number.isFinite(parsed) ? Math.min(64, Math.max(1, parsed)) : 1;
