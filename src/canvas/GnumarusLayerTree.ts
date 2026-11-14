@@ -10,6 +10,56 @@
 
 export type GnumarusLayerParentMap = Map<string, string | null>;
 
+/** Own flag plus every ancestor must be visible (cycle-safe; missing ancestors don't hide). */
+export function isEffectivelyVisible(
+  id: string,
+  parents: ReadonlyMap<string, string | null>,
+  isVisible: (layerId: string) => boolean,
+): boolean {
+  if (!isVisible(id)) {
+    return false;
+  }
+  const seen = new Set<string>([id]);
+  let current = parents.get(id) ?? null;
+  while (current !== null) {
+    if (seen.has(current)) {
+      return true;
+    }
+    seen.add(current);
+    if (!isVisible(current)) {
+      // Unknown ids (never created) don't hide; only known-hidden hides.
+      // Callers pass `true` for unknown ids to get exactly this behavior.
+      return false;
+    }
+    current = parents.get(current) ?? null;
+  }
+  return true;
+}
+
+/** True when any strict ancestor is in the collapsed set (cycle-safe). */
+export function isHiddenByCollapse(
+  id: string,
+  parents: ReadonlyMap<string, string | null>,
+  collapsed: ReadonlySet<string>,
+): boolean {
+  if (collapsed.size === 0) {
+    return false;
+  }
+  const seen = new Set<string>([id]);
+  let current = parents.get(id) ?? null;
+  while (current !== null) {
+    if (collapsed.has(current)) {
+      return true;
+    }
+    if (seen.has(current)) {
+      return false;
+    }
+    seen.add(current);
+    current = parents.get(current) ?? null;
+  }
+  return false;
+}
+
 /** Sanitize raw parent links: unknown ids, self-links and cycles become roots. */
 export function sanitizeLayerParents(
   ids: readonly string[],

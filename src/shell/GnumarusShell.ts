@@ -13,6 +13,7 @@ import {
   unionSelectedFrameRange,
   unionSelectedIdRange,
 } from "../canvas/GnumarusSelectionBoolean";
+import { isHiddenByCollapse } from "../canvas/GnumarusLayerTree";
 import {
   formatContentBytes,
   modelMeta,
@@ -1777,6 +1778,7 @@ export class GnumarusShell extends LitElement {
     layers: { type: Array },
     activeLayerId: { type: String },
     renamingId: { type: String },
+    collapsedLayers: { type: Array },
     dragLayerId: { type: String },
     dropTargetLayerId: { type: String },
     contextMenuLayerId: { type: String },
@@ -1992,6 +1994,7 @@ export class GnumarusShell extends LitElement {
   declare layerText: string;
   declare frameText: string;
   declare renamingId: string | null;
+  declare collapsedLayers: string[];
   declare dragLayerId: string | null;
   declare dropTargetLayerId: string | null;
   declare contextMenuLayerId: string | null;
@@ -2248,6 +2251,7 @@ export class GnumarusShell extends LitElement {
     this.layerText = "-";
     this.frameText = tr("frame.label", { frame: 1, count: 1, name: "F1" });
     this.renamingId = null;
+    this.collapsedLayers = [];
     this.dragLayerId = null;
     this.dropTargetLayerId = null;
     this.contextMenuLayerId = null;
@@ -3052,8 +3056,13 @@ export class GnumarusShell extends LitElement {
             <button aria-label=${tr("layer.add")} title=${tr("layer.add")} @click=${(): void => this.onAddLayer()}>+</button>
           </div>
           <div class="layers-list">
-            ${[...this.layers].reverse().map((layer, displayIndex, displayLayers) => {
+            ${[...this.layers]
+              .reverse()
+              .filter((row) => !this.isLayerRowHidden(row.id))
+              .map((layer, displayIndex, displayLayers) => {
               const depth = this.layerDepthOf(layer.id);
+              const collapsed = this.collapsedLayerSet().has(layer.id);
+              const expandable = this.hasLayerChildren(layer.id);
               const siblings = displayLayers.filter(
                 (entry) => (entry.parentId ?? null) === (layer.parentId ?? null),
               );
@@ -3067,7 +3076,7 @@ export class GnumarusShell extends LitElement {
                   data-layer-id=${layer.id}
                   data-depth=${depth}
                   data-parent-id=${layer.parentId ?? ""}
-                  style="margin-left:${depth * 14}px"
+                  style="margin-left:${depth * 8}px"
                   draggable="true"
                   @click=${(event: MouseEvent): void => this.onSelectLayerClick(layer.id, event.shiftKey, event.ctrlKey || event.metaKey)}
                   @contextmenu=${(event: MouseEvent): void => {
@@ -3081,6 +3090,23 @@ export class GnumarusShell extends LitElement {
                   @dragend=${(): void => this.onLayerDragEnd()}
                 >
                   <div class="layer-top">
+                    ${expandable
+                      ? html`
+                          <button
+                            aria-label=${collapsed ? tr("layer.expandChildren") : tr("layer.collapseChildren")}
+                            title=${collapsed ? tr("layer.expandChildren") : tr("layer.collapseChildren")}
+                            aria-expanded=${collapsed ? "false" : "true"}
+                            data-testid="layer-collapse"
+                            data-collapse-for=${layer.id}
+                            @click=${(event: Event): void => {
+                              event.stopPropagation();
+                              this.toggleCollapsedLayer(layer.id);
+                            }}
+                          >
+                            ${collapsed ? "▸" : "▾"}
+                          </button>
+                        `
+                      : html``}
                     <input
                       type="checkbox"
                       aria-label=${tr("layer.toggleVisibility")}
@@ -10439,9 +10465,10 @@ export class GnumarusShell extends LitElement {
     if (canvas === null) {
       return;
     }
-    const size = this.engine.size;
-    const infos = this.engine.getLayers();
-    const pixels = this.engine.exportLayers();
+    const engine = this.engine;
+    const size = engine.size;
+    const infos = engine.getLayers();
+    const pixels = engine.exportLayers();
     const inputs = infos.map((info) => {
       const rendered = pixels.find((entry) => entry.id === info.id);
       if (rendered === undefined) {
@@ -10452,7 +10479,7 @@ export class GnumarusShell extends LitElement {
         height: info.height,
         buffer: rendered.buffer,
         transform: { ...info.transform },
-        visible: info.visible,
+        visible: engine.isLayerEffectivelyVisible(info.id),
         opacity: info.opacity,
         blend: info.blend,
       };
@@ -14120,6 +14147,29 @@ export class GnumarusShell extends LitElement {
       current = this.layerParentOf(current);
     }
     return depth;
+  }
+
+  private collapsedLayerSet(): Set<string> {
+    return new Set(this.collapsedLayers ?? []);
+  }
+
+  private hasLayerChildren(id: string): boolean {
+    return this.layers.some((layer) => (layer.parentId ?? null) === id);
+  }
+
+  private isLayerRowHidden(id: string): boolean {
+    const parents = new Map(this.layers.map((layer) => [layer.id, layer.parentId ?? null] as const));
+    return isHiddenByCollapse(id, parents, this.collapsedLayerSet());
+  }
+
+  private toggleCollapsedLayer(id: string): void {
+    const next = new Set(this.collapsedLayers ?? []);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    this.collapsedLayers = [...next];
   }
 
   private onLayerDragStart(event: DragEvent, id: string): void {

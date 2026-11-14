@@ -140,6 +140,7 @@ import {
   type GnumarusTipAngleMode,
 } from "./GnumarusPaintBrush";
 import {
+  isEffectivelyVisible,
   layerBlockRange,
   makeRootLayer,
   moveLayerBlock,
@@ -2051,7 +2052,7 @@ export class GnumarusCanvasEngine {
         height: cell.height,
         buffer: cell.buffer,
         transform: { ...cell.transform },
-        visible: layer.visible,
+        visible: this.isLayerEffectivelyVisible(layer.id),
         opacity: layer.opacity,
         blend: layer.blend,
       };
@@ -2092,7 +2093,7 @@ export class GnumarusCanvasEngine {
     layer.height = resolved.height;
     layer.transform = { ...resolved.transform };
     layer.renderTextureId = texId;
-    layer.plane.visible = layer.visible;
+    layer.plane.visible = this.isLayerEffectivelyVisible(layer.id);
     this.syncWrapTiles();
   }
 
@@ -6221,6 +6222,25 @@ export class GnumarusCanvasEngine {
     return this.findLayer(id)?.parentId ?? null;
   }
 
+  /** Own flag plus every ancestor must be visible; unknown ids are hidden. */
+  isLayerEffectivelyVisible(id: string): boolean {
+    if (this.findLayer(id) === null) {
+      return false;
+    }
+    return isEffectivelyVisible(id, this.layerParentMap(), (layerId) => this.findLayer(layerId)?.visible ?? true);
+  }
+
+  /** Recompute canvas planes for one block (used after visibility/parent changes). */
+  private refreshBlockVisibility(ids: readonly string[]): void {
+    for (const entry of ids) {
+      const layer = this.findLayer(entry);
+      if (layer === null) {
+        continue;
+      }
+      layer.plane.visible = layer.renderTextureId !== null && this.isLayerEffectivelyVisible(layer.id);
+    }
+  }
+
   /** Repair parent links (unknown/self/cycles to roots) and restore contiguity. */
   private sanitizeLayerTree(): void {
     const order = this.layerOrderIds();
@@ -6255,6 +6275,7 @@ export class GnumarusCanvasEngine {
     this.applyParentMap(result.parents);
     this.applyLayerOrder(result.order);
     this.refreshLayerStacking();
+    this.refreshBlockVisibility(result.order);
     this.render();
     this.onLayersChanged?.();
     this.emitStats();
@@ -6275,6 +6296,7 @@ export class GnumarusCanvasEngine {
     this.applyParentMap(result.parents);
     this.applyLayerOrder(result.order);
     this.refreshLayerStacking();
+    this.refreshBlockVisibility(result.order);
     this.render();
     this.onLayersChanged?.();
     this.emitStats();
@@ -6797,10 +6819,38 @@ export class GnumarusCanvasEngine {
       return false;
     }
     layer.visible = visible;
-    layer.plane.visible = visible;
+    // Hiding a layer hides its whole subtree on canvas; showing restores
+    // descendants whose own flags (and remaining ancestors) allow it.
+    const affected: string[] = [];
+    for (const entry of this.layers) {
+      if (entry.id === id || this.isDescendantOf(entry.id, id)) {
+        affected.push(entry.id);
+      }
+    }
+    this.refreshBlockVisibility(affected);
     this.render();
     this.emitStats();
     return true;
+  }
+
+  /** True when `descendant` is strictly below `ancestor` in the tree. */
+  private isDescendantOf(descendant: string, ancestor: string): boolean {
+    if (descendant === ancestor) {
+      return false;
+    }
+    const seen = new Set<string>([descendant]);
+    let current = this.findLayer(descendant)?.parentId ?? null;
+    while (current !== null) {
+      if (current === ancestor) {
+        return true;
+      }
+      if (seen.has(current)) {
+        return false;
+      }
+      seen.add(current);
+      current = this.findLayer(current)?.parentId ?? null;
+    }
+    return false;
   }
 
   setLayerOpacity(id: string, opacity: number): boolean {

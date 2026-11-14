@@ -14941,7 +14941,7 @@ test("nested layers indent children between parent and next root @recent", async
   const order = await page.evaluate(() => {
     const shell = document.querySelector("gnumarus-shell");
     const shadow = (shell as unknown as { shadowRoot: ShadowRoot | null })?.shadowRoot;
-    return [...(shadow?.querySelectorAll("[data-layer-id]") ?? [])].map((row) => ({
+    return [...(shadow?.querySelectorAll(".layer-row[data-layer-id]") ?? [])].map((row) => ({
       id: row.getAttribute("data-layer-id"),
       depth: row.getAttribute("data-depth"),
       margin: (row as HTMLElement).style.marginLeft,
@@ -14949,7 +14949,7 @@ test("nested layers indent children between parent and next root @recent", async
   });
   expect(order.map((row) => row.id)).toEqual(["layer2", "layer0", "layer1"]);
   expect(order.map((row) => row.depth)).toEqual(["0", "1", "0"]);
-  expect(order.find((row) => row.id === "layer0")?.margin).toBe("14px");
+  expect(order.find((row) => row.id === "layer0")?.margin).toBe("8px");
   expect(order.find((row) => row.id === "layer2")?.margin).toBe("0px");
   // Matrix follows the same display order.
   const matrixOrder = await page.evaluate(() => {
@@ -15076,4 +15076,81 @@ test("nesting cycles are rejected and keep pixels otherwise intact @recent", asy
     return root.__gnumarus?.engine?.getLayers() ?? [];
   });
   expect(details.every((layer) => layer.opacity === 1 && layer.visible && layer.width === 64 && layer.height === 64)).toBe(true);
+});
+
+test("hiding a parent hides its children on canvas and flatten @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await setPencil(page, "#0000ff");
+  await paintCenter(page);
+  // Top layer1 (blue) covers bottom layer0 (red) at the center.
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+  expect(await engineReparent(page, "layer0", "layer1")).toBe(true);
+  // Hide the parent: the child stays checked but renders nothing.
+  await page.locator('gnumarus-shell [data-layer-id="layer1"] input[type="checkbox"]').click();
+  const flags = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          getLayers(): Array<{ id: string; visible: boolean }>;
+          isLayerEffectivelyVisible(id: string): boolean;
+          getFrameFlattenInputs(frame: number): Array<{ visible: boolean }> | null;
+        };
+      };
+    };
+    const layers = root.__gnumarus?.engine?.getLayers() ?? [];
+    return {
+      own: layers.find((layer) => layer.id === "layer0")?.visible,
+      effectiveChild: root.__gnumarus?.engine?.isLayerEffectivelyVisible("layer0"),
+      flatten: root.__gnumarus?.engine?.getFrameFlattenInputs(0)?.map((entry) => entry.visible),
+    };
+  });
+  expect(flags.own).toBe(true);
+  expect(flags.effectiveChild).toBe(false);
+  expect(flags.flatten).toEqual([false, false]);
+  const planesHidden = await page.evaluate(() => {
+    const engine = (window as unknown as { __gnumarus?: { engine?: unknown } }).__gnumarus?.engine as unknown as
+      | { layers: Array<{ id: string; plane: { visible: boolean } }> }
+      | undefined;
+    return (engine?.layers ?? []).map((layer) => ({ id: layer.id, visible: layer.plane.visible }));
+  });
+  expect(planesHidden.find((layer) => layer.id === "layer0")?.visible).toBe(false);
+  expect(planesHidden.find((layer) => layer.id === "layer1")?.visible).toBe(false);
+  // Showing the parent restores the child with no other change.
+  await page.locator('gnumarus-shell [data-layer-id="layer1"] input[type="checkbox"]').click();
+  const planesShown = await page.evaluate(() => {
+    const engine = (window as unknown as { __gnumarus?: { engine?: unknown } }).__gnumarus?.engine as unknown as
+      | { layers: Array<{ id: string; plane: { visible: boolean } }> }
+      | undefined;
+    return (engine?.layers ?? []).map((layer) => ({ id: layer.id, visible: layer.plane.visible }));
+  });
+  expect(planesShown.find((layer) => layer.id === "layer0")?.visible).toBe(true);
+  expect(planesShown.find((layer) => layer.id === "layer1")?.visible).toBe(true);
+});
+
+test("child layer list collapses without touching the matrix or canvas @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await page.getByRole("button", { name: "Add layer" }).click();
+  expect(await engineReparent(page, "layer0", "layer2")).toBe(true);
+  const toggle = page.locator('gnumarus-shell [data-testid="layer-collapse"][data-collapse-for="layer2"]');
+  await expect(toggle).toHaveText("▾");
+  const before = await readPixel(page, 32, 32);
+  await toggle.click();
+  await expect(toggle).toHaveText("▸");
+  await expect(page.locator('gnumarus-shell .layer-row[data-layer-id="layer0"]')).toHaveCount(0);
+  await expect(page.locator('gnumarus-shell .layer-row[data-layer-id="layer2"]')).toHaveCount(1);
+  // Matrix keeps every row; canvas pixels are untouched by the list collapse.
+  await expect(page.locator('gnumarus-shell [data-testid="anim-layer-name"][data-matrix-layer="layer0"]')).toHaveCount(1);
+  expect(await readPixel(page, 32, 32)).toEqual(before);
+  await toggle.click();
+  await expect(page.locator('gnumarus-shell .layer-row[data-layer-id="layer0"]')).toHaveCount(1);
 });

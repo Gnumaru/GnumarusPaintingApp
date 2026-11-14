@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  isEffectivelyVisible,
+  isHiddenByCollapse,
   isLayerAncestor,
   layerBlockRange,
   layerDepth,
@@ -127,5 +129,38 @@ describe("nested layer tree", () => {
       "c1",
       "a",
     ]);
+  });
+
+  it("hides subtrees behind hidden ancestors only", () => {
+    const order = ["b", "g", "c", "a"];
+    const parents = parentsOf(order, { b: null, g: "c", c: "a", a: null });
+    const visible = new Map<string, boolean>([
+      ["b", true],
+      ["g", true],
+      ["c", true],
+      ["a", false],
+    ]);
+    const isVisible = (id: string): boolean => visible.get(id) ?? true;
+    expect(isEffectivelyVisible("a", parents, isVisible)).toBe(false);
+    expect(isEffectivelyVisible("c", parents, isVisible)).toBe(false);
+    expect(isEffectivelyVisible("g", parents, isVisible)).toBe(false);
+    expect(isEffectivelyVisible("b", parents, isVisible)).toBe(true);
+    visible.set("a", true);
+    visible.set("c", false);
+    expect(isEffectivelyVisible("c", parents, isVisible)).toBe(false);
+    expect(isEffectivelyVisible("g", parents, isVisible)).toBe(false);
+    expect(isEffectivelyVisible("a", parents, isVisible)).toBe(true);
+  });
+
+  it("collapses only strict descendants in the panel", () => {
+    const order = ["b", "g", "c", "a"];
+    const parents = parentsOf(order, { b: null, g: "c", c: "a", a: null });
+    expect(isHiddenByCollapse("a", parents, new Set(["a"]))).toBe(false);
+    expect(isHiddenByCollapse("c", parents, new Set(["a"]))).toBe(true);
+    expect(isHiddenByCollapse("g", parents, new Set(["a"]))).toBe(true);
+    expect(isHiddenByCollapse("g", parents, new Set(["c"]))).toBe(true);
+    expect(isHiddenByCollapse("c", parents, new Set(["c"]))).toBe(false);
+    expect(isHiddenByCollapse("b", parents, new Set(["a"]))).toBe(false);
+    expect(isHiddenByCollapse("g", parents, new Set())).toBe(false);
   });
 });
