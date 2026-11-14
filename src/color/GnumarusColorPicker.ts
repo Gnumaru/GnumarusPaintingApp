@@ -1,10 +1,17 @@
 import { LitElement, css, html } from "lit";
 import {
+  defaultHslPalette,
   getColorModelDef,
+  GNUMARUS_PALETTE_MAX_COLORS,
   hsvToRgbBytes,
   hsvWheelHue,
+  imagePixelsToPaletteEntries,
+  reducePaletteMedianCut,
+  sortPaletteEntries,
   svToTrianglePoint,
   svTriangleInCircle,
+  type GnumarusPaletteEntry,
+  type GnumarusPaletteSortKey,
   type GnumarusSvTriangle,
   isColorModelId,
   modelAlphaFromValues,
@@ -22,6 +29,7 @@ import {
   type GnumarusRgbaBytes,
 } from "./GnumarusColorModels";
 import { tr, type GnumarusMessageKey } from "../i18n/GnumarusI18n";
+import { pickImageFile } from "../project/GnumarusFileSystem";
 
 /** Catalog key for each English color-model axis label. */
 export const COLOR_AXIS_KEYS: Record<string, GnumarusMessageKey> = {
@@ -198,6 +206,56 @@ export class GnumarusColorPicker extends LitElement {
     .palette-swatch:hover {
       border-color: #0e639c;
     }
+    .palette-toggle {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      width: 22px;
+      height: 22px;
+      padding: 0;
+      font-size: 12px;
+      line-height: 1;
+      background: transparent;
+      color: #e6e6e6;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .palette-toggle:hover {
+      background: #3a3a3a;
+    }
+    .popup.palette-open {
+      display: flex;
+      gap: 12px;
+      max-width: min(580px, 96vw);
+    }
+    .popup-main {
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+    .palette-panel {
+      width: 172px;
+      flex: 0 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 0;
+    }
+    .palette-panel select {
+      width: 100%;
+      background: #1e1e1e;
+      color: #e6e6e6;
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 4px 6px;
+    }
+    .palette-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      overflow-y: auto;
+      min-height: 0;
+    }
     .palette-swatch .remove {
       position: absolute;
       top: -7px;
@@ -307,6 +365,20 @@ export class GnumarusColorPicker extends LitElement {
   /** Tracked hue for the HSV triangle, kept across achromatic colors. */
   private hsvHue = 0;
   private popupPos: { left: number; top: number } | null = null;
+  /** Image palette panel open (arrow top-right of the popup). */
+  private paletteOpen = false;
+  /** Image palette entries (null = default procedural palette). */
+  private paletteColors: GnumarusPaletteEntry[] | null = null;
+  /** Image palette sort: criterion plus direction. */
+  private paletteSort:
+    | "hue-asc"
+    | "hue-desc"
+    | "saturation-asc"
+    | "saturation-desc"
+    | "brightness-asc"
+    | "brightness-desc"
+    | "lightness-asc"
+    | "lightness-desc" = "hue-asc";
   /** Swallow the document pointerdown that opened the popup programmatically. */
   private ignoreNextDocPointerDown = false;
 
@@ -727,8 +799,9 @@ export class GnumarusColorPicker extends LitElement {
   /** Open the popup at a viewport position (e.g. canvas right-click). */
   openAt(clientX: number, clientY: number): void {
     this.open = true;
+    const reserve = this.paletteOpen ? 580 : 380;
     this.popupPos = {
-      left: Math.min(clientX + 8, Math.max(8, window.innerWidth - 380)),
+      left: Math.min(clientX + 8, Math.max(8, window.innerWidth - reserve)),
       top: Math.min(clientY, Math.max(8, window.innerHeight - 420)),
     };
     // The opening pointerdown is still bubbling toward window: ignore that
@@ -796,6 +869,74 @@ export class GnumarusColorPicker extends LitElement {
     window.removeEventListener("keydown", this.onDocumentKeyDown);
   }
 
+  /** Toggle the image palette side panel. */
+  private togglePalette(): void {
+    this.paletteOpen = !this.paletteOpen;
+    if (this.paletteOpen && this.popupPos !== null) {
+      this.popupPos = {
+        left: Math.min(this.popupPos.left, Math.max(8, window.innerWidth - 580)),
+        top: this.popupPos.top,
+      };
+    }
+    this.requestUpdate();
+  }
+
+  /** Palette entries to show: image palette or the default, sorted. */
+  private paletteEntriesSorted(): GnumarusPaletteEntry[] {
+    const source = this.paletteColors ?? defaultHslPalette();
+    const [key, dir] = this.paletteSort.split("-") as [GnumarusPaletteSortKey, "asc" | "desc"];
+    return sortPaletteEntries(source, key, dir === "desc");
+  }
+
+  /** Choose a palette color (discrete pick: live change plus commit). */
+  private pickPaletteColor(hex: string): void {
+    const parsed = parseHexToRgbaBytes(hex);
+    if (parsed === null) {
+      return;
+    }
+    this.rgba = parsed;
+    this.modelValues = rgbBytesToModelAxes(parsed, this.model);
+    this.trackHsvHue();
+    this.emitChange();
+    this.emitCommit();
+  }
+
+  /** Load a raster image as the panel palette (alpha dropped, median-cut past 256 colors). */
+  private async openPaletteImage(): Promise<void> {
+    let handle: Awaited<ReturnType<typeof pickImageFile>>;
+    try {
+      handle = await pickImageFile();
+    } catch {
+      return;
+    }
+    if (handle === null) {
+      return;
+    }
+    try {
+      const picked = await handle.getFile();
+      const bitmap = await createImageBitmap(new Blob([await picked.arrayBuffer()]));
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (ctx === null || bitmap.width === 0 || bitmap.height === 0) {
+          return;
+        }
+        ctx.drawImage(bitmap, 0, 0);
+        const data = ctx.getImageData(0, 0, bitmap.width, bitmap.height).data;
+        const entries = imagePixelsToPaletteEntries(data);
+        this.paletteColors =
+          entries.length > GNUMARUS_PALETTE_MAX_COLORS ? reducePaletteMedianCut(entries) : entries;
+        this.requestUpdate();
+      } finally {
+        bitmap.close();
+      }
+    } catch {
+      // Unreadable files leave the current palette alone.
+    }
+  }
+
   private readonly onDocumentPointerDown = (event: PointerEvent): void => {
     if (this.ignoreNextDocPointerDown) {
       this.ignoreNextDocPointerDown = false;
@@ -845,13 +986,22 @@ export class GnumarusColorPicker extends LitElement {
       ${this.open
         ? html`
             <div
-              class="popup"
+              class=${this.paletteOpen ? "popup palette-open" : "popup"}
               role="dialog"
               aria-label=${tr("color.dialog")}
               style=${this.popupPos === null
                 ? ""
                 : `left: ${this.popupPos.left}px; top: ${this.popupPos.top}px;`}
             >
+              <button
+                class="palette-toggle"
+                data-testid="palette-toggle"
+                aria-label=${tr("color.paletteToggle")}
+                title=${tr("color.paletteToggle")}
+                aria-expanded=${this.paletteOpen ? "true" : "false"}
+                @click=${(): void => this.togglePalette()}
+              >${this.paletteOpen ? "▼" : "▶"}</button>
+              <div class="popup-main">
               <div class="hsv-wheel" data-testid="hsv-wheel">
                 <div
                   class="hsv-ring"
@@ -1022,6 +1172,59 @@ export class GnumarusColorPicker extends LitElement {
                           @click=${(): void => this.pickSwatch(entry)}
                         ></button>`,
                       )}
+                    </div>
+                  `
+                : html``}
+              </div>
+              ${this.paletteOpen
+                ? html`
+                    <div class="palette-panel" data-testid="palette-panel">
+                      <span class="swatch-section-label">${tr("color.paletteTitle")}</span>
+                      <select
+                        data-testid="palette-sort"
+                        .value=${this.paletteSort}
+                        aria-label=${tr("color.paletteSort")}
+                        @change=${(event: Event): void => {
+                          const select = event.target as HTMLSelectElement | null;
+                          const next = select?.value ?? "hue-asc";
+                          this.paletteSort =
+                            next === "hue-desc" ||
+                            next === "saturation-asc" ||
+                            next === "saturation-desc" ||
+                            next === "brightness-asc" ||
+                            next === "brightness-desc" ||
+                            next === "lightness-asc" ||
+                            next === "lightness-desc"
+                              ? next
+                              : "hue-asc";
+                          this.requestUpdate();
+                        }}
+                      >
+                        <option value="hue-asc">${tr("color.sortHueAsc")}</option>
+                        <option value="hue-desc">${tr("color.sortHueDesc")}</option>
+                        <option value="saturation-asc">${tr("color.sortSaturationAsc")}</option>
+                        <option value="saturation-desc">${tr("color.sortSaturationDesc")}</option>
+                        <option value="brightness-asc">${tr("color.sortBrightnessAsc")}</option>
+                        <option value="brightness-desc">${tr("color.sortBrightnessDesc")}</option>
+                        <option value="lightness-asc">${tr("color.sortLightnessAsc")}</option>
+                        <option value="lightness-desc">${tr("color.sortLightnessDesc")}</option>
+                      </select>
+                      <button data-testid="palette-open" @click=${(): void => void this.openPaletteImage()}>
+                        ${tr("color.paletteOpen")}
+                      </button>
+                      <div class="palette-grid" data-testid="palette-grid">
+                        ${this.paletteEntriesSorted().map(
+                          (entry) => html`<button
+                            class="palette-swatch"
+                            data-testid="palette-swatch"
+                            data-hex=${entry.hex}
+                            title=${entry.hex}
+                            aria-label=${tr("color.applySwatch", { hex: entry.hex })}
+                            style="background-color: ${entry.hex};"
+                            @click=${(): void => this.pickPaletteColor(entry.hex)}
+                          ></button>`,
+                        )}
+                      </div>
                     </div>
                   `
                 : html``}

@@ -705,7 +705,7 @@ export function drawBrushLine(
   const sy = y0 < y1 ? 1 : -1;
   let err = dx - dy;
   for (;;) {
-    drawBrushStamp(buffer, width, height, x, y, tip, shape, color, locked, blend, wrap);
+    drawBrushStamp(buffer, width, height, x, y, tip, shape, color, locked, blend, wrap, maxSize);
     if (x === x1 && y === y1) {
       break;
     }
@@ -820,7 +820,7 @@ export function drawLineSegment(
     if (thick <= 1) {
       drawPixelLine(buffer, width, height, x0, y0, x1, y1, color, locked, blend, wrap);
     } else {
-      drawBrushLine(buffer, width, height, x0, y0, x1, y1, thick, shape, color, locked, blend, wrap);
+      drawBrushLine(buffer, width, height, x0, y0, x1, y1, thick, shape, color, locked, blend, wrap, maxSize);
     }
     return;
   }

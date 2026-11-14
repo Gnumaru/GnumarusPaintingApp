@@ -34,7 +34,7 @@ export const GNUMARUS_NEW_PROJECT_PRESETS: GnumarusNewProjectPreset[] = [
 ];
 
 /** Display name of the preset selected by default in the new-project dialog. */
-export const DEFAULT_NEW_PROJECT_PRESET = "digital painting lossy";
+export const DEFAULT_NEW_PROJECT_PRESET = "digital painting lossless";
 
 /** Dialog field values produced by applying a preset (or null when unknown). */
 export interface GnumarusNewProjectFields {

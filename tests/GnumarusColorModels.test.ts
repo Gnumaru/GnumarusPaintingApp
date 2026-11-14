@@ -3,11 +3,13 @@ import { parseHexColor } from "../src/canvas/GnumarusPixelBuffer";
 import {
   ardToRgb01,
   cmykToRgb01,
+  defaultHslPalette,
   getColorModelDef,
   hslToRgb01,
   hsvToRgb01,
   hsvToRgbBytes,
   hsvWheelHue,
+  imagePixelsToPaletteEntries,
   isColorModelId,
   linearSrgbToOkhsl,
   linearSrgbToOkhsv,
@@ -19,6 +21,7 @@ import {
   okhsvToLinearSrgb,
   parseAxisInput,
   parseHexToRgbaBytes,
+  reducePaletteMedianCut,
   rgb01ToArd,
   rgb01ToCmyk,
   rgb01ToHsl,
@@ -26,6 +29,7 @@ import {
   rgbBytesToHsv,
   rgbBytesToModelAxes,
   rgbaBytesToHex,
+  sortPaletteEntries,
   srgbByteToLinear,
   svToTrianglePoint,
   svTriangleInCircle,
@@ -346,5 +350,64 @@ describe("GnumarusColorModels hsv triangle and wheel", () => {
     expect(hsvWheelHue(-1, 0)).toBeCloseTo(270, 5);
     expect(hsvWheelHue(0, 0)).toBe(0);
     expect(hsvWheelHue(Number.NaN, 0)).toBe(0);
+  });
+});
+
+describe("image palette", () => {
+  it("builds the default 48-color HSL palette", () => {
+    const palette = defaultHslPalette().map((entry) => entry.hex);
+    expect(palette).toHaveLength(48);
+    expect(new Set(palette).size).toBe(48);
+    // Hue 0 at lightness 0.1 with full saturation is dark red; the
+    // brightest stop (0.9) never reaches white.
+    expect(palette[0]).toBe("#330000");
+    expect(palette).toContain("#ffcccc");
+  });
+
+  it("collects unique colors dropping alpha", () => {
+    const pixels = new Uint8ClampedArray([
+      255, 0, 0, 255, 0, 255, 0, 128, 255, 0, 0, 0, 0, 0, 255, 255,
+    ]);
+    const entries = imagePixelsToPaletteEntries(pixels);
+    expect(entries.map((entry) => entry.hex)).toEqual(["#ff0000", "#00ff00", "#0000ff"]);
+  });
+
+  it("keeps small palettes and caps large ones at 256", () => {
+    const small = imagePixelsToPaletteEntries(new Uint8ClampedArray([1, 2, 3, 255]));
+    expect(reducePaletteMedianCut(small)).toEqual(small);
+    const many: Array<{ hex: string; r: number; g: number; b: number; count: number }> = [];
+    for (let i = 0; i < 300; i += 1) {
+      many.push({ hex: "#000000", r: i % 256, g: (i * 7) % 256, b: (i * 13) % 256, count: 1 });
+    }
+    const reduced = reducePaletteMedianCut(many);
+    expect(reduced).toHaveLength(256);
+    // Deterministic: same input, same output.
+    expect(reducePaletteMedianCut(many)).toEqual(reduced);
+  });
+
+  it("sorts by hue, saturation, brightness and lightness both ways", () => {
+    const entries = imagePixelsToPaletteEntries(
+      new Uint8ClampedArray([255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255]),
+    );
+    expect(sortPaletteEntries(entries, "brightness", false).map((e) => e.hex)).toEqual([
+      "#ff0000",
+      "#00ff00",
+      "#0000ff",
+      "#ffffff",
+    ]);
+    // Red/green/blue tie on channel sum; ties keep the input order.
+    expect(sortPaletteEntries(entries, "brightness", true).map((e) => e.hex)).toEqual([
+      "#ffffff",
+      "#ff0000",
+      "#00ff00",
+      "#0000ff",
+    ]);
+    // Pure red/green/blue share saturation and lightness; hue orders them.
+    expect(sortPaletteEntries(entries.slice(0, 3), "hue", false).map((e) => e.hex)).toEqual([
+      "#ff0000",
+      "#00ff00",
+      "#0000ff",
+    ]);
+    expect(sortPaletteEntries(entries.slice(0, 3), "lightness", true)[0]?.hex).toBe("#00ff00");
   });
 });

@@ -1124,3 +1124,254 @@ export function normalizeModelValues(model: GnumarusColorModelId, values: number
     return clamp(rounded, axis.min, axis.max);
   });
 }
+
+/* ------------------------------------------------------------------ */
+/* Image palette panel: default procedural palette, raster import with */
+/* proximity reduction, and hue/saturation/brightness/lightness sort.  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One palette color with its source channels (alpha is always dropped)
+ * and its pixel count (1 for procedural colors, area share for images).
+ */
+export interface GnumarusPaletteEntry {
+  hex: string;
+  r: number;
+  g: number;
+  b: number;
+  count: number;
+}
+
+/** Lightness stops of the default procedural palette. */
+const DEFAULT_PALETTE_LIGHTNESS = [0.1, 0.37, 0.63, 0.9];
+
+/**
+ * Default procedural palette: hues 0..330 in steps of 30, each with
+ * maximum saturation at lightness 10/37/63/90 (12 x 4 = 48 colors).
+ */
+export function defaultHslPalette(): GnumarusPaletteEntry[] {
+  const out: GnumarusPaletteEntry[] = [];
+  for (let h = 0; h < 360; h += 30) {
+    for (const l of DEFAULT_PALETTE_LIGHTNESS) {
+      const rgb = hslToRgb01(h, 1, l);
+      const r = Math.round(rgb.r * 255);
+      const g = Math.round(rgb.g * 255);
+      const b = Math.round(rgb.b * 255);
+      out.push({ hex: rgbaBytesToHex({ r, g, b, a: 255 }), r, g, b, count: 1 });
+    }
+  }
+  return out;
+}
+
+/**
+ * Collect the unique RGB colors of raw RGBA pixels, dropping the alpha
+ * channel. Order is first appearance.
+ */
+export function imagePixelsToPaletteEntries(pixels: Uint8ClampedArray): GnumarusPaletteEntry[] {
+  const counts = new Map<number, { entry: GnumarusPaletteEntry; count: number }>();
+  const order: number[] = [];
+  for (let i = 0; i + 3 < pixels.length + 1; i += 4) {
+    const alpha = pixels[i + 3] as number;
+    if (alpha === 0) {
+      continue;
+    }
+    const r = pixels[i] as number;
+    const g = pixels[i + 1] as number;
+    const b = pixels[i + 2] as number;
+    const key = (r << 16) | (g << 8) | b;
+    const slot = counts.get(key);
+    if (slot === undefined) {
+      counts.set(key, {
+        entry: { hex: rgbaBytesToHex({ r, g, b, a: 255 }), r, g, b, count: 1 },
+        count: 1,
+      });
+      order.push(key);
+    } else {
+      slot.count += 1;
+      slot.entry.count += 1;
+    }
+  }
+  return order.map((key) => (counts.get(key) as { entry: GnumarusPaletteEntry }).entry);
+}
+
+/** Maximum colors of a reduced image palette (GIMP optimum-palette default). */
+export const GNUMARUS_PALETTE_MAX_COLORS = 256;
+
+interface GnumarusPaletteBox {
+  entries: GnumarusPaletteEntry[];
+  count: number;
+}
+
+/**
+ * Reduce a color list to at most `maxColors` with median-cut quantization
+ * by proximity: repeatedly split the box with the largest count x channel
+ * range at the median (by cumulative pixel count), then average each box
+ * weighted by count. Deterministic for stable input order.
+ */
+export function reducePaletteMedianCut(
+  entries: GnumarusPaletteEntry[],
+  maxColors: number = GNUMARUS_PALETTE_MAX_COLORS,
+): GnumarusPaletteEntry[] {
+  const items = entries.map((entry) => ({ entry, count: entry.count }));
+  if (items.length <= maxColors) {
+    return entries.map((entry) => ({ ...entry }));
+  }
+  const boxes: GnumarusPaletteBox[] = [
+    { entries: items.map((item) => item.entry), count: items.reduce((sum, item) => sum + item.count, 0) },
+  ];
+  // Keep per-color counts aligned with the boxes for median splits.
+  const boxCounts: number[][] = [items.map((item) => item.count)];
+  while (boxes.length < maxColors) {
+    let pick = -1;
+    let pickScore = -1;
+    for (let i = 0; i < boxes.length; i += 1) {
+      const box = boxes[i];
+      if (box === undefined || box.entries.length < 2) {
+        continue;
+      }
+      let minR = 255;
+      let maxR = 0;
+      let minG = 255;
+      let maxG = 0;
+      let minB = 255;
+      let maxB = 0;
+      for (const entry of box.entries) {
+        if (entry.r < minR) minR = entry.r;
+        if (entry.r > maxR) maxR = entry.r;
+        if (entry.g < minG) minG = entry.g;
+        if (entry.g > maxG) maxG = entry.g;
+        if (entry.b < minB) minB = entry.b;
+        if (entry.b > maxB) maxB = entry.b;
+      }
+      const range = Math.max(maxR - minR, maxG - minG, maxB - minB);
+      const score = box.count * (range + 1);
+      if (score > pickScore) {
+        pickScore = score;
+        pick = i;
+      }
+    }
+    if (pick < 0) {
+      break;
+    }
+    const box = boxes[pick] as GnumarusPaletteBox;
+    const counts = boxCounts[pick] as number[];
+    let minR = 255;
+    let maxR = 0;
+    let minG = 255;
+    let maxG = 0;
+    let minB = 255;
+    let maxB = 0;
+    for (const entry of box.entries) {
+      if (entry.r < minR) minR = entry.r;
+      if (entry.r > maxR) maxR = entry.r;
+      if (entry.g < minG) minG = entry.g;
+      if (entry.g > maxG) maxG = entry.g;
+      if (entry.b < minB) minB = entry.b;
+      if (entry.b > maxB) maxB = entry.b;
+    }
+    const ranges = [
+      { channel: 0, span: maxR - minR },
+      { channel: 1, span: maxG - minG },
+      { channel: 2, span: maxB - minB },
+    ];
+    ranges.sort((a, b) => b.span - a.span || a.channel - b.channel);
+    const channel = ranges[0]?.channel ?? 0;
+    const order = box.entries
+      .map((entry, index) => ({ entry, count: counts[index] ?? 1, index }))
+      .sort((a, b) => {
+        const av = channel === 0 ? a.entry.r : channel === 1 ? a.entry.g : a.entry.b;
+        const bv = channel === 0 ? b.entry.r : channel === 1 ? b.entry.g : b.entry.b;
+        return av - bv || a.index - b.index;
+      });
+    const half = box.count / 2;
+    let running = 0;
+    let cut = 1;
+    for (let i = 0; i < order.length - 1; i += 1) {
+      running += order[i]?.count ?? 0;
+      if (running >= half) {
+        cut = i + 1;
+        break;
+      }
+    }
+    const lower = order.slice(0, cut);
+    const upper = order.slice(cut);
+    if (lower.length === 0 || upper.length === 0) {
+      break;
+    }
+    const lowerCount = lower.reduce((sum, item) => sum + item.count, 0);
+    boxes[pick] = {
+      entries: lower.map((item) => item.entry),
+      count: lowerCount,
+    };
+    boxCounts[pick] = lower.map((item) => item.count);
+    boxes.push({
+      entries: upper.map((item) => item.entry),
+      count: box.count - lowerCount,
+    });
+    boxCounts.push(upper.map((item) => item.count));
+  }
+  return boxes.map((box) => {
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    let total = 0;
+    const idx = boxes.indexOf(box);
+    const counts = boxCounts[idx] ?? [];
+    box.entries.forEach((entry, i) => {
+      const count = counts[i] ?? 1;
+      r += entry.r * count;
+      g += entry.g * count;
+      b += entry.b * count;
+      total += count;
+    });
+    const n = Math.max(1, total);
+    const ar = Math.round(r / n);
+    const ag = Math.round(g / n);
+    const ab = Math.round(b / n);
+    return { hex: rgbaBytesToHex({ r: ar, g: ag, b: ab, a: 255 }), r: ar, g: ag, b: ab, count: n };
+  });
+}
+
+/** Sort criterion for the image palette panel. */
+export type GnumarusPaletteSortKey = "hue" | "saturation" | "brightness" | "lightness";
+
+/** Relative luminance (Rec. 709) used as perceptual lightness for sorting. */
+export function paletteEntryLightness(entry: { r: number; g: number; b: number }): number {
+  const lin = (byte: number): number => {
+    const v = srgbByteToLinear(byte);
+    return Number.isFinite(v) ? v : 0;
+  };
+  return 0.2126 * lin(entry.r) + 0.7152 * lin(entry.g) + 0.0722 * lin(entry.b);
+}
+
+/**
+ * Sort palette entries by one criterion, ascending or descending.
+ * Hue/saturation come from HSL, brightness is the channel sum (like the
+ * GIMP indexed dialog sort), lightness is perceptual (Rec. 709 luma).
+ * Ties keep the input order (stable).
+ */
+export function sortPaletteEntries(
+  entries: GnumarusPaletteEntry[],
+  key: GnumarusPaletteSortKey,
+  descending: boolean,
+): GnumarusPaletteEntry[] {
+  const scored = entries.map((entry, index) => {
+    let score: number;
+    if (key === "brightness") {
+      score = entry.r + entry.g + entry.b;
+    } else if (key === "lightness") {
+      score = paletteEntryLightness(entry);
+    } else {
+      const hsl = rgb01ToHsl(entry.r / 255, entry.g / 255, entry.b / 255);
+      score = key === "hue" ? hsl.h : hsl.s;
+    }
+    return { entry, score, index };
+  });
+  scored.sort((a, b) => {
+    if (a.score !== b.score) {
+      return descending ? b.score - a.score : a.score - b.score;
+    }
+    return a.index - b.index;
+  });
+  return scored.map((item) => ({ ...item.entry }));
+}

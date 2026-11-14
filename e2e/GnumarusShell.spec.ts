@@ -80,9 +80,9 @@ test("File > New creates a canvas with the requested size", async ({ page }) => 
   await page.getByRole("button", { name: "File" }).click();
   await page.getByRole("button", { name: "New Project" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("New canvas");
-  // The dialog defaults to the digital painting lossy preset.
+  // The dialog defaults to the digital painting lossless preset.
   const dialog = page.locator("gnumarus-shell dialog#newDialog");
-  await expect(dialog.locator("select#newPreset")).toHaveValue("digital painting lossy");
+  await expect(dialog.locator("select#newPreset")).toHaveValue("digital painting lossless");
   await dialog.locator("select#newPreset").selectOption("");
   await dialog.locator("input#newWidth").fill("80");
   await dialog.locator("input#newHeight").fill("70");
@@ -13809,19 +13809,19 @@ test("tool drawer flyouts render above floating windows @recent", async ({ page 
   expect(hit).toBe("flyout");
 });
 
-test("new project dialog defaults to digital painting lossy @recent", async ({ page }) => {
+test("new project dialog defaults to digital painting lossless @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell");
   await page.getByRole("button", { name: "File" }).click();
   await page.getByRole("button", { name: "New Project" }).click();
   const dialog = page.locator("gnumarus-shell dialog#newDialog");
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator("select#newPreset")).toHaveValue("digital painting lossy");
+  await expect(dialog.locator("select#newPreset")).toHaveValue("digital painting lossless");
   await expect(dialog.locator("input#newWidth")).toHaveValue("1920");
   await expect(dialog.locator("input#newHeight")).toHaveValue("1080");
   await expect(dialog.locator("select#newStorageFormat")).toHaveValue("jxl");
-  await expect(dialog.locator("select#newStorageMode")).toHaveValue("lossy");
-  await expect(dialog.locator("input#newStorageQuality")).toHaveValue("95");
+  await expect(dialog.locator("select#newStorageMode")).toHaveValue("lossless");
+  await expect(dialog.locator("input#newStorageQuality")).toHaveCount(0);
 });
 
 test("brush size ceiling defaults to 512 and is configurable up to 2048 @recent", async ({ page }) => {
@@ -13860,6 +13860,9 @@ test("brush size ceiling defaults to 512 and is configurable up to 2048 @recent"
   const center = await layerToScreen(page, 32, 32);
   await page.mouse.click(center.x, center.y);
   expect(await paintedPixelCount(page)).toBeGreaterThan(1000);
+  // A 64px brush leaves the corners untouched; a 500px one paints them.
+  expect(await readPixel(page, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 63, 63)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
 });
 
 test("hsv triangle clamps outside picks to its edges @recent", async ({ page }) => {
@@ -13983,4 +13986,69 @@ test("X swaps the foreground and background paint colors @recent", async ({ page
   // The text tool lost its letter key but still opens from the toolbar.
   await page.locator("gnumarus-shell [data-testid='tool-text']").click();
   await expect(page.locator("gnumarus-shell")).toContainText("text");
+});
+
+test("image palette panel opens with the default palette and sorts @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const picker = await openPicker(page, "pencilColor");
+  const toggle = picker.getByTestId("palette-toggle");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await toggle.click();
+  const panel = picker.getByTestId("palette-panel");
+  await expect(panel).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  const swatches = panel.getByTestId("palette-swatch");
+  await expect(swatches).toHaveCount(48);
+  const firstHue = await swatches.first().getAttribute("data-hex");
+  await panel.getByTestId("palette-sort").selectOption("brightness-desc");
+  const firstBright = await panel.getByTestId("palette-swatch").first().getAttribute("data-hex");
+  expect(firstBright).not.toBe(firstHue);
+  expect(await panel.getByTestId("palette-swatch").count()).toBe(48);
+  await toggle.click();
+  await expect(panel).toBeHidden();
+});
+
+test("image palette panel loads an image palette and picks from it @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const picker = await openPicker(page, "pencilColor");
+  await picker.getByTestId("palette-toggle").click();
+  const panel = picker.getByTestId("palette-panel");
+  await expect(panel).toBeVisible();
+  // 2x2 PNG painted in-page: red/green top row, blue/white bottom row.
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      showOpenFilePicker?: () => Promise<Array<{ getFile(): Promise<File> }>>;
+    };
+    root.showOpenFilePicker = async () => [
+      {
+        getFile: async () => {
+          const canvas = new OffscreenCanvas(2, 2);
+          const ctx = canvas.getContext("2d");
+          if (ctx === null) {
+            throw new Error("no 2d context");
+          }
+          ctx.fillStyle = "#ff0000";
+          ctx.fillRect(0, 0, 1, 1);
+          ctx.fillStyle = "#00ff00";
+          ctx.fillRect(1, 0, 1, 1);
+          ctx.fillStyle = "#0000ff";
+          ctx.fillRect(0, 1, 1, 1);
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(1, 1, 1, 1);
+          const blob = await canvas.convertToBlob({ type: "image/png" });
+          return new File([blob], "pal.png", { type: "image/png" });
+        },
+      },
+    ];
+  });
+  await panel.getByTestId("palette-open").click();
+  const swatches = panel.getByTestId("palette-swatch");
+  await expect(swatches).toHaveCount(4);
+  await swatches.first().click();
+  expect(await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { colorValue: string } } };
+    return root.__gnumarus?.shell?.colorValue ?? "";
+  })).toBe(await swatches.first().getAttribute("data-hex"));
 });
