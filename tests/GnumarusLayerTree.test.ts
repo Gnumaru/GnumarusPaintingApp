@@ -164,3 +164,50 @@ describe("nested layer tree", () => {
     expect(isHiddenByCollapse("g", parents, new Set())).toBe(false);
   });
 });
+
+describe("layer masks", () => {
+  it("computes white-shows black-hides texel factors", async () => {
+    const { maskTexelFactor } = await import("../src/canvas/GnumarusLayerTree");
+    expect(maskTexelFactor(255, 255, 255, 255, 1)).toBe(1);
+    expect(maskTexelFactor(0, 0, 0, 255, 1)).toBe(0);
+    expect(maskTexelFactor(123, 45, 67, 0, 1)).toBe(1);
+    expect(maskTexelFactor(255, 255, 255, 255, 0)).toBe(1);
+    expect(maskTexelFactor(255, 255, 255, 128, 1)).toBeCloseTo(128 / 255, 5);
+  });
+
+  it("combines masks in parent space with identity outside", async () => {
+    const { combineMasksForParent } = await import("../src/canvas/GnumarusLayerTree");
+    const { IDENTITY_LAYER_TRANSFORM } = await import("../src/canvas/GnumarusViewportMath");
+    const white = new Uint8ClampedArray([255, 255, 255, 255]);
+    const black = new Uint8ClampedArray([0, 0, 0, 255]);
+    const out = combineMasksForParent(1, 1, { ...IDENTITY_LAYER_TRANSFORM }, [
+      { width: 1, height: 1, buffer: white, transform: { ...IDENTITY_LAYER_TRANSFORM }, opacity: 1 },
+    ]);
+    expect(out?.[0]).toBe(255);
+    const hidden = combineMasksForParent(1, 1, { ...IDENTITY_LAYER_TRANSFORM }, [
+      { width: 1, height: 1, buffer: black, transform: { ...IDENTITY_LAYER_TRANSFORM }, opacity: 1 },
+    ]);
+    expect(hidden?.[0]).toBe(0);
+    expect(combineMasksForParent(1, 1, { ...IDENTITY_LAYER_TRANSFORM }, [])).toBeNull();
+  });
+
+  it("clears unworkable mask flags", async () => {
+    const { sanitizeLayerMasks } = await import("../src/canvas/GnumarusLayerTree");
+    const order = ["m", "p", "c", "q"];
+    const parents = new Map<string, string | null>([
+      ["m", null],
+      ["p", null],
+      ["c", "p"],
+      ["q", "c"],
+    ]);
+    const isMask = new Map<string, boolean>([
+      ["m", true],
+      ["p", false],
+      ["c", true],
+      ["q", true],
+    ]);
+    // m has no parent, c has a child, q's parent is a mask: all cleared.
+    expect(sanitizeLayerMasks(order, parents, isMask).sort()).toEqual(["c", "m", "q"]);
+    expect(isMask.get("c")).toBe(false);
+  });
+});

@@ -6,8 +6,17 @@ import {
   type GnumarusLayerBlendMode,
   type GnumarusRgba,
 } from "../canvas/GnumarusPixelBuffer";
-import { layerPixelCenterToProject, IDENTITY_LAYER_TRANSFORM, layerLinearMatrix } from "../canvas/GnumarusViewportMath";
+import { layerPixelCenterToProject, projectToLayerPixel, IDENTITY_LAYER_TRANSFORM, layerLinearMatrix } from "../canvas/GnumarusViewportMath";
 import type { GnumarusLayerTransform } from "../canvas/GnumarusViewportMath";
+
+export interface GnumarusFlattenMaskInput {
+  width: number;
+  height: number;
+  buffer: Uint8ClampedArray;
+  transform: GnumarusLayerTransform;
+  /** Mask layer opacity (0..1): 0 disables the mask. */
+  opacity: number;
+}
 
 export interface GnumarusFlattenLayerInput {
   width: number;
@@ -18,6 +27,8 @@ export interface GnumarusFlattenLayerInput {
   opacity: number;
   /** Compositing blend mode; absent means normal. */
   blend?: GnumarusLayerBlendMode;
+  /** Layer masks (modulate this layer's alpha; empty when none). */
+  masks?: GnumarusFlattenMaskInput[];
 }
 
 /**
@@ -150,6 +161,48 @@ function prepareFlattenLayers(layers: GnumarusFlattenLayerInput[]): GnumarusPrep
   return prepared;
 }
 
+function maskFactorAt(
+  projectX: number,
+  projectY: number,
+  masks: readonly GnumarusFlattenMaskInput[] | undefined,
+): number {
+  if (masks === undefined || masks.length === 0) {
+    return 1;
+  }
+  let factor = 1;
+  for (const mask of masks) {
+    if (
+      !Number.isInteger(mask.width) ||
+      !Number.isInteger(mask.height) ||
+      mask.width < 1 ||
+      mask.height < 1 ||
+      mask.buffer.length !== mask.width * mask.height * 4
+    ) {
+      continue;
+    }
+    const sample = projectToLayerPixel(projectX, projectY, mask.width, mask.height, mask.transform);
+    if (sample === null) {
+      continue;
+    }
+    const o = (sample.y * mask.width + sample.x) * 4;
+    const r = mask.buffer[o] as number;
+    const g = mask.buffer[o + 1] as number;
+    const b = mask.buffer[o + 2] as number;
+    const a = mask.buffer[o + 3] as number;
+    if (!(a > 0)) {
+      continue;
+    }
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    const raw = luminance * (a / 255) >= 1 ? 1 : luminance * (a / 255);
+    const opacity = Math.min(1, Math.max(0, mask.opacity));
+    factor *= 1 - (1 - raw) * opacity;
+    if (!(factor > 0)) {
+      return 0;
+    }
+  }
+  return factor;
+}
+
 function compositePreparedAt(
   prepared: GnumarusPreparedLayer[],
   width: number,
@@ -174,11 +227,15 @@ function compositePreparedAt(
     if (sx < 0 || sy < 0 || sx >= layer.width || sy >= layer.height) {
       continue;
     }
+    const effectiveOpacity = layer.opacity * maskFactorAt(project.x, project.y, layer.masks);
+    if (!(effectiveOpacity > 0)) {
+      continue;
+    }
     const blend = parseLayerBlendMode((layer as { blend?: unknown }).blend);
     if (blend === "normal") {
-      compositePixelOver(dst, dstIndex, layer.buffer, (sy * layer.width + sx) * 4, layer.opacity);
+      compositePixelOver(dst, dstIndex, layer.buffer, (sy * layer.width + sx) * 4, effectiveOpacity);
     } else {
-      compositeBlendPixelOver(dst, dstIndex, layer.buffer, (sy * layer.width + sx) * 4, layer.opacity, blend);
+      compositeBlendPixelOver(dst, dstIndex, layer.buffer, (sy * layer.width + sx) * 4, effectiveOpacity, blend);
     }
   }
 }

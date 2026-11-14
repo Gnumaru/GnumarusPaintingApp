@@ -94,6 +94,7 @@ export interface GnumarusMergedLayerSnapshot {
   transform: GnumarusLayerTransform;
   lockedChannels: GnumarusChannelLock;
   parentId: string | null;
+  isMask: boolean;
   stackIndex: number;
   buffer: Uint8ClampedArray;
   /** Cells of the removed layer, so undo can re-associate its contents. */

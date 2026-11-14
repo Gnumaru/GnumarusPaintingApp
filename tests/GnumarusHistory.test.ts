@@ -223,6 +223,7 @@ describe("GnumarusHistory", () => {
           lockedChannels: { r: false, g: false, b: false, a: false },
       blend: "normal",
           parentId: null,
+          isMask: false,
           stackIndex: 1,
           buffer: upperBuffer,
           cells: [{ frame: 0, content: "content9" }],
@@ -280,6 +281,7 @@ describe("GnumarusHistory", () => {
           lockedChannels: { r: false, g: false, b: false, a: false },
       blend: "normal",
           parentId: null,
+          isMask: false,
           stackIndex: 1,
           buffer: createPixelBuffer(4, 4),
           cells: [
@@ -345,6 +347,7 @@ describe("GnumarusHistory", () => {
           lockedChannels: { r: false, g: false, b: false, a: false },
       blend: "normal",
           parentId: null,
+          isMask: false,
           stackIndex: 1,
           buffer: createPixelBuffer(4, 4),
           cells: [{ frame: 0, content: "content9" }],

@@ -150,3 +150,39 @@ describe("GnumarusFinalRender", () => {
     ).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   });
 });
+
+describe("layer masks", () => {
+  it("white mask shows, black mask hides", async () => {
+    const { compositeFinalImage } = await import("../src/preview/GnumarusFinalRender");
+    const { IDENTITY_LAYER_TRANSFORM } = await import("../src/canvas/GnumarusViewportMath");
+    const red = new Uint8ClampedArray([255, 0, 0, 255]);
+    const white = new Uint8ClampedArray([255, 255, 255, 255]);
+    const black = new Uint8ClampedArray([0, 0, 0, 255]);
+    const base = { width: 1, height: 1, transform: { ...IDENTITY_LAYER_TRANSFORM }, visible: true, opacity: 1 };
+    const shown = compositeFinalImage(1, 1, [
+      { ...base, buffer: red, masks: [{ width: 1, height: 1, buffer: white, transform: { ...IDENTITY_LAYER_TRANSFORM }, opacity: 1 }] },
+    ]);
+    expect(Array.from(shown)).toEqual([255, 0, 0, 255]);
+    const hidden = compositeFinalImage(1, 1, [
+      { ...base, buffer: red, masks: [{ width: 1, height: 1, buffer: black, transform: { ...IDENTITY_LAYER_TRANSFORM }, opacity: 1 }] },
+    ]);
+    expect(Array.from(hidden)).toEqual([0, 0, 0, 0]);
+  });
+
+  it("transparent mask texels are identity and opacity scales the effect", async () => {
+    const { compositeFinalImage } = await import("../src/preview/GnumarusFinalRender");
+    const { IDENTITY_LAYER_TRANSFORM } = await import("../src/canvas/GnumarusViewportMath");
+    const red = new Uint8ClampedArray([255, 0, 0, 255]);
+    const clear = new Uint8ClampedArray([0, 0, 0, 0]);
+    const black = new Uint8ClampedArray([0, 0, 0, 255]);
+    const base = { width: 1, height: 1, transform: { ...IDENTITY_LAYER_TRANSFORM }, visible: true, opacity: 1 };
+    const untouched = compositeFinalImage(1, 1, [
+      { ...base, buffer: red, masks: [{ width: 1, height: 1, buffer: clear, transform: { ...IDENTITY_LAYER_TRANSFORM }, opacity: 1 }] },
+    ]);
+    expect(Array.from(untouched)).toEqual([255, 0, 0, 255]);
+    const disabled = compositeFinalImage(1, 1, [
+      { ...base, buffer: red, masks: [{ width: 1, height: 1, buffer: black, transform: { ...IDENTITY_LAYER_TRANSFORM }, opacity: 0 }] },
+    ]);
+    expect(Array.from(disabled)).toEqual([255, 0, 0, 255]);
+  });
+});

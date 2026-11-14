@@ -871,6 +871,22 @@ export class GnumarusShell extends LitElement {
       outline: 2px dashed #4fc3f7;
       outline-offset: -2px;
     }
+    .layer-row[data-mask="true"] {
+      border-left: 2px solid #ba68c8;
+    }
+    .layer-mask-badge {
+      flex: 0 0 auto;
+      font-size: 10px;
+      font-style: normal;
+      color: #1e1e1e;
+      background: #ba68c8;
+      border-radius: 3px;
+      padding: 0 5px;
+      line-height: 1.6;
+    }
+    .anim-layer-name[data-mask="true"] {
+      font-style: italic;
+    }
     .layer-top {
       display: flex;
       align-items: center;
@@ -3076,6 +3092,7 @@ export class GnumarusShell extends LitElement {
                   data-layer-id=${layer.id}
                   data-depth=${depth}
                   data-parent-id=${layer.parentId ?? ""}
+                  data-mask=${layer.isMask}
                   style="margin-left:${depth * 8}px"
                   draggable="true"
                   @click=${(event: MouseEvent): void => this.onSelectLayerClick(layer.id, event.shiftKey, event.ctrlKey || event.metaKey)}
@@ -3141,6 +3158,9 @@ export class GnumarusShell extends LitElement {
                             ${layer.name}
                           </span>
                           <span class="layer-dims">${layer.width}×${layer.height}</span>
+                          ${layer.isMask
+                            ? html`<span class="layer-mask-badge">${tr("layer.maskBadge")}</span>`
+                            : html``}
                         `}
                     <button
                       aria-label=${tr("layer.moveUp")}
@@ -3316,7 +3336,7 @@ export class GnumarusShell extends LitElement {
                         ${tr("ctx.deleteLayer")}
                       </button>
                       <button
-                        ?disabled=${this.layers.length > 0 && this.layers[0]?.id === this.contextMenuLayerId}
+                        ?disabled=${this.isMergeDownDisabled(this.contextMenuLayerId)}
                         @click=${(): void => {
                           if (this.contextMenuLayerId !== null) {
                             this.onMergeDown(this.contextMenuLayerId);
@@ -3354,6 +3374,17 @@ export class GnumarusShell extends LitElement {
                         }}
                       >
                         ${tr("ctx.makeRoot")}
+                      </button>
+                      <button
+                        @click=${(): void => {
+                          if (this.contextMenuLayerId !== null) {
+                            this.onToggleLayerMask(this.contextMenuLayerId);
+                          }
+                        }}
+                      >
+                        ${(this.layers.find((entry) => entry.id === this.contextMenuLayerId)?.isMask ?? false)
+                          ? tr("ctx.convertToNormal")
+                          : tr("ctx.convertToMask")}
                       </button>
                       <button
                         @click=${(): void => {
@@ -6122,6 +6153,7 @@ export class GnumarusShell extends LitElement {
                   title=${row.layerName}
                   data-testid="anim-layer-name"
                   data-matrix-layer=${row.layerId}
+                  data-mask=${row.isMask}
                   role="button"
                   tabindex="0"
                   aria-label=${tr("matrix.layerAria", { name: row.layerName })}
@@ -7495,6 +7527,14 @@ export class GnumarusShell extends LitElement {
       requirements: [],
       run: (): void => {
         this.makeActiveLayerRoot();
+      },
+    });
+    this.actionRegistry.register({
+      id: "toggle-layer-mask",
+      name: tr("action.toggleLayerMask"),
+      requirements: [],
+      run: (): void => {
+        this.toggleActiveLayerMask();
       },
     });
   }
@@ -10479,9 +10519,10 @@ export class GnumarusShell extends LitElement {
         height: info.height,
         buffer: rendered.buffer,
         transform: { ...info.transform },
-        visible: engine.isLayerEffectivelyVisible(info.id),
+        visible: info.isMask ? false : engine.isLayerEffectivelyVisible(info.id),
         opacity: info.opacity,
         blend: info.blend,
+        masks: engine.getMaskFlattenInputs(info.id),
       };
     });
     const checker = this.engine.getCheckerSettings();
@@ -14212,6 +14253,11 @@ export class GnumarusShell extends LitElement {
     if (dragged === null || dragged === "" || dragged === id || this.engine === null) {
       return;
     }
+    if (this.layers.find((layer) => layer.id === id)?.isMask === true) {
+      this.statusMessage = tr("status.layerReparentOntoMask");
+      this.showToast(tr("status.layerReparentOntoMask"));
+      return;
+    }
     const targetName = this.layers.find((layer) => layer.id === id)?.name ?? id;
     if (this.engine.reparentLayerAsChild(dragged, id)) {
       this.refreshLayers();
@@ -14254,6 +14300,94 @@ export class GnumarusShell extends LitElement {
       this.statusMessage = tr("status.layerMadeRoot");
     } else {
       this.statusMessage = tr("status.layerAlreadyRoot");
+    }
+  }
+
+  private isMergeDownDisabled(id: string | null): boolean {
+    if (id === null || this.layers.length === 0 || this.layers[0]?.id === id) {
+      return true;
+    }
+    const index = this.layers.findIndex((entry) => entry.id === id);
+    if (index <= 0) {
+      return true;
+    }
+    const upper = this.layers[index];
+    const lower = this.layers[index - 1];
+    if (upper === undefined || lower === undefined) {
+      return true;
+    }
+    if (upper.isMask || lower.isMask) {
+      return true;
+    }
+    return this.layers.some((entry) => entry.isMask && entry.parentId === upper.id);
+  }
+
+  private onMergeDown(id: string): void {
+    this.closeLayerMenu();
+    const index = this.layers.findIndex((entry) => entry.id === id);
+    const upper = index < 0 ? undefined : this.layers[index];
+    const lower = index <= 0 ? undefined : this.layers[index - 1];
+    const upperHasMasks =
+      upper !== undefined && this.layers.some((entry) => entry.isMask && entry.parentId === upper.id);
+    if ((upper?.isMask ?? false) || (lower?.isMask ?? false) || upperHasMasks) {
+      this.statusMessage = tr("status.layerMaskNoMerge");
+      this.showToast(tr("status.layerMaskNoMerge"));
+      return;
+    }
+    if (this.engine?.mergeDown(id) === true) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = tr("status.layersMerged");
+    } else {
+      this.statusMessage = tr("status.nothingBelow");
+    }
+  }
+
+  private onToggleLayerMask(id: string): void {
+    this.closeLayerMenu();
+    if (this.engine === null) {
+      return;
+    }
+    const result = this.engine.setLayerMask(id, !(this.layers.find((entry) => entry.id === id)?.isMask ?? false));
+    const name = this.layers.find((entry) => entry.id === id)?.name ?? id;
+    if (result === "ok") {
+      this.refreshLayers();
+      this.dirty = true;
+      const masked = this.layers.find((entry) => entry.id === id)?.isMask ?? false;
+      this.statusMessage = masked ? tr("status.layerMaskOn", { name }) : tr("status.layerMaskOff", { name });
+    } else if (result === "needs-parent") {
+      this.statusMessage = tr("status.layerMaskNeedsParent");
+      this.showToast(tr("status.layerMaskNeedsParent"));
+    } else if (result === "has-children") {
+      this.statusMessage = tr("status.layerMaskHasChildren");
+      this.showToast(tr("status.layerMaskHasChildren"));
+    } else if (result === "parent-is-mask") {
+      this.statusMessage = tr("status.layerMaskParentIsMask");
+      this.showToast(tr("status.layerMaskParentIsMask"));
+    }
+  }
+
+  private toggleActiveLayerMask(): void {
+    if (this.engine === null) {
+      return;
+    }
+    const id = this.engine.getActiveLayerId();
+    const result = this.engine.setLayerMask(id, !(this.layers.find((entry) => entry.id === id)?.isMask ?? false));
+    const name = this.layers.find((entry) => entry.id === id)?.name ?? id;
+    if (result === "ok") {
+      this.refreshLayers();
+      this.dirty = true;
+      const masked = this.layers.find((entry) => entry.id === id)?.isMask ?? false;
+      this.statusMessage = masked ? tr("status.layerMaskOn", { name }) : tr("status.layerMaskOff", { name });
+    } else if (result === "needs-parent") {
+      this.statusMessage = tr("status.layerMaskNeedsParent");
+      this.showToast(tr("status.layerMaskNeedsParent"));
+    } else if (result === "has-children") {
+      this.statusMessage = tr("status.layerMaskHasChildren");
+      this.showToast(tr("status.layerMaskHasChildren"));
+    } else if (result === "parent-is-mask") {
+      this.statusMessage = tr("status.layerMaskParentIsMask");
+      this.showToast(tr("status.layerMaskParentIsMask"));
     }
   }
 
@@ -14333,17 +14467,6 @@ export class GnumarusShell extends LitElement {
       this.showToast(tr("status.layersDeleted", { count: deleted }));
     } else {
       this.statusMessage = tr("status.layerDeleteLast");
-    }
-  }
-
-  private onMergeDown(id: string): void {
-    this.closeLayerMenu();
-    if (this.engine?.mergeDown(id) === true) {
-      this.refreshLayers();
-      this.dirty = true;
-      this.statusMessage = tr("status.layersMerged");
-    } else {
-      this.statusMessage = tr("status.nothingBelow");
     }
   }
 
@@ -15300,6 +15423,7 @@ export class GnumarusShell extends LitElement {
           blend: layer.blend,
           lockedChannels: { ...layer.lockedChannels },
           parentId: layer.parentId ?? null,
+          isMask: layer.mask === true,
         })),
         textures,
         texts: await this.resolveStoredTexts(project.animation.texts, fileBlobs),
@@ -16073,6 +16197,7 @@ export class GnumarusShell extends LitElement {
           blend: layer.blend,
           lockedChannels: { ...layer.lockedChannels },
           ...(layer.parentId === null ? {} : { parentId: layer.parentId }),
+          ...(layer.isMask ? { mask: true as const } : {}),
         })),
         animation: {
           frames: exported.frames,

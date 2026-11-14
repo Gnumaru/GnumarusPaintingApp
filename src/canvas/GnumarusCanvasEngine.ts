@@ -140,6 +140,7 @@ import {
   type GnumarusTipAngleMode,
 } from "./GnumarusPaintBrush";
 import {
+  combineMasksForParent,
   isEffectivelyVisible,
   layerBlockRange,
   makeRootLayer,
@@ -147,7 +148,9 @@ import {
   moveLayerBlockWrapping,
   rebuildLayerOrder,
   reparentLayer,
+  sanitizeLayerMasks,
   sanitizeLayerParents,
+  type GnumarusMaskContribution,
 } from "./GnumarusLayerTree";
 import {
   clipSegmentToRect,
@@ -467,6 +470,8 @@ export interface GnumarusLayerInfo {
   lockedChannels: GnumarusChannelLock;
   /** Nesting parent (null = root). Only ordering/render order is affected. */
   parentId: string | null;
+  /** Layer mask: never renders on its own, modulates the alpha of its parent. */
+  isMask: boolean;
 }
 
 export interface GnumarusLayerPixels {
@@ -511,6 +516,8 @@ interface GnumarusLayer extends GnumarusLayerInfo {
   plane: THREE.Mesh;
   /** Texture id currently shown, or null when the active cell is empty. */
   renderTextureId: string | null;
+  /** Combined mask multiplier (parent texture space) or null when unused. */
+  maskTexture: THREE.DataTexture | null;
 }
 
 /** Stored pixel pool entry: one per layer plus any textures created later. */
@@ -563,6 +570,7 @@ export interface GnumarusMatrixCellView {
 export interface GnumarusMatrixRowView {
   layerId: string;
   layerName: string;
+  isMask: boolean;
   cells: GnumarusMatrixCellView[];
 }
 
@@ -596,6 +604,7 @@ export interface GnumarusAnimationProjectData {
     blend?: GnumarusLayerBlendMode;
     lockedChannels: GnumarusChannelLock;
     parentId: string | null;
+    isMask: boolean;
   }>;
   textures: GnumarusTexturePixels[];
   texts?: Array<{ id: string; name: string; document: GnumarusTextDocument }>;
@@ -625,6 +634,7 @@ export interface GnumarusProjectLayerInput {
   transform: GnumarusLayerTransform;
   lockedChannels: GnumarusChannelLock;
   parentId?: string | null;
+  isMask?: boolean;
 }
 
 /**
@@ -708,10 +718,13 @@ const LAYER_FRAGMENT_SHADER = [
   "precision mediump float;",
   "varying vec2 vUv;",
   "uniform sampler2D uMap;",
+  "uniform sampler2D uMaskMap;",
   "uniform float uOpacity;",
+  "uniform float uUseMask;",
   "void main() {",
   "  vec4 tex = texture2D(uMap, vUv);",
-  "  float alpha = tex.a * uOpacity;",
+  "  float mask = mix(1.0, texture2D(uMaskMap, vUv).r, uUseMask);",
+  "  float alpha = tex.a * uOpacity * mask;",
   // Fully transparent fragments must not touch the framebuffer: blend-mode
   // equations (multiply factors, min/max) cannot see alpha, so without this
   // an untouched transparent-black texel would paint black instead of
@@ -1144,6 +1157,10 @@ export class GnumarusCanvasEngine {
   private sizeDrag: { tool: GnumarusSizedTool; startClientX: number; startSize: number } | null = null;
   private strokeBase: Uint8ClampedArray | null = null;
   private strokeLayerId: string | null = null;
+  /** Shared 1x1 white mask texture (bound when a layer has no mask). */
+  private whiteMaskTexture: THREE.DataTexture | null = null;
+  /** Parents whose combined mask texture needs a recompute before drawing. */
+  private maskRefreshQueued = new Set<string>();
   /** Coverage mask for non-accumulating pencil strokes (union semantics). */
   private strokeMask: Uint8Array | null = null;
   private readonly history = new GnumarusHistory(100);
@@ -1869,6 +1886,7 @@ export class GnumarusCanvasEngine {
     lockedChannels: GnumarusChannelLock | undefined = undefined,
     blend: GnumarusLayerBlendMode = "normal",
     parentId: string | null = null,
+    isMask = false,
   ): GnumarusLayer {
     const texture = new THREE.DataTexture(buffer, width, height);
     texture.magFilter = THREE.NearestFilter;
@@ -1880,7 +1898,9 @@ export class GnumarusCanvasEngine {
     const material = new THREE.ShaderMaterial({
       uniforms: {
         uMap: { value: texture },
+        uMaskMap: { value: this.sharedWhiteMaskTexture() },
         uOpacity: { value: clampedOpacity },
+        uUseMask: { value: 0 },
       },
       vertexShader: LAYER_VERTEX_SHADER,
       fragmentShader: LAYER_FRAGMENT_SHADER,
@@ -1907,14 +1927,31 @@ export class GnumarusCanvasEngine {
       transform: { ...transform },
       lockedChannels: parsedLock,
       parentId,
+      isMask,
       buffer,
       texture,
       material,
       plane,
       renderTextureId: null,
+      maskTexture: null,
     };
     this.applyLayerBlending(created);
     return created;
+  }
+
+  /** Shared 1x1 white texture bound when a layer has no mask (uUseMask = 0). */
+  private sharedWhiteMaskTexture(): THREE.DataTexture {
+    if (this.whiteMaskTexture === null) {
+      const white = new Uint8ClampedArray([255, 255, 255, 255]);
+      const texture = new THREE.DataTexture(white, 1, 1);
+      texture.magFilter = THREE.NearestFilter;
+      texture.minFilter = THREE.NearestFilter;
+      texture.generateMipmaps = false;
+      texture.flipY = true;
+      texture.needsUpdate = true;
+      this.whiteMaskTexture = texture;
+    }
+    return this.whiteMaskTexture;
   }
 
   private refreshLayerStacking(): void {
@@ -2020,6 +2057,8 @@ export class GnumarusCanvasEngine {
   /**
    * Flatten inputs for an arbitrary frame without touching live render
    * state (buffer references are shared read-only). Null for bad frames.
+   * Mask layers never render on their own (`visible: false`); their
+   * content is attached to the masked parent's `masks` instead.
    */
   getFrameFlattenInputs(frame: number): Array<{
     width: number;
@@ -2029,12 +2068,26 @@ export class GnumarusCanvasEngine {
     visible: boolean;
     opacity: number;
     blend: GnumarusLayerBlendMode;
+    masks: GnumarusMaskContribution[];
   }> | null {
     if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
       return null;
     }
     const resolved = this.resolveFrameAt(frame);
+    const parents = this.layerParentMap();
     return this.layers.map((layer) => {
+      if (layer.isMask) {
+        return {
+          width: 0,
+          height: 0,
+          buffer: new Uint8ClampedArray(0),
+          transform: { ...IDENTITY_LAYER_TRANSFORM },
+          visible: false,
+          opacity: layer.opacity,
+          blend: layer.blend,
+          masks: [],
+        };
+      }
       const cell = resolved.get(layer.id);
       if (cell === undefined || cell.buffer === null || cell.width < 1 || cell.height < 1) {
         return {
@@ -2045,6 +2098,7 @@ export class GnumarusCanvasEngine {
           visible: false,
           opacity: layer.opacity,
           blend: layer.blend,
+          masks: [],
         };
       }
       return {
@@ -2055,8 +2109,49 @@ export class GnumarusCanvasEngine {
         visible: this.isLayerEffectivelyVisible(layer.id),
         opacity: layer.opacity,
         blend: layer.blend,
+        masks: this.collectMaskInputs(layer.id, parents, resolved),
       };
     });
+  }
+
+  /**
+   * Mask contributions of one layer at the current frame (for callers that
+   * build flatten inputs manually, like the final preview).
+   */
+  getMaskFlattenInputs(layerId: string): GnumarusMaskContribution[] {
+    return this.collectMaskInputs(layerId, this.layerParentMap(), this.resolveFrame());
+  }
+
+  private collectMaskInputs(
+    layerId: string,
+    parents: ReadonlyMap<string, string | null>,
+    resolved: Map<string, GnumarusResolvedCell>,
+  ): GnumarusMaskContribution[] {
+    void parents;
+    const out: GnumarusMaskContribution[] = [];
+    for (const mask of this.layers) {
+      if (!mask.isMask || mask.parentId !== layerId) {
+        continue;
+      }
+      if (!this.isLayerEffectivelyVisible(mask.id)) {
+        continue;
+      }
+      const cell = resolved.get(mask.id);
+      if (cell === undefined || cell.textureId === null || cell.buffer === null) {
+        continue;
+      }
+      if (!Number.isInteger(cell.width) || !Number.isInteger(cell.height) || cell.width < 1 || cell.height < 1) {
+        continue;
+      }
+      out.push({
+        width: cell.width,
+        height: cell.height,
+        buffer: cell.buffer,
+        transform: { ...cell.transform },
+        opacity: mask.opacity,
+      });
+    }
+    return out;
   }
 
   /** Point one layer render at its current-frame cell (shared buffer refs, no copies). */
@@ -2071,6 +2166,18 @@ export class GnumarusCanvasEngine {
       layer.height = this.imageHeight;
       layer.transform = resolved === undefined ? { ...IDENTITY_LAYER_TRANSFORM } : { ...resolved.transform };
       layer.renderTextureId = null;
+      layer.plane.visible = false;
+      this.syncWrapTiles();
+      return;
+    }
+    if (layer.isMask) {
+      // Masks never render on their own planes; only buffer/dims/transform
+      // tracking matters (sampling reads the mask cell content directly).
+      layer.buffer = resolved.buffer;
+      layer.width = resolved.width;
+      layer.height = resolved.height;
+      layer.transform = { ...resolved.transform };
+      layer.renderTextureId = resolved.textureId;
       layer.plane.visible = false;
       this.syncWrapTiles();
       return;
@@ -2101,6 +2208,8 @@ export class GnumarusCanvasEngine {
     for (const layer of this.layers) {
       this.syncLayerRender(layer);
     }
+    this.queueAllMaskRefreshes();
+    this.flushMaskRefreshQueue();
     if (this.onionEnabled && !this.drawing) {
       this.refreshOnionSkins();
     }
@@ -2110,6 +2219,17 @@ export class GnumarusCanvasEngine {
     for (const layer of this.layers) {
       if (layer.renderTextureId === textureId) {
         layer.texture.needsUpdate = true;
+      }
+    }
+    // Painting a mask's content changes its parent's combined mask texture.
+    const resolved = this.resolveFrame();
+    for (const layer of this.layers) {
+      if (!layer.isMask) {
+        continue;
+      }
+      const cell = resolved.get(layer.id);
+      if (cell !== undefined && cell.textureId === textureId && layer.parentId !== null) {
+        this.queueMaskRefresh(layer.parentId);
       }
     }
   }
@@ -2625,6 +2745,7 @@ export class GnumarusCanvasEngine {
     const rows: GnumarusMatrixRowView[] = [...this.layers].reverse().map((layer) => ({
       layerId: layer.id,
       layerName: layer.name,
+      isMask: layer.isMask,
       cells: Array.from({ length: this.frameCount }, (_unused, frame) => {
         const contentId = this.cells.get(animationCellKey(layer.id, frame)) ?? null;
         const content = contentId === null ? undefined : this.contents.get(contentId);
@@ -6051,6 +6172,7 @@ export class GnumarusCanvasEngine {
         blend: layer.blend,
         lockedChannels: { ...layer.lockedChannels },
         parentId: layer.parentId,
+        isMask: layer.isMask,
       })),
       textures: [...this.textures.values()].map((texture) => ({
         id: texture.id,
@@ -6122,6 +6244,7 @@ export class GnumarusCanvasEngine {
       transform: { ...layer.transform },
       lockedChannels: { ...layer.lockedChannels },
       parentId: layer.parentId,
+      isMask: layer.isMask,
     }));
   }
 
@@ -6237,7 +6360,121 @@ export class GnumarusCanvasEngine {
       if (layer === null) {
         continue;
       }
-      layer.plane.visible = layer.renderTextureId !== null && this.isLayerEffectivelyVisible(layer.id);
+      // Masks never render on their own planes; they modulate the parent.
+      layer.plane.visible =
+        !layer.isMask && layer.renderTextureId !== null && this.isLayerEffectivelyVisible(layer.id);
+    }
+  }
+
+  /** Mask layers directly under `parentId` (in storage order). */
+  private directMasksOf(parentId: string): GnumarusLayer[] {
+    return this.layers.filter((layer) => layer.isMask && layer.parentId === parentId);
+  }
+
+  /** Queue a combined-mask recompute for one parent before the next draw. */
+  private queueMaskRefresh(parentId: string): void {
+    this.maskRefreshQueued.add(parentId);
+  }
+
+  /** Queue recomputes for every parent that currently owns masks. */
+  private queueAllMaskRefreshes(): void {
+    for (const layer of this.layers) {
+      if (!layer.isMask && this.directMasksOf(layer.id).length > 0) {
+        this.maskRefreshQueued.add(layer.id);
+      }
+    }
+  }
+
+  /**
+   * Recompute the combined mask texture of one parent in the parent's
+   * texture space (so the shader can sample it with the parent UVs).
+   * Invisible or empty masks are skipped (identity). Updates uUseMask.
+   */
+  private refreshMaskForParent(parentId: string): void {
+    const parent = this.findLayer(parentId);
+    if (parent === null || parent.isMask) {
+      return;
+    }
+    const resolved = this.resolveFrame().get(parent.id);
+    const contributions: GnumarusMaskContribution[] = [];
+    if (resolved !== undefined && resolved.textureId !== null && resolved.buffer !== null) {
+      for (const mask of this.directMasksOf(parentId)) {
+        if (!this.isLayerEffectivelyVisible(mask.id)) {
+          continue;
+        }
+        const cell = this.resolveFrame().get(mask.id);
+        if (cell === undefined || cell.textureId === null || cell.buffer === null) {
+          continue;
+        }
+        if (!Number.isInteger(cell.width) || !Number.isInteger(cell.height) || cell.width < 1 || cell.height < 1) {
+          continue;
+        }
+        contributions.push({
+          width: cell.width,
+          height: cell.height,
+          buffer: cell.buffer,
+          transform: { ...cell.transform },
+          opacity: mask.opacity,
+        });
+      }
+    }
+    const uniforms = parent.material.uniforms;
+    const useMask = uniforms["uUseMask"] as { value: number } | undefined;
+    const maskMap = uniforms["uMaskMap"] as { value: THREE.DataTexture } | undefined;
+    if (contributions.length === 0 || resolved === undefined) {
+      if (useMask !== undefined) {
+        useMask.value = 0;
+      }
+      if (maskMap !== undefined) {
+        maskMap.value = this.sharedWhiteMaskTexture();
+      }
+      return;
+    }
+    const combined = combineMasksForParent(parent.width, parent.height, parent.transform, contributions);
+    if (combined === null) {
+      if (useMask !== undefined) {
+        useMask.value = 0;
+      }
+      if (maskMap !== undefined) {
+        maskMap.value = this.sharedWhiteMaskTexture();
+      }
+      return;
+    }
+    const existing = parent.maskTexture;
+    if (
+      existing === null ||
+      existing.image.width !== parent.width ||
+      existing.image.height !== parent.height
+    ) {
+      existing?.dispose();
+      const texture = new THREE.DataTexture(combined, parent.width, parent.height);
+      texture.magFilter = THREE.NearestFilter;
+      texture.minFilter = THREE.NearestFilter;
+      texture.generateMipmaps = false;
+      texture.flipY = true;
+      texture.needsUpdate = true;
+      parent.maskTexture = texture;
+      if (maskMap !== undefined) {
+        maskMap.value = texture;
+      }
+    } else {
+      (existing.image.data as Uint8ClampedArray).set(combined);
+      existing.needsUpdate = true;
+    }
+    if (useMask !== undefined) {
+      useMask.value = 1;
+    }
+  }
+
+  /** Flush every queued combined-mask recompute (called before drawing). */
+  private flushMaskRefreshQueue(): void {
+    if (this.maskRefreshQueued.size === 0) {
+      return;
+    }
+    const queued = [...this.maskRefreshQueued];
+    this.maskRefreshQueued.clear();
+    for (const parentId of queued) {
+      this.refreshMaskForParent(parentId);
     }
   }
 
@@ -6250,19 +6487,29 @@ export class GnumarusCanvasEngine {
     }
     const parents = sanitizeLayerParents(order, raw);
     this.applyParentMap(parents);
+    const isMask = new Map<string, boolean>(this.layers.map((layer) => [layer.id, layer.isMask]));
+    sanitizeLayerMasks(order, parents, isMask);
+    for (const layer of this.layers) {
+      layer.isMask = isMask.get(layer.id) === true;
+    }
     this.applyLayerOrder(rebuildLayerOrder(order, parents));
+    this.queueAllMaskRefreshes();
   }
 
   /**
    * Drop `childId` onto `newParentId`, making it a child. Placement follows
    * the pre-move order: dragged from above the parent lands on top of the
    * children (directly below the parent), from below lands at the far end.
-   * Rejects drops onto itself or its own descendants. No history entry.
+   * Rejects drops onto itself, its own descendants, or mask layers
+   * (masks are leaves: nothing nests under them). No history entry.
    */
   reparentLayerAsChild(childId: string, newParentId: string): boolean {
     const order = this.layerOrderIds();
     const parents = this.layerParentMap();
     if (!order.includes(childId) || !order.includes(newParentId)) {
+      return false;
+    }
+    if (this.findLayer(newParentId)?.isMask === true) {
       return false;
     }
     const childIndex = order.indexOf(childId);
@@ -6276,15 +6523,50 @@ export class GnumarusCanvasEngine {
     this.applyLayerOrder(result.order);
     this.refreshLayerStacking();
     this.refreshBlockVisibility(result.order);
+    this.queueAllMaskRefreshes();
     this.render();
     this.onLayersChanged?.();
     this.emitStats();
     return true;
   }
 
+  /** Result of converting a layer to/from a mask (for precise UI feedback). */
+  setLayerMask(id: string, mask: boolean): "ok" | "unknown" | "already" | "needs-parent" | "has-children" | "parent-is-mask" {
+    const layer = this.findLayer(id);
+    if (layer === null) {
+      return "unknown";
+    }
+    if ((layer.isMask === true) === mask) {
+      return "already";
+    }
+    if (mask) {
+      const parent = layer.parentId === null ? null : this.findLayer(layer.parentId);
+      if (parent === null) {
+        return "needs-parent";
+      }
+      if (parent.isMask) {
+        return "parent-is-mask";
+      }
+      if (this.layers.some((entry) => entry.parentId === id)) {
+        return "has-children";
+      }
+      layer.isMask = true;
+    } else {
+      layer.isMask = false;
+    }
+    this.queueAllMaskRefreshes();
+    this.refreshBlockVisibility(this.layerOrderIds());
+    this.refreshLayerStacking();
+    this.render();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return "ok";
+  }
+
   /**
    * Promote a nested layer back to root, placed immediately above its old
-   * parent. Returns false for roots and unknown ids. No history entry.
+   * parent. Masks become normal layers (a root mask would have no target).
+   * Returns false for roots and unknown ids. No history entry.
    */
   makeRootLayer(id: string): boolean {
     const order = this.layerOrderIds();
@@ -6293,10 +6575,15 @@ export class GnumarusCanvasEngine {
     if (result === null) {
       return false;
     }
+    const layer = this.findLayer(id);
+    if (layer !== null) {
+      layer.isMask = false;
+    }
     this.applyParentMap(result.parents);
     this.applyLayerOrder(result.order);
     this.refreshLayerStacking();
     this.refreshBlockVisibility(result.order);
+    this.queueAllMaskRefreshes();
     this.render();
     this.onLayersChanged?.();
     this.emitStats();
@@ -6415,6 +6702,8 @@ export class GnumarusCanvasEngine {
     for (const layer of this.layers) {
       if (layer.parentId === id) {
         layer.parentId = null;
+        // A mask without a target cannot work: promote as a normal layer.
+        layer.isMask = false;
       }
     }
     const [removed] = this.layers.splice(index, 1);
@@ -6422,6 +6711,7 @@ export class GnumarusCanvasEngine {
       this.scene.remove(removed.plane);
       removed.material.dispose();
       removed.texture.dispose();
+      removed.maskTexture?.dispose();
     }
     this.textures.delete(id);
     if (this.activeLayerId === id) {
@@ -6447,6 +6737,7 @@ export class GnumarusCanvasEngine {
       { ...snapshot.lockedChannels },
       snapshot.blend,
       snapshot.parentId ?? null,
+      snapshot.isMask ?? false,
     );
     // Only layers snapshotted with a layer-id texture get one back; fresh
     // layers own none, and legacy contents still pointing at the layer id
@@ -6500,6 +6791,11 @@ export class GnumarusCanvasEngine {
     const upper = this.layers[index];
     const lower = this.layers[index - 1];
     if (upper === undefined || lower === undefined) {
+      return false;
+    }
+    // Masks modulate instead of compositing, and parents carrying masks would
+    // orphan them: merging with masks involved is refused.
+    if (upper.isMask || lower.isMask || this.directMasksOf(upper.id).length > 0) {
       return false;
     }
     const frame = this.currentFrame;
@@ -6576,6 +6872,7 @@ export class GnumarusCanvasEngine {
       lockedChannels: { ...upper.lockedChannels },
       blend: upper.blend,
       parentId: upper.parentId,
+      isMask: upper.isMask,
       stackIndex: index,
       buffer: (ownedEntry?.buffer ?? upper.buffer).slice(),
       cells: [],
@@ -6705,6 +7002,7 @@ export class GnumarusCanvasEngine {
       lockedChannels: { ...upper.lockedChannels },
       blend: upper.blend,
       parentId: upper.parentId,
+      isMask: upper.isMask,
       stackIndex: index,
       buffer: (ownedEntry?.buffer ?? upper.buffer).slice(),
       cells: [],
@@ -6828,6 +7126,9 @@ export class GnumarusCanvasEngine {
       }
     }
     this.refreshBlockVisibility(affected);
+    // Visibility toggles can change mask contributions (mask on/off, or an
+    // ancestor hiding a mask): recompute every masked parent.
+    this.queueAllMaskRefreshes();
     this.render();
     this.emitStats();
     return true;
@@ -6861,6 +7162,12 @@ export class GnumarusCanvasEngine {
     const clamped = Math.min(1, Math.max(0, opacity));
     layer.opacity = clamped;
     layer.material.uniforms["uOpacity"]!.value = clamped;
+    // Mask opacity scales the mask effect: refresh the masked parent.
+    if (layer.isMask && layer.parentId !== null) {
+      this.queueMaskRefresh(layer.parentId);
+    } else if (this.directMasksOf(layer.id).length > 0) {
+      this.queueMaskRefresh(layer.id);
+    }
     this.render();
     return true;
   }
@@ -7687,6 +7994,7 @@ export class GnumarusCanvasEngine {
         parseChannelLock(input.lockedChannels),
         parseLayerBlendMode((input as { blend?: unknown }).blend),
         typeof input.parentId === "string" ? input.parentId : null,
+        input.isMask === true,
       );
       this.layers.push(layer);
       this.textures.set(input.id, {
@@ -7753,6 +8061,7 @@ export class GnumarusCanvasEngine {
         blend?: GnumarusLayerBlendMode;
         lockedChannels: GnumarusChannelLock;
         parentId?: string | null;
+        isMask?: boolean;
       }>;
       textures: GnumarusTexturePixels[];
       texts?: Array<{ id: string; name: string; document: GnumarusTextDocument }>;
@@ -7819,6 +8128,7 @@ export class GnumarusCanvasEngine {
           parseChannelLock(layer.lockedChannels),
           parseLayerBlendMode((layer as { blend?: unknown }).blend),
           typeof layer.parentId === "string" ? layer.parentId : null,
+          (layer as { isMask?: unknown }).isMask === true,
         ),
       );
     }
@@ -8133,6 +8443,7 @@ export class GnumarusCanvasEngine {
       this.scene.remove(layer.plane);
       layer.material.dispose();
       layer.texture.dispose();
+      layer.maskTexture?.dispose();
     }
     this.layers = [];
     this.textures.clear();
@@ -14612,6 +14923,7 @@ export class GnumarusCanvasEngine {
     this.pixelsVersion += 1;
     this.syncFloatingWithHistory();
     this.markLayersDirty();
+    this.queueAllMaskRefreshes();
     this.refreshLayerStacking();
     this.render();
     this.onPixelsChanged();
@@ -14642,6 +14954,7 @@ export class GnumarusCanvasEngine {
     this.pixelsVersion += 1;
     this.syncFloatingWithHistory();
     this.markLayersDirty();
+    this.queueAllMaskRefreshes();
     this.refreshLayerStacking();
     this.render();
     this.onPixelsChanged();
@@ -17329,6 +17642,7 @@ export class GnumarusCanvasEngine {
     if (this.disposed) {
       return;
     }
+    this.flushMaskRefreshQueue();
     this.renderer.render(this.scene, this.camera);
   }
 

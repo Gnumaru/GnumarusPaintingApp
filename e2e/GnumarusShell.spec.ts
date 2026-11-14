@@ -5757,6 +5757,7 @@ test("quick action palette filters and runs actions", async ({ page }) => {
     "Settings",
     "Shortcuts",
     "Source code",
+    "Toggle layer mask",
     "Undo",
     "Unlink cell content",
   ]);
@@ -15153,4 +15154,164 @@ test("child layer list collapses without touching the matrix or canvas @recent",
   expect(await readPixel(page, 32, 32)).toEqual(before);
   await toggle.click();
   await expect(page.locator('gnumarus-shell .layer-row[data-layer-id="layer0"]')).toHaveCount(1);
+});
+
+async function getLayerMasks(page: import("@playwright/test").Page): Promise<Array<{ id: string; isMask: boolean }>> {
+  return page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getLayers(): Array<{ id: string; isMask: boolean }> } };
+    };
+    return root.__gnumarus?.engine?.getLayers().map((layer) => ({ id: layer.id, isMask: layer.isMask })) ?? [];
+  });
+}
+
+async function expectPreviewCenter(page: import("@playwright/test").Page, expected: string): Promise<void> {
+  const preview = page.locator('gnumarus-shell [data-testid="final-preview"]');
+  await expect(preview).toBeVisible();
+  const canvas = page.locator("gnumarus-shell canvas#previewCanvas");
+  await expect(canvas).toBeVisible();
+  await expect
+    .poll(
+      async () => {
+        const value: unknown = await canvas.evaluate((element: HTMLCanvasElement) => {
+          const context = element.getContext("2d");
+          if (context === null) {
+            return null;
+          }
+          const data = context.getImageData(32, 32, 1, 1).data;
+          return `${data[0]},${data[1]},${data[2]},${data[3]}`;
+        });
+        return value;
+      },
+      { timeout: 10000 },
+    )
+    .toBe(expected);
+}
+
+test("layer mask conversion hides with black and shows with white @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await page.getByRole("button", { name: "Add layer" }).click();
+  expect(await engineReparent(page, "layer2", "layer1")).toBe(true);
+  // Parent red, mask white (full-layer bucket fills).
+  await page.locator('gnumarus-shell [data-layer-id="layer1"] .layer-name').click();
+  await selectTool(page, "Bucket fill");
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  await page.locator('gnumarus-shell [data-layer-id="layer2"] .layer-name').click();
+  await setPencil(page, "#ffffff");
+  await paintCenter(page);
+  await page.locator('gnumarus-shell [data-layer-id="layer2"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Convert to mask" }).click();
+  expect(await getLayerMasks(page)).toContainEqual({ id: "layer2", isMask: true });
+  await expect(page.locator('gnumarus-shell .layer-row[data-layer-id="layer2"] .layer-mask-badge')).toBeVisible();
+  // White mask shows the red parent in the flattened preview.
+  await page.getByRole("button", { name: "Final preview" }).click();
+  await expectPreviewCenter(page, "255,0,0,255");
+  await page.getByRole("button", { name: "Close preview" }).click();
+  // Black mask hides the parent (default image checker shows through).
+  await setPencil(page, "#000000");
+  await paintCenter(page);
+  await page.getByRole("button", { name: "Final preview" }).click();
+  await expectPreviewCenter(page, "148,148,148,255");
+  await page.getByRole("button", { name: "Close preview" }).click();
+  // Converting back renders the layer normally (still nested under its
+  // parent, so the red parent keeps covering it).
+  await page.locator('gnumarus-shell [data-layer-id="layer2"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Convert to normal layer" }).click();
+  expect(await getLayerMasks(page)).toContainEqual({ id: "layer2", isMask: false });
+  await expect(page.locator('gnumarus-shell .layer-row[data-layer-id="layer2"] .layer-mask-badge')).toHaveCount(0);
+  const unmasked = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          getFrameFlattenInputs(frame: number): Array<{ visible: boolean; masks?: Array<unknown> }> | null;
+          getLayers(): Array<{ id: string }>;
+        };
+      };
+    };
+    const layers = root.__gnumarus?.engine?.getLayers() ?? [];
+    const inputs = root.__gnumarus?.engine?.getFrameFlattenInputs(0) ?? [];
+    const entry = inputs[layers.findIndex((layer) => layer.id === "layer2")];
+    return { visible: entry?.visible, masks: entry?.masks?.length ?? 0 };
+  });
+  expect(unmasked).toEqual({ visible: true, masks: 0 });
+  // Make it a root: it moves above the parent and covers it with black.
+  await page.locator('gnumarus-shell [data-layer-id="layer2"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Make root layer" }).click();
+  await page.getByRole("button", { name: "Final preview" }).click();
+  await expectPreviewCenter(page, "0,0,0,255");
+  await page.getByRole("button", { name: "Close preview" }).click();
+});
+
+test("masks never render alone and reject nesting and merges @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await page.getByRole("button", { name: "Add layer" }).click();
+  expect(await engineReparent(page, "layer2", "layer1")).toBe(true);
+  // Parent red so the mask has content to modulate.
+  await page.locator('gnumarus-shell [data-layer-id="layer1"] .layer-name').click();
+  await selectTool(page, "Bucket fill");
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  // Toggle via the run action palette.
+  await page.locator('gnumarus-shell [data-layer-id="layer2"] .layer-name').click();
+  await page.keyboard.press("Control+Shift+P");
+  const dialog = page.locator("gnumarus-shell dialog#actionPaletteDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator('[data-testid="action-palette-input"]').fill("toggle layer mask");
+  await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveText(["Toggle layer mask"]);
+  await dialog.locator('[data-testid="action-palette-item"]').click();
+  expect(await getLayerMasks(page)).toContainEqual({ id: "layer2", isMask: true });
+  await setPencil(page, "#ffffff");
+  await paintCenter(page);
+  // Flattening excludes the mask as an independent layer and wires the parent.
+  const flatten = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          getFrameFlattenInputs(frame: number): Array<{ visible: boolean; masks?: Array<unknown> }> | null;
+          getLayers(): Array<{ id: string }>;
+        };
+      };
+    };
+    const layers = root.__gnumarus?.engine?.getLayers() ?? [];
+    const inputs = root.__gnumarus?.engine?.getFrameFlattenInputs(0) ?? [];
+    const byId = new Map(layers.map((layer, index) => [layer.id, inputs[index]]));
+    return {
+      maskVisible: byId.get("layer2")?.visible,
+      parentMasks: (byId.get("layer1")?.masks ?? []).length,
+    };
+  });
+  expect(flatten.maskVisible).toBe(false);
+  expect(flatten.parentMasks).toBe(1);
+  // Canvas wires the parent shader flag.
+  const wired = await page.evaluate(() => {
+    const engine = (window as unknown as { __gnumarus?: { engine?: unknown } }).__gnumarus?.engine as unknown as
+      | { layers: Array<{ id: string; material: { uniforms: Record<string, { value: unknown }> } }> }
+      | undefined;
+    const parent = engine?.layers.find((layer) => layer.id === "layer1");
+    return parent?.material.uniforms["uUseMask"]?.value;
+  });
+  expect(wired).toBe(1);
+  // The mask row stays in the panel and matrix (panel only collapses).
+  await expect(page.locator('gnumarus-shell .layer-row[data-layer-id="layer2"][data-mask="true"]')).toHaveCount(1);
+  await expect(page.locator('gnumarus-shell [data-testid="anim-layer-name"][data-mask="true"]')).toHaveCount(1);
+  // Nesting under a mask is rejected.
+  await dropLayerOnto(page, "layer0", "layer2");
+  await expect(page.locator("gnumarus-shell")).toContainText("Cannot nest a layer under a mask");
+  expect((await getLayerParents(page)).find((layer) => layer.id === "layer0")?.parentId).toBeNull();
+  // Merging with a mask is rejected and the menu disables it.
+  const merged = await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { mergeDown(id: string): boolean } } };
+    return root.__gnumarus?.engine?.mergeDown("layer2") ?? true;
+  });
+  expect(merged).toBe(false);
+  await page.locator('gnumarus-shell [data-layer-id="layer2"]').click({ button: "right" });
+  await expect(page.getByRole("button", { name: "Merge Down" })).toBeDisabled();
+  await page.locator("gnumarus-shell .context-blocker").click();
 });

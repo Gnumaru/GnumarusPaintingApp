@@ -124,6 +124,26 @@ describe("GnumarusProjectFormat", () => {
     expect(cleaned.layers.find((layer) => layer.id === "x")?.parentId ?? null).toBeNull();
     expect(cleaned.layers.find((layer) => layer.id === "y")?.parentId ?? null).toBeNull();
     const byId = new Map(cleaned.layers.map((layer) => [layer.id, layer.parentId ?? null]));
+    const masked = {
+      ...base,
+      layers: makeLayerSet([{ id: "p" }, { id: "m", parentId: "p" }]).map((layer) =>
+        layer.id === "m" ? { ...layer, mask: true } : layer,
+      ),
+      animation: makeAnimationFor(["p", "m"]),
+    };
+    const parsedMask = parseProject(serializeProject(masked));
+    expect(parsedMask.layers.find((layer) => layer.id === "m")?.mask).toBe(true);
+    expect(parsedMask.layers.find((layer) => layer.id === "p")?.mask).toBeUndefined();
+    const badMask = {
+      ...base,
+      layers: [
+        { id: "r", name: "R", visible: true, opacity: 1, blend: "normal" as const, lockedChannels: { r: false, g: false, b: false, a: false }, mask: true },
+      ],
+      animation: makeAnimationFor(["r"]),
+    };
+    const cleanedMask = parseProject(serializeProject(badMask));
+    expect(cleanedMask.layers[0]?.mask).toBeUndefined();
+
     for (const start of ["p", "q"]) {
       const seen = new Set<string>();
       let current: string | null | undefined = start;

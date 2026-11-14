@@ -1,12 +1,23 @@
 /**
- * Pure layer-tree helpers for nested layers (`parentId`).
+ * Pure layer-tree helpers for nested layers (`parentId`) and layer masks.
  *
  * Storage invariant (bottom -> top, index 0 is the bottom render layer):
  * every parent sits immediately above its whole subtree, so a node's block
  * is `[descendants..., node]` and sibling blocks are adjacent. Display order
  * (top -> bottom) is the reverse, i.e. parent, then children, then the next
  * root. Render order follows the storage array directly.
+ *
+ * Mask layers (`isMask`) never render on their own: a mask modulates the
+ * alpha of its direct parent (white shows, black hides, transparent texels
+ * and out-of-bounds samples are identity). Several masks on one parent
+ * multiply.
  */
+
+import {
+  layerPixelCenterToProject,
+  projectToLayerPixel,
+  type GnumarusLayerTransform,
+} from "./GnumarusViewportMath";
 
 export type GnumarusLayerParentMap = Map<string, string | null>;
 
@@ -458,4 +469,168 @@ export function rebuildLayerOrder(
     }
   }
   return rebuilt;
+}
+
+/** One layer-mask contribution resolved for a frame (already visibility-checked by callers). */
+export interface GnumarusMaskContribution {
+  width: number;
+  height: number;
+  buffer: Uint8ClampedArray;
+  transform: GnumarusLayerTransform;
+  /** Mask layer opacity (0..1): 0 disables the mask, 1 applies it fully. */
+  opacity: number;
+}
+
+/**
+ * Mask factor of a single mask texel (0..1): transparent texels are
+ * identity (1, "no opinion", so fresh/empty masks show everything),
+ * otherwise luminance × alpha × mask opacity. White opaque shows (1),
+ * black opaque hides (0), matching Photoshop/Krita mask semantics.
+ */
+export function maskTexelFactor(r: number, g: number, b: number, a: number, maskOpacity: number): number {
+  if (!(a > 0)) {
+    return 1;
+  }
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  const alpha = Math.min(1, Math.max(0, a / 255));
+  const opacity = Math.min(1, Math.max(0, maskOpacity));
+  // Mask opacity 0 disables the mask (identity); 1 applies the raw factor.
+  const raw = luminance * alpha >= 1 ? 1 : luminance * alpha;
+  const factor = 1 - (1 - raw) * opacity;
+  return factor >= 1 ? 1 : factor;
+}
+
+/**
+ * Combined mask multiplier for a parent-sized buffer (parent texture
+ * space, so the canvas shader can sample it with the parent UVs).
+ * Returns null when `masks` is empty. Out-of-bounds and transparent
+ * samples are identity; several masks multiply. Pure and testable.
+ */
+export function combineMasksForParent(
+  parentWidth: number,
+  parentHeight: number,
+  parentTransform: GnumarusLayerTransform,
+  masks: readonly GnumarusMaskContribution[],
+): Uint8ClampedArray | null {
+  if (masks.length === 0 || !Number.isInteger(parentWidth) || !Number.isInteger(parentHeight) || parentWidth < 1 || parentHeight < 1) {
+    return null;
+  }
+  const usable = masks.filter(
+    (mask) =>
+      Number.isInteger(mask.width) &&
+      Number.isInteger(mask.height) &&
+      mask.width >= 1 &&
+      mask.height >= 1 &&
+      mask.buffer.length === mask.width * mask.height * 4,
+  );
+  if (usable.length === 0) {
+    return null;
+  }
+  const out = new Uint8ClampedArray(parentWidth * parentHeight * 4);
+  for (let y = 0; y < parentHeight; y += 1) {
+    for (let x = 0; x < parentWidth; x += 1) {
+      const project = layerPixelCenterToProject(x, y, parentWidth, parentHeight, parentTransform);
+      let factor = 1;
+      for (const mask of usable) {
+        const sample = projectToLayerPixel(project.x, project.y, mask.width, mask.height, mask.transform);
+        if (sample === null) {
+          continue;
+        }
+        const o = (sample.y * mask.width + sample.x) * 4;
+        factor *= maskTexelFactor(
+          mask.buffer[o] as number,
+          mask.buffer[o + 1] as number,
+          mask.buffer[o + 2] as number,
+          mask.buffer[o + 3] as number,
+          mask.opacity,
+        );
+        if (!(factor > 0)) {
+          factor = 0;
+          break;
+        }
+      }
+      const i = (y * parentWidth + x) * 4;
+      const quantized = Math.round(factor * 255);
+      out[i] = quantized;
+      out[i + 1] = quantized;
+      out[i + 2] = quantized;
+      out[i + 3] = 255;
+    }
+  }
+  return out;
+}
+
+/**
+ * Combined mask factor at one project-space point (for CPU flattening).
+ * Returns 1 when there is nothing to apply. Pure and testable.
+ */
+export function maskFactorAtProject(
+  projectX: number,
+  projectY: number,
+  masks: readonly GnumarusMaskContribution[],
+): number {
+  let factor = 1;
+  for (const mask of masks) {
+    if (!Number.isInteger(mask.width) || !Number.isInteger(mask.height) || mask.width < 1 || mask.height < 1) {
+      continue;
+    }
+    if (mask.buffer.length !== mask.width * mask.height * 4) {
+      continue;
+    }
+    const sample = projectToLayerPixel(projectX, projectY, mask.width, mask.height, mask.transform);
+    if (sample === null) {
+      continue;
+    }
+    const o = (sample.y * mask.width + sample.x) * 4;
+    factor *= maskTexelFactor(
+      mask.buffer[o] as number,
+      mask.buffer[o + 1] as number,
+      mask.buffer[o + 2] as number,
+      mask.buffer[o + 3] as number,
+      mask.opacity,
+    );
+    if (!(factor > 0)) {
+      return 0;
+    }
+  }
+  return factor;
+}
+
+/**
+ * Clear mask flags that cannot work: masks without a parent, masks under
+ * masks, and masks with children (masks are always leaves). Mutates the
+ * `isMask` map in place and returns the cleared ids. Pure and testable.
+ */
+export function sanitizeLayerMasks(
+  order: readonly string[],
+  parents: ReadonlyMap<string, string | null>,
+  isMask: Map<string, boolean>,
+): string[] {
+  const cleared: string[] = [];
+  const childrenOf = new Map<string, string[]>();
+  for (const id of order) {
+    const parent = parents.get(id) ?? null;
+    if (parent !== null) {
+      const list = childrenOf.get(parent) ?? [];
+      list.push(id);
+      childrenOf.set(parent, list);
+    }
+  }
+  const isMaskOf = (id: string): boolean => isMask.get(id) === true;
+  // Snapshot original flags so the result doesn't depend on visit order.
+  const original = new Map<string, boolean>();
+  for (const id of order) {
+    original.set(id, isMaskOf(id));
+  }
+  for (const id of order) {
+    if (original.get(id) !== true) {
+      continue;
+    }
+    const parent = parents.get(id) ?? null;
+    if (parent === null || !order.includes(parent) || original.get(parent) === true || (childrenOf.get(id)?.length ?? 0) > 0) {
+      isMask.set(id, false);
+      cleared.push(id);
+    }
+  }
+  return cleared;
 }

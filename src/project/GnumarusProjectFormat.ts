@@ -13,7 +13,7 @@ import type { GnumarusLayerTransform } from "../canvas/GnumarusViewportMath";
 import { IDENTITY_LAYER_TRANSFORM } from "../canvas/GnumarusViewportMath";
 import type { GnumarusAnimationLoop } from "../animation/GnumarusNamedAnimations";
 import { parseChannelLock, parseLayerBlendMode, type GnumarusChannelLock, type GnumarusLayerBlendMode } from "../canvas/GnumarusPixelBuffer";
-import { sanitizeLayerParents } from "../canvas/GnumarusLayerTree";
+import { sanitizeLayerMasks, sanitizeLayerParents } from "../canvas/GnumarusLayerTree";
 import {
   clampFrameDurationSec,
   defaultFrameName,
@@ -150,6 +150,8 @@ export interface GnumarusLayerMeta {
   lockedChannels: GnumarusChannelLock;
   /** Nesting parent (null/absent = root); unknown/self/cyclic links load as roots. */
   parentId?: string | null;
+  /** Layer mask (modulates the parent instead of rendering); absent means normal. */
+  mask?: boolean;
   /** Legacy size/transform/cells: present in old files, omitted in new ones. */
   width?: number;
   height?: number;
@@ -1093,7 +1095,7 @@ export function parseProject(jsonText: string): GnumarusProjectMeta {
     if (!isRecord(entry)) {
       throw new GnumarusProjectError("project.json has an invalid layer");
     }
-    const { id, name, visible, opacity, width, height, transform, lockedChannels, cells, blend, parentId } = entry;
+    const { id, name, visible, opacity, width, height, transform, lockedChannels, cells, blend, parentId, mask } = entry;
     if (typeof id !== "string" || typeof name !== "string") {
       throw new GnumarusProjectError("project.json has a layer with invalid id/name");
     }
@@ -1117,6 +1119,14 @@ export function parseProject(jsonText: string): GnumarusProjectMeta {
         throw new GnumarusProjectError("project.json has a layer with an invalid parent");
       }
       checked.parentId = parentId;
+    }
+    if (mask !== undefined) {
+      if (typeof mask !== "boolean") {
+        throw new GnumarusProjectError("project.json has a layer with an invalid mask flag");
+      }
+      if (mask) {
+        checked.mask = true;
+      }
     }
     if (typeof width === "number" && width >= 1) {
       checked.width = Math.floor(width);
@@ -1145,6 +1155,8 @@ export function parseProject(jsonText: string): GnumarusProjectMeta {
     return checked;
   });
   // Unknown, self and cyclic parents load as roots (kept only when valid).
+  // Unworkable mask flags (no parent, under masks, with children) load as
+  // normal layers.
   {
     const order = checkedLayers.map((layer) => layer.id);
     const raw = new Map<string, unknown>();
@@ -1158,6 +1170,15 @@ export function parseProject(jsonText: string): GnumarusProjectMeta {
         delete layer.parentId;
       } else {
         layer.parentId = next;
+      }
+    }
+    const isMask = new Map<string, boolean>(checkedLayers.map((layer) => [layer.id, layer.mask === true]));
+    sanitizeLayerMasks(order, parents, isMask);
+    for (const layer of checkedLayers) {
+      if (isMask.get(layer.id) === true) {
+        layer.mask = true;
+      } else {
+        delete layer.mask;
       }
     }
   }
