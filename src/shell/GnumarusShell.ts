@@ -866,6 +866,10 @@ export class GnumarusShell extends LitElement {
     .layer-row.selected {
       box-shadow: inset 0 0 0 2px #ffd23f;
     }
+    .layer-row.drop-target {
+      outline: 2px dashed #4fc3f7;
+      outline-offset: -2px;
+    }
     .layer-top {
       display: flex;
       align-items: center;
@@ -1773,6 +1777,8 @@ export class GnumarusShell extends LitElement {
     layers: { type: Array },
     activeLayerId: { type: String },
     renamingId: { type: String },
+    dragLayerId: { type: String },
+    dropTargetLayerId: { type: String },
     contextMenuLayerId: { type: String },
     contextMenuLayerIds: { type: Array },
     contextMenuX: { type: Number },
@@ -1986,6 +1992,8 @@ export class GnumarusShell extends LitElement {
   declare layerText: string;
   declare frameText: string;
   declare renamingId: string | null;
+  declare dragLayerId: string | null;
+  declare dropTargetLayerId: string | null;
   declare contextMenuLayerId: string | null;
   /** Multi-layer targets for the shared layers context menu (null = single). */
   declare contextMenuLayerIds: string[] | null;
@@ -2240,6 +2248,8 @@ export class GnumarusShell extends LitElement {
     this.layerText = "-";
     this.frameText = tr("frame.label", { frame: 1, count: 1, name: "F1" });
     this.renamingId = null;
+    this.dragLayerId = null;
+    this.dropTargetLayerId = null;
     this.contextMenuLayerId = null;
     this.contextMenuX = 0;
     this.contextMenuY = 0;
@@ -3042,16 +3052,33 @@ export class GnumarusShell extends LitElement {
             <button aria-label=${tr("layer.add")} title=${tr("layer.add")} @click=${(): void => this.onAddLayer()}>+</button>
           </div>
           <div class="layers-list">
-            ${[...this.layers].reverse().map(
-              (layer, displayIndex, displayLayers) => html`
+            ${[...this.layers].reverse().map((layer, displayIndex, displayLayers) => {
+              const depth = this.layerDepthOf(layer.id);
+              const siblings = displayLayers.filter(
+                (entry) => (entry.parentId ?? null) === (layer.parentId ?? null),
+              );
+              const siblingPos = siblings.findIndex((entry) => entry.id === layer.id);
+              const moveUpDisabled = siblingPos <= 0;
+              const moveDownDisabled = siblingPos < 0 || siblingPos >= siblings.length - 1;
+              void displayIndex;
+              return html`
                 <div
-                  class="layer-row ${layer.id === this.activeLayerId ? "active" : ""} ${this.selectedLayerSet().has(layer.id) ? "selected" : ""}"
+                  class="layer-row ${layer.id === this.activeLayerId ? "active" : ""} ${this.selectedLayerSet().has(layer.id) ? "selected" : ""} ${this.dropTargetLayerId === layer.id ? "drop-target" : ""}"
                   data-layer-id=${layer.id}
+                  data-depth=${depth}
+                  data-parent-id=${layer.parentId ?? ""}
+                  style="margin-left:${depth * 14}px"
+                  draggable="true"
                   @click=${(event: MouseEvent): void => this.onSelectLayerClick(layer.id, event.shiftKey, event.ctrlKey || event.metaKey)}
                   @contextmenu=${(event: MouseEvent): void => {
                     event.preventDefault();
                     this.openLayerMenu(layer.id, event.clientX, event.clientY);
                   }}
+                  @dragstart=${(event: DragEvent): void => this.onLayerDragStart(event, layer.id)}
+                  @dragover=${(event: DragEvent): void => this.onLayerDragOver(event, layer.id)}
+                  @dragleave=${(): void => this.onLayerDragLeave(layer.id)}
+                  @drop=${(event: DragEvent): void => this.onLayerDrop(event, layer.id)}
+                  @dragend=${(): void => this.onLayerDragEnd()}
                 >
                   <div class="layer-top">
                     <input
@@ -3092,7 +3119,7 @@ export class GnumarusShell extends LitElement {
                     <button
                       aria-label=${tr("layer.moveUp")}
                       title=${tr("layer.moveUpTitle")}
-                      ?disabled=${displayIndex === 0}
+                      ?disabled=${moveUpDisabled}
                       @click=${(event: Event): void => {
                         event.stopPropagation();
                         this.onMoveLayer(layer.id, "up");
@@ -3103,7 +3130,7 @@ export class GnumarusShell extends LitElement {
                     <button
                       aria-label=${tr("layer.moveDown")}
                       title=${tr("layer.moveDownTitle")}
-                      ?disabled=${displayIndex === displayLayers.length - 1}
+                      ?disabled=${moveDownDisabled}
                       @click=${(event: Event): void => {
                         event.stopPropagation();
                         this.onMoveLayer(layer.id, "down");
@@ -3220,8 +3247,8 @@ export class GnumarusShell extends LitElement {
                     </button>
                   </div>
                 </div>
-              `,
-            )}
+              `;
+            })}
           </div>
         </aside>
         ${this.contextMenuLayerId !== null
@@ -3289,6 +3316,18 @@ export class GnumarusShell extends LitElement {
                         }}
                       >
                         ${tr("ctx.addBelow")}
+                      </button>
+                      <button
+                        ?disabled=${this.contextMenuLayerId === null ||
+                        (this.layers.find((entry) => entry.id === this.contextMenuLayerId)?.parentId ?? null) ===
+                          null}
+                        @click=${(): void => {
+                          if (this.contextMenuLayerId !== null) {
+                            this.onMakeRootLayer(this.contextMenuLayerId);
+                          }
+                        }}
+                      >
+                        ${tr("ctx.makeRoot")}
                       </button>
                       <button
                         @click=${(): void => {
@@ -7422,6 +7461,14 @@ export class GnumarusShell extends LitElement {
       requirements: [],
       run: (): void => {
         this.openRelinkDialog(this.resolveCellActionTargets());
+      },
+    });
+    this.actionRegistry.register({
+      id: "make-root-layer",
+      name: tr("action.makeRoot"),
+      requirements: [],
+      run: (): void => {
+        this.makeActiveLayerRoot();
       },
     });
   }
@@ -14056,6 +14103,110 @@ export class GnumarusShell extends LitElement {
     this.refreshLayers();
   }
 
+  private layerParentOf(id: string): string | null {
+    return this.layers.find((layer) => layer.id === id)?.parentId ?? null;
+  }
+
+  private layerDepthOf(id: string): number {
+    let depth = 0;
+    let current = this.layerParentOf(id);
+    const seen = new Set<string>([id]);
+    while (current !== null) {
+      if (seen.has(current)) {
+        break;
+      }
+      seen.add(current);
+      depth += 1;
+      current = this.layerParentOf(current);
+    }
+    return depth;
+  }
+
+  private onLayerDragStart(event: DragEvent, id: string): void {
+    this.dragLayerId = id;
+    this.dropTargetLayerId = null;
+    if (event.dataTransfer !== null) {
+      event.dataTransfer.effectAllowed = "move";
+      try {
+        event.dataTransfer.setData("text/plain", id);
+      } catch {
+        // Some browsers block setData outside trusted gestures; ids still tracked locally.
+      }
+    }
+  }
+
+  private onLayerDragOver(event: DragEvent, id: string): void {
+    if (this.dragLayerId === null || this.dragLayerId === id) {
+      return;
+    }
+    event.preventDefault();
+    if (event.dataTransfer !== null) {
+      event.dataTransfer.dropEffect = "move";
+    }
+    if (this.dropTargetLayerId !== id) {
+      this.dropTargetLayerId = id;
+    }
+  }
+
+  private onLayerDragLeave(id: string): void {
+    if (this.dropTargetLayerId === id) {
+      this.dropTargetLayerId = null;
+    }
+  }
+
+  private onLayerDrop(event: DragEvent, id: string): void {
+    event.preventDefault();
+    const dragged = this.dragLayerId ?? event.dataTransfer?.getData("text/plain") ?? null;
+    this.dragLayerId = null;
+    this.dropTargetLayerId = null;
+    if (dragged === null || dragged === "" || dragged === id || this.engine === null) {
+      return;
+    }
+    const targetName = this.layers.find((layer) => layer.id === id)?.name ?? id;
+    if (this.engine.reparentLayerAsChild(dragged, id)) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = tr("status.layerReparented", { name: targetName });
+      this.showToast(tr("status.layerReparented", { name: targetName }));
+    } else {
+      this.statusMessage = tr("status.layerReparentInvalid");
+      this.showToast(tr("status.layerReparentInvalid"));
+    }
+  }
+
+  private onLayerDragEnd(): void {
+    this.dragLayerId = null;
+    this.dropTargetLayerId = null;
+  }
+
+  private onMakeRootLayer(id: string): void {
+    this.closeLayerMenu();
+    if (this.engine === null) {
+      return;
+    }
+    if (this.engine.makeRootLayer(id)) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = tr("status.layerMadeRoot");
+    } else {
+      this.statusMessage = tr("status.layerAlreadyRoot");
+    }
+  }
+
+  private makeActiveLayerRoot(): void {
+    if (this.engine === null) {
+      return;
+    }
+    const id = this.engine.getActiveLayerId();
+    if (this.engine.makeRootLayer(id)) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = tr("status.layerMadeRoot");
+    } else {
+      this.statusMessage = tr("status.layerAlreadyRoot");
+    }
+  }
+
   private onAddLayerAbove(id: string): void {
     this.closeLayerMenu();
     if (this.engine === null) {
@@ -15098,6 +15249,7 @@ export class GnumarusShell extends LitElement {
           opacity: layer.opacity,
           blend: layer.blend,
           lockedChannels: { ...layer.lockedChannels },
+          parentId: layer.parentId ?? null,
         })),
         textures,
         texts: await this.resolveStoredTexts(project.animation.texts, fileBlobs),
@@ -15870,6 +16022,7 @@ export class GnumarusShell extends LitElement {
           opacity: layer.opacity,
           blend: layer.blend,
           lockedChannels: { ...layer.lockedChannels },
+          ...(layer.parentId === null ? {} : { parentId: layer.parentId }),
         })),
         animation: {
           frames: exported.frames,

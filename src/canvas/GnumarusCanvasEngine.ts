@@ -140,6 +140,15 @@ import {
   type GnumarusTipAngleMode,
 } from "./GnumarusPaintBrush";
 import {
+  layerBlockRange,
+  makeRootLayer,
+  moveLayerBlock,
+  moveLayerBlockWrapping,
+  rebuildLayerOrder,
+  reparentLayer,
+  sanitizeLayerParents,
+} from "./GnumarusLayerTree";
+import {
   clipSegmentToRect,
   constrainSquareDrag,
   parseWrapMode,
@@ -455,6 +464,8 @@ export interface GnumarusLayerInfo {
   height: number;
   transform: GnumarusLayerTransform;
   lockedChannels: GnumarusChannelLock;
+  /** Nesting parent (null = root). Only ordering/render order is affected. */
+  parentId: string | null;
 }
 
 export interface GnumarusLayerPixels {
@@ -583,6 +594,7 @@ export interface GnumarusAnimationProjectData {
     opacity: number;
     blend?: GnumarusLayerBlendMode;
     lockedChannels: GnumarusChannelLock;
+    parentId: string | null;
   }>;
   textures: GnumarusTexturePixels[];
   texts?: Array<{ id: string; name: string; document: GnumarusTextDocument }>;
@@ -611,6 +623,7 @@ export interface GnumarusProjectLayerInput {
   buffer: Uint8ClampedArray;
   transform: GnumarusLayerTransform;
   lockedChannels: GnumarusChannelLock;
+  parentId?: string | null;
 }
 
 /**
@@ -1854,6 +1867,7 @@ export class GnumarusCanvasEngine {
     transform: GnumarusLayerTransform,
     lockedChannels: GnumarusChannelLock | undefined = undefined,
     blend: GnumarusLayerBlendMode = "normal",
+    parentId: string | null = null,
   ): GnumarusLayer {
     const texture = new THREE.DataTexture(buffer, width, height);
     texture.magFilter = THREE.NearestFilter;
@@ -1891,6 +1905,7 @@ export class GnumarusCanvasEngine {
       height,
       transform: { ...transform },
       lockedChannels: parsedLock,
+      parentId,
       buffer,
       texture,
       material,
@@ -6034,6 +6049,7 @@ export class GnumarusCanvasEngine {
         opacity: layer.opacity,
         blend: layer.blend,
         lockedChannels: { ...layer.lockedChannels },
+        parentId: layer.parentId,
       })),
       textures: [...this.textures.values()].map((texture) => ({
         id: texture.id,
@@ -6104,6 +6120,7 @@ export class GnumarusCanvasEngine {
       height: layer.height,
       transform: { ...layer.transform },
       lockedChannels: { ...layer.lockedChannels },
+      parentId: layer.parentId,
     }));
   }
 
@@ -6131,42 +6148,149 @@ export class GnumarusCanvasEngine {
   }
 
   addLayer(): string {
-    return this.insertLayerAt(this.layers.length);
+    return this.insertLayerAt(this.layers.length, null);
   }
 
   /** Insert a new layer immediately above the active layer and select it. */
   insertLayerAboveActive(): string {
-    const index = this.layers.findIndex((layer) => layer.id === this.activeLayerId);
-    const at = index < 0 ? this.layers.length : index + 1;
-    return this.insertLayerAt(at);
+    const active = this.findLayer(this.activeLayerId);
+    if (active === null) {
+      return this.insertLayerAt(this.layers.length, null);
+    }
+    return this.insertLayerAbove(active.id) ?? this.insertLayerAt(this.layers.length, null);
   }
 
   /** Insert a new layer immediately below the active layer and select it. */
   insertLayerBelowActive(): string {
-    const index = this.layers.findIndex((layer) => layer.id === this.activeLayerId);
-    const at = index < 0 ? 0 : index;
-    return this.insertLayerAt(at);
+    const active = this.findLayer(this.activeLayerId);
+    if (active === null) {
+      return this.insertLayerAt(0, null);
+    }
+    return this.insertLayerBelow(active.id) ?? this.insertLayerAt(0, null);
   }
 
   /** Insert a new layer immediately above the given layer and select it. Null for unknown ids. */
   insertLayerAbove(id: string): string | null {
-    const index = this.layers.findIndex((layer) => layer.id === id);
-    if (index < 0) {
+    const order = this.layerOrderIds();
+    const parents = this.layerParentMap();
+    const range = layerBlockRange(order, parents, id);
+    if (range === null) {
       return null;
     }
-    return this.insertLayerAt(index + 1);
+    return this.insertLayerAt(range.end + 1, parents.get(id) ?? null);
   }
 
   /** Insert a new layer immediately below the given layer and select it. Null for unknown ids. */
   insertLayerBelow(id: string): string | null {
-    const index = this.layers.findIndex((layer) => layer.id === id);
-    if (index < 0) {
+    const order = this.layerOrderIds();
+    const parents = this.layerParentMap();
+    const range = layerBlockRange(order, parents, id);
+    if (range === null) {
       return null;
     }
-    return this.insertLayerAt(index);
+    return this.insertLayerAt(range.start, parents.get(id) ?? null);
   }
 
-  private insertLayerAt(at: number): string {
+  private layerOrderIds(): string[] {
+    return this.layers.map((layer) => layer.id);
+  }
+
+  private layerParentMap(): Map<string, string | null> {
+    return new Map(this.layers.map((layer) => [layer.id, layer.parentId] as const));
+  }
+
+  private applyLayerOrder(order: readonly string[]): void {
+    const byId = new Map(this.layers.map((layer) => [layer.id, layer] as const));
+    const next: GnumarusLayer[] = [];
+    for (const id of order) {
+      const layer = byId.get(id);
+      if (layer !== undefined) {
+        next.push(layer);
+      }
+    }
+    for (const layer of this.layers) {
+      if (!order.includes(layer.id)) {
+        next.push(layer);
+      }
+    }
+    this.layers = next;
+  }
+
+  /** Parent id of a layer (null for roots and unknown ids). */
+  getLayerParentId(id: string): string | null {
+    return this.findLayer(id)?.parentId ?? null;
+  }
+
+  /** Repair parent links (unknown/self/cycles to roots) and restore contiguity. */
+  private sanitizeLayerTree(): void {
+    const order = this.layerOrderIds();
+    const raw = new Map<string, unknown>();
+    for (const layer of this.layers) {
+      raw.set(layer.id, layer.parentId);
+    }
+    const parents = sanitizeLayerParents(order, raw);
+    this.applyParentMap(parents);
+    this.applyLayerOrder(rebuildLayerOrder(order, parents));
+  }
+
+  /**
+   * Drop `childId` onto `newParentId`, making it a child. Placement follows
+   * the pre-move order: dragged from above the parent lands on top of the
+   * children (directly below the parent), from below lands at the far end.
+   * Rejects drops onto itself or its own descendants. No history entry.
+   */
+  reparentLayerAsChild(childId: string, newParentId: string): boolean {
+    const order = this.layerOrderIds();
+    const parents = this.layerParentMap();
+    if (!order.includes(childId) || !order.includes(newParentId)) {
+      return false;
+    }
+    const childIndex = order.indexOf(childId);
+    const parentIndex = order.indexOf(newParentId);
+    const placement: "top" | "bottom" = childIndex > parentIndex ? "top" : "bottom";
+    const result = reparentLayer(order, parents, childId, newParentId, placement);
+    if (result === null) {
+      return false;
+    }
+    this.applyParentMap(result.parents);
+    this.applyLayerOrder(result.order);
+    this.refreshLayerStacking();
+    this.render();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return true;
+  }
+
+  /**
+   * Promote a nested layer back to root, placed immediately above its old
+   * parent. Returns false for roots and unknown ids. No history entry.
+   */
+  makeRootLayer(id: string): boolean {
+    const order = this.layerOrderIds();
+    const parents = this.layerParentMap();
+    const result = makeRootLayer(order, parents, id);
+    if (result === null) {
+      return false;
+    }
+    this.applyParentMap(result.parents);
+    this.applyLayerOrder(result.order);
+    this.refreshLayerStacking();
+    this.render();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return true;
+  }
+
+  private applyParentMap(parents: ReadonlyMap<string, string | null>): void {
+    for (const layer of this.layers) {
+      const next = parents.get(layer.id);
+      if (next !== undefined) {
+        layer.parentId = next;
+      }
+    }
+  }
+
+  private insertLayerAt(at: number, parentId: string | null): string {
     const id = `layer${this.layerCounter}`;
     const name = `L${this.layerCounter + 1}`;
     this.layerCounter += 1;
@@ -6179,6 +6303,9 @@ export class GnumarusCanvasEngine {
       this.imageWidth,
       this.imageHeight,
       { ...IDENTITY_LAYER_TRANSFORM },
+      undefined,
+      "normal",
+      parentId,
     );
     const clamped = Math.min(Math.max(0, Math.floor(at)), this.layers.length);
     this.layers.splice(clamped, 0, layer);
@@ -6261,6 +6388,13 @@ export class GnumarusCanvasEngine {
     if (index < 0) {
       return false;
     }
+    // Promote direct children to roots in place; their subtrees stay intact
+    // and the remaining order already satisfies the nesting invariant.
+    for (const layer of this.layers) {
+      if (layer.parentId === id) {
+        layer.parentId = null;
+      }
+    }
     const [removed] = this.layers.splice(index, 1);
     if (removed !== undefined) {
       this.scene.remove(removed.plane);
@@ -6290,6 +6424,7 @@ export class GnumarusCanvasEngine {
       { ...IDENTITY_LAYER_TRANSFORM },
       { ...snapshot.lockedChannels },
       snapshot.blend,
+      snapshot.parentId ?? null,
     );
     // Only layers snapshotted with a layer-id texture get one back; fresh
     // layers own none, and legacy contents still pointing at the layer id
@@ -6418,6 +6553,7 @@ export class GnumarusCanvasEngine {
       transform: { ...upper.transform },
       lockedChannels: { ...upper.lockedChannels },
       blend: upper.blend,
+      parentId: upper.parentId,
       stackIndex: index,
       buffer: (ownedEntry?.buffer ?? upper.buffer).slice(),
       cells: [],
@@ -6546,6 +6682,7 @@ export class GnumarusCanvasEngine {
       transform: { ...upper.transform },
       lockedChannels: { ...upper.lockedChannels },
       blend: upper.blend,
+      parentId: upper.parentId,
       stackIndex: index,
       buffer: (ownedEntry?.buffer ?? upper.buffer).slice(),
       cells: [],
@@ -6773,41 +6910,36 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
-  /** Move a layer visually up (toward the top) or down. Returns false at the ends. */
+  /**
+   * Move a layer within its own level (roots or same-parent children),
+   * carrying its whole descendant block. Returns false at the level edge.
+   */
   moveLayer(id: string, direction: "up" | "down"): boolean {
-    const index = this.layers.findIndex((layer) => layer.id === id);
-    const target = direction === "up" ? index + 1 : index - 1;
-    if (index < 0 || target < 0 || target >= this.layers.length) {
+    const order = this.layerOrderIds();
+    const parents = this.layerParentMap();
+    const next = moveLayerBlock(order, parents, id, direction);
+    if (next === null) {
       return false;
     }
-    const current = this.layers[index];
-    const other = this.layers[target];
-    if (current === undefined || other === undefined) {
-      return false;
-    }
-    this.layers[target] = current;
-    this.layers[index] = other;
+    this.applyLayerOrder(next);
     this.refreshLayerStacking();
     this.render();
     this.emitStats();
     return true;
   }
 
-  /** Move a layer up/down in the stack, wrapping around the ends. */
+  /** Move a layer up/down, wrapping around inside its own level. */
   moveLayerWrapping(id: string, direction: "up" | "down"): boolean {
-    const index = this.layers.findIndex((layer) => layer.id === id);
-    if (index < 0 || this.layers.length <= 1) {
+    if (this.layers.length <= 1) {
       return false;
     }
-    const target = direction === "up" ? index + 1 : index - 1;
-    if (target >= 0 && target < this.layers.length) {
-      return this.moveLayer(id, direction);
-    }
-    const [removed] = this.layers.splice(index, 1);
-    if (removed === undefined) {
+    const order = this.layerOrderIds();
+    const parents = this.layerParentMap();
+    const next = moveLayerBlockWrapping(order, parents, id, direction);
+    if (next === null) {
       return false;
     }
-    this.layers.splice(direction === "up" ? 0 : this.layers.length, 0, removed);
+    this.applyLayerOrder(next);
     this.refreshLayerStacking();
     this.render();
     this.emitStats();
@@ -7504,6 +7636,7 @@ export class GnumarusCanvasEngine {
         },
         parseChannelLock(input.lockedChannels),
         parseLayerBlendMode((input as { blend?: unknown }).blend),
+        typeof input.parentId === "string" ? input.parentId : null,
       );
       this.layers.push(layer);
       this.textures.set(input.id, {
@@ -7531,6 +7664,7 @@ export class GnumarusCanvasEngine {
       });
       this.cells.set(animationCellKey(input.id, 0), contentId);
     }
+    this.sanitizeLayerTree();
     const top = this.layers[this.layers.length - 1];
     if (top !== undefined) {
       this.activeLayerId = top.id;
@@ -7568,6 +7702,7 @@ export class GnumarusCanvasEngine {
         opacity: number;
         blend?: GnumarusLayerBlendMode;
         lockedChannels: GnumarusChannelLock;
+        parentId?: string | null;
       }>;
       textures: GnumarusTexturePixels[];
       texts?: Array<{ id: string; name: string; document: GnumarusTextDocument }>;
@@ -7633,9 +7768,11 @@ export class GnumarusCanvasEngine {
           { ...IDENTITY_LAYER_TRANSFORM },
           parseChannelLock(layer.lockedChannels),
           parseLayerBlendMode((layer as { blend?: unknown }).blend),
+          typeof layer.parentId === "string" ? layer.parentId : null,
         ),
       );
     }
+    this.sanitizeLayerTree();
     for (const texture of data.textures) {
       this.textures.set(texture.id, {
         id: texture.id,

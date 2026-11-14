@@ -60,6 +60,81 @@ describe("GnumarusProjectFormat", () => {
     expect(parsed).toEqual(project);
   });
 
+  it("round-trips nested layers and sanitizes bad parents to roots", () => {
+    const base = createDefaultProject(64, 64);
+    const layerTemplate = base.layers[0] as { id: string; name: string };
+    void layerTemplate;
+    const makeLayerSet = (ids: Array<{ id: string; parentId?: string }>): typeof base.layers => {
+      return ids.map((entry) => ({
+        id: entry.id,
+        name: entry.id.toUpperCase(),
+        visible: true,
+        opacity: 1,
+        blend: "normal" as const,
+        lockedChannels: { r: false, g: false, b: false, a: false },
+        ...(entry.parentId === undefined ? {} : { parentId: entry.parentId }),
+      }));
+    };
+    const makeAnimationFor = (ids: string[]): typeof base.animation => {
+      return {
+        ...base.animation,
+        textures: ids.map((id, index) => ({
+          id,
+          name: `t${index + 1}`,
+          width: 64,
+          height: 64,
+          file: textureFilePath(id),
+        })),
+        contents: ids.map((id, index) => ({
+          id: `content${index + 1}`,
+          name: `C${index + 1}`,
+          textureId: id,
+          textId: null,
+          svgId: null,
+          model3dId: null,
+          tilemapId: null,
+          flyCam: null,
+          transform: base.animation.contents[0]?.transform ?? {
+            x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1,
+            skewX: 0, skewY: 0, rotationX: 0, rotationY: 0,
+          },
+        })),
+        cells: ids.map((id, index) => ({ layer: id, frame: 0, content: `content${index + 1}` })),
+      };
+    };
+    const nestedIds = [{ id: "b" }, { id: "c1", parentId: "a" }, { id: "a" }];
+    const nested = {
+      ...base,
+      layers: makeLayerSet(nestedIds),
+      animation: makeAnimationFor(["b", "c1", "a"]),
+    };
+    const parsed = parseProject(serializeProject(nested));
+    expect(parsed.layers.map((layer) => [layer.id, layer.parentId ?? null])).toEqual([
+      ["b", null],
+      ["c1", "a"],
+      ["a", null],
+    ]);
+    const badIds = [{ id: "x", parentId: "missing" }, { id: "y", parentId: "y" }, { id: "p", parentId: "q" }, { id: "q", parentId: "p" }];
+    const bad = {
+      ...base,
+      layers: makeLayerSet(badIds),
+      animation: makeAnimationFor(["x", "y", "p", "q"]),
+    };
+    const cleaned = parseProject(serializeProject(bad));
+    expect(cleaned.layers.find((layer) => layer.id === "x")?.parentId ?? null).toBeNull();
+    expect(cleaned.layers.find((layer) => layer.id === "y")?.parentId ?? null).toBeNull();
+    const byId = new Map(cleaned.layers.map((layer) => [layer.id, layer.parentId ?? null]));
+    for (const start of ["p", "q"]) {
+      const seen = new Set<string>();
+      let current: string | null | undefined = start;
+      while (typeof current === "string") {
+        expect(seen.has(current)).toBe(false);
+        seen.add(current);
+        current = byId.get(current) ?? null;
+      }
+    }
+  });
+
   it("migrates legacy layers to a single-frame animation", () => {
     const parsed = parseProject(
       JSON.stringify({

@@ -13,6 +13,7 @@ import type { GnumarusLayerTransform } from "../canvas/GnumarusViewportMath";
 import { IDENTITY_LAYER_TRANSFORM } from "../canvas/GnumarusViewportMath";
 import type { GnumarusAnimationLoop } from "../animation/GnumarusNamedAnimations";
 import { parseChannelLock, parseLayerBlendMode, type GnumarusChannelLock, type GnumarusLayerBlendMode } from "../canvas/GnumarusPixelBuffer";
+import { sanitizeLayerParents } from "../canvas/GnumarusLayerTree";
 import {
   clampFrameDurationSec,
   defaultFrameName,
@@ -147,6 +148,8 @@ export interface GnumarusLayerMeta {
   /** Compositing blend mode; absent in legacy files means normal. */
   blend?: GnumarusLayerBlendMode;
   lockedChannels: GnumarusChannelLock;
+  /** Nesting parent (null/absent = root); unknown/self/cyclic links load as roots. */
+  parentId?: string | null;
   /** Legacy size/transform/cells: present in old files, omitted in new ones. */
   width?: number;
   height?: number;
@@ -1090,7 +1093,7 @@ export function parseProject(jsonText: string): GnumarusProjectMeta {
     if (!isRecord(entry)) {
       throw new GnumarusProjectError("project.json has an invalid layer");
     }
-    const { id, name, visible, opacity, width, height, transform, lockedChannels, cells, blend } = entry;
+    const { id, name, visible, opacity, width, height, transform, lockedChannels, cells, blend, parentId } = entry;
     if (typeof id !== "string" || typeof name !== "string") {
       throw new GnumarusProjectError("project.json has a layer with invalid id/name");
     }
@@ -1109,6 +1112,12 @@ export function parseProject(jsonText: string): GnumarusProjectMeta {
       blend: parseLayerBlendMode(blend),
       lockedChannels: parseChannelLock(lockedChannels),
     };
+    if (parentId !== undefined && parentId !== null) {
+      if (typeof parentId !== "string") {
+        throw new GnumarusProjectError("project.json has a layer with an invalid parent");
+      }
+      checked.parentId = parentId;
+    }
     if (typeof width === "number" && width >= 1) {
       checked.width = Math.floor(width);
     } else if (width !== undefined) {
@@ -1135,6 +1144,23 @@ export function parseProject(jsonText: string): GnumarusProjectMeta {
     }
     return checked;
   });
+  // Unknown, self and cyclic parents load as roots (kept only when valid).
+  {
+    const order = checkedLayers.map((layer) => layer.id);
+    const raw = new Map<string, unknown>();
+    for (const layer of checkedLayers) {
+      raw.set(layer.id, layer.parentId ?? null);
+    }
+    const parents = sanitizeLayerParents(order, raw);
+    for (const layer of checkedLayers) {
+      const next = parents.get(layer.id) ?? null;
+      if (next === null) {
+        delete layer.parentId;
+      } else {
+        layer.parentId = next;
+      }
+    }
+  }
   const checkedAnimation =
     animation === undefined
       ? migrateLegacyLayersToAnimation(checkedLayers, widthDim, heightDim)

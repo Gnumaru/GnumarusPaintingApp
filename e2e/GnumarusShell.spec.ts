@@ -5744,6 +5744,7 @@ test("quick action palette filters and runs actions", async ({ page }) => {
     "Import raster image as layer",
     "Import SVG as layer",
     "Invert colors",
+    "Make root layer",
     "New animation",
     "New Project",
     "Open Project",
@@ -14887,4 +14888,192 @@ test("large hard brush keeps V shape instead of collapsing to endpoints @recent"
   expect(await readPixel(page, 32, 50)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 10, 10)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 54, 10)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+});
+
+async function getLayerParents(page: import("@playwright/test").Page): Promise<Array<{ id: string; parentId: string | null }>> {
+  return page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getLayers(): Array<{ id: string; parentId: string | null }> } };
+    };
+    return root.__gnumarus?.engine?.getLayers().map((layer) => ({ id: layer.id, parentId: layer.parentId })) ?? [];
+  });
+}
+
+async function engineReparent(page: import("@playwright/test").Page, childId: string, parentId: string): Promise<boolean> {
+  return page.evaluate(([child, parent]: string[]) => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { refreshLayers(): void }; engine?: { reparentLayerAsChild(c: string, p: string): boolean } };
+    };
+    const ok = root.__gnumarus?.engine?.reparentLayerAsChild(child, parent) ?? false;
+    root.__gnumarus?.shell?.refreshLayers?.();
+    return ok;
+  }, [childId, parentId] as string[]);
+}
+
+async function dropLayerOnto(page: import("@playwright/test").Page, childId: string, parentId: string): Promise<void> {
+  await page.evaluate(([child, parent]: string[]) => {
+    const shell = document.querySelector("gnumarus-shell");
+    const shadow = (shell as unknown as { shadowRoot: ShadowRoot | null })?.shadowRoot;
+    const src = shadow?.querySelector(`[data-layer-id="${child}"]`);
+    const dst = shadow?.querySelector(`[data-layer-id="${parent}"]`);
+    if (src === undefined || src === null || dst === undefined || dst === null) {
+      throw new Error(`missing layer rows for drag ${child} -> ${parent}`);
+    }
+    src.dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true }));
+    dst.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true }));
+    dst.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true }));
+    src.dispatchEvent(new DragEvent("dragend", { bubbles: true, cancelable: true }));
+  }, [childId, parentId] as string[]);
+}
+
+test("nested layers indent children between parent and next root @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await page.getByRole("button", { name: "Add layer" }).click();
+  // Storage bottom -> top: layer0, layer1, layer2 (layer2 on top).
+  expect(await engineReparent(page, "layer0", "layer2")).toBe(true);
+  const parents = await getLayerParents(page);
+  expect(parents.find((layer) => layer.id === "layer0")?.parentId).toBe("layer2");
+  expect(parents.find((layer) => layer.id === "layer1")?.parentId).toBeNull();
+  // Display top -> bottom: parent, child, next root.
+  const order = await page.evaluate(() => {
+    const shell = document.querySelector("gnumarus-shell");
+    const shadow = (shell as unknown as { shadowRoot: ShadowRoot | null })?.shadowRoot;
+    return [...(shadow?.querySelectorAll("[data-layer-id]") ?? [])].map((row) => ({
+      id: row.getAttribute("data-layer-id"),
+      depth: row.getAttribute("data-depth"),
+      margin: (row as HTMLElement).style.marginLeft,
+    }));
+  });
+  expect(order.map((row) => row.id)).toEqual(["layer2", "layer0", "layer1"]);
+  expect(order.map((row) => row.depth)).toEqual(["0", "1", "0"]);
+  expect(order.find((row) => row.id === "layer0")?.margin).toBe("14px");
+  expect(order.find((row) => row.id === "layer2")?.margin).toBe("0px");
+  // Matrix follows the same display order.
+  const matrixOrder = await page.evaluate(() => {
+    const shell = document.querySelector("gnumarus-shell");
+    const shadow = (shell as unknown as { shadowRoot: ShadowRoot | null })?.shadowRoot;
+    return [...(shadow?.querySelectorAll('[data-testid="anim-layer-name"]') ?? [])].map((row) =>
+      row.getAttribute("data-matrix-layer"),
+    );
+  });
+  expect(matrixOrder).toEqual(["layer2", "layer0", "layer1"]);
+});
+
+test("nested layers reorder only inside the same level and carry children @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await page.getByRole("button", { name: "Add layer" }).click();
+  // Storage: layer0, layer1, layer2, layer3(top). Parent layer3 with children layer0+layer1.
+  expect(await engineReparent(page, "layer1", "layer3")).toBe(true);
+  expect(await engineReparent(page, "layer0", "layer3")).toBe(true);
+  let state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.id)).toEqual(["layer2", "layer0", "layer1", "layer3"]);
+  // Top child cannot move up; bottom child cannot move down.
+  const topBlocked = await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { moveLayer(id: string, d: "up" | "down"): boolean } } };
+    return root.__gnumarus?.engine?.moveLayer("layer1", "up") ?? true;
+  });
+  expect(topBlocked).toBe(false);
+  const bottomBlocked = await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { moveLayer(id: string, d: "up" | "down"): boolean } } };
+    return root.__gnumarus?.engine?.moveLayer("layer0", "down") ?? true;
+  });
+  expect(bottomBlocked).toBe(false);
+  // Sibling swap inside the level.
+  await page.locator('gnumarus-shell [data-layer-id="layer0"]').getByRole("button", { name: "Move layer up" }).click();
+  state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.id)).toEqual(["layer2", "layer1", "layer0", "layer3"]);
+  // Moving the parent carries its whole block above the next root.
+  await page.locator('gnumarus-shell [data-layer-id="layer3"]').getByRole("button", { name: "Move layer down" }).click();
+  state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.id)).toEqual(["layer1", "layer0", "layer3", "layer2"]);
+  const parents = await getLayerParents(page);
+  expect(parents.find((layer) => layer.id === "layer0")?.parentId).toBe("layer3");
+  expect(parents.find((layer) => layer.id === "layer1")?.parentId).toBe("layer3");
+});
+
+test("make root layer works from context menu and run action @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await page.getByRole("button", { name: "Add layer" }).click();
+  expect(await engineReparent(page, "layer0", "layer2")).toBe(true);
+  // Context menu path.
+  await page.locator('gnumarus-shell [data-layer-id="layer0"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Make root layer" }).click();
+  let parents = await getLayerParents(page);
+  expect(parents.find((layer) => layer.id === "layer0")?.parentId).toBeNull();
+  let state = await getLayers(page);
+  // Promoted block lands immediately above the old parent.
+  expect(state.layers.map((layer) => layer.id)).toEqual(["layer1", "layer2", "layer0"]);
+  // Run action palette path on the active layer.
+  expect(await engineReparent(page, "layer1", "layer2")).toBe(true);
+  await page.locator('gnumarus-shell [data-layer-id="layer1"] .layer-name').click();
+  await page.keyboard.press("Control+Shift+P");
+  const dialog = page.locator("gnumarus-shell dialog#actionPaletteDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator('[data-testid="action-palette-input"]').fill("make root");
+  await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveText(["Make root layer"]);
+  await dialog.locator('[data-testid="action-palette-item"]').click();
+  parents = await getLayerParents(page);
+  expect(parents.find((layer) => layer.id === "layer1")?.parentId).toBeNull();
+});
+
+test("drag onto a layer reparents to top or bottom edge @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await page.getByRole("button", { name: "Add layer" }).click();
+  // Storage: layer0(below), layer1(child), layer2(parent), layer3(above).
+  expect(await engineReparent(page, "layer1", "layer2")).toBe(true);
+  // Drag from above the parent lands on top (directly below the parent).
+  await dropLayerOnto(page, "layer3", "layer2");
+  let parents = await getLayerParents(page);
+  expect(parents.find((layer) => layer.id === "layer3")?.parentId).toBe("layer2");
+  let state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.id)).toEqual(["layer0", "layer1", "layer3", "layer2"]);
+  // Drag from below the parent lands at the far end.
+  await dropLayerOnto(page, "layer0", "layer2");
+  parents = await getLayerParents(page);
+  expect(parents.find((layer) => layer.id === "layer0")?.parentId).toBe("layer2");
+  state = await getLayers(page);
+  expect(state.layers.map((layer) => layer.id)).toEqual(["layer0", "layer1", "layer3", "layer2"]);
+});
+
+test("nesting cycles are rejected and keep pixels otherwise intact @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await page.getByRole("button", { name: "Add layer" }).click();
+  expect(await engineReparent(page, "layer0", "layer2")).toBe(true);
+  const before = await getLayers(page);
+  // Parent onto its own child is invalid (engine + drag UI share the rule).
+  const cycled = await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { reparentLayerAsChild(c: string, p: string): boolean } } };
+    return root.__gnumarus?.engine?.reparentLayerAsChild("layer2", "layer0") ?? true;
+  });
+  expect(cycled).toBe(false);
+  await dropLayerOnto(page, "layer2", "layer0");
+  await expect(page.locator("gnumarus-shell")).toContainText("Cannot nest a layer");
+  const after = await getLayers(page);
+  expect(after.layers.map((layer) => layer.id)).toEqual(before.layers.map((layer) => layer.id));
+  expect(await getLayerParents(page)).toEqual(await getLayerParents(page));
+  // Reparenting only reorders: opacity/visibility/size are untouched.
+  const details = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getLayers(): Array<{ id: string; opacity: number; visible: boolean; width: number; height: number }> } };
+    };
+    return root.__gnumarus?.engine?.getLayers() ?? [];
+  });
+  expect(details.every((layer) => layer.opacity === 1 && layer.visible && layer.width === 64 && layer.height === 64)).toBe(true);
 });
