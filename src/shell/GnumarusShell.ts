@@ -346,6 +346,7 @@ import {
   GNUMARUS_DEFAULT_FRAME_DURATION_SEC as DEFAULT_ANIMATION_FRAME_DURATION,
 } from "../animation/GnumarusAnimationModel";
 import "../color/GnumarusColorPicker";
+import type { GnumarusColorPicker } from "../color/GnumarusColorPicker";
 
 interface GnumarusShortcutEntry {
   keys: string;
@@ -456,7 +457,8 @@ function gnumarusShortcuts(): GnumarusShortcutSection[] {
         { keys: "L", action: tr("sc.toolLasso") },
         { keys: "P", action: tr("sc.toolPolylasso") },
         { keys: "W", action: tr("sc.toolColorselect") },
-        { keys: "X", action: tr("sc.toolText") },
+        { keys: "X", action: tr("sc.swapColors") },
+        { keys: "Toolbar, palette", action: tr("sc.toolText") },
         { keys: "R (tile brush)", action: tr("sc.tileRotate") },
         { keys: "H (tile brush)", action: tr("sc.tileFlipH") },
         { keys: "V (tile brush)", action: tr("sc.tileFlipV") },
@@ -591,6 +593,40 @@ export class GnumarusShell extends LitElement {
     }
     .toolbar .tool-icon svg {
       display: block;
+    }
+    .paint-wells {
+      position: relative;
+      width: 40px;
+      height: 32px;
+      flex: 0 0 auto;
+    }
+    .paint-well {
+      position: absolute;
+      width: 20px;
+      height: 20px;
+      border: 1px solid #111;
+      border-radius: 4px;
+      padding: 0;
+      cursor: pointer;
+    }
+    .paint-well-back {
+      left: 16px;
+      top: 12px;
+    }
+    .paint-well-front {
+      left: 0;
+      top: 0;
+      cursor: default;
+    }
+    .paint-swap {
+      position: absolute;
+      right: 0;
+      top: 0;
+      width: 16px;
+      height: 16px;
+      padding: 0;
+      font-size: 11px;
+      line-height: 1;
     }
     .tool-drawer {
       position: relative;
@@ -1574,6 +1610,7 @@ export class GnumarusShell extends LitElement {
   static properties = {
     tool: { type: String },
     colorValue: { type: String },
+    secondaryColorValue: { type: String },
     zoomText: { type: String },
     rotText: { type: String },
     flipText: { type: String },
@@ -1774,6 +1811,7 @@ export class GnumarusShell extends LitElement {
   declare rotText: string;
   declare flipText: string;
   declare colorValue: string;
+  declare secondaryColorValue: string;
   declare zoomText: string;
   declare cursorText: string;
   declare canvasText: string;
@@ -2007,6 +2045,7 @@ export class GnumarusShell extends LitElement {
     this.actionPaletteIndex = 0;
     this.registerActions();
     this.colorValue = "#000000";
+    this.secondaryColorValue = "#ffffff";
     this.zoomText = "800%";
     this.rotText = "0°";
     this.flipText = "";
@@ -2374,6 +2413,31 @@ export class GnumarusShell extends LitElement {
           ${this.renderToolDrawer("model")}
 
           ${this.renderToolDrawer("selection")}
+          <div class="paint-wells" title=${tr("color.wellsHint")}>
+            <button
+              class="paint-well paint-well-back"
+              data-testid="bg-well"
+              style="background-color: ${this.secondaryColorValue};"
+              aria-label=${tr("color.background")}
+              title=${tr("color.background")}
+              @click=${(): void => this.swapPaintColors()}
+            ></button>
+            <button
+              class="paint-well paint-well-front"
+              data-testid="fg-well"
+              style="background-color: ${this.colorValue};"
+              aria-label=${tr("color.foreground")}
+              title=${tr("color.foreground")}
+            ></button>
+            <button
+              class="paint-swap"
+              data-testid="swap-colors"
+              aria-label=${tr("color.swap")}
+              title=${tr("color.swapHint")}
+              @click=${(): void => this.swapPaintColors()}
+              >⇄</button
+            >
+          </div>
           ${this.renderToolDrawer("destructive")}
           ${this.renderToolDrawer("transform")}
           <gnumarus-color-picker
@@ -2385,7 +2449,18 @@ export class GnumarusShell extends LitElement {
             @gnumarus-color-change=${(event: Event): void => {
               const detail = (event as CustomEvent<{ value?: unknown }>).detail;
               if (typeof detail?.value === "string") {
-                this.setPencilColor(detail.value);
+                const parsed = parseHexToRgbaBytes(detail.value);
+                if (parsed === null) {
+                  return;
+                }
+                this.colorValue = rgbaBytesToHex(parsed);
+                this.engine?.setColor(this.colorValue);
+              }
+            }}
+            @gnumarus-color-commit=${(event: Event): void => {
+              const detail = (event as CustomEvent<{ value?: unknown }>).detail;
+              if (typeof detail?.value === "string") {
+                this.pushRecentColor(detail.value);
               }
             }}
             @gnumarus-swatches-edit=${(event: Event): void => {
@@ -5799,6 +5874,9 @@ export class GnumarusShell extends LitElement {
           this.setPencilColor(hex);
           this.statusMessage = tr("status.eyedropper", { hex });
         },
+        onOpenColorPicker: (clientX, clientY): void => {
+          this.openColorPickerAt(clientX, clientY);
+        },
         onTransformChanged: (): void => {
           void this.refreshPreview();
         },
@@ -6053,6 +6131,21 @@ export class GnumarusShell extends LitElement {
       event.preventDefault();
       event.stopImmediatePropagation();
       return;
+    }
+    if ((event.key === "x" || event.key === "X") && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      // X swaps the foreground/background paint colors everywhere except
+      // while flying (suppressed like every other editor shortcut), in
+      // text fields and color pickers, and with dialogs open.
+      if (
+        !this.eventInField(event) &&
+        !this.eventInColorPicker(event) &&
+        this.shadowRoot?.querySelector("dialog[open]") === null
+      ) {
+        this.swapPaintColors();
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
     }
     if (event.key === "Tab") {
       if (this.shadowRoot?.querySelector("dialog[open]") !== null || this.eventInField(event)) {
@@ -7806,6 +7899,14 @@ export class GnumarusShell extends LitElement {
     this.pushRecentColor(this.colorValue);
   }
 
+  /** Swap the foreground and background paint colors (X key). */
+  private swapPaintColors(): void {
+    const foreground = this.secondaryColorValue;
+    this.secondaryColorValue = this.colorValue;
+    this.setPencilColor(foreground);
+    this.statusMessage = tr("status.colorsSwapped");
+  }
+
   /** Remember a color in the recents row (dedupe, newest first, capped). */
   private pushRecentColor(hex: string): void {
     const normalized = normalizeSwatchHex(hex);
@@ -7815,6 +7916,12 @@ export class GnumarusShell extends LitElement {
     const rest = this.recentColors.filter((entry) => entry !== normalized);
     this.recentColors = [normalized, ...rest].slice(0, GNUMARUS_MAX_RECENT_COLORS);
     this.persistSwatches();
+  }
+
+  /** Open the paint color picker popup at a viewport position (canvas right-click). */
+  private openColorPickerAt(clientX: number, clientY: number): void {
+    const picker = this.shadowRoot?.getElementById("pencilColor") as GnumarusColorPicker | null;
+    picker?.openAt(clientX, clientY);
   }
 
   /** Add the current paint color to the saved swatches (dedupe, capped). */

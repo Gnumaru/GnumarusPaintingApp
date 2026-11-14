@@ -27,6 +27,8 @@ import {
   rgbBytesToModelAxes,
   rgbaBytesToHex,
   srgbByteToLinear,
+  svToTrianglePoint,
+  svTriangleInCircle,
   trianglePointToSv,
 } from "../src/color/GnumarusColorModels";
 
@@ -283,13 +285,58 @@ describe("GnumarusColorModels hsv triangle and wheel", () => {
     expect(rgbBytesToHsv({ r: 0, g: 0, b: 0, a: 255 })).toMatchObject({ s: 0, v: 0 });
   });
 
-  it("maps triangle points to saturation and value with clamping", () => {
-    expect(trianglePointToSv(0, 0, 0, 0, 100, 84)).toEqual({ s: 0, v: 1 });
-    expect(trianglePointToSv(100, 0, 0, 0, 100, 84)).toEqual({ s: 1, v: 1 });
-    expect(trianglePointToSv(50, 84, 0, 0, 100, 84)).toEqual({ s: 0.5, v: 0 });
-    expect(trianglePointToSv(75, 21, 0, 0, 100, 84)).toEqual({ s: 0.75, v: 0.75 });
-    expect(trianglePointToSv(-10, 200, 0, 0, 100, 84)).toEqual({ s: 0, v: 0 });
-    expect(trianglePointToSv(0, 0, 0, 0, 0, 0)).toEqual({ s: 0, v: 1 });
+  it("inscribes an equilateral triangle touching the circle", () => {
+    const tri = svTriangleInCircle(68, 68, 68);
+    // All three vertices sit exactly on the circle.
+    for (const corner of [tri.white, tri.hue, tri.black]) {
+      expect(Math.hypot(corner.x - 68, corner.y - 68)).toBeCloseTo(68, 9);
+    }
+    // Equilateral: all three sides match.
+    const side = (a: { x: number; y: number }, b: { x: number; y: number }): number =>
+      Math.hypot(a.x - b.x, a.y - b.y);
+    expect(side(tri.white, tri.hue)).toBeCloseTo(side(tri.hue, tri.black), 9);
+    expect(side(tri.hue, tri.black)).toBeCloseTo(side(tri.black, tri.white), 9);
+    // Flat top edge, apex straight down.
+    expect(tri.white.y).toBeCloseTo(tri.hue.y, 9);
+    expect(tri.black.x).toBeCloseTo(68, 9);
+  });
+
+  it("round-trips saturation/value through the triangle", () => {
+    const tri = svTriangleInCircle(68, 68, 68);
+    for (const [s, v] of [
+      [0, 1],
+      [1, 1],
+      [0, 0],
+      [0.5, 0.5],
+      [1, 0],
+      [0.25, 0.75],
+    ] as Array<[number, number]>) {
+      const point = svToTrianglePoint(s, v, tri);
+      const back = trianglePointToSv(point.x, point.y, tri);
+      expect(back.s).toBeCloseTo(v === 0 ? 0 : s, 9);
+      expect(back.v).toBeCloseTo(v, 9);
+    }
+    // Vertices map exactly.
+    expect(trianglePointToSv(tri.white.x, tri.white.y, tri)).toEqual({ s: 0, v: 1 });
+    expect(trianglePointToSv(tri.hue.x, tri.hue.y, tri)).toEqual({ s: 1, v: 1 });
+    expect(trianglePointToSv(tri.black.x, tri.black.y, tri)).toEqual({ s: 0, v: 0 });
+  });
+
+  it("clamps points outside the triangle to its edges", () => {
+    const tri = svTriangleInCircle(68, 68, 68);
+    // Far above the top edge clamps to the white-hue edge (v = 1).
+    expect(trianglePointToSv(68, -100, tri).v).toBe(1);
+    // Far below the apex clamps to black.
+    expect(trianglePointToSv(68, 1000, tri)).toEqual({ s: 0, v: 0 });
+    // Far left of white clamps to the white corner.
+    expect(trianglePointToSv(-100, tri.white.y, tri)).toEqual({ s: 0, v: 1 });
+    // Far right of the hue corner clamps to it.
+    expect(trianglePointToSv(1000, tri.hue.y, tri)).toEqual({ s: 1, v: 1 });
+    // The old screenshot case: left of the triangle at mid height snaps
+    // to the white-black edge instead of leaking out with s = 0.
+    const left = trianglePointToSv(-50, 80, tri);
+    expect(left.s).toBeGreaterThanOrEqual(0);
+    expect(left.s).toBeLessThan(0.25);
   });
 
   it("maps ring offsets to hue with zero at the top, clockwise", () => {

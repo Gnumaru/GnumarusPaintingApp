@@ -689,6 +689,8 @@ export interface GnumarusEngineOptions {
   onLayersChanged?: () => void;
   onToolSizeChanged?: (kind: GnumarusToolSizeKind, size: number) => void;
   onEyedropperPick?: (hex: string) => void;
+  /** Fired when right-click on the canvas should open the paint color picker. */
+  onOpenColorPicker?: (clientX: number, clientY: number) => void;
   /** Fired when a cell content transform changes (move/rotate/flip/reset). */
   onTransformChanged?: () => void;
   /** Fired when the text tool requests the text editor for a cell. */
@@ -1240,6 +1242,7 @@ export class GnumarusCanvasEngine {
   private readonly onLayersChanged: (() => void) | undefined;
   private readonly onToolSizeChanged: ((kind: GnumarusToolSizeKind, size: number) => void) | undefined;
   private readonly onEyedropperPick: ((hex: string) => void) | undefined;
+  private readonly onOpenColorPicker: ((clientX: number, clientY: number) => void) | undefined;
   private readonly onTransformChanged: (() => void) | undefined;
   private readonly onTextEditRequested:
     | ((info: { layerId: string; frame: number; contentId: string; textId: string }) => void)
@@ -1260,6 +1263,7 @@ export class GnumarusCanvasEngine {
     this.onLayersChanged = options.onLayersChanged;
     this.onToolSizeChanged = options.onToolSizeChanged;
     this.onEyedropperPick = options.onEyedropperPick;
+    this.onOpenColorPicker = options.onOpenColorPicker;
     this.onTransformChanged = options.onTransformChanged;
     this.onTextEditRequested = options.onTextEditRequested;
     this.onNotice = options.onNotice;
@@ -14433,6 +14437,17 @@ export class GnumarusCanvasEngine {
       }
       const isRightButton = (event.button as number) === 2;
       if (event.button !== 0 && !(isRightButton && (this.tool === "tilebrush" || this.tool === "modeltransform"))) {
+        if (
+          isRightButton &&
+          this.tool !== "polylasso" &&
+          this.tool !== "polygon" &&
+          this.tool !== "loupe" &&
+          this.tool !== "transform"
+        ) {
+          // Right-click opens the paint color picker for every tool that
+          // does not consume the right button itself.
+          this.onOpenColorPicker?.(event.clientX, event.clientY);
+        }
         return;
       }
       if (
@@ -15937,10 +15952,8 @@ export class GnumarusCanvasEngine {
           this.setTool("recolor");
           return;
         }
-        if (event.key === "x" || event.key === "X") {
-          this.setTool("text");
-          return;
-        }
+        // X swaps the paint colors (handled by the shell); the text tool
+        // lives in the toolbar and the action palette, with no letter key.
         if (event.key === "m" || event.key === "M") {
           // M flips the canvas view horizontally, Shift+M vertically —
           // the same setFlip toggles the loupe middle-click gestures use.

@@ -393,24 +393,72 @@ export function rgbBytesToHsv(color: GnumarusRgbaBytes): GnumarusHsv {
 }
 
 /**
- * Map a point in the saturation/value triangle to fractions.
- * The triangle spans its bounding box: left edge is S = 0 (white),
- * right edge is S = 1, top edge is V = 1, bottom edge is V = 0 (black).
+ * Vertices of the flat-top saturation/value triangle: white (S = 0, V = 1),
+ * pure hue (S = 1, V = 1) and black (V = 0, hue meaningless).
  */
-export function trianglePointToSv(
-  x: number,
-  y: number,
-  left: number,
-  top: number,
-  width: number,
-  height: number,
-): { s: number; v: number } {
-  if (!(width > 0) || !(height > 0)) {
+export interface GnumarusSvTriangle {
+  white: { x: number; y: number };
+  hue: { x: number; y: number };
+  black: { x: number; y: number };
+}
+
+/**
+ * Equilateral flat-top triangle inscribed in a circle: the two top
+ * vertices sit at -60°/+60° (touching the circle's inner edge left and
+ * right) and the apex points straight down at 180° (touching the bottom).
+ */
+export function svTriangleInCircle(cx: number, cy: number, r: number): GnumarusSvTriangle {
+  const half = (r * Math.sqrt(3)) / 2;
+  return {
+    white: { x: cx - half, y: cy - r / 2 },
+    hue: { x: cx + half, y: cy - r / 2 },
+    black: { x: cx, y: cy + r },
+  };
+}
+
+/**
+ * Map saturation/value fractions to a point in the triangle: walk S along
+ * the white→hue top edge, then V from that point down toward black.
+ */
+export function svToTrianglePoint(s: number, v: number, tri: GnumarusSvTriangle): { x: number; y: number } {
+  const topX = tri.white.x + s * (tri.hue.x - tri.white.x);
+  const topY = tri.white.y + s * (tri.hue.y - tri.white.y);
+  return {
+    x: v * topX + (1 - v) * tri.black.x,
+    y: v * topY + (1 - v) * tri.black.y,
+  };
+}
+
+/**
+ * Map a point to saturation/value fractions, clamped inside the triangle
+ * with barycentric coordinates (points outside snap to the nearest edge).
+ */
+export function trianglePointToSv(x: number, y: number, tri: GnumarusSvTriangle): { s: number; v: number } {
+  const v0x = tri.hue.x - tri.white.x;
+  const v0y = tri.hue.y - tri.white.y;
+  const v1x = tri.black.x - tri.white.x;
+  const v1y = tri.black.y - tri.white.y;
+  const v2x = x - tri.white.x;
+  const v2y = y - tri.white.y;
+  const d00 = v0x * v0x + v0y * v0y;
+  const d01 = v0x * v1x + v0y * v1y;
+  const d11 = v1x * v1x + v1y * v1y;
+  const d20 = v2x * v0x + v2y * v0y;
+  const d21 = v2x * v1x + v2y * v1y;
+  const denom = d00 * d11 - d01 * d01;
+  if (!(denom > 0)) {
+    return { s: 0, v: 1 };
+  }
+  const beta = Math.max(0, (d11 * d20 - d01 * d21) / denom);
+  const gamma = Math.max(0, (d00 * d21 - d01 * d20) / denom);
+  const alpha = Math.max(0, 1 - beta - gamma);
+  const total = alpha + beta + gamma;
+  if (!(total > 0)) {
     return { s: 0, v: 1 };
   }
   return {
-    s: clamp((x - left) / width, 0, 1),
-    v: clamp(1 - (y - top) / height, 0, 1),
+    s: alpha + beta > 0 ? beta / (alpha + beta) : 0,
+    v: (alpha + beta) / total,
   };
 }
 

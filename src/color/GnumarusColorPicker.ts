@@ -3,6 +3,9 @@ import {
   getColorModelDef,
   hsvToRgbBytes,
   hsvWheelHue,
+  svToTrianglePoint,
+  svTriangleInCircle,
+  type GnumarusSvTriangle,
   isColorModelId,
   modelAlphaFromValues,
   modelAxesToRgbBytes,
@@ -45,11 +48,24 @@ function colorAxisLabel(label: string): string {
   return key === undefined ? label : tr(key);
 }
 
+/** Side of the square SVG box holding the inscribed SV triangle. */
+export const HSV_TRIANGLE_SIZE = 136;
+
+/**
+ * Flat-top equilateral SV triangle inscribed in the hue ring's inner
+ * circle (136px box, center 68,68, radius 68): white top-left, pure hue
+ * top-right, black apex at the bottom. All three vertices touch the
+ * circle's inner edge.
+ */
+export const HSV_SV_TRIANGLE: GnumarusSvTriangle = svTriangleInCircle(68, 68, 68);
+
 /**
  * Custom color picker: model selector, one draggable gradient bar plus an
  * editable numeric input per axis, and a hex field. No native
  * `<input type="color">` is used anywhere. Emits `gnumarus-color-change`
- * with `{ value: hex }` on every user edit (live).
+ * with `{ value: hex }` on every user edit (live) and
+ * `gnumarus-color-commit` with `{ value: hex }` when a gesture ends
+ * (pointerup, slider/text commit, discrete pick).
  */
 export class GnumarusColorPicker extends LitElement {
   static styles = css`
@@ -245,10 +261,10 @@ export class GnumarusColorPicker extends LitElement {
     }
     .hsv-triangle {
       position: absolute;
-      left: 50px;
-      top: 58px;
-      width: 100px;
-      height: 84px;
+      left: 32px;
+      top: 32px;
+      width: 136px;
+      height: 136px;
       cursor: crosshair;
     }
     .hsv-triangle:focus-visible {
@@ -259,6 +275,7 @@ export class GnumarusColorPicker extends LitElement {
       position: absolute;
       width: 12px;
       height: 12px;
+      box-sizing: border-box;
       margin-left: -6px;
       margin-top: -6px;
       border-radius: 50%;
@@ -290,6 +307,8 @@ export class GnumarusColorPicker extends LitElement {
   /** Tracked hue for the HSV triangle, kept across achromatic colors. */
   private hsvHue = 0;
   private popupPos: { left: number; top: number } | null = null;
+  /** Swallow the document pointerdown that opened the popup programmatically. */
+  private ignoreNextDocPointerDown = false;
 
   constructor() {
     super();
@@ -344,6 +363,7 @@ export class GnumarusColorPicker extends LitElement {
     this.modelValues = rgbBytesToModelAxes(parsed, this.model);
     this.trackHsvHue();
     this.emitChange();
+    this.emitCommit();
   }
 
   private editSwatches(kind: "add" | "remove", hex?: string): void {
@@ -361,6 +381,17 @@ export class GnumarusColorPicker extends LitElement {
     this.dispatchEvent(
       new CustomEvent("gnumarus-color-change", {
         detail: { value: this.value },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+
+  /** Announce a finished color gesture (pointerup, committed input, discrete pick). */
+  private emitCommit(): void {
+    this.dispatchEvent(
+      new CustomEvent("gnumarus-color-commit", {
+        detail: { value: rgbaBytesToHex(this.rgba) },
         bubbles: true,
         composed: true,
       }),
@@ -429,6 +460,7 @@ export class GnumarusColorPicker extends LitElement {
       ring.removeEventListener("pointermove", move);
       ring.removeEventListener("pointerup", up);
       ring.removeEventListener("pointercancel", up);
+      this.emitCommit();
     };
     ring.addEventListener("pointermove", move);
     ring.addEventListener("pointerup", up);
@@ -444,7 +476,12 @@ export class GnumarusColorPicker extends LitElement {
     (triangle as unknown as Element).setPointerCapture?.(event.pointerId);
     const apply = (clientX: number, clientY: number): void => {
       const rect = triangle.getBoundingClientRect();
-      const { s, v } = trianglePointToSv(clientX, clientY, rect.left, rect.top, rect.width, rect.height);
+      if (!(rect.width > 0) || !(rect.height > 0)) {
+        return;
+      }
+      const localX = ((clientX - rect.left) / rect.width) * HSV_TRIANGLE_SIZE;
+      const localY = ((clientY - rect.top) / rect.height) * HSV_TRIANGLE_SIZE;
+      const { s, v } = trianglePointToSv(localX, localY, HSV_SV_TRIANGLE);
       this.applyHsv(this.hsvHue, s, v);
     };
     apply(event.clientX, event.clientY);
@@ -455,6 +492,7 @@ export class GnumarusColorPicker extends LitElement {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
+      this.emitCommit();
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -471,11 +509,13 @@ export class GnumarusColorPicker extends LitElement {
       const current = rgbBytesToHsv(this.rgba);
       this.applyHsv(0, current.s, current.v);
       event.preventDefault();
+      this.emitCommit();
       return;
     } else if (event.key === "End") {
       const currentEnd = rgbBytesToHsv(this.rgba);
       this.applyHsv(359.9, currentEnd.s, currentEnd.v);
       event.preventDefault();
+      this.emitCommit();
       return;
     } else {
       return;
@@ -483,6 +523,7 @@ export class GnumarusColorPicker extends LitElement {
     event.preventDefault();
     const current = rgbBytesToHsv(this.rgba);
     this.applyHsv(this.hsvHue + delta, current.s, current.v);
+    this.emitCommit();
   }
 
   private onHsvTriangleKeyDown(event: KeyboardEvent): void {
@@ -503,6 +544,7 @@ export class GnumarusColorPicker extends LitElement {
     }
     event.preventDefault();
     this.applyHsv(current.h, s, v);
+    this.emitCommit();
   }
 
   private onModelSelect(event: Event): void {
@@ -554,6 +596,7 @@ export class GnumarusColorPicker extends LitElement {
     const next = [...this.modelValues];
     next[axisIndex] = parsed;
     this.applyModelValues(next);
+    this.emitCommit();
   }
 
   private valueFromPointer(axisIndex: number, clientX: number, bar: HTMLElement): number | null {
@@ -600,6 +643,7 @@ export class GnumarusColorPicker extends LitElement {
       bar.removeEventListener("pointermove", move);
       bar.removeEventListener("pointerup", up);
       bar.removeEventListener("pointercancel", up);
+      this.emitCommit();
     };
     bar.addEventListener("pointermove", move);
     bar.addEventListener("pointerup", up);
@@ -622,12 +666,14 @@ export class GnumarusColorPicker extends LitElement {
       const next = [...this.modelValues];
       next[axisIndex] = axis.min;
       this.applyModelValues(next);
+      this.emitCommit();
       event.preventDefault();
       return;
     } else if (event.key === "End") {
       const next = [...this.modelValues];
       next[axisIndex] = axis.unit === "degrees" ? 359.9 : axis.max;
       this.applyModelValues(next);
+      this.emitCommit();
       event.preventDefault();
       return;
     } else {
@@ -649,6 +695,7 @@ export class GnumarusColorPicker extends LitElement {
     const next = [...this.modelValues];
     next[axisIndex] = nextValue;
     this.applyModelValues(next);
+    this.emitCommit();
   }
 
   private onHexInput(event: Event): void {
@@ -674,6 +721,36 @@ export class GnumarusColorPicker extends LitElement {
     if (parseHexToRgbaBytes(target.value) === null) {
       target.value = rgbaBytesToHex(this.rgba);
     }
+    this.emitCommit();
+  }
+
+  /** Open the popup at a viewport position (e.g. canvas right-click). */
+  openAt(clientX: number, clientY: number): void {
+    this.open = true;
+    this.popupPos = {
+      left: Math.min(clientX + 8, Math.max(8, window.innerWidth - 380)),
+      top: Math.min(clientY, Math.max(8, window.innerHeight - 420)),
+    };
+    // The opening pointerdown is still bubbling toward window: ignore that
+    // single document click so the popup does not close instantly.
+    this.ignoreNextDocPointerDown = true;
+    this.requestUpdate();
+    void this.updateComplete.then(() => {
+      if (!this.open || this.popupPos === null) {
+        return;
+      }
+      const dialog = this.shadowRoot?.querySelector(".popup") as HTMLElement | null;
+      if (dialog === null) {
+        return;
+      }
+      const overflow = dialog.getBoundingClientRect().bottom - window.innerHeight + 8;
+      if (overflow > 0) {
+        this.popupPos = { left: this.popupPos.left, top: Math.max(8, this.popupPos.top - overflow) };
+        this.requestUpdate();
+      }
+    });
+    window.addEventListener("pointerdown", this.onDocumentPointerDown);
+    window.addEventListener("keydown", this.onDocumentKeyDown);
   }
 
   private toggleOpen(): void {
@@ -714,11 +791,16 @@ export class GnumarusColorPicker extends LitElement {
   private closePopup(): void {
     this.open = false;
     this.popupPos = null;
+    this.ignoreNextDocPointerDown = false;
     window.removeEventListener("pointerdown", this.onDocumentPointerDown);
     window.removeEventListener("keydown", this.onDocumentKeyDown);
   }
 
   private readonly onDocumentPointerDown = (event: PointerEvent): void => {
+    if (this.ignoreNextDocPointerDown) {
+      this.ignoreNextDocPointerDown = false;
+      return;
+    }
     const path = event.composedPath();
     if (!path.includes(this)) {
       this.closePopup();
@@ -746,8 +828,9 @@ export class GnumarusColorPicker extends LitElement {
     const ringAngle = (hsv.h * Math.PI) / 180;
     const ringThumbLeft = 100 + 81.5 * Math.sin(ringAngle);
     const ringThumbTop = 100 - 81.5 * Math.cos(ringAngle);
-    const triThumbLeft = 50 + hsv.s * 100;
-    const triThumbTop = 58 + (1 - hsv.v) * 84;
+    const triPoint = svToTrianglePoint(hsv.s, hsv.v, HSV_SV_TRIANGLE);
+    const triThumbLeft = 32 + triPoint.x;
+    const triThumbTop = 32 + triPoint.y;
     return html`
       <button
         class="swatch"
@@ -786,7 +869,7 @@ export class GnumarusColorPicker extends LitElement {
                 <svg
                   class="hsv-triangle"
                   data-testid="hsv-triangle"
-                  viewBox="0 0 100 84"
+                  viewBox="0 0 136 136"
                   role="slider"
                   tabindex="0"
                   aria-label=${tr("color.svTriangle")}
@@ -807,9 +890,9 @@ export class GnumarusColorPicker extends LitElement {
                       <stop offset="1" stop-color="#000000" />
                     </linearGradient>
                   </defs>
-                  <polygon points="0,0 100,0 50,84" fill=${hueHex} />
-                  <polygon points="0,0 100,0 50,84" fill="url(#hsvWhite)" />
-                  <polygon points="0,0 100,0 50,84" fill="url(#hsvBlack)" />
+                  <polygon points="9.11,34 126.89,34 68,136" fill=${hueHex} />
+                  <polygon points="9.11,34 126.89,34 68,136" fill="url(#hsvWhite)" />
+                  <polygon points="9.11,34 126.89,34 68,136" fill="url(#hsvBlack)" />
                 </svg>
                 <div
                   class="hsv-thumb"

@@ -4106,34 +4106,46 @@ test("hsv triangle and hue ring edit the color in any model", async ({ page }) =
   if (triBox === null) {
     throw new Error("hsv triangle has no bounding box");
   }
-  await page.mouse.click(triBox.x + triBox.width * 0.05, triBox.y + triBox.height * 0.05);
-  await expect(picker.getByLabel("Hue", { exact: true })).toHaveValue("180.0");
-  await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("5.0");
-  await expect(picker.getByLabel("Value", { exact: true })).toHaveValue("94.9");
-  await expect(picker.locator("#hexInput")).toHaveValue("#e6f2f2");
-  await page.mouse.click(triBox.x + triBox.width * 0.75, triBox.y + triBox.height * 0.25);
-  await expect(picker.getByLabel("Hue", { exact: true })).toHaveValue("180.0");
-  await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("74.9");
-  await expect(picker.getByLabel("Value", { exact: true })).toHaveValue("74.9");
-  await expect(picker.locator("#hexInput")).toHaveValue("#30bfbf");
+  // The svg viewBox is 136x136 with an inscribed flat-top triangle:
+  // white (9.11,34), hue (126.89,34), black apex (68,136).
+  const triAt = (lx: number, ly: number): { x: number; y: number } => ({
+    x: triBox.x + (lx / 136) * triBox.width,
+    y: triBox.y + (ly / 136) * triBox.height,
+  });
+  let p = triAt(9.11, 34);
+  await page.mouse.click(p.x, p.y);
+  // Pure white has no defined hue, so the axis shows 0 (tracked hue stays 180).
+  await expect(picker.getByLabel("Hue", { exact: true })).toHaveValue("0.0");
+  await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("0.0");
+  await expect(picker.getByLabel("Value", { exact: true })).toHaveValue("100.0");
+  await expect(picker.locator("#hexInput")).toHaveValue("#ffffff");
+  p = triAt(126.89, 34);
+  await page.mouse.click(p.x, p.y);
+  await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("100.0");
+  await expect(picker.getByLabel("Value", { exact: true })).toHaveValue("100.0");
+  await expect(picker.locator("#hexInput")).toHaveValue("#00ffff");
+  p = triAt(68, 34);
+  await page.mouse.click(p.x, p.y);
+  expect(Number(await picker.getByLabel("Saturation", { exact: true }).inputValue())).toBeCloseTo(50, 0);
   await triangle.focus();
   await page.keyboard.down("Shift");
   await page.keyboard.press("ArrowLeft");
   await page.keyboard.up("Shift");
-  await expect(picker.locator("#hexInput")).toHaveValue("#43bfbf");
-  await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("64.9");
-  await page.mouse.click(triBox.x + triBox.width * 0.5, triBox.y + triBox.height * 0.95);
-  await expect(picker.locator("#hexInput")).toHaveValue("#060d0d");
-  await expect(picker.getByLabel("Value", { exact: true })).toHaveValue("5.1");
-  await expect(picker.getByLabel("Hue", { exact: true })).toHaveValue("180.0");
+  expect(Number(await picker.getByLabel("Saturation", { exact: true }).inputValue())).toBeCloseTo(40, 0);
+  p = triAt(68, 135.9);
+  await page.mouse.click(p.x, p.y);
+  await expect(picker.locator("#hexInput")).toHaveValue("#000000");
+  await expect(picker.getByLabel("Value", { exact: true })).toHaveValue("0.0");
+  await expect(picker.getByLabel("Hue", { exact: true })).toHaveValue("0.0");
   await triangle.focus();
   await page.keyboard.press("ArrowUp");
-  await expect(picker.locator("#hexInput")).toHaveValue("#071010");
-  await expect(picker.getByLabel("Value", { exact: true })).toHaveValue("6.3");
+  await expect(picker.locator("#hexInput")).toHaveValue("#030303");
+  expect(Number(await picker.getByLabel("Value", { exact: true }).inputValue())).toBeCloseTo(1, 0);
   await ring.focus();
   await page.keyboard.press("End");
   await expect(picker.getByLabel("Hue", { exact: true })).toHaveValue("0.0");
-  await expect(picker.locator("#hexInput")).toHaveValue("#100707");
+  // Saturation stayed zero from the black apex, so the hue flip keeps neutral gray.
+  await expect(picker.locator("#hexInput")).toHaveValue("#030303");
 });
 
 test("normal blend accumulates translucent paint and eraser subtracts alpha", async ({ page }) => {
@@ -13848,4 +13860,127 @@ test("brush size ceiling defaults to 512 and is configurable up to 2048 @recent"
   const center = await layerToScreen(page, 32, 32);
   await page.mouse.click(center.x, center.y);
   expect(await paintedPixelCount(page)).toBeGreaterThan(1000);
+});
+
+test("hsv triangle clamps outside picks to its edges @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const picker = await openPicker(page, "pencilColor");
+  const triangle = picker.getByTestId("hsv-triangle");
+  const box = await triangle.boundingBox();
+  if (box === null) {
+    throw new Error("hsv triangle has no bounding box");
+  }
+  const toClient = (lx: number, ly: number): { x: number; y: number } => ({
+    // The svg viewBox is 136x136 mapped 1:1 onto its CSS box.
+    x: box.x + (lx / 136) * box.width,
+    y: box.y + (ly / 136) * box.height,
+  });
+  // Click the pure-hue corner: exact red follows.
+  const hue = toClient(126.89, 34);
+  await page.mouse.click(hue.x, hue.y);
+  expect(await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { colorValue: string } } };
+    return root.__gnumarus?.shell?.colorValue ?? "";
+  })).toBe("#ff0000");
+  // Click far outside the triangle (bottom-right of the box): the pick must
+  // land on the nearest triangle edge instead of the raw box point.
+  const outside = toClient(130, 130);
+  await page.mouse.click(outside.x, outside.y);
+  const result = await page.evaluate(() => {
+    const root = document.querySelector("gnumarus-shell")?.shadowRoot ?? null;
+    const picker = root?.querySelector("#pencilColor") as unknown as {
+      shadowRoot: ShadowRoot | null;
+    } | null;
+    const inner = picker?.shadowRoot ?? null;
+    const wheel = inner?.querySelector(".hsv-wheel") as HTMLElement | null;
+    const thumb = inner?.querySelector('[data-testid="hsv-tri-thumb"]') as HTMLElement | null;
+    if (wheel === null || thumb === null) {
+      return null;
+    }
+    const wb = wheel.getBoundingClientRect();
+    const tb = thumb.getBoundingClientRect();
+    // Thumb center in triangle-local coords (triangle starts at 32,32).
+    const px = tb.left + tb.width / 2 - wb.left - 32;
+    const py = tb.top + tb.height / 2 - wb.top - 32;
+    // Distance to the hue-black edge (126.89,34)-(68,136).
+    const ax = 126.89;
+    const ay = 34;
+    const bx = 68;
+    const by = 136;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const t = Math.min(1, Math.max(0, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
+    return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+  });
+  expect(result).not.toBeNull();
+  expect(result ?? 999).toBeLessThan(1.5);
+});
+
+test("recent colors update once per picker gesture @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const picker = await openPicker(page, "pencilColor");
+  const triangle = picker.getByTestId("hsv-triangle");
+  const box = await triangle.boundingBox();
+  if (box === null) {
+    throw new Error("hsv triangle has no bounding box");
+  }
+  // Drag across the triangle: many live colors, a single recent on release.
+  await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.3);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.7, { steps: 10 });
+  await page.mouse.up();
+  const recents = picker.getByTestId("recent-swatch");
+  await expect(recents).toHaveCount(1);
+});
+
+test("right-click on canvas opens the paint color picker @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const canvas = page.locator("gnumarus-shell canvas[data-engine]");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "right" });
+  const picker = page.locator("gnumarus-shell #pencilColor");
+  await expect(picker.getByRole("dialog", { name: "Color picker" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(picker.getByRole("dialog", { name: "Color picker" })).toBeHidden();
+});
+
+test("X swaps the foreground and background paint colors @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const colorsOf = (): Promise<{ fg: string; bg: string; engine: number[] | null }> =>
+    page.evaluate(() => {
+      const root = window as unknown as {
+        __gnumarus?: {
+          shell?: { colorValue: string; secondaryColorValue: string };
+          engine?: { readPixel(x: number, y: number): { r: number; g: number; b: number; a: number } | null };
+        };
+      };
+      return {
+        fg: root.__gnumarus?.shell?.colorValue ?? "",
+        bg: root.__gnumarus?.shell?.secondaryColorValue ?? "",
+        engine: null,
+      };
+    });
+  expect(await colorsOf()).toMatchObject({ fg: "#000000", bg: "#ffffff" });
+  await page.keyboard.press("x");
+  expect(await colorsOf()).toMatchObject({ fg: "#ffffff", bg: "#000000" });
+  // Painting uses the new foreground color.
+  await setPencil(page, "#ff0000");
+  await page.keyboard.press("x");
+  expect(await colorsOf()).toMatchObject({ fg: "#000000", bg: "#ff0000" });
+  const center = await layerToScreen(page, 32, 32);
+  await page.mouse.click(center.x, center.y);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  // The back well also swaps.
+  await page.locator("gnumarus-shell [data-testid='bg-well']").click();
+  expect(await colorsOf()).toMatchObject({ fg: "#ff0000", bg: "#000000" });
+  // The text tool lost its letter key but still opens from the toolbar.
+  await page.locator("gnumarus-shell [data-testid='tool-text']").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("text");
 });
