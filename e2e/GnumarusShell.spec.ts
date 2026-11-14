@@ -1979,6 +1979,53 @@ test("cell transform is stored per content and follows the frame", async ({ page
   expect(moved.contents.find((entry) => entry.id === frame2Content)?.transform.x).toBe(5);
 });
 
+test("final preview zoom avoids recompositing @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Final preview" }).click();
+  const preview = page.locator('gnumarus-shell [data-testid="final-preview"]');
+  await expect(preview).toBeVisible();
+  const size = await layerSize(page);
+  // Count canvas uploads: full refreshes call putImageData, CSS-only zooms do not.
+  await page.evaluate(() => {
+    const w = window as unknown as { __putImageDataCalls?: number };
+    w.__putImageDataCalls = 0;
+    type PutImageDataFn = (this: CanvasRenderingContext2D, imageData: ImageData, dx: number, dy: number) => void;
+    const ctxProto = CanvasRenderingContext2D.prototype as unknown as { putImageData: PutImageDataFn };
+    const orig: PutImageDataFn = ctxProto.putImageData;
+    ctxProto.putImageData = function (this: CanvasRenderingContext2D, imageData: ImageData, dx: number, dy: number): void {
+      w.__putImageDataCalls = (w.__putImageDataCalls ?? 0) + 1;
+      orig.call(this, imageData, dx, dy);
+    };
+  });
+  const uploads = (): Promise<number> =>
+    page.evaluate(() => (window as unknown as { __putImageDataCalls?: number }).__putImageDataCalls ?? -1);
+  // Reopening recomposites (the spy observes real uploads).
+  await page.getByRole("button", { name: "Final preview" }).click();
+  await expect(preview).toBeHidden();
+  await page.getByRole("button", { name: "Final preview" }).click();
+  await expect(preview).toBeVisible();
+  expect(await uploads()).toBeGreaterThanOrEqual(1);
+  await page.evaluate(() => {
+    (window as unknown as { __putImageDataCalls?: number }).__putImageDataCalls = 0;
+  });
+  // Four zoom clicks change only the CSS size, with no uploads in between.
+  const zoomIn = preview.getByRole("button", { name: "Zoom in preview" });
+  const zoomOut = preview.getByRole("button", { name: "Zoom out preview" });
+  await zoomIn.click();
+  await zoomOut.click();
+  await zoomIn.click();
+  await zoomOut.click();
+  await page.waitForTimeout(1000);
+  expect(await uploads()).toBe(0);
+  const zoomInput = preview.locator('[data-testid="preview-zoom-input"]');
+  await expect(zoomInput).toHaveValue("400");
+  const previewCanvas = page.locator("gnumarus-shell canvas#previewCanvas");
+  expect(await previewCanvas.evaluate((element: HTMLCanvasElement) => element.style.width)).toBe(
+    `${size.width * 4}px`,
+  );
+});
+
 test("final preview pans with left, right and middle mouse drags", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

@@ -10224,12 +10224,12 @@ export class GnumarusShell extends LitElement {
   private zoomPreview(factor: number): void {
     const next = Math.min(64, Math.max(0.01, this.previewZoom * factor));
     this.previewZoom = next;
-    void this.refreshPreview();
+    this.paintPreviewSize();
   }
 
   private resetPreviewZoom(): void {
     this.previewZoom = 1;
-    void this.refreshPreview();
+    this.paintPreviewSize();
   }
 
   /** Read the zoom percent input, clamped to 1..6400. */
@@ -10241,7 +10241,7 @@ export class GnumarusShell extends LitElement {
       input.value = String(percent);
     }
     this.previewZoom = percent / 100;
-    void this.refreshPreview();
+    this.paintPreviewSize();
   }
 
   /**
@@ -10264,7 +10264,33 @@ export class GnumarusShell extends LitElement {
       64,
       Math.max(0.01, Math.min(body.clientWidth / size.width, body.clientHeight / size.height)),
     );
-    void this.refreshPreview();
+    this.paintPreviewSize();
+  }
+
+  /**
+   * Apply the current zoom as a CSS-only resize of the existing preview
+   * bitmap (GPU-scaled, instant even on huge canvases). The expensive
+   * flatten + upload in `refreshPreview` runs only when pixels change.
+   * Falls back to a full refresh when the backing store is stale.
+   */
+  private paintPreviewSize(): void {
+    if (this.engine === null) {
+      return;
+    }
+    const canvas = this.shadowRoot?.getElementById("previewCanvas") as HTMLCanvasElement | null;
+    if (canvas === null) {
+      return;
+    }
+    const size = this.engine.size;
+    if (size.width < 1 || size.height < 1) {
+      return;
+    }
+    if (canvas.width !== size.width || canvas.height !== size.height) {
+      void this.refreshPreview();
+      return;
+    }
+    canvas.style.width = `${Math.max(1, Math.round(canvas.width * this.previewZoom))}px`;
+    canvas.style.height = `${Math.max(1, Math.round(canvas.height * this.previewZoom))}px`;
   }
 
   private previewDragState: { startX: number; startY: number; originX: number; originY: number } | null = null;
@@ -10389,10 +10415,7 @@ export class GnumarusShell extends LitElement {
     const image = ctx.createImageData(size.width, size.height);
     image.data.set(flat);
     ctx.putImageData(image, 0, 0);
-    const displayWidth = Math.max(1, Math.round(size.width * this.previewZoom));
-    const displayHeight = Math.max(1, Math.round(size.height * this.previewZoom));
-    canvas.style.width = `${displayWidth}px`;
-    canvas.style.height = `${displayHeight}px`;
+    this.paintPreviewSize();
   }
 
   private refreshLayers(): void {
