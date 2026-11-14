@@ -12995,6 +12995,53 @@ test("adjust hue/saturation proportional mode and manual inputs @recent", async 
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
+test("update banner appears in the menubar when master is newer @recent", async ({ page }) => {
+  await page.route("https://api.github.com/**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: { "content-type": "application/json", etag: '"update-test-new"' },
+      body: JSON.stringify({ sha: "f".repeat(40) }),
+    });
+  });
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { forceUpdateCheck(): Promise<string> } };
+    };
+    return root.__gnumarus?.shell?.forceUpdateCheck();
+  });
+  const banner = page.locator('gnumarus-shell .menubar [data-testid="update-banner"]');
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText("Update available");
+});
+
+test("no update banner when the build matches master @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const localSha = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { buildSha(): string } };
+    };
+    return root.__gnumarus?.shell?.buildSha() ?? "";
+  });
+  expect(localSha).toMatch(/^[0-9a-f]{40}$/);
+  await page.route("https://api.github.com/**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: { "content-type": "application/json", etag: '"update-test-same"' },
+      body: JSON.stringify({ sha: localSha }),
+    });
+  });
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { forceUpdateCheck(): Promise<string> } };
+    };
+    return root.__gnumarus?.shell?.forceUpdateCheck();
+  });
+  await expect(page.locator('gnumarus-shell [data-testid="update-banner"]')).toHaveCount(0);
+});
+
 test("drawer flyout renders above the canvas instead of clipped @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

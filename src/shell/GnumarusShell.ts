@@ -247,6 +247,17 @@ import {
   type GnumarusHslAdjustMode,
   type GnumarusHslAdjustModel,
 } from "../color/GnumarusAdjustments";
+import {
+  commitsApiUrl,
+  GNUMARUS_UPDATE_BRANCH,
+  GNUMARUS_UPDATE_CHECK_MS,
+  GNUMARUS_UPDATE_COOLDOWN_MS,
+  GNUMARUS_UPDATE_REPO,
+  isOutdatedBuild,
+  parseLatestCommitSha,
+  shouldCheckForUpdates,
+  type GnumarusUpdateStatus,
+} from "../project/GnumarusUpdateCheck";
 import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
 import {
   applyAlphaPlane,
@@ -717,6 +728,20 @@ export class GnumarusShell extends LitElement {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    .update-banner {
+      background: #c00000;
+      color: #fff;
+      font-weight: 700;
+      border: none;
+      border-radius: 4px;
+      padding: 4px 12px;
+      margin-left: 8px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .update-banner:hover {
+      background: #e00000;
     }
     .tool-options {
       display: flex;
@@ -1777,6 +1802,7 @@ export class GnumarusShell extends LitElement {
     uiHidden: { type: Boolean },
     matrixHeightPx: { type: Number },
     toastMessage: { type: String },
+    updateStatus: { type: String },
     toastDurationSec: { type: Number },
     swatches: { attribute: false },
     recentColors: { attribute: false },
@@ -2001,6 +2027,8 @@ export class GnumarusShell extends LitElement {
   /** Explicit animation-matrix height in px (null = automatic). */
   declare matrixHeightPx: number | null;
   declare toastMessage: string;
+  /** Update-check status (banner shows only when outdated). */
+  declare updateStatus: GnumarusUpdateStatus;
   declare toastDurationSec: number;
   declare onionEnabled: boolean;
   declare onionPast: number;
@@ -2239,6 +2267,7 @@ export class GnumarusShell extends LitElement {
     this.uiHidden = false;
     this.matrixHeightPx = null;
     this.toastMessage = "";
+    this.updateStatus = "unknown";
     this.toastDurationSec = DEFAULT_TOAST_SETTINGS.durationSec;
     this.onionEnabled = DEFAULT_ONION_SETTINGS.enabled;
     this.onionPast = DEFAULT_ONION_SETTINGS.past;
@@ -2403,6 +2432,16 @@ export class GnumarusShell extends LitElement {
               `
             : html``}
         </div>
+        ${this.updateStatus === "outdated"
+          ? html`<button
+              class="update-banner"
+              data-testid="update-banner"
+              title=${tr("update.availableTitle")}
+              @click=${(): void => window.location.reload()}
+            >
+              ${tr("update.available")}
+            </button>`
+          : html``}
         <span class="app-title">Gnumaru's Painting and Animation App${this.dirty ? tr("app.modified") : ""}</span>
       </div>
       ${this.renderEditorOptions()}
@@ -6123,6 +6162,11 @@ export class GnumarusShell extends LitElement {
     this.fitContextMenusToViewport();
   }
 
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.stopUpdateChecker();
+  }
+
   /** Shift fixed-position context menus left/up only by the measured overflow so they stay adjacent to the cursor. */
   private fitContextMenusToViewport(): void {
     const root = this.shadowRoot;
@@ -6366,6 +6410,7 @@ export class GnumarusShell extends LitElement {
         shell: this,
         engine: this.engine,
       };
+      this.startUpdateChecker();
     } catch (error) {
       if (error instanceof GnumarusWebGlError) {
         this.webglError = error.message;
@@ -6476,6 +6521,109 @@ export class GnumarusShell extends LitElement {
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+  }
+
+  /** Last commits-API ETag for conditional (rate-limit-free) update polls. */
+  private updateEtag: string | null = null;
+  /** Polling timer id for the update checker, or null when stopped. */
+  private updateTimer: number | null = null;
+  /** Epoch ms before which update polls are skipped (rate-limit cooldown). */
+  private updateCooldownUntil = 0;
+  /** In-flight guard so slow polls never overlap. */
+  private updateCheckInFlight = false;
+  /** Test hook: force the check even on localhost (e2e with a mocked API). */
+  private updateCheckForced = false;
+
+  /** Embedded build commit SHA (vite define, "unknown" when git was unavailable). */
+  private buildSha(): string {
+    try {
+      const sha = typeof __GNUMARUS_BUILD_SHA__ !== "undefined" ? __GNUMARUS_BUILD_SHA__ : "";
+      return /^[0-9a-f]{40}$/i.test(sha) ? sha.toLowerCase() : "";
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * Test hook for e2e: force one update check now and report the status.
+   * Bypasses the localhost skip so the suite can mock the commits API.
+   */
+  async forceUpdateCheck(): Promise<GnumarusUpdateStatus> {
+    this.updateCheckForced = true;
+    await this.checkForUpdates();
+    return this.updateStatus;
+  }
+
+  /** Start the continuous update check (immediate check plus polling). */
+  private startUpdateChecker(): void {
+    this.stopUpdateChecker();
+    void this.checkForUpdates();
+    this.updateTimer = window.setInterval(() => {
+      void this.checkForUpdates();
+    }, GNUMARUS_UPDATE_CHECK_MS);
+  }
+
+  /** Stop the continuous update check. */
+  private stopUpdateChecker(): void {
+    if (this.updateTimer !== null) {
+      window.clearInterval(this.updateTimer);
+      this.updateTimer = null;
+    }
+  }
+
+  /**
+   * Poll the newest master commit and update the banner status. Silent on
+   * every failure mode (offline, rate limit, bad payload): the last known
+   * status stands until a newer master is actually observed.
+   */
+  private async checkForUpdates(): Promise<void> {
+    if (this.updateCheckInFlight) {
+      return;
+    }
+    if (!this.updateCheckForced && !shouldCheckForUpdates(window.location.hostname, this.buildSha())) {
+      return;
+    }
+    if (Date.now() < this.updateCooldownUntil) {
+      return;
+    }
+    this.updateCheckInFlight = true;
+    try {
+      const headers: Record<string, string> = { Accept: "application/vnd.github+json" };
+      if (this.updateEtag !== null) {
+        headers["If-None-Match"] = this.updateEtag;
+      }
+      const response = await fetch(commitsApiUrl(GNUMARUS_UPDATE_REPO, GNUMARUS_UPDATE_BRANCH), {
+        headers,
+        cache: "no-store",
+      });
+      if (response.status === 304) {
+        return;
+      }
+      if (response.status === 403 || response.status === 429) {
+        this.updateCooldownUntil = Date.now() + GNUMARUS_UPDATE_COOLDOWN_MS;
+        return;
+      }
+      if (!response.ok) {
+        return;
+      }
+      const etag = response.headers.get("etag");
+      if (etag !== null) {
+        this.updateEtag = etag;
+      }
+      const payload: unknown = await response.json();
+      const remoteSha = parseLatestCommitSha(payload);
+      if (remoteSha === null) {
+        return;
+      }
+      const next: GnumarusUpdateStatus = isOutdatedBuild(this.buildSha(), remoteSha) ? "outdated" : "current";
+      if (next !== this.updateStatus) {
+        this.updateStatus = next;
+      }
+    } catch {
+      // Offline or unreachable: keep the last known status silently.
+    } finally {
+      this.updateCheckInFlight = false;
+    }
   }
 
   /** Header click toggles one menu, closing the others. */
