@@ -114,6 +114,64 @@ export function softTipCoverage(u: number, v: number, hardness: number): number 
   return 0.5 * (1 + Math.cos(Math.PI * t));
 }
 
+/**
+ * Pre-rendered radial falloff table (idea from Krita's KisDabCache, which
+ * caches each dab so huge brushes reuse it instead of recomputing falloff
+ * per pixel per dab). 257 entries over r in [0,1] using the exact same
+ * cosine formula as `softTipCoverage`; lookup with linear interpolation
+ * matches it within ~0.002 while avoiding a cos() per pixel. Keyed by
+ * hardness quantized to 1/64.
+ */
+const GNUMARUS_SOFT_LUT_SIZE = 257;
+const gnumarusSoftLutCache = new Map<number, Float32Array>();
+
+export function softCoverageLut(hardness: number): Float32Array {
+  const key = Math.round(clampBrushHardness(hardness) * 64);
+  const cached = gnumarusSoftLutCache.get(key);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const hard = key / 64;
+  const lut = new Float32Array(GNUMARUS_SOFT_LUT_SIZE);
+  for (let i = 0; i < GNUMARUS_SOFT_LUT_SIZE; i += 1) {
+    const r = i / (GNUMARUS_SOFT_LUT_SIZE - 1);
+    if (!(r < 1)) {
+      lut[i] = 0;
+    } else if (r <= hard) {
+      lut[i] = 1;
+    } else {
+      const span = 1 - hard;
+      if (!(span > 0)) {
+        lut[i] = 0;
+      } else {
+        const t = (r - hard) / span;
+        lut[i] = 0.5 * (1 + Math.cos(Math.PI * t));
+      }
+    }
+  }
+  if (gnumarusSoftLutCache.size > 128) {
+    gnumarusSoftLutCache.clear();
+  }
+  gnumarusSoftLutCache.set(key, lut);
+  return lut;
+}
+
+/** Lookup radial coverage from a LUT (r >= 0; returns 0 past the rim). */
+export function softLutCoverage(lut: Float32Array, r: number): number {
+  if (!(r < 1)) {
+    return 0;
+  }
+  const scaled = r * (lut.length - 1);
+  const i0 = Math.floor(scaled);
+  const frac = scaled - i0;
+  const a = lut[i0] ?? 0;
+  if (!(frac > 0)) {
+    return a;
+  }
+  const b = lut[Math.min(lut.length - 1, i0 + 1)] ?? 0;
+  return a + (b - a) * frac;
+}
+
 /** Dab slot along a stroke segment. */
 export interface GnumarusDabPosition {
   x: number;
@@ -215,16 +273,86 @@ export function paintSoftDab(  buffer: Uint8ClampedArray,
     dabAlpha = smudgeDabAlpha(alpha, smudgeRate);
   }
   const radius = diameter / 2;
+  const radiusInv = radius > 1e-9 ? 1 / radius : 0;
   const reach = Math.ceil(radius) + 1;
   const minX = Math.floor(centerX - reach);
   const maxX = Math.ceil(centerX + reach);
   const minY = Math.floor(centerY - reach);
   const maxY = Math.ceil(centerY + reach);
+  const useImage = tip === "image";
+  const hasGrain = jitter !== undefined && clampPaintGrainStrength(jitter.grainStrength) > 0;
+  const hasDual = dual !== undefined && dual !== null;
+  const hasAngle = Math.abs(tipAngle) > 1e-9;
+  const cosA = hasAngle ? Math.cos(tipAngle) : 1;
+  const sinA = hasAngle ? Math.sin(tipAngle) : 0;
+  const hardClamped = clampBrushHardness(hardness);
+  const isHardDisk = !useImage && hardClamped >= 1 - 1e-9;
+  const lut = useImage || isHardDisk ? null : softCoverageLut(hardness);
+  const dualScale = hasDual && dual !== undefined && dual !== null ? clampPaintDualScale(dual.scale) : 1;
+  const dualStrength = hasDual && dual !== undefined && dual !== null ? clampPaintDualStrength(dual.strength) : 0;
+  const dualTip = hasDual && dual !== undefined && dual !== null ? dual.tip : null;
+  const useWrap = wrap !== "off";
+  const simpleBlit =
+    !useWrap && !useImage && !hasGrain && !hasDual && !hasAngle &&
+    (smudge === undefined || smudge === null) && blend === "normal" &&
+    (locked === undefined || (locked.r !== true && locked.g !== true && locked.b !== true && locked.a !== true));
+  if (simpleBlit) {
+    const rC = dabColor.r | 0;
+    const gC = dabColor.g | 0;
+    const bC = dabColor.b | 0;
+    const aC = dabColor.a | 0;
+    const x0 = Math.max(0, minX);
+    const x1 = Math.min(width - 1, maxX);
+    const y0 = Math.max(0, minY);
+    const y1 = Math.min(height - 1, maxY);
+    for (let y = y0; y <= y1; y += 1) {
+      const v = (y + 0.5 - centerY) * radiusInv;
+      const row = y * width * 4;
+      for (let x = x0; x <= x1; x += 1) {
+        const u = (x + 0.5 - centerX) * radiusInv;
+        const q = u * u + v * v;
+        if (!(q < 1)) {
+          continue;
+        }
+        let coverage: number;
+        if (isHardDisk) {
+          coverage = 1;
+        } else if (lut !== null) {
+          coverage = softLutCoverage(lut, Math.sqrt(q));
+        } else {
+          coverage = softTipCoverage(u, v, hardness);
+        }
+        if (coverage <= 0) {
+          continue;
+        }
+        const covA = coverage * dabAlpha;
+        if (!(covA > 0)) {
+          continue;
+        }
+        const i = row + x * 4;
+        const srcA = (aC / 255) * covA;
+        if (!(srcA > 0)) {
+          continue;
+        }
+        const dstA = (buffer[i + 3] ?? 0) / 255;
+        const outA = srcA + dstA * (1 - srcA);
+        if (!(outA > 0)) {
+          continue;
+        }
+        const inv = dstA * (1 - srcA);
+        buffer[i] = Math.round((rC * srcA + (buffer[i] ?? 0) * inv) / outA);
+        buffer[i + 1] = Math.round((gC * srcA + (buffer[i + 1] ?? 0) * inv) / outA);
+        buffer[i + 2] = Math.round((bC * srcA + (buffer[i + 2] ?? 0) * inv) / outA);
+        buffer[i + 3] = Math.round(outA * 255);
+      }
+    }
+    return;
+  }
   for (let y = minY; y <= maxY; y += 1) {
     for (let x = minX; x <= maxX; x += 1) {
       let gx = x;
       let gy = y;
-      if (wrap !== "off") {
+      if (useWrap) {
         const wrapped = wrapLayerPixel(x, y, width, height, wrap);
         if (wrapped === null) {
           continue;
@@ -232,28 +360,47 @@ export function paintSoftDab(  buffer: Uint8ClampedArray,
         gx = wrapped.x;
         gy = wrapped.y;
       }
-      const u = radius > 1e-9 ? (x + 0.5 - centerX) / radius : 0;
-      const v = radius > 1e-9 ? (y + 0.5 - centerY) / radius : 0;
-      let coverage = softTipCoverage(u, v, hardness);
+      const u = (x + 0.5 - centerX) * radiusInv;
+      const v = (y + 0.5 - centerY) * radiusInv;
+      const q = u * u + v * v;
+      if (!(q < 1)) {
+        continue;
+      }
+      let coverage: number;
+      if (isHardDisk) {
+        coverage = 1;
+      } else if (lut !== null) {
+        coverage = softLutCoverage(lut, Math.sqrt(q));
+      } else {
+        coverage = softTipCoverage(u, v, hardness);
+      }
       if (coverage <= 0) {
         continue;
       }
-      const lookup = rotateDabUV(u, v, tipAngle);
-      if (tip === "image" && tipImage !== null) {
-        coverage *= samplePaintTipAlpha(tipImage, lookup.u, lookup.v);
+      let lu = u;
+      let lv = v;
+      if (hasAngle) {
+        lu = u * cosA + v * sinA;
+        lv = v * cosA - u * sinA;
+      }
+      if (useImage && tipImage !== null) {
+        coverage *= samplePaintTipAlpha(tipImage, lu, lv);
         if (coverage <= 0) {
           continue;
         }
       }
-      if (jitter !== undefined) {
+      if (hasGrain && jitter !== undefined) {
         coverage *= paintGrainFactor(jitter, gx, gy);
         if (coverage <= 0) {
           continue;
         }
       }
-      coverage = applyPaintDualTip(coverage, dual ?? null, lookup.u, lookup.v);
-      if (coverage <= 0) {
-        continue;
+      if (hasDual && dualTip !== null) {
+        const sampled = samplePaintTipAlpha(dualTip, lu / dualScale, lv / dualScale);
+        coverage *= 1 - dualStrength * (1 - sampled);
+        if (coverage <= 0) {
+          continue;
+        }
       }
       blendPixelCoverage(buffer, width, height, gx, gy, dabColor, coverage * dabAlpha, locked, blend);
     }
@@ -295,16 +442,30 @@ export function stampPaintDabCoverage(
     return;
   }
   const radius = diameter / 2;
+  const radiusInv = radius > 1e-9 ? 1 / radius : 0;
   const reach = Math.ceil(radius) + 1;
   const minX = Math.floor(centerX - reach);
   const maxX = Math.ceil(centerX + reach);
   const minY = Math.floor(centerY - reach);
   const maxY = Math.ceil(centerY + reach);
+  const useImage = tip === "image";
+  const hasGrain = jitter !== undefined && clampPaintGrainStrength(jitter.grainStrength) > 0;
+  const hasDual = dual !== undefined && dual !== null;
+  const hasAngle = Math.abs(tipAngle) > 1e-9;
+  const cosA = hasAngle ? Math.cos(tipAngle) : 1;
+  const sinA = hasAngle ? Math.sin(tipAngle) : 0;
+  const hardClamped = clampBrushHardness(hardness);
+  const isHardDisk = !useImage && hardClamped >= 1 - 1e-9;
+  const lut = useImage || isHardDisk ? null : softCoverageLut(hardness);
+  const dualScale = hasDual && dual !== undefined && dual !== null ? clampPaintDualScale(dual.scale) : 1;
+  const dualStrength = hasDual && dual !== undefined && dual !== null ? clampPaintDualStrength(dual.strength) : 0;
+  const dualTip = hasDual && dual !== undefined && dual !== null ? dual.tip : null;
+  const useWrap = wrap !== "off";
   for (let y = minY; y <= maxY; y += 1) {
     for (let x = minX; x <= maxX; x += 1) {
       let gx = x;
       let gy = y;
-      if (wrap !== "off") {
+      if (useWrap) {
         const wrapped = wrapLayerPixel(x, y, width, height, wrap);
         if (wrapped === null) {
           continue;
@@ -314,28 +475,47 @@ export function stampPaintDabCoverage(
       } else if (x < 0 || x >= width || y < 0 || y >= height) {
         continue;
       }
-      const u = radius > 1e-9 ? (x + 0.5 - centerX) / radius : 0;
-      const v = radius > 1e-9 ? (y + 0.5 - centerY) / radius : 0;
-      let coverage = softTipCoverage(u, v, hardness);
+      const u = (x + 0.5 - centerX) * radiusInv;
+      const v = (y + 0.5 - centerY) * radiusInv;
+      const q = u * u + v * v;
+      if (!(q < 1)) {
+        continue;
+      }
+      let coverage: number;
+      if (isHardDisk) {
+        coverage = 1;
+      } else if (lut !== null) {
+        coverage = softLutCoverage(lut, Math.sqrt(q));
+      } else {
+        coverage = softTipCoverage(u, v, hardness);
+      }
       if (coverage <= 0) {
         continue;
       }
-      const lookup = rotateDabUV(u, v, tipAngle);
-      if (tip === "image" && tipImage !== null) {
-        coverage *= samplePaintTipAlpha(tipImage, lookup.u, lookup.v);
+      let lu = u;
+      let lv = v;
+      if (hasAngle) {
+        lu = u * cosA + v * sinA;
+        lv = v * cosA - u * sinA;
+      }
+      if (useImage && tipImage !== null) {
+        coverage *= samplePaintTipAlpha(tipImage, lu, lv);
         if (coverage <= 0) {
           continue;
         }
       }
-      if (jitter !== undefined) {
+      if (hasGrain && jitter !== undefined) {
         coverage *= paintGrainFactor(jitter, gx, gy);
         if (coverage <= 0) {
           continue;
         }
       }
-      coverage = applyPaintDualTip(coverage, dual ?? null, lookup.u, lookup.v);
-      if (coverage <= 0) {
-        continue;
+      if (hasDual && dualTip !== null) {
+        const sampled = samplePaintTipAlpha(dualTip, lu / dualScale, lv / dualScale);
+        coverage *= 1 - dualStrength * (1 - sampled);
+        if (coverage <= 0) {
+          continue;
+        }
       }
       const at = gy * width + gx;
       const stamped = Math.round(Math.min(1, coverage * alpha) * 255);

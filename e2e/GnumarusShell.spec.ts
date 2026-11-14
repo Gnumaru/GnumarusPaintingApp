@@ -14223,3 +14223,35 @@ test("image palette panel loads an image palette and picks from it @recent", asy
     return root.__gnumarus?.shell?.colorValue ?? "";
   })).toBe(await swatches.first().getAttribute("data-hex"));
 });
+
+test("large hard brush keeps V shape instead of collapsing to endpoints @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Pencil" }).click();
+  await loadTinyLayer(page, 64);
+  await setPencil(page, "#000000");
+  await page.locator("gnumarus-shell input#brushSize").fill("32");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const state = await getViewState(page);
+  const view = { zoom: state.zoom, panX: 0, panY: 0, rotation: state.rotation, flipX: false, flipY: false };
+  const layer = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 };
+  const rect = { left: box.x, top: box.y, width: box.width, height: box.height };
+  const at = (lx: number, ly: number): { x: number; y: number } =>
+    layerPixelToScreen(lx, ly, rect, 64, 64, view, layer);
+  const a = at(10, 10);
+  const b = at(32, 50);
+  const c = at(54, 10);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 12 });
+  await page.mouse.move(c.x, c.y, { steps: 12 });
+  await page.mouse.up();
+  // Joint of the V is painted: the stroke did not collapse to a straight A->C line.
+  expect(await readPixel(page, 32, 50)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 10, 10)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 54, 10)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+});

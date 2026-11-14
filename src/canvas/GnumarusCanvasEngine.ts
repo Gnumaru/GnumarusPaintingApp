@@ -77,6 +77,7 @@ import {
   type GnumarusBlendMode,
   type GnumarusBrushShape,
   type GnumarusChannelLock,
+  type GnumarusDabDirtyRect,
   type GnumarusLayerBlendMode,
   type GnumarusPressureResponse,
   type GnumarusRgba,
@@ -8979,6 +8980,12 @@ export class GnumarusCanvasEngine {
    * Repaint a texture from a base snapshot plus a coverage mask in one
    * uniform pass (non-accumulating strokes). The mask holds union coverage,
    * so overlapping dab regions are applied exactly once.
+   *
+   * With `dirty`, only that bounding box is restored from the base and
+   * repainted (idea from Krita's fixed-size dab device + dstDabRect): a
+   * 512px dab repaints ~0.3M px instead of the full 2M of a 1920x1080
+   * layer. Without it (wrap-around scatters pixels everywhere) the full
+   * layer is repainted as before.
    */
   private repaintFromMask(
     tex: { buffer: Uint8ClampedArray; width: number; height: number },
@@ -8986,15 +8993,66 @@ export class GnumarusCanvasEngine {
     mask: Uint8Array,
     locked: GnumarusChannelLock,
     color: GnumarusRgba,
+    dirty?: GnumarusDabDirtyRect | null,
   ): void {
-    tex.buffer.set(base);
-    applyCoverageMask(tex.buffer, mask, tex.width, tex.height, color, this.blendMode, locked);
+    if (dirty === undefined || dirty === null || this.wrapMode !== "off") {
+      tex.buffer.set(base);
+      applyCoverageMask(tex.buffer, mask, tex.width, tex.height, color, this.blendMode, locked);
+      return;
+    }
+    const x0 = Math.max(0, dirty.left);
+    const y0 = Math.max(0, dirty.top);
+    const x1 = Math.min(tex.width - 1, dirty.right - 1);
+    const y1 = Math.min(tex.height - 1, dirty.bottom - 1);
+    if (x1 < x0 || y1 < y0) {
+      return;
+    }
+    const rowBytes = (x1 - x0 + 1) * 4;
+    for (let y = y0; y <= y1; y += 1) {
+      const at = (y * tex.width + x0) * 4;
+      tex.buffer.set(base.subarray(at, at + rowBytes), at);
+    }
+    applyCoverageMask(tex.buffer, mask, tex.width, tex.height, color, this.blendMode, locked, {
+      left: x0,
+      top: y0,
+      width: x1 - x0 + 1,
+      height: y1 - y0 + 1,
+    });
+  }
+
+  /** Merge one dab bbox into a dirty union (null starts the box). */
+  private unionDabDirty(
+    acc: GnumarusDabDirtyRect | null,
+    centerX: number,
+    centerY: number,
+    radius: number,
+  ): GnumarusDabDirtyRect {
+    const reach = Math.ceil(radius) + 1;
+    const box: GnumarusDabDirtyRect = {
+      left: Math.floor(centerX - reach),
+      top: Math.floor(centerY - reach),
+      right: Math.ceil(centerX + reach) + 1,
+      bottom: Math.ceil(centerY + reach) + 1,
+    };
+    if (acc === null) {
+      return box;
+    }
+    return {
+      left: Math.min(acc.left, box.left),
+      top: Math.min(acc.top, box.top),
+      right: Math.max(acc.right, box.right),
+      bottom: Math.max(acc.bottom, box.bottom),
+    };
   }
 
   /**
    * Stamp one paint-mode dab at an absolute position with the current stroke
    * dynamics (fuzzy jitter, flow, speed fade, grain, dual tip, rotation).
    * Shared by spaced segments and timed airbrush ticks.
+   *
+   * When `batch` is provided (non-accumulating segment batching), the mask
+   * is stamped and the dab bbox merged into `batch.dirty` without repainting;
+   * the caller repaints once for the whole segment.
    */
   private stampPaintDabAt(
     tex: { buffer: Uint8ClampedArray; width: number; height: number },
@@ -9002,6 +9060,7 @@ export class GnumarusCanvasEngine {
     x: number,
     y: number,
     angle: number,
+    batch?: { dirty: GnumarusDabDirtyRect | null },
   ): void {
     const size = this.pressureBrushSize();
     const color = this.pressureBrushColor();
@@ -9030,7 +9089,12 @@ export class GnumarusCanvasEngine {
         this.brushTipKind, this.brushHardness, this.paintTipImage, dabAlpha, jitter, dual, tipAngle,
         this.wrapMode,
       );
-      this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked, color);
+      if (batch !== undefined) {
+        batch.dirty = this.unionDabDirty(batch.dirty, x + offset.x, y + offset.y, dabSize / 2);
+      } else {
+        const dirty = this.unionDabDirty(null, x + offset.x, y + offset.y, dabSize / 2);
+        this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked, color, dirty);
+      }
     } else {
       paintSoftDab(
         tex.buffer, tex.width, tex.height, x + offset.x, y + offset.y, dabSize,
@@ -9045,7 +9109,8 @@ export class GnumarusCanvasEngine {
    * Paint one paint-mode segment (`soft`/`image` tip kinds) with dab spacing.
    * Accumulating strokes stamp each dab onto the texture; non-accumulating
    * strokes build fractional coverage with max-union semantics and repaint
-   * once at the stroke opacity ceiling. Pixel tips never reach here.
+   * once at the stroke opacity ceiling (one repaint per segment over the
+   * dirty union, not one full-layer repaint per dab). Pixel tips never reach here.
    */
   private paintPaintSegment(
     tex: { buffer: Uint8ClampedArray; width: number; height: number },
@@ -9075,22 +9140,34 @@ export class GnumarusCanvasEngine {
       }
     }
     const baseAngle = this.strokeDabAngle;
+    const batching = !this.accumulate && this.strokeBase !== null && this.strokeMask !== null;
+    const batch: { dirty: GnumarusDabDirtyRect | null } = { dirty: null };
+    const stampOne = (px: number, py: number, angle: number): void => {
+      if (batching) {
+        this.stampPaintDabAt(tex, locked, px, py, angle, batch);
+      } else {
+        this.stampPaintDabAt(tex, locked, px, py, angle);
+      }
+    };
     for (const dab of positions) {
-      this.stampPaintDabAt(tex, locked, dab.x, dab.y, baseAngle);
+      stampOne(dab.x, dab.y, baseAngle);
       if (this.symmetryMode !== "off") {
         if (this.symmetryMode === "mirror-x" || this.symmetryMode === "both") {
           const mirrored = this.mirrorDabPoint(dab.x, dab.y, true, false);
-          this.stampPaintDabAt(tex, locked, mirrored.x, mirrored.y, Math.PI - baseAngle);
+          stampOne(mirrored.x, mirrored.y, Math.PI - baseAngle);
         }
         if (this.symmetryMode === "mirror-y" || this.symmetryMode === "both") {
           const mirrored = this.mirrorDabPoint(dab.x, dab.y, false, true);
-          this.stampPaintDabAt(tex, locked, mirrored.x, mirrored.y, -baseAngle);
+          stampOne(mirrored.x, mirrored.y, -baseAngle);
         }
         if (this.symmetryMode === "both") {
           const mirrored = this.mirrorDabPoint(dab.x, dab.y, true, true);
-          this.stampPaintDabAt(tex, locked, mirrored.x, mirrored.y, Math.PI + baseAngle);
+          stampOne(mirrored.x, mirrored.y, Math.PI + baseAngle);
         }
       }
+    }
+    if (batching && batch.dirty !== null && this.strokeBase !== null && this.strokeMask !== null) {
+      this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked, this.pressureBrushColor(), batch.dirty);
     }
   }
 
@@ -9155,7 +9232,13 @@ export class GnumarusCanvasEngine {
           }
           mask[y * tex.width + x] = 255;
         });
-        this.repaintFromMask(tex, base, mask, locked, color);
+        const dirty: GnumarusDabDirtyRect = {
+          left: Math.min(x0, x1) - 1,
+          top: Math.min(y0, y1) - 1,
+          right: Math.max(x0, x1) + 2,
+          bottom: Math.max(y0, y1) + 2,
+        };
+        this.repaintFromMask(tex, base, mask, locked, color, dirty);
         return;
       }
       if (this.accumulate && base !== null) {
@@ -9196,7 +9279,14 @@ export class GnumarusCanvasEngine {
         this.wrapMode,
         this.maxBrushSize,
       );
-      this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked, color);
+      const reach = (this.pencilAntialias ? size : Math.round(size)) / 2 + 1;
+      const dirty: GnumarusDabDirtyRect = {
+        left: Math.floor(Math.min(x0, x1) - reach),
+        top: Math.floor(Math.min(y0, y1) - reach),
+        right: Math.ceil(Math.max(x0, x1) + reach) + 1,
+        bottom: Math.ceil(Math.max(y0, y1) + reach) + 1,
+      };
+      this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked, color, dirty);
       return;
     }
     drawLineSegment(
@@ -9375,6 +9465,34 @@ export class GnumarusCanvasEngine {
     this.syncFloatingPlane();
     this.render();
     this.updatePreviews();
+  }
+
+  /**
+   * Coalesced pointer events for a move (idea from Krita's freehand
+   * helper, which interpolates through every tablet sample instead of
+   * just the last one): when the main thread blocks on a big dab, the
+   * browser coalesces intermediate moves; painting only the endpoints
+   * turns a fast "C" into a straight line. Walking every coalesced
+   * sample preserves the curvature.
+   */
+  private pencilCoalescedEvents(event: PointerEvent): PointerEvent[] {
+    try {
+      const get = event.getCoalescedEvents;
+      if (typeof get !== "function") {
+        return [event];
+      }
+      const list = get.call(event);
+      if (list.length === 0) {
+        return [event];
+      }
+      const last = list[list.length - 1];
+      if (last !== undefined && (last.clientX !== event.clientX || last.clientY !== event.clientY)) {
+        return [...list, event];
+      }
+      return list;
+    } catch {
+      return [event];
+    }
   }
 
   /**
@@ -11378,6 +11496,8 @@ export class GnumarusCanvasEngine {
           ? []
           : mirrorSegmentEndsOnAxis(qx0, qy0, qx1, qy1, this.symmetryCenter.x, this.symmetryCenter.y, this.symmetryMode)),
       ];
+      let dirty: GnumarusDabDirtyRect | null = null;
+      const reach = (this.pencilAntialias ? size : Math.round(size)) / 2 + 1;
       for (const end of ends) {
         stampSegmentCoverage(
           this.strokeMask,
@@ -11393,8 +11513,14 @@ export class GnumarusCanvasEngine {
           this.wrapMode,
           this.maxBrushSize,
         );
+        dirty = this.unionDabDirty(
+          this.unionDabDirty(dirty, end.x0, end.y0, reach),
+          end.x1,
+          end.y1,
+          reach,
+        );
       }
-      this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked, color);
+      this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked, color, dirty);
       return;
     }
     // The aliased rasterizer walks integer pixels with Bresenham and only
@@ -15423,8 +15549,13 @@ export class GnumarusCanvasEngine {
         return;
       }
       if (this.tool === "pencil" && this.stabilizerMode !== "none") {
-        const floatTarget = this.clientToLayerImageFloat(event.clientX, event.clientY);
-        if (floatTarget !== null) {
+        const subEvents = this.pencilCoalescedEvents(event);
+        let painted = false;
+        for (const sub of subEvents) {
+          const floatTarget = this.clientToLayerImageFloat(sub.clientX, sub.clientY);
+          if (floatTarget === null) {
+            continue;
+          }
           if (this.stabilizerPos === null) {
             this.stabilizerPos = { x: floatTarget.x, y: floatTarget.y };
             this.stabilizerTarget = { x: floatTarget.x, y: floatTarget.y };
@@ -15436,15 +15567,14 @@ export class GnumarusCanvasEngine {
               const prev = this.stabilizerPos;
               this.stabilizerPos = next;
               if (this.drawing && this.strokeLayerId !== null) {
-                this.strokePressure = normalizePointerPressure(event.pointerType, event.pressure);
-                this.trackStrokeMotion(event, { x: next.x, y: next.y });
+                this.strokePressure = normalizePointerPressure(sub.pointerType, sub.pressure);
+                this.trackStrokeMotion(sub, { x: next.x, y: next.y });
                 this.airbrushAt = { x: next.x, y: next.y };
                 const layer = this.activeLayer();
                 const tex = this.strokeLayerId === null ? undefined : this.textures.get(this.strokeLayerId);
                 if (layer !== null && tex !== undefined) {
                   this.paintStabilizedSegment(tex, layer.lockedChannels, prev, next);
-                  this.scheduleStrokeRender(tex.id);
-                  this.onPixelsChanged();
+                  painted = true;
                 }
               }
               this.updatePreviews();
@@ -15456,10 +15586,17 @@ export class GnumarusCanvasEngine {
             this.ensureFollowLoop();
           }
         }
+        if (painted && this.strokeLayerId !== null) {
+          const tex = this.textures.get(this.strokeLayerId);
+          if (tex !== undefined) {
+            this.scheduleStrokeRender(tex.id);
+            this.onPixelsChanged();
+          }
+        }
         this.emitStats();
         return;
       }
-      if (this.drawing && this.lastPixel !== null && pixel !== null) {
+      if (this.drawing && this.lastPixel !== null) {
         const layer = this.activeLayer();
         if (layer === null || this.strokeLayerId === null) {
           return;
@@ -15468,13 +15605,25 @@ export class GnumarusCanvasEngine {
         if (tex === undefined) {
           return;
         }
-        this.strokePressure = normalizePointerPressure(event.pointerType, event.pressure);
-        this.trackStrokeMotion(event, { x: pixel.x, y: pixel.y });
-        this.airbrushAt = { x: pixel.x, y: pixel.y };
-        this.paintPencilLine(tex, layer.lockedChannels, this.lastPixel.x, this.lastPixel.y, pixel.x, pixel.y);
-        this.lastPixel = pixel;
-        this.scheduleStrokeRender(tex.id);
-        this.onPixelsChanged();
+        let painted = false;
+        for (const sub of this.pencilCoalescedEvents(event)) {
+          const subPixel = usePaintMapping
+            ? this.toPaintPixel(sub.clientX, sub.clientY)
+            : this.toImagePixel(sub.clientX, sub.clientY);
+          if (subPixel === null) {
+            continue;
+          }
+          this.strokePressure = normalizePointerPressure(sub.pointerType, sub.pressure);
+          this.trackStrokeMotion(sub, { x: subPixel.x, y: subPixel.y });
+          this.airbrushAt = { x: subPixel.x, y: subPixel.y };
+          this.paintPencilLine(tex, layer.lockedChannels, this.lastPixel.x, this.lastPixel.y, subPixel.x, subPixel.y);
+          this.lastPixel = subPixel;
+          painted = true;
+        }
+        if (painted) {
+          this.scheduleStrokeRender(tex.id);
+          this.onPixelsChanged();
+        }
       }
       this.emitStats();
     });

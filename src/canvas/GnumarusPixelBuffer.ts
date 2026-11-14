@@ -650,23 +650,258 @@ export function drawBrushStamp(
 ): void {
   const tip = clampBrushSize(size, maxSize);
   const anchor = Math.floor((tip - 1) / 2);
-  const left = centerX - anchor;
-  const top = centerY - anchor;
-  if (shape === "square") {
+  const left = Math.round(centerX) - anchor;
+  const top = Math.round(centerY) - anchor;
+  if (wrap !== "off") {
+    if (shape === "square") {
+      for (let dy = 0; dy < tip; dy += 1) {
+        for (let dx = 0; dx < tip; dx += 1) {
+          setPixel(buffer, width, height, left + dx, top + dy, color, locked, blend, wrap);
+        }
+      }
+      return;
+    }
+    const centerW = (tip - 1) / 2;
+    const thresholdW = Math.max(0, (tip * tip) / 4 - 0.5);
     for (let dy = 0; dy < tip; dy += 1) {
       for (let dx = 0; dx < tip; dx += 1) {
-        setPixel(buffer, width, height, left + dx, top + dy, color, locked, blend, wrap);
+        const distSquared = (dx - centerW) * (dx - centerW) + (dy - centerW) * (dy - centerW);
+        if (distSquared <= thresholdW + 1e-9) {
+          setPixel(buffer, width, height, left + dx, top + dy, color, locked, blend, wrap);
+        }
+      }
+    }
+    return;
+  }
+  const r = color.r | 0;
+  const g = color.g | 0;
+  const b = color.b | 0;
+  const a = color.a | 0;
+  const unlocked = locked === undefined || areAllChannelsUnlocked(locked);
+  const lockR = !unlocked && locked !== undefined && locked.r === true;
+  const lockG = !unlocked && locked !== undefined && locked.g === true;
+  const lockB = !unlocked && locked !== undefined && locked.b === true;
+  const lockA = !unlocked && locked !== undefined && locked.a === true;
+  if (blend === "eraser") {
+    if (lockA) {
+      return;
+    }
+    if (shape === "square") {
+      const x0 = Math.max(0, left);
+      const x1 = Math.min(width - 1, left + tip - 1);
+      const y0 = Math.max(0, top);
+      const y1 = Math.min(height - 1, top + tip - 1);
+      for (let y = y0; y <= y1; y += 1) {
+        const row = y * width * 4;
+        for (let x = x0; x <= x1; x += 1) {
+          const i = row + x * 4;
+          buffer[i + 3] = Math.max(0, Math.round((buffer[i + 3] ?? 0) - a));
+        }
+      }
+      return;
+    }
+    const centerE = (tip - 1) / 2;
+    const thresholdE = Math.max(0, (tip * tip) / 4 - 0.5);
+    const x0e = Math.max(0, left);
+    const x1e = Math.min(width - 1, left + tip - 1);
+    const y0e = Math.max(0, top);
+    const y1e = Math.min(height - 1, top + tip - 1);
+    for (let y = y0e; y <= y1e; y += 1) {
+      const dy = y - top - centerE;
+      const row = y * width * 4;
+      for (let x = x0e; x <= x1e; x += 1) {
+        const dx = x - left - centerE;
+        if (dx * dx + dy * dy > thresholdE + 1e-9) {
+          continue;
+        }
+        const i = row + x * 4;
+        buffer[i + 3] = Math.max(0, Math.round((buffer[i + 3] ?? 0) - a));
+      }
+    }
+    return;
+  }
+  if (blend === "copy") {
+    if (shape === "square") {
+      const x0 = Math.max(0, left);
+      const x1 = Math.min(width - 1, left + tip - 1);
+      const y0 = Math.max(0, top);
+      const y1 = Math.min(height - 1, top + tip - 1);
+      for (let y = y0; y <= y1; y += 1) {
+        const row = y * width * 4;
+        for (let x = x0; x <= x1; x += 1) {
+          const i = row + x * 4;
+          if (unlocked) {
+            buffer[i] = r;
+            buffer[i + 1] = g;
+            buffer[i + 2] = b;
+            buffer[i + 3] = a;
+          } else {
+            if (!lockR) {
+              buffer[i] = r;
+            }
+            if (!lockG) {
+              buffer[i + 1] = g;
+            }
+            if (!lockB) {
+              buffer[i + 2] = b;
+            }
+            if (!lockA) {
+              buffer[i + 3] = a;
+            }
+          }
+        }
+      }
+      return;
+    }
+    const centerC = (tip - 1) / 2;
+    const thresholdC = Math.max(0, (tip * tip) / 4 - 0.5);
+    const x0c = Math.max(0, left);
+    const x1c = Math.min(width - 1, left + tip - 1);
+    const y0c = Math.max(0, top);
+    const y1c = Math.min(height - 1, top + tip - 1);
+    for (let y = y0c; y <= y1c; y += 1) {
+      const dy = y - top - centerC;
+      const row = y * width * 4;
+      for (let x = x0c; x <= x1c; x += 1) {
+        const dx = x - left - centerC;
+        if (dx * dx + dy * dy > thresholdC + 1e-9) {
+          continue;
+        }
+        const i = row + x * 4;
+        if (unlocked) {
+          buffer[i] = r;
+          buffer[i + 1] = g;
+          buffer[i + 2] = b;
+          buffer[i + 3] = a;
+        } else {
+          if (!lockR) {
+            buffer[i] = r;
+          }
+          if (!lockG) {
+            buffer[i + 1] = g;
+          }
+          if (!lockB) {
+            buffer[i + 2] = b;
+          }
+          if (!lockA) {
+            buffer[i + 3] = a;
+          }
+        }
+      }
+    }
+    return;
+  }
+  const srcA = a / 255;
+  if (!(srcA > 0)) {
+    return;
+  }
+  const invSrcA = 1 - srcA;
+  if (shape === "square") {
+    const x0 = Math.max(0, left);
+    const x1 = Math.min(width - 1, left + tip - 1);
+    const y0 = Math.max(0, top);
+    const y1 = Math.min(height - 1, top + tip - 1);
+    if (unlocked) {
+      for (let y = y0; y <= y1; y += 1) {
+        const row = y * width * 4;
+        for (let x = x0; x <= x1; x += 1) {
+          const i = row + x * 4;
+          const dstA = (buffer[i + 3] ?? 0) / 255;
+          const outA = srcA + dstA * invSrcA;
+          if (!(outA > 0)) {
+            continue;
+          }
+          const inv = dstA * invSrcA;
+          buffer[i] = Math.round((r * srcA + (buffer[i] ?? 0) * inv) / outA);
+          buffer[i + 1] = Math.round((g * srcA + (buffer[i + 1] ?? 0) * inv) / outA);
+          buffer[i + 2] = Math.round((b * srcA + (buffer[i + 2] ?? 0) * inv) / outA);
+          buffer[i + 3] = Math.round(outA * 255);
+        }
+      }
+      return;
+    }
+    for (let y = y0; y <= y1; y += 1) {
+      const row = y * width * 4;
+      for (let x = x0; x <= x1; x += 1) {
+        const i = row + x * 4;
+        const dstA = (buffer[i + 3] ?? 0) / 255;
+        const outA = srcA + dstA * invSrcA;
+        if (!(outA > 0)) {
+          continue;
+        }
+        const inv = dstA * invSrcA;
+        if (!lockR) {
+          buffer[i] = Math.round((r * srcA + (buffer[i] ?? 0) * inv) / outA);
+        }
+        if (!lockG) {
+          buffer[i + 1] = Math.round((g * srcA + (buffer[i + 1] ?? 0) * inv) / outA);
+        }
+        if (!lockB) {
+          buffer[i + 2] = Math.round((b * srcA + (buffer[i + 2] ?? 0) * inv) / outA);
+        }
+        if (!lockA) {
+          buffer[i + 3] = Math.round(outA * 255);
+        }
       }
     }
     return;
   }
   const center = (tip - 1) / 2;
   const threshold = Math.max(0, (tip * tip) / 4 - 0.5);
-  for (let dy = 0; dy < tip; dy += 1) {
-    for (let dx = 0; dx < tip; dx += 1) {
-      const distSquared = (dx - center) * (dx - center) + (dy - center) * (dy - center);
-      if (distSquared <= threshold + 1e-9) {
-        setPixel(buffer, width, height, left + dx, top + dy, color, locked, blend, wrap);
+  const x0 = Math.max(0, left);
+  const x1 = Math.min(width - 1, left + tip - 1);
+  const y0 = Math.max(0, top);
+  const y1 = Math.min(height - 1, top + tip - 1);
+  if (unlocked) {
+    for (let y = y0; y <= y1; y += 1) {
+      const dy = y - top - center;
+      const row = y * width * 4;
+      for (let x = x0; x <= x1; x += 1) {
+        const dx = x - left - center;
+        if (dx * dx + dy * dy > threshold + 1e-9) {
+          continue;
+        }
+        const i = row + x * 4;
+        const dstA = (buffer[i + 3] ?? 0) / 255;
+        const outA = srcA + dstA * invSrcA;
+        if (!(outA > 0)) {
+          continue;
+        }
+        const inv = dstA * invSrcA;
+        buffer[i] = Math.round((r * srcA + (buffer[i] ?? 0) * inv) / outA);
+        buffer[i + 1] = Math.round((g * srcA + (buffer[i + 1] ?? 0) * inv) / outA);
+        buffer[i + 2] = Math.round((b * srcA + (buffer[i + 2] ?? 0) * inv) / outA);
+        buffer[i + 3] = Math.round(outA * 255);
+      }
+    }
+    return;
+  }
+  for (let y = y0; y <= y1; y += 1) {
+    const dy = y - top - center;
+    const row = y * width * 4;
+    for (let x = x0; x <= x1; x += 1) {
+      const dx = x - left - center;
+      if (dx * dx + dy * dy > threshold + 1e-9) {
+        continue;
+      }
+      const i = row + x * 4;
+      const dstA = (buffer[i + 3] ?? 0) / 255;
+      const outA = srcA + dstA * invSrcA;
+      if (!(outA > 0)) {
+        continue;
+      }
+      const inv = dstA * invSrcA;
+      if (!lockR) {
+        buffer[i] = Math.round((r * srcA + (buffer[i] ?? 0) * inv) / outA);
+      }
+      if (!lockG) {
+        buffer[i + 1] = Math.round((g * srcA + (buffer[i + 1] ?? 0) * inv) / outA);
+      }
+      if (!lockB) {
+        buffer[i + 2] = Math.round((b * srcA + (buffer[i + 2] ?? 0) * inv) / outA);
+      }
+      if (!lockA) {
+        buffer[i + 3] = Math.round(outA * 255);
       }
     }
   }
@@ -675,6 +910,11 @@ export function drawBrushStamp(
 /**
  * Brush stroke along a Bresenham path, stamping the tip at every path pixel.
  * Preserves the 1px pencil path exactly when size is 1 (either shape).
+ *
+ * Distance-based dab spacing (idea from Krita's effectiveSpacing): large tips
+ * are stamped every `tip * 0.15` px along the path instead of at every pixel,
+ * so a 512px tip over 200px needs ~3 stamps instead of ~200 overlapping ones.
+ * Small tips (step < 1) keep the legacy per-pixel behavior bit-for-bit.
  */
 export function drawBrushLine(
   buffer: Uint8ClampedArray,
@@ -697,6 +937,9 @@ export function drawBrushLine(
     drawPixelLine(buffer, width, height, x0, y0, x1, y1, color, locked, blend, wrap);
     return;
   }
+  const step = tip * 0.15;
+  const stepSquared = step * step;
+  const useSpacing = stepSquared > 1;
   let x = x0;
   let y = y0;
   const dx = Math.abs(x1 - x0);
@@ -704,8 +947,28 @@ export function drawBrushLine(
   const sx = x0 < x1 ? 1 : -1;
   const sy = y0 < y1 ? 1 : -1;
   let err = dx - dy;
+  if (!useSpacing) {
+    for (;;) {
+      drawBrushStamp(buffer, width, height, x, y, tip, shape, color, locked, blend, wrap, maxSize);
+      if (x === x1 && y === y1) {
+        break;
+      }
+      const e2 = 2 * err;
+      if (e2 > -dy) {
+        err -= dy;
+        x += sx;
+      }
+      if (e2 < dx) {
+        err += dx;
+        y += sy;
+      }
+    }
+    return;
+  }
+  let lastX = x0;
+  let lastY = y0;
+  drawBrushStamp(buffer, width, height, x0, y0, tip, shape, color, locked, blend, wrap, maxSize);
   for (;;) {
-    drawBrushStamp(buffer, width, height, x, y, tip, shape, color, locked, blend, wrap, maxSize);
     if (x === x1 && y === y1) {
       break;
     }
@@ -718,6 +981,21 @@ export function drawBrushLine(
       err += dx;
       y += sy;
     }
+    if (x === x1 && y === y1) {
+      break;
+    }
+    const ddx = x - lastX;
+    const ddy = y - lastY;
+    if (ddx * ddx + ddy * ddy >= stepSquared) {
+      drawBrushStamp(buffer, width, height, x, y, tip, shape, color, locked, blend, wrap, maxSize);
+      lastX = x;
+      lastY = y;
+    }
+  }
+  const edx = x1 - lastX;
+  const edy = y1 - lastY;
+  if (edx !== 0 || edy !== 0) {
+    drawBrushStamp(buffer, width, height, x1, y1, tip, shape, color, locked, blend, wrap, maxSize);
   }
 }
 
@@ -1004,37 +1282,66 @@ function stampDotCoverage(
   const anchor = Math.floor((tip - 1) / 2);
   const left = Math.round(centerX) - anchor;
   const top = Math.round(centerY) - anchor;
-  const stamp = (x: number, y: number): void => {
-    if (wrap !== "off") {
+  if (wrap !== "off") {
+    const stamp = (x: number, y: number): void => {
       const wrapped = wrapLayerPixel(x, y, width, height, wrap);
       if (wrapped === null) {
         return;
       }
       mask[wrapped.y * width + wrapped.x] = 255;
+    };
+    if (shape === "square") {
+      for (let dy = 0; dy < tip; dy += 1) {
+        for (let dx = 0; dx < tip; dx += 1) {
+          stamp(left + dx, top + dy);
+        }
+      }
       return;
     }
-    if (x < 0 || y < 0 || x >= width || y >= height) {
-      return;
-    }
-    mask[y * width + x] = 255;
-  };
-  if (shape === "square") {
+    const centerW = (tip - 1) / 2;
+    const thresholdW = Math.max(0, (tip * tip) / 4 - 0.5);
     for (let dy = 0; dy < tip; dy += 1) {
       for (let dx = 0; dx < tip; dx += 1) {
-        stamp(left + dx, top + dy);
+        const distSquared = (dx - centerW) * (dx - centerW) + (dy - centerW) * (dy - centerW);
+        if (distSquared <= thresholdW + 1e-9) {
+          stamp(left + dx, top + dy);
+        }
       }
+    }
+    return;
+  }
+  if (shape === "square") {
+    const x0 = Math.max(0, left);
+    const x1 = Math.min(width - 1, left + tip - 1);
+    const y0 = Math.max(0, top);
+    const y1 = Math.min(height - 1, top + tip - 1);
+    if (x1 < x0 || y1 < y0) {
+      return;
+    }
+    for (let y = y0; y <= y1; y += 1) {
+      mask.fill(255, y * width + x0, y * width + x1 + 1);
     }
     return;
   }
   const center = (tip - 1) / 2;
   const threshold = Math.max(0, (tip * tip) / 4 - 0.5);
   for (let dy = 0; dy < tip; dy += 1) {
-    for (let dx = 0; dx < tip; dx += 1) {
-      const distSquared = (dx - center) * (dx - center) + (dy - center) * (dy - center);
-      if (distSquared <= threshold + 1e-9) {
-        stamp(left + dx, top + dy);
-      }
+    const y = top + dy;
+    if (y < 0 || y >= height) {
+      continue;
     }
+    const dyC = dy - center;
+    const remaining = threshold - dyC * dyC;
+    if (remaining < -1e-9) {
+      continue;
+    }
+    const extent = Math.floor(Math.sqrt(Math.max(0, remaining + 1e-9)));
+    const x0 = Math.max(0, left + Math.ceil(center - extent));
+    const x1 = Math.min(width - 1, left + Math.floor(center + extent));
+    if (x1 < x0) {
+      continue;
+    }
+    mask.fill(255, y * width + x0, y * width + x1 + 1);
   }
 }
 
@@ -1111,13 +1418,42 @@ export function stampSegmentCoverage(
       }
       return;
     }
+    // Distance-based dab spacing for large tips (same idea as drawBrushLine):
+    // stamp every tip*0.15 px so a 512px tip needs a handful of stamps.
+    const step = thick * 0.15;
+    const stepSquared = step * step;
+    if (!(stepSquared > 1)) {
+      const dx = Math.abs(endX - x);
+      const dy = Math.abs(endY - y);
+      const sx = x < endX ? 1 : -1;
+      const sy = y < endY ? 1 : -1;
+      let err = dx - dy;
+      for (;;) {
+        stampDotCoverage(mask, width, height, x, y, thick, shape, wrap);
+        if (x === endX && y === endY) {
+          break;
+        }
+        const e2 = 2 * err;
+        if (e2 > -dy) {
+          err -= dy;
+          x += sx;
+        }
+        if (e2 < dx) {
+          err += dx;
+          y += sy;
+        }
+      }
+      return;
+    }
+    stampDotCoverage(mask, width, height, x, y, thick, shape, wrap);
+    let lastX = x;
+    let lastY = y;
     const dx = Math.abs(endX - x);
     const dy = Math.abs(endY - y);
     const sx = x < endX ? 1 : -1;
     const sy = y < endY ? 1 : -1;
     let err = dx - dy;
     for (;;) {
-      stampDotCoverage(mask, width, height, x, y, thick, shape, wrap);
       if (x === endX && y === endY) {
         break;
       }
@@ -1130,6 +1466,19 @@ export function stampSegmentCoverage(
         err += dx;
         y += sy;
       }
+      if (x === endX && y === endY) {
+        break;
+      }
+      const ddx = x - lastX;
+      const ddy = y - lastY;
+      if (ddx * ddx + ddy * ddy >= stepSquared) {
+        stampDotCoverage(mask, width, height, x, y, thick, shape, wrap);
+        lastX = x;
+        lastY = y;
+      }
+    }
+    if (lastX !== endX || lastY !== endY) {
+      stampDotCoverage(mask, width, height, endX, endY, thick, shape, wrap);
     }
     return;
   }
@@ -1194,6 +1543,12 @@ export function drawCubicBezierCoverage(
  * Apply a byte coverage mask to a pixel buffer in one uniform pass using the
  * given blend mode (mask 255 = full application). Used for non-accumulating
  * strokes: the shape is built up with max-union coverage, then applied once.
+ *
+ * The optional `rect` limits the scan to a dirty bounding box
+ * (`{ left, top, width, height }` in pixels); pixels outside keep their
+ * current values. Callers track the union of dab bboxes so a 512px dab on a
+ * 1920x1080 layer scans ~0.3M px instead of ~2M (idea from Krita's
+ * fixed-size dab device + dstDabRect).
  */
 export function applyCoverageMask(
   buffer: Uint8ClampedArray,
@@ -1203,8 +1558,29 @@ export function applyCoverageMask(
   color: GnumarusRgba,
   blend: GnumarusBlendMode,
   locked: GnumarusChannelLock | undefined = undefined,
+  rect?: { left: number; top: number; width: number; height: number },
 ): void {
   if (mask.length !== width * height || buffer.length !== width * height * 4) {
+    return;
+  }
+  if (rect !== undefined) {
+    const rx0 = Math.max(0, Math.floor(rect.left));
+    const ry0 = Math.max(0, Math.floor(rect.top));
+    const rx1 = Math.min(width - 1, Math.ceil(rect.left + rect.width - 1));
+    const ry1 = Math.min(height - 1, Math.ceil(rect.top + rect.height - 1));
+    if (rx1 < rx0 || ry1 < ry0) {
+      return;
+    }
+    for (let y = ry0; y <= ry1; y += 1) {
+      const row = y * width;
+      for (let x = rx0; x <= rx1; x += 1) {
+        const m = mask[row + x];
+        if (m === undefined || m <= 0) {
+          continue;
+        }
+        blendPixelCoverage(buffer, width, height, x, y, color, m / 255, locked, blend);
+      }
+    }
     return;
   }
   for (let y = 0; y < height; y += 1) {
@@ -1216,6 +1592,39 @@ export function applyCoverageMask(
       blendPixelCoverage(buffer, width, height, x, y, color, m / 255, locked, blend);
     }
   }
+}
+
+/** Dirty bounding box of one dab (inclusive min, exclusive max), clamped later. */
+export interface GnumarusDabDirtyRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/** Union `add` into `acc` (null starts the box). Returns the merged box. */
+export function unionDabRect(
+  acc: GnumarusDabDirtyRect | null,
+  centerX: number,
+  centerY: number,
+  radius: number,
+): GnumarusDabDirtyRect {
+  const reach = Math.ceil(radius) + 1;
+  const box: GnumarusDabDirtyRect = {
+    left: Math.floor(centerX - reach),
+    top: Math.floor(centerY - reach),
+    right: Math.ceil(centerX + reach) + 1,
+    bottom: Math.ceil(centerY + reach) + 1,
+  };
+  if (acc === null) {
+    return box;
+  }
+  return {
+    left: Math.min(acc.left, box.left),
+    top: Math.min(acc.top, box.top),
+    right: Math.max(acc.right, box.right),
+    bottom: Math.max(acc.bottom, box.bottom),
+  };
 }
 
 /** Per-pixel layer blend composite: blended color source-over the backdrop. */
