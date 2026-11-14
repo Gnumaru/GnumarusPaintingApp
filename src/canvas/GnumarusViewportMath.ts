@@ -643,6 +643,47 @@ export function rotatedBounds(width: number, height: number, rotation: number): 
   };
 }
 
+/**
+ * Outward-snapped union of a texture rect with a transformed content box,
+ * so merged selections are never clipped: e.g. a 100x100 square rotated
+ * 45 degrees needs a 142x142 texture (the diagonal length, rounded up).
+ * Returns null when the content already fits (nothing to do) or when the
+ * union would exceed maxDim (the caller falls back to a clipped merge).
+ */
+export function growTextureBoxForPlacement(
+  texWidth: number,
+  texHeight: number,
+  box: { minX: number; minY: number; maxX: number; maxY: number },
+  maxDim: number,
+): GnumarusCropBox | null {
+  if (
+    !Number.isInteger(texWidth) ||
+    texWidth < 1 ||
+    !Number.isInteger(texHeight) ||
+    texHeight < 1 ||
+    !Number.isFinite(box.minX) ||
+    !Number.isFinite(box.minY) ||
+    !Number.isFinite(box.maxX) ||
+    !Number.isFinite(box.maxY) ||
+    !Number.isFinite(maxDim)
+  ) {
+    return null;
+  }
+  const left = Math.min(0, Math.floor(box.minX));
+  const top = Math.min(0, Math.floor(box.minY));
+  const right = Math.max(texWidth, Math.ceil(box.maxX));
+  const bottom = Math.max(texHeight, Math.ceil(box.maxY));
+  if (left === 0 && top === 0 && right === texWidth && bottom === texHeight) {
+    return null;
+  }
+  const width = right - left;
+  const height = bottom - top;
+  if (!(width >= 1) || !(height >= 1) || width > maxDim || height > maxDim) {
+    return null;
+  }
+  return { left, top, width, height };
+}
+
 /** Visible client rectangle of a scroll container (CSS px, viewport space). */
 export interface GnumarusScrollView {
   left: number;

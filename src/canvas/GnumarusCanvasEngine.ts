@@ -195,6 +195,7 @@ import {
   canvasResizeTextureBox,
   canvasVisibleTextureBox,
   clampCropBoxToMin1,
+  growTextureBoxForPlacement,
   GNUMARUS_MAX_LAYER_SKEW,
   IDENTITY_LAYER_TRANSFORM,
   layerImageToProject,
@@ -11118,15 +11119,92 @@ export class GnumarusCanvasEngine {
       return false;
     }
     const box = selectionCornerBox(placement);
-    const minX = Math.max(0, Math.floor(box.minX));
-    const minY = Math.max(0, Math.floor(box.minY));
-    const maxX = Math.min(tex.width, Math.ceil(box.maxX));
-    const maxY = Math.min(tex.height, Math.ceil(box.maxY));
-    if (minX >= maxX || minY >= maxY) {
+    // Union of the home texture with the transformed content: the texture
+    // grows (never shrinks) so nothing transformed is clipped. A 100x100
+    // square rotated 45 degrees merges into a 142x142 texture (the
+    // diagonal length, rounded up).
+    const growBox = growTextureBoxForPlacement(tex.width, tex.height, box, GNUMARUS_MAX_TEXTURE_DIM);
+    if (growBox === null) {
+      // Fits as-is (or is too large to grow): legacy in-place clipped merge.
+      return this.mergeFloatingInPlace(floating, tex, placement);
+    }
+    const left = growBox.left;
+    const top = growBox.top;
+    // Shift the placement into grown-texture coordinates, then expand the
+    // home texture around the old pixels (transparent padding).
+    floating.cx -= left;
+    floating.cy -= top;
+    const record = this.cropTextureToBox(floating.textureId, tex, growBox);
+    if (record === null) {
+      floating.cx += left;
+      floating.cy += top;
       return false;
     }
-    const base = tex.buffer.slice();
+    const grownPlacement = this.floatingPlacement(floating);
+    const grownBox = selectionCornerBox(grownPlacement);
+    const painted = this.mergeFloatingIntoTexture(
+      tex,
+      floating,
+      grownPlacement,
+      Math.max(0, Math.floor(grownBox.minX)),
+      Math.max(0, Math.floor(grownBox.minY)),
+      Math.min(tex.width, Math.ceil(grownBox.maxX)),
+      Math.min(tex.height, Math.ceil(grownBox.maxY)),
+    );
+    if (!painted) {
+      // Practically unreachable (non-empty mask over a non-degenerate
+      // placement always hits): roll the expansion back without history.
+      const rollback = new Uint8ClampedArray(record.beforeBuffer);
+      if (this.setTexturePixels(floating.textureId, record.beforeWidth, record.beforeHeight, rollback)) {
+        for (const entry of record.transforms) {
+          const content = this.contents.get(entry.contentId);
+          if (content !== undefined) {
+            content.transform = { ...entry.before };
+          }
+        }
+      }
+      floating.cx += left;
+      floating.cy += top;
+      this.syncAllLayerRenders();
+      return false;
+    }
+    record.afterBuffer = tex.buffer.slice();
+    this.floating = null;
+    // Live adjust sessions target the floating content: merging it bakes
+    // the previewed pixels, so the sessions end here (no separate history).
+    this.bcSession = null;
+    this.hsSession = null;
+    this.clearTransformGestures();
+    this.disposeFloatingPlane();
+    this.pushHistory({ type: "fit", fit: record });
+    this.markTextureViewsDirty(tex.id);
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  /**
+   * Paint the floating content into a texture over an integer box (already
+   * clipped to the texture), sampling through `placement` with nearest
+   * sampling and a tie epsilon, masked by the selection mask. Returns true
+   * when at least one masked pixel was visited.
+   */
+  private mergeFloatingIntoTexture(
+    tex: { buffer: Uint8ClampedArray; width: number; height: number },
+    floating: GnumarusFloatingSelection,
+    placement: GnumarusSelectionPlacement,
+    minX: number,
+    minY: number,
+    maxX: number,
+    maxY: number,
+  ): boolean {
     const epsilon = 1e-6;
+    let painted = false;
     for (let dy = minY; dy < maxY; dy += 1) {
       for (let dx = minX; dx < maxX; dx += 1) {
         const local = inverseSelectionPoint(placement, dx + 0.5, dy + 0.5);
@@ -11142,6 +11220,7 @@ export class GnumarusCanvasEngine {
         if (maskValue === 0) {
           continue;
         }
+        painted = true;
         const source = (sy * floating.width + sx) * 4;
         const dest = (dy * tex.width + dx) * 4;
         if (maskValue >= 255) {
@@ -11159,6 +11238,30 @@ export class GnumarusCanvasEngine {
         tex.buffer[dest + 3] = Math.round((floating.buffer[source + 3] as number) * alpha + (tex.buffer[dest + 3] as number) * inv);
       }
     }
+    return painted;
+  }
+
+  /**
+   * Legacy in-place merge: paints the floating content clipped to the
+   * current texture bounds (used when nothing sticks out, or when the
+   * grown texture would exceed the texture cap). Single undoable stroke
+   * entry. Returns false when nothing was merged.
+   */
+  private mergeFloatingInPlace(
+    floating: GnumarusFloatingSelection,
+    tex: { id: string; buffer: Uint8ClampedArray; width: number; height: number },
+    placement: GnumarusSelectionPlacement,
+  ): boolean {
+    const box = selectionCornerBox(placement);
+    const minX = Math.max(0, Math.floor(box.minX));
+    const minY = Math.max(0, Math.floor(box.minY));
+    const maxX = Math.min(tex.width, Math.ceil(box.maxX));
+    const maxY = Math.min(tex.height, Math.ceil(box.maxY));
+    if (minX >= maxX || minY >= maxY) {
+      return false;
+    }
+    const base = tex.buffer.slice();
+    this.mergeFloatingIntoTexture(tex, floating, placement, minX, minY, maxX, maxY);
     this.floating = null;
     // Live adjust sessions target the floating content: merging it bakes
     // the previewed pixels, so the sessions end here (no separate history).

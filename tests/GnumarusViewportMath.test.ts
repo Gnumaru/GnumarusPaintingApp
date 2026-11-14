@@ -7,6 +7,7 @@ import {
   clampZoom,
   clipSegmentToRect,
   constrainSquareDrag,
+  growTextureBoxForPlacement,
   imageToScreenPixel,
   layerImageToProject,
   layerLinearMatrix,
@@ -153,6 +154,40 @@ describe("GnumarusViewportMath", () => {  it("maps the container center to the i
     expect(diagonal.height).toBeCloseTo(64 * Math.SQRT2, 8);
     // Sign of rotation does not matter for the bbox.
     expect(rotatedBounds(64, 32, -Math.PI / 2)).toEqual(quarter);
+  });
+
+  it("grows textures to fit transformed selections", () => {
+    // A centered 100x100 square rotated 45 degrees spans the diagonal.
+    const h = 50 * Math.SQRT2;
+    expect(growTextureBoxForPlacement(100, 100, { minX: 50 - h, minY: 50 - h, maxX: 50 + h, maxY: 50 + h }, 4096)).toEqual({
+      left: -21,
+      top: -21,
+      width: 142,
+      height: 142,
+    });
+    // Content inside the texture needs no growth.
+    expect(growTextureBoxForPlacement(100, 100, { minX: 10, minY: 10, maxX: 90, maxY: 90 }, 4096)).toBeNull();
+    expect(growTextureBoxForPlacement(100, 100, { minX: 0, minY: 0, maxX: 100, maxY: 100 }, 4096)).toBeNull();
+    // Overflow on one side grows only that side.
+    expect(growTextureBoxForPlacement(100, 100, { minX: 0, minY: 0, maxX: 120, maxY: 110 }, 4096)).toEqual({
+      left: 0,
+      top: 0,
+      width: 120,
+      height: 110,
+    });
+    // Negative origins use whole pixels outward.
+    expect(growTextureBoxForPlacement(100, 100, { minX: -5.5, minY: 10, maxX: 50, maxY: 50 }, 4096)).toEqual({
+      left: -6,
+      top: 0,
+      width: 106,
+      height: 100,
+    });
+    // Over the cap: fall back to a clipped in-place merge.
+    expect(growTextureBoxForPlacement(100, 100, { minX: -5000, minY: 0, maxX: 100, maxY: 100 }, 4096)).toBeNull();
+    expect(growTextureBoxForPlacement(10, 10, { minX: -1, minY: -1, maxX: 11, maxY: 11 }, 11)).toBeNull();
+    // Invalid inputs never grow.
+    expect(growTextureBoxForPlacement(0, 100, { minX: -1, minY: 0, maxX: 10, maxY: 10 }, 4096)).toBeNull();
+    expect(growTextureBoxForPlacement(100, 100, { minX: Number.NaN, minY: 0, maxX: 10, maxY: 10 }, 4096)).toBeNull();
   });
 
   it("scales layer images about the layer center", () => {

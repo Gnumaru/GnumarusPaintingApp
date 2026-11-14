@@ -13230,6 +13230,42 @@ test("hue/saturation OK on a floating selection merges adjusted colors @recent",
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
 });
 
+test("destructive transform merge grows the texture to fit @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await paintLayerRect(page, "#ff0000", 0, 0, 63, 63);
+  await selectTool(page, "Rectangular selection");
+  await dragRect(page, 8, 8, 55, 55);
+  expect(await getFloatingSelection(page)).toEqual({ x: 8, y: 8, width: 48, height: 48, selected: 2304 });
+  // Rotate the floating square exactly 45 degrees about its center.
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: { floating: { rotation: number } | null };
+      };
+    };
+    const engine = root.__gnumarus?.engine as { floating: { rotation: number } | null } | undefined;
+    if (engine === undefined || engine.floating === null) {
+      throw new Error("no floating selection");
+    }
+    engine.floating.rotation = Math.PI / 4;
+  });
+  await selectTool(page, "Destructive selection transform");
+  await page.getByRole("button", { name: "Commit selection" }).click();
+  // A 48x48 square rotated 45 degrees spans ~67.9px: the texture grows
+  // from 64x64 to 68x68 instead of clipping the corners.
+  expect(await layerSize(page)).toEqual({ width: 68, height: 68 });
+  expect(await getFloatingSelection(page)).toBeNull();
+  expect(await readPixel(page, 34, 34)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  // One undo restores the pre-merge texture and its size.
+  await page.keyboard.press("Control+z");
+  expect(await layerSize(page)).toEqual({ width: 64, height: 64 });
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 4, 4)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
 test("adjust hue/saturation proportional mode and manual inputs @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
