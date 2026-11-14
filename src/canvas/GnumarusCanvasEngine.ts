@@ -203,6 +203,7 @@ import {
   layerPixelCenterToProject,
   layerRotate3,
   normalizeRotation,
+  proportionalResizeScale,
   projectToLayerImageFloat,
   projectToLayerPixel,
   projectToScreen,
@@ -10338,8 +10339,8 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
-  /** Advance an in-progress resize/rotate/skew gesture from the cursor. */
-  private updateTransformGesture(clientX: number, clientY: number): void {
+  /** Advance an in-progress resize/rotate/skew gesture from the cursor. Alt locks resize to a uniform scale. */
+  private updateTransformGesture(clientX: number, clientY: number, proportional: boolean): void {
     const floating = this.floating;
     if (floating === null || !floating.active || !this.floatingHomeVisible()) {
       this.resizeDrag = null;
@@ -10402,6 +10403,18 @@ export class GnumarusCanvasEngine {
         if (Math.abs(denomY) > 1e-9) {
           scaleY = gesture.startScaleY * (local.y - halfH - anchorCY) / denomY;
         }
+      }
+      if (proportional) {
+        const coupled = proportionalResizeScale(
+          scaleX,
+          scaleY,
+          gesture.startScaleX,
+          gesture.startScaleY,
+          gesture.axis !== "y",
+          gesture.axis !== "x",
+        );
+        scaleX = coupled.scaleX;
+        scaleY = coupled.scaleY;
       }
       scaleX = Math.min(
         GNUMARUS_MAX_LAYER_DIMENSION / floating.width,
@@ -10635,8 +10648,8 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
-  /** Advance an in-progress non-destructive layer gesture from the cursor. */
-  private updateLayerGesture(clientX: number, clientY: number): void {
+  /** Advance an in-progress non-destructive layer gesture from the cursor. Alt locks resize to a uniform scale. */
+  private updateLayerGesture(clientX: number, clientY: number, proportional: boolean): void {
     const layer = this.activeLayer();
     if (this.layerRotateDrag !== null) {
       const gesture = this.layerRotateDrag;
@@ -10697,6 +10710,18 @@ export class GnumarusCanvasEngine {
         if (Math.abs(denomY) > 1e-9) {
           scaleY = (gesture.startScaleY * (cursor.y - halfH - anchorCY)) / denomY;
         }
+      }
+      if (proportional) {
+        const coupled = proportionalResizeScale(
+          scaleX,
+          scaleY,
+          gesture.startScaleX,
+          gesture.startScaleY,
+          gesture.axis !== "y",
+          gesture.axis !== "x",
+        );
+        scaleX = coupled.scaleX;
+        scaleY = coupled.scaleY;
       }
       scaleX = Math.min(
         GNUMARUS_MAX_LAYER_DIMENSION / layer.width,
@@ -15888,7 +15913,7 @@ export class GnumarusCanvasEngine {
         return;
       }
       if (this.layerResizeDrag !== null || this.layerRotateDrag !== null || this.layerSkewDrag !== null) {
-        this.updateLayerGesture(event.clientX, event.clientY);
+        this.updateLayerGesture(event.clientX, event.clientY, event.altKey);
         return;
       }
       if (this.layerCenterTap !== null) {
@@ -16040,7 +16065,7 @@ export class GnumarusCanvasEngine {
         return;
       }
       if (this.resizeDrag !== null || this.rotateDrag !== null || this.skewDrag !== null) {
-        this.updateTransformGesture(event.clientX, event.clientY);
+        this.updateTransformGesture(event.clientX, event.clientY, event.altKey);
         return;
       }
       if (this.centerTap !== null) {

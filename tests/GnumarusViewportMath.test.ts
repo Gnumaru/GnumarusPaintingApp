@@ -17,6 +17,7 @@ import {
   layerRotate3,
   normalizeRotation,
   parseWrapMode,
+  proportionalResizeScale,
   wrapLayerPixel,
   wrapTileOffsets,
   wrapTileShift,
@@ -547,5 +548,29 @@ describe("constrainSquareDrag", () => {
     expect(constrainSquareDrag(5, 5, 5, 5)).toEqual({ x1: 5, y1: 5 });
     expect(constrainSquareDrag(5, 5, 5, 9)).toEqual({ x1: 5, y1: 9 });
     expect(constrainSquareDrag(5, 5, 9, 5)).toEqual({ x1: 9, y1: 5 });
+  });
+});
+
+describe("proportionalResizeScale", () => {
+  it("follows the dominant axis preserving the start ratio", () => {
+    // Horizontal drag on a square: both axes double.
+    expect(proportionalResizeScale(2, 1, 1, 1, true, true)).toEqual({ scaleX: 2, scaleY: 2 });
+    // Vertical drag wins when it moves more.
+    expect(proportionalResizeScale(1.1, 3, 1, 1, true, true)).toEqual({ scaleX: 3, scaleY: 3 });
+    // Non-square start ratios are preserved, not squared.
+    expect(proportionalResizeScale(4, 1, 2, 1, true, true)).toEqual({ scaleX: 4, scaleY: 2 });
+    expect(proportionalResizeScale(2, 5, 2, 1, true, true)).toEqual({ scaleX: 10, scaleY: 5 });
+  });
+
+  it("couples edge handles through the single adjusted axis", () => {
+    expect(proportionalResizeScale(3, 1, 1, 1, true, false)).toEqual({ scaleX: 3, scaleY: 3 });
+    expect(proportionalResizeScale(1, 0.5, 1, 1, false, true)).toEqual({ scaleX: 0.5, scaleY: 0.5 });
+  });
+
+  it("leaves untouched and degenerate inputs alone", () => {
+    expect(proportionalResizeScale(2, 3, 1, 1, false, false)).toEqual({ scaleX: 2, scaleY: 3 });
+    expect(proportionalResizeScale(0, 0, 0, 0, true, true)).toEqual({ scaleX: 0, scaleY: 0 });
+    expect(proportionalResizeScale(2, 2, 1, 1, true, false)).toEqual({ scaleX: 2, scaleY: 2 });
+    expect(proportionalResizeScale(Number.NaN, 2, 1, 1, true, true)).toEqual({ scaleX: 2, scaleY: 2 });
   });
 });

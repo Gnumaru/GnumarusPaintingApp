@@ -482,6 +482,7 @@ function gnumarusShortcuts(): GnumarusShortcutSection[] {
         { keys: "H (tile brush)", action: tr("sc.tileFlipH") },
         { keys: "V (tile brush)", action: tr("sc.tileFlipV") },
         { keys: "Shift / Ctrl+Shift / Alt+Shift + drag", action: tr("sc.rectselectModifiers") },
+        { keys: "Alt + drag a transform resize handle", action: tr("sc.transformProportional") },
         { keys: "Right-click a drawer button", action: tr("sc.drawerFlyout") },
         { keys: "V", action: tr("sc.toolDestransform") },
         { keys: "U", action: tr("sc.toolDestransform3d") },

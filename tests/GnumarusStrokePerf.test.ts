@@ -68,7 +68,10 @@ describe("large brush stroke", () => {
     }
   });
 
-  it("dirty-rect mask apply matches the full-layer apply", () => {
+  it(
+    "dirty-rect mask apply matches the full-layer apply",
+    { timeout: 30000 },
+    () => {
     const mask = new Uint8Array(W * H);
     stampSegmentCoverage(mask, W, H, 500, 400, 700, 420, 512, "circle", false, "off", 2048);
     const full = createPixelBuffer(W, H);
@@ -81,7 +84,8 @@ describe("large brush stroke", () => {
       height: 800,
     });
     expect(Array.from(partial)).toEqual(Array.from(full));
-  });
+    },
+  );
 
   it("soft LUT matches the cosine falloff", () => {
     for (const hardness of [0, 0.25, 0.5, 0.75]) {

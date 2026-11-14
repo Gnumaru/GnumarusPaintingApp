@@ -7119,6 +7119,22 @@ test("corner anchors resize the floating selection", async ({ page }) => {
   expect(await redPixelCount(page, 28, 28, 42, 36)).toBeLessThanOrEqual(21);
 });
 
+test("alt-drag keeps floating resize proportional @recent", async ({ page }) => {
+  await cutRedBlock(page);
+  const zoom = (await getViewState(page)).zoom;
+  const anchor = await getSelectionHandle(page, "resize-se");
+  await page.keyboard.down("Alt");
+  await page.mouse.move(anchor.x, anchor.y);
+  await page.mouse.down();
+  await page.mouse.move(anchor.x + 5 * zoom, anchor.y, { steps: 4 });
+  await page.mouse.up();
+  await page.keyboard.up("Alt");
+  // Same horizontal drag as without Alt, but the height follows the width.
+  const transform = await getFloatingTransform(page);
+  expect(transform?.scaleX).toBeCloseTo(2, 6);
+  expect(transform?.scaleY).toBeCloseTo(2, 6);
+});
+
 test("rotate anchors turn the floating selection", async ({ page }) => {
   await cutRedBlock(page);
   const box = await page.locator("gnumarus-shell canvas").boundingBox();
@@ -7313,6 +7329,7 @@ async function layerDragHandle(
   id: string,
   dxLayers: number,
   dyLayers: number,
+  alt = false,
 ): Promise<void> {
   // Zoom out so the outer anchors sit inside the canvas.
   const zoom = await zoomToFitLayer(page);
@@ -7330,10 +7347,16 @@ async function layerDragHandle(
   if (position === null) {
     throw new Error(`layer handle ${id} is missing`);
   }
+  if (alt) {
+    await page.keyboard.down("Alt");
+  }
   await page.mouse.move(box.x + position.x, box.y + position.y);
   await page.mouse.down();
   await page.mouse.move(box.x + position.x + dxLayers * zoom, box.y + position.y + dyLayers * zoom, { steps: 4 });
   await page.mouse.up();
+  if (alt) {
+    await page.keyboard.up("Alt");
+  }
 }
 
 test("non-destructive resize anchors scale the layer about the opposite edge", async ({ page }) => {
@@ -7348,6 +7371,20 @@ test("non-destructive resize anchors scale the layer about the opposite edge", a
   expect(transform.scaleY).toBeCloseTo(1, 6);
   expect(transform.x).toBeCloseTo(2.5, 4);
   expect(transform.y).toBeCloseTo(0, 6);
+});
+
+test("alt-drag keeps non-destructive resize proportional @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadRedProject(page, 64, 64, 0, 0);
+  await layerDragHandle(page, "resize-se", 5, 0, true);
+  // Same horizontal drag as without Alt, but the height follows the width
+  // (69/64 on both axes) and the center shifts diagonally.
+  const transform = await getLayerTransform(page);
+  expect(transform.scaleX).toBeCloseTo(69 / 64, 6);
+  expect(transform.scaleY).toBeCloseTo(69 / 64, 6);
+  expect(transform.x).toBeCloseTo(2.5, 4);
+  expect(transform.y).toBeCloseTo(2.5, 4);
 });
 
 test("non-destructive rotate anchors turn the layer about its center", async ({ page }) => {

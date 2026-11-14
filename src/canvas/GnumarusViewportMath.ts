@@ -746,3 +746,32 @@ export function constrainSquareDrag(x0: number, y0: number, x1: number, y1: numb
     y1: y0 + Math.sign(dy) * side,
   };
 }
+
+/**
+ * Couple a resize drag to a uniform scale that preserves the start
+ * proportions (Alt-drag on transform handles): among the adjusted axes,
+ * the one with the largest change relative to its start scale drives and
+ * the other follows the `startScaleY / startScaleX` ratio. Non-adjusted
+ * axes (edge handles) count as followers when adjusted. Degenerate
+ * (near-zero start) or untouched axes keep their computed values.
+ */
+export function proportionalResizeScale(
+  scaleX: number,
+  scaleY: number,
+  startScaleX: number,
+  startScaleY: number,
+  adjustX: boolean,
+  adjustY: boolean,
+): { scaleX: number; scaleY: number } {
+  const validX = adjustX && Math.abs(startScaleX) > 1e-12 && Number.isFinite(scaleX);
+  const validY = adjustY && Math.abs(startScaleY) > 1e-12 && Number.isFinite(scaleY);
+  if (!validX && !validY) {
+    return { scaleX, scaleY };
+  }
+  const changeX = validX ? Math.abs(scaleX / startScaleX - 1) : -1;
+  const changeY = validY ? Math.abs(scaleY / startScaleY - 1) : -1;
+  if (changeX >= changeY) {
+    return { scaleX, scaleY: scaleX * (startScaleY / startScaleX) };
+  }
+  return { scaleX: scaleY * (startScaleX / startScaleY), scaleY };
+}
