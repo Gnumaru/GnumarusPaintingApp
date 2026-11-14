@@ -60,7 +60,8 @@ describe("GnumarusBrushPresets", () => {
     const base = JSON.parse(serializeBrushPreset(first)) as Record<string, unknown>;
     expect(() => parseBrushPreset(JSON.stringify({ ...base, version: 2 }))).toThrow(GnumarusBrushPresetError);
     expect(() => parseBrushPreset(JSON.stringify({ ...base, name: "" }))).toThrow(GnumarusBrushPresetError);
-    expect(() => parseBrushPreset(JSON.stringify({ ...base, brushSize: 999 }))).toThrow(GnumarusBrushPresetError);
+    expect(() => parseBrushPreset(JSON.stringify({ ...base, brushSize: 9999 }))).toThrow(GnumarusBrushPresetError);
+    expect(parseBrushPreset(JSON.stringify({ ...base, brushSize: 999 })).brushSize).toBe(999);
     expect(() => parseBrushPreset(JSON.stringify({ ...base, brushTipKind: "fancy" }))).toThrow(GnumarusBrushPresetError);
     expect(() => parseBrushPreset(JSON.stringify({ ...base, accumulate: "yes" }))).toThrow(GnumarusBrushPresetError);
     expect(() => parseBrushPresetList("{}")).toThrow(GnumarusBrushPresetError);

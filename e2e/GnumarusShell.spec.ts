@@ -80,8 +80,14 @@ test("File > New creates a canvas with the requested size", async ({ page }) => 
   await page.getByRole("button", { name: "File" }).click();
   await page.getByRole("button", { name: "New Project" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("New canvas");
+  // The dialog defaults to the digital painting lossy preset.
+  const dialog = page.locator("gnumarus-shell dialog#newDialog");
+  await expect(dialog.locator("select#newPreset")).toHaveValue("digital painting lossy");
+  await dialog.locator("select#newPreset").selectOption("");
+  await dialog.locator("input#newWidth").fill("80");
+  await dialog.locator("input#newHeight").fill("70");
   await page.getByRole("button", { name: "Create" }).click();
-  await expect(page.locator("gnumarus-shell")).toContainText("64 x 64");
+  await expect(page.locator("gnumarus-shell")).toContainText("80 x 70");
 });
 
 test("File > New preset fills dimensions and WebP lossless storage", async ({ page }) => {
@@ -2520,7 +2526,9 @@ test("pencil brush size and shape paint thick strokes", async ({ page }) => {
   await expect(page.locator("gnumarus-shell")).toContainText("Brush shape: Square");
   expect(await brushOf()).toEqual({ size: 3, shape: "square" });
   await page.locator("gnumarus-shell input#brushSize").fill("99");
-  expect(await brushOf()).toEqual({ size: 64, shape: "square" });
+  expect(await brushOf()).toEqual({ size: 99, shape: "square" });
+  await page.locator("gnumarus-shell input#brushSize").fill("9999");
+  expect(await brushOf()).toEqual({ size: 512, shape: "square" });
   await page.locator("gnumarus-shell input#brushSize").fill("3");
   await page.locator("gnumarus-shell select#brushShape").selectOption("square");
   await setPencil(page, "#ff0000");
@@ -13787,4 +13795,57 @@ test("tool drawer flyouts render above floating windows @recent", async ({ page 
     return el.closest('[data-testid="paint-flyout"]') !== null ? "flyout" : el.tagName;
   }, [cx, cy] as [number, number]);
   expect(hit).toBe("flyout");
+});
+
+test("new project dialog defaults to digital painting lossy @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell");
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "New Project" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#newDialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator("select#newPreset")).toHaveValue("digital painting lossy");
+  await expect(dialog.locator("input#newWidth")).toHaveValue("1920");
+  await expect(dialog.locator("input#newHeight")).toHaveValue("1080");
+  await expect(dialog.locator("select#newStorageFormat")).toHaveValue("jxl");
+  await expect(dialog.locator("select#newStorageMode")).toHaveValue("lossy");
+  await expect(dialog.locator("input#newStorageQuality")).toHaveValue("95");
+});
+
+test("brush size ceiling defaults to 512 and is configurable up to 2048 @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const maxOf = (): Promise<number> =>
+    page.evaluate(() => {
+      const root = window as unknown as { __gnumarus?: { engine?: { getMaxBrushSize(): number } } };
+      return root.__gnumarus?.engine?.getMaxBrushSize() ?? -1;
+    });
+  await expect(maxOf()).resolves.toBe(512);
+  await expect(page.locator("gnumarus-shell input#brushSize")).toHaveAttribute("max", "512");
+  // A size above the old hardcoded 64 now sticks.
+  await page.locator("gnumarus-shell input#brushSize").fill("500");
+  await expect(engineBrushSize(page)).resolves.toBe(500);
+  // Raise the ceiling through the Settings dialog.
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const settings = page.locator("gnumarus-shell dialog#settingsDialog");
+  await settings.locator("input#brushMaxSize").fill("1024");
+  await expect(maxOf()).resolves.toBe(1024);
+  await expect(page.locator("gnumarus-shell input#brushSize")).toHaveAttribute("max", "1024");
+  const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.brush.v1"));
+  expect(persisted).toContain('"maxBrushSize": 1024');
+  await settings.locator("input#brushMaxSize").fill("9999");
+  await expect(maxOf()).resolves.toBe(2048);
+  await settings.locator("input#brushMaxSize").fill("64");
+  await expect(maxOf()).resolves.toBe(64);
+  await settings.getByRole("button", { name: "Reset maximum brush size to default" }).click();
+  await expect(maxOf()).resolves.toBe(512);
+  await settings.getByRole("button", { name: "Close" }).click();
+  // Painting with a large brush covers the canvas.
+  await page.locator("gnumarus-shell input#brushSize").fill("500");
+  await expect(engineBrushSize(page)).resolves.toBe(500);
+  await page.getByRole("button", { name: "Pencil" }).click();
+  const center = await layerToScreen(page, 32, 32);
+  await page.mouse.click(center.x, center.y);
+  expect(await paintedPixelCount(page)).toBeGreaterThan(1000);
 });

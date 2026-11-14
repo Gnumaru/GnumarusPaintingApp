@@ -13,6 +13,7 @@ import type { GnumarusSymmetryMode } from "./GnumarusPaintBrush";
 import type { GnumarusTipAngleMode } from "./GnumarusPaintBrush";
 import type { GnumarusWrapMode } from "./GnumarusViewportMath";
 import type { GnumarusBrushShape } from "./GnumarusPixelBuffer";
+import { GNUMARUS_MAX_MAX_BRUSH_SIZE } from "../settings/GnumarusBrushSettings";
 
 export interface GnumarusBrushPreset {
   version: 1;
@@ -110,8 +111,8 @@ export function parseBrushPreset(jsonText: string): GnumarusBrushPreset {
     throw new GnumarusBrushPresetError("preset has an invalid name");
   }
   const numbers: Array<[string, number, number]> = [
-    ["brushSize", 0.1, 64],
-    ["brushSizeMin", 0.1, 64],
+    ["brushSize", 0.1, GNUMARUS_MAX_MAX_BRUSH_SIZE],
+    ["brushSizeMin", 0.1, GNUMARUS_MAX_MAX_BRUSH_SIZE],
     ["brushHardness", 0, 1],
     ["brushSpacing", 0.05, 4],
     ["brushFlow", 0.01, 1],

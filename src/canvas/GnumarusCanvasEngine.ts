@@ -227,6 +227,10 @@ import {
   DEFAULT_ROTATION_SETTINGS,
 } from "../settings/GnumarusRotationSettings";
 import {
+  clampMaxBrushSize,
+  DEFAULT_BRUSH_SETTINGS,
+} from "../settings/GnumarusBrushSettings";
+import {
   DEFAULT_STORAGE_SETTINGS,
   parseModelLighting,
   type GnumarusModelLighting,
@@ -901,6 +905,8 @@ export class GnumarusCanvasEngine {
   private brushSize = 1;
   /** Minimum pencil size: pen pressure interpolates min→max, otherwise max paints. */
   private brushSizeMin = 1;
+  /** Ceiling for brush/line/curve sizes (brush setting, default 512, up to 2048). */
+  private maxBrushSize = DEFAULT_BRUSH_SETTINGS.maxBrushSize;
   private brushShape: GnumarusBrushShape = "circle";
   private brushTipKind: GnumarusBrushTipKind = "pixel";
   private brushHardness = DEFAULT_BRUSH_HARDNESS;
@@ -7557,7 +7563,7 @@ export class GnumarusCanvasEngine {
   }
 
   setBrushSize(size: number): boolean {
-    const clamped = clampBrushSizeFloat(size);
+    const clamped = clampBrushSizeFloat(size, this.maxBrushSize);
     if (clamped === this.brushSize) {
       return false;
     }
@@ -7575,7 +7581,7 @@ export class GnumarusCanvasEngine {
   }
 
   setBrushSizeMin(size: number): boolean {
-    const clamped = Math.min(clampBrushSizeFloat(size), this.brushSize);
+    const clamped = Math.min(clampBrushSizeFloat(size, this.maxBrushSize), this.brushSize);
     if (clamped === this.brushSizeMin) {
       return false;
     }
@@ -7583,6 +7589,34 @@ export class GnumarusCanvasEngine {
     this.emitStats();
     this.updatePreviews();
     return true;
+  }
+
+  /** Ceiling applied to brush/line/curve sizes (brush setting). */
+  getMaxBrushSize(): number {
+    return this.maxBrushSize;
+  }
+
+  /**
+   * Set the brush size ceiling (1..2048), clamping the current sizes down
+   * when they exceed it. True when anything changed.
+   */
+  setMaxBrushSize(size: number): boolean {
+    const clamped = clampMaxBrushSize(size);
+    let changed = false;
+    if (clamped !== this.maxBrushSize) {
+      this.maxBrushSize = clamped;
+      changed = true;
+    }
+    if (this.setBrushSize(this.brushSize)) {
+      changed = true;
+    }
+    if (this.setLineWidth(this.lineWidth)) {
+      changed = true;
+    }
+    if (this.setCurveWidth(this.curveWidth)) {
+      changed = true;
+    }
+    return changed;
   }
 
   setBrushShape(shape: GnumarusBrushShape): boolean {
@@ -8123,7 +8157,7 @@ export class GnumarusCanvasEngine {
         drawBrushStamp(
           tex.buffer, tex.width, tex.height, Math.round(at.x), Math.round(at.y),
           this.brushSize, this.brushShape, this.pressureBrushColor(), layer.lockedChannels, this.blendMode,
-          this.wrapMode,
+          this.wrapMode, this.maxBrushSize,
         );
         if (this.symmetryMode !== "off") {
           for (const mirror of mirrorSegmentEndsOnAxis(
@@ -8133,7 +8167,7 @@ export class GnumarusCanvasEngine {
             drawBrushStamp(
               tex.buffer, tex.width, tex.height, mirror.x0, mirror.y0,
               this.brushSize, this.brushShape, this.pressureBrushColor(), layer.lockedChannels, this.blendMode,
-              this.wrapMode,
+              this.wrapMode, this.maxBrushSize,
             );
           }
         }
@@ -8224,7 +8258,10 @@ export class GnumarusCanvasEngine {
         ? evalPressureCurve(this.pressureSizeCurve, this.strokePressure)
         : 1;
     const ranged = pressureSizeInRange(this.pressureResponse, pressureGain, this.brushSizeMin, this.brushSize);
-    return clampBrushSizeFloat(ranged * paintTiltSizeGain(this.strokeTiltMag, this.tiltSizeAmount));
+    return clampBrushSizeFloat(
+      ranged * paintTiltSizeGain(this.strokeTiltMag, this.tiltSizeAmount),
+      this.maxBrushSize,
+    );
   }
 
   /** Pencil color with alpha scaled by the current stroke pressure when enabled. */
@@ -8398,7 +8435,7 @@ export class GnumarusCanvasEngine {
   }
 
   setLineWidth(size: number): boolean {
-    const clamped = clampBrushSizeFloat(size);
+    const clamped = clampBrushSizeFloat(size, this.maxBrushSize);
     if (clamped === this.lineWidth) {
       return false;
     }
@@ -8416,7 +8453,7 @@ export class GnumarusCanvasEngine {
   }
 
   setLineWidthMin(size: number): boolean {
-    const clamped = Math.min(clampBrushSizeFloat(size), this.lineWidth);
+    const clamped = Math.min(clampBrushSizeFloat(size, this.maxBrushSize), this.lineWidth);
     if (clamped === this.lineWidthMin) {
       return false;
     }
@@ -8475,7 +8512,7 @@ export class GnumarusCanvasEngine {
   }
 
   setCurveWidth(size: number): boolean {
-    const clamped = clampBrushSizeFloat(size);
+    const clamped = clampBrushSizeFloat(size, this.maxBrushSize);
     if (clamped === this.curveWidth) {
       return false;
     }
@@ -8832,7 +8869,7 @@ export class GnumarusCanvasEngine {
   }
 
   setCurveWidthMin(size: number): boolean {
-    const clamped = Math.min(clampBrushSizeFloat(size), this.curveWidth);
+    const clamped = Math.min(clampBrushSizeFloat(size, this.maxBrushSize), this.curveWidth);
     if (clamped === this.curveWidthMin) {
       return false;
     }
@@ -9133,6 +9170,7 @@ export class GnumarusCanvasEngine {
         this.brushShape,
         this.pencilAntialias,
         this.wrapMode,
+        this.maxBrushSize,
       );
       this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked, color);
       return;
@@ -9152,6 +9190,7 @@ export class GnumarusCanvasEngine {
       locked,
       this.blendMode,
       this.wrapMode,
+      this.maxBrushSize,
     );
   }
 
@@ -11316,6 +11355,7 @@ export class GnumarusCanvasEngine {
           this.brushShape,
           this.pencilAntialias,
           this.wrapMode,
+          this.maxBrushSize,
         );
       }
       this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked, color);
@@ -11346,6 +11386,7 @@ export class GnumarusCanvasEngine {
         locked,
         this.blendMode,
         this.wrapMode,
+        this.maxBrushSize,
       );
     }
   }
@@ -11456,7 +11497,7 @@ export class GnumarusCanvasEngine {
     paintLineSegment(
       tex, base,
       this.shapeStyleFor(this.lineWidth, this.lineShape, this.lineAntialias, layer.lockedChannels, false),
-      this.lineAnchor.x, this.lineAnchor.y, x, y,
+      this.lineAnchor.x, this.lineAnchor.y, x, y, this.maxBrushSize,
     );
     this.lineAnchor = null;
     const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
@@ -11842,6 +11883,7 @@ export class GnumarusCanvasEngine {
       { x: c1.x, y: c1.y },
       { x: c2x, y: c2y },
       { x: p3.x, y: p3.y },
+      this.maxBrushSize,
     );
     this.resetCurveState();
     const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
@@ -12579,7 +12621,7 @@ export class GnumarusCanvasEngine {
           const ay = this.lineAnchor.y;
           const style = this.shapeStyleFor(this.lineWidth, this.lineShape, this.lineAntialias, layer.lockedChannels, false);
           key = `line|${ax}|${ay}|${pixel.x}|${pixel.y}|${this.shapeStyleKey(style)}`;
-          paint = (tex, zeros) => paintLineSegment(tex, zeros, style, ax, ay, pixel.x, pixel.y);
+          paint = (tex, zeros) => paintLineSegment(tex, zeros, style, ax, ay, pixel.x, pixel.y, this.maxBrushSize);
         }
       } else if (
         (this.tool === "rectangle" || this.tool === "ellipseShape" || this.tool === "gradient") &&
@@ -12620,7 +12662,8 @@ export class GnumarusCanvasEngine {
           // rubber line on the start point, like the old overlay did.
           const current = this.curveDragCurrent ?? { x: p0.x, y: p0.y };
           key = `curve-drag|${p0.x}|${p0.y}|${current.x}|${current.y}|${this.shapeStyleKey(style)}`;
-          paint = (tex, zeros) => paintLineSegment(tex, zeros, style, p0.x, p0.y, current.x, current.y);
+          paint = (tex, zeros) =>
+            paintLineSegment(tex, zeros, style, p0.x, p0.y, current.x, current.y, this.maxBrushSize);
         } else if (this.curvePhase === "awaitC1" && this.curveP0 !== null && this.curveP3 !== null) {
           const control = this.clientToLayerImageFloat(mouse.x, mouse.y);
           if (control !== null) {
@@ -12630,7 +12673,7 @@ export class GnumarusCanvasEngine {
               `curve-c1|${p0.x}|${p0.y}|${quantize(control.x)}|${quantize(control.y)}|${p3.x}|${p3.y}` +
               `|${this.shapeStyleKey(style)}`;
             const frozen = { x: control.x, y: control.y };
-            paint = (tex, zeros) => paintCurveStroke(tex, zeros, style, p0, frozen, p3, p3);
+            paint = (tex, zeros) => paintCurveStroke(tex, zeros, style, p0, frozen, p3, p3, this.maxBrushSize);
           }
         } else if (
           this.curvePhase === "awaitC2" &&
@@ -12647,7 +12690,8 @@ export class GnumarusCanvasEngine {
               `curve-c2|${p0.x}|${p0.y}|${c1.x}|${c1.y}|${quantize(control.x)}|${quantize(control.y)}|${p3.x}|${p3.y}` +
               `|${this.shapeStyleKey(style)}`;
             const frozen = { x: control.x, y: control.y };
-            paint = (tex, zeros) => paintCurveStroke(tex, zeros, style, p0, c1, frozen, p3);
+            paint = (tex, zeros) =>
+              paintCurveStroke(tex, zeros, style, p0, c1, frozen, p3, this.maxBrushSize);
           }
         }
       }
@@ -15316,6 +15360,7 @@ export class GnumarusCanvasEngine {
         // Horizontal movement only: right grows, left shrinks, vertical is ignored.
         const size = clampBrushSizeFloat(
           this.sizeDrag.startSize + (event.clientX - this.sizeDrag.startClientX) / GNUMARUS_SIZE_DRAG_PX_PER_UNIT,
+          this.maxBrushSize,
         );
         if (this.sizeDrag.tool === "pencil") {
           if (this.setBrushSize(size)) {

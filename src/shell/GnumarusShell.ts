@@ -150,6 +150,7 @@ import {
 } from "../settings/GnumarusFitSettings";
 import {
   applyNewProjectPreset,
+  DEFAULT_NEW_PROJECT_PRESET,
   GNUMARUS_NEW_PROJECT_PRESETS,
 } from "../settings/GnumarusNewProjectPresets";
 import {
@@ -188,6 +189,13 @@ import {
   parseExpandSettings,
   serializeExpandSettings,
 } from "../settings/GnumarusExpandSettings";
+import {
+  BRUSH_SETTINGS_STORAGE_KEY,
+  clampMaxBrushSize,
+  DEFAULT_BRUSH_SETTINGS,
+  parseBrushSettings,
+  serializeBrushSettings,
+} from "../settings/GnumarusBrushSettings";
 import { compositeFinalImage, type GnumarusPreviewBackground } from "../preview/GnumarusFinalRender";
 import {
   detectStillFormats,
@@ -1684,6 +1692,7 @@ export class GnumarusShell extends LitElement {
     brushQuality: { type: Number },
     importCleanup: { type: String },
     expandStep: { type: Number },
+    maxBrushSize: { type: Number },
     renamingFrame: { type: Number },
     selectedFrames: { type: Array },
     selectedLayers: { type: Array },
@@ -1892,6 +1901,7 @@ export class GnumarusShell extends LitElement {
   declare brushQuality: number;
   declare importCleanup: GnumarusImportCleanup;
   declare expandStep: number;
+  declare maxBrushSize: number;
   declare renamingFrame: number | null;
   declare selectedFrames: number[];
   declare selectedLayers: string[];
@@ -2128,6 +2138,7 @@ export class GnumarusShell extends LitElement {
     this.cellAnchor = null;
     this.brushSize = 1;
     this.brushSizeMin = 1;
+    this.maxBrushSize = DEFAULT_BRUSH_SETTINGS.maxBrushSize;
     this.brushShape = "circle";
     this.presetName = "";
     this.brushPresets = [];
@@ -3642,6 +3653,30 @@ export class GnumarusShell extends LitElement {
               </button>`
             : html``}
         </div>
+        <div class="setting-row">
+          <label
+            >${tr("setting.brushMaxSize")}
+            <input
+              type="number"
+              id="brushMaxSize"
+              min="1"
+              max="2048"
+              step="1"
+              .value=${String(this.maxBrushSize)}
+              @input=${(): void => this.applyBrushFromDialog()}
+            />
+          </label>
+          ${this.maxBrushSize !== DEFAULT_BRUSH_SETTINGS.maxBrushSize
+            ? html`<button
+                class="reset-btn"
+                aria-label=${tr("a11y.resetBrushMaxSize")}
+                title=${tr("a11y.resetToDefault")}
+                @click=${(): void => this.resetBrushMaxToDefault()}
+              >
+                ↻
+              </button>`
+            : html``}
+        </div>
           <button @click=${(): void => this.resetCheckerDefaults()}>${tr("setting.resetDefaults")}</button>
           <button @click=${(): void => this.closeSettingsDialog()}>${tr("btn.close")}</button>
         </div>
@@ -4753,7 +4788,7 @@ export class GnumarusShell extends LitElement {
               type="number"
               id="brushSize"
               min="0.1"
-              max="64"
+              max=${String(this.maxBrushSize)}
               step="0.1"
               .value=${String(this.brushSize)}
               @input=${(): void => this.applyBrushSizeFromDialog()}
@@ -4765,7 +4800,7 @@ export class GnumarusShell extends LitElement {
               type="number"
               id="brushSizeMin"
               min="0.1"
-              max="64"
+              max=${String(this.maxBrushSize)}
               step="0.1"
               .value=${String(this.brushSizeMin)}
               @input=${(): void => this.applyBrushSizeMinFromDialog()}
@@ -5041,7 +5076,7 @@ export class GnumarusShell extends LitElement {
               type="number"
               id="lineWidth"
               min="0.1"
-              max="64"
+              max=${String(this.maxBrushSize)}
               step="0.1"
               .value=${String(this.lineWidth)}
               @input=${(): void => this.applyLineWidthFromDialog()}
@@ -5053,7 +5088,7 @@ export class GnumarusShell extends LitElement {
               type="number"
               id="lineWidthMin"
               min="0.1"
-              max="64"
+              max=${String(this.maxBrushSize)}
               step="0.1"
               .value=${String(this.lineWidthMin)}
               @input=${(): void => this.applyLineWidthMinFromDialog()}
@@ -5088,7 +5123,7 @@ export class GnumarusShell extends LitElement {
               type="number"
               id="curveWidth"
               min="0.1"
-              max="64"
+              max=${String(this.maxBrushSize)}
               step="0.1"
               .value=${String(this.curveWidth)}
               @input=${(): void => this.applyCurveWidthFromDialog()}
@@ -5100,7 +5135,7 @@ export class GnumarusShell extends LitElement {
               type="number"
               id="curveWidthMin"
               min="0.1"
-              max="64"
+              max=${String(this.maxBrushSize)}
               step="0.1"
               .value=${String(this.curveWidthMin)}
               @input=${(): void => this.applyCurveWidthMinFromDialog()}
@@ -5715,6 +5750,7 @@ export class GnumarusShell extends LitElement {
     this.importCleanup = this.loadImportCleanup();
     const storedExpand = this.loadExpandSettings();
     this.expandStep = storedExpand.step;
+    this.maxBrushSize = this.loadBrushSettings().maxBrushSize;
     this.brushPresets = this.loadBrushPresets();
     const host = this.shadowRoot?.getElementById("canvasHost") ?? null;
     if (host === null) {
@@ -5845,6 +5881,7 @@ export class GnumarusShell extends LitElement {
       this.engine.setPencilPixelPerfect(this.pencilPixelPerfect);
       this.engine.setCurvePixelPerfect(this.curvePixelPerfect);
       this.engine.setModelLighting(this.storageModelLighting);
+      this.engine.setMaxBrushSize(this.maxBrushSize);
       this.refreshLayers();
       // The engine fits the zoom during construction, before the animation
       // matrix above the status bar takes part in the layout. Re-fit once the
@@ -6268,7 +6305,15 @@ export class GnumarusShell extends LitElement {
     this.newStorageFormat = this.storageFormat;
     this.newStorageLossless = this.storageLossless;
     this.newStorageQuality = this.storageQuality;
-    this.newPreset = "";
+    this.newPreset = DEFAULT_NEW_PROJECT_PRESET;
+    const applied = applyNewProjectPreset(this.newPreset);
+    if (applied !== null) {
+      this.newWidth = applied.width;
+      this.newHeight = applied.height;
+      this.newStorageFormat = applied.format;
+      this.newStorageLossless = applied.lossless;
+      this.newStorageQuality = applied.quality;
+    }
     const dialog = this.shadowRoot?.getElementById("newDialog") as HTMLDialogElement | null;
     dialog?.showModal();
   }
@@ -7378,6 +7423,14 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = this.storageStatusMessage();
   }
 
+  /** Test hook: set the brush size ceiling (1..2048, default 512). */
+  setMaxBrushSize(size: number): void {
+    this.maxBrushSize = clampMaxBrushSize(size);
+    this.persistBrush();
+    this.engine?.setMaxBrushSize(this.maxBrushSize);
+    this.statusMessage = tr("status.brushMaxSize", { value: this.maxBrushSize });
+  }
+
   /** Test hook: set project texture storage (format, JXL mode/quality, PNG level, JPEG quality, brush JXL quality, text storage). */
   setProjectStorage(
     lossless: boolean,
@@ -7505,6 +7558,49 @@ export class GnumarusShell extends LitElement {
     } catch {
       // Storage failures must not break the settings flow.
     }
+  }
+
+  private loadBrushSettings(): { maxBrushSize: number } {
+    try {
+      const stored = window.localStorage.getItem(BRUSH_SETTINGS_STORAGE_KEY);
+      if (stored !== null) {
+        return parseBrushSettings(stored);
+      }
+    } catch {
+      // Corrupt or unavailable storage falls back to defaults.
+    }
+    return { ...DEFAULT_BRUSH_SETTINGS };
+  }
+
+  private persistBrush(): void {
+    try {
+      window.localStorage.setItem(
+        BRUSH_SETTINGS_STORAGE_KEY,
+        serializeBrushSettings({ maxBrushSize: this.maxBrushSize }),
+      );
+    } catch {
+      // Storage failures must not break the settings flow.
+    }
+  }
+
+  private currentDialogMaxBrushSize(): number {
+    const input = this.shadowRoot?.getElementById("brushMaxSize") as HTMLInputElement | null;
+    const parsed = Number(input?.value ?? String(DEFAULT_BRUSH_SETTINGS.maxBrushSize));
+    return clampMaxBrushSize(Number.isFinite(parsed) ? parsed : DEFAULT_BRUSH_SETTINGS.maxBrushSize);
+  }
+
+  private applyBrushFromDialog(): void {
+    this.maxBrushSize = this.currentDialogMaxBrushSize();
+    this.persistBrush();
+    this.engine?.setMaxBrushSize(this.maxBrushSize);
+    this.statusMessage = tr("status.brushMaxSize", { value: this.maxBrushSize });
+  }
+
+  private resetBrushMaxToDefault(): void {
+    this.maxBrushSize = DEFAULT_BRUSH_SETTINGS.maxBrushSize;
+    this.persistBrush();
+    this.engine?.setMaxBrushSize(this.maxBrushSize);
+    this.statusMessage = tr("status.brushMaxSize", { value: this.maxBrushSize });
   }
 
   private currentDialogExpandStep(): number {
@@ -7767,7 +7863,7 @@ export class GnumarusShell extends LitElement {
 
   /** Test hook: set the brush size (floats 0.1..64, clamped). */
   setBrushSize(size: number): void {
-    const clamped = clampBrushSizeFloat(size);
+    const clamped = clampBrushSizeFloat(size, this.maxBrushSize);
     this.brushSize = clamped;
     if (this.brushSizeMin > clamped) {
       this.brushSizeMin = clamped;
@@ -7779,7 +7875,7 @@ export class GnumarusShell extends LitElement {
 
   /** Test hook: set the minimum brush size (floats 0.1..max, clamped). */
   setBrushSizeMin(size: number): void {
-    const clamped = Math.min(clampBrushSizeFloat(size), this.brushSize);
+    const clamped = Math.min(clampBrushSizeFloat(size, this.maxBrushSize), this.brushSize);
     this.brushSizeMin = clamped;
     this.engine?.setBrushSizeMin(clamped);
     this.statusMessage = this.brushSizeStatus();
@@ -7992,7 +8088,7 @@ export class GnumarusShell extends LitElement {
   private currentDialogBrushSize(): number {
     const input = this.shadowRoot?.getElementById("brushSize") as HTMLInputElement | null;
     const parsed = Number(input?.value ?? "1");
-    return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1);
+    return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1, this.maxBrushSize);
   }
 
   private currentDialogBrushShape(): GnumarusBrushShape {
@@ -8032,7 +8128,7 @@ export class GnumarusShell extends LitElement {
   private currentDialogBrushSizeMin(): number {
     const input = this.shadowRoot?.getElementById("brushSizeMin") as HTMLInputElement | null;
     const parsed = Number(input?.value ?? "1");
-    return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1);
+    return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1, this.maxBrushSize);
   }
 
   private applyBrushSizeMinFromDialog(): void {
@@ -8879,7 +8975,7 @@ export class GnumarusShell extends LitElement {
 
   /** Test hook: set the line width (floats 0.1..64, clamped). */
   setLineWidth(size: number): void {
-    const clamped = clampBrushSizeFloat(size);
+    const clamped = clampBrushSizeFloat(size, this.maxBrushSize);
     this.lineWidth = clamped;
     if (this.lineWidthMin > clamped) {
       this.lineWidthMin = clamped;
@@ -8891,7 +8987,7 @@ export class GnumarusShell extends LitElement {
 
   /** Test hook: set the minimum line width (floats 0.1..max, clamped). */
   setLineWidthMin(size: number): void {
-    const clamped = Math.min(clampBrushSizeFloat(size), this.lineWidth);
+    const clamped = Math.min(clampBrushSizeFloat(size, this.maxBrushSize), this.lineWidth);
     this.lineWidthMin = clamped;
     this.engine?.setLineWidthMin(clamped);
     this.statusMessage = this.lineWidthStatus();
@@ -8916,7 +9012,7 @@ export class GnumarusShell extends LitElement {
   private currentDialogLineWidth(): number {
     const input = this.shadowRoot?.getElementById("lineWidth") as HTMLInputElement | null;
     const parsed = Number(input?.value ?? "1");
-    return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1);
+    return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1, this.maxBrushSize);
   }
 
   private currentDialogLineShape(): GnumarusBrushShape {
@@ -8943,7 +9039,7 @@ export class GnumarusShell extends LitElement {
   private currentDialogLineWidthMin(): number {
     const input = this.shadowRoot?.getElementById("lineWidthMin") as HTMLInputElement | null;
     const parsed = Number(input?.value ?? "1");
-    return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1);
+    return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1, this.maxBrushSize);
   }
 
   private applyLineWidthMinFromDialog(): void {
@@ -8969,7 +9065,7 @@ export class GnumarusShell extends LitElement {
 
   /** Test hook: set the curve width (floats 0.1..64, clamped). */
   setCurveWidth(size: number): void {
-    const clamped = clampBrushSizeFloat(size);
+    const clamped = clampBrushSizeFloat(size, this.maxBrushSize);
     this.curveWidth = clamped;
     if (this.curveWidthMin > clamped) {
       this.curveWidthMin = clamped;
@@ -8981,7 +9077,7 @@ export class GnumarusShell extends LitElement {
 
   /** Test hook: set the minimum curve width (floats 0.1..max, clamped). */
   setCurveWidthMin(size: number): void {
-    const clamped = Math.min(clampBrushSizeFloat(size), this.curveWidth);
+    const clamped = Math.min(clampBrushSizeFloat(size, this.maxBrushSize), this.curveWidth);
     this.curveWidthMin = clamped;
     this.engine?.setCurveWidthMin(clamped);
     this.statusMessage = this.curveWidthStatus();
@@ -9006,7 +9102,7 @@ export class GnumarusShell extends LitElement {
   private currentDialogCurveWidth(): number {
     const input = this.shadowRoot?.getElementById("curveWidth") as HTMLInputElement | null;
     const parsed = Number(input?.value ?? "1");
-    return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1);
+    return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1, this.maxBrushSize);
   }
 
   private currentDialogCurveShape(): GnumarusBrushShape {
@@ -9033,7 +9129,7 @@ export class GnumarusShell extends LitElement {
   private currentDialogCurveWidthMin(): number {
     const input = this.shadowRoot?.getElementById("curveWidthMin") as HTMLInputElement | null;
     const parsed = Number(input?.value ?? "1");
-    return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1);
+    return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1, this.maxBrushSize);
   }
 
   private applyCurveWidthMinFromDialog(): void {

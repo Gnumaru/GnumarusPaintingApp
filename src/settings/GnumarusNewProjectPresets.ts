@@ -33,6 +33,9 @@ export const GNUMARUS_NEW_PROJECT_PRESETS: GnumarusNewProjectPreset[] = [
   { name: "digital painting lossy", width: 1920, height: 1080, format: "jxl", lossless: false, quality: 95 },
 ];
 
+/** Display name of the preset selected by default in the new-project dialog. */
+export const DEFAULT_NEW_PROJECT_PRESET = "digital painting lossy";
+
 /** Dialog field values produced by applying a preset (or null when unknown). */
 export interface GnumarusNewProjectFields {
   width: number;

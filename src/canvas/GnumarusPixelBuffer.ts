@@ -546,28 +546,28 @@ export const GNUMARUS_MIN_BRUSH_SIZE = 1;
 export const GNUMARUS_MAX_BRUSH_SIZE = 64;
 export const GNUMARUS_MIN_BRUSH_SIZE_FLOAT = 0.1;
 
-/** Clamp a brush size to the supported integer range 1..64. */
-export function clampBrushSize(value: number): number {
+/** Clamp a brush size to the supported integer range 1..max (default 64). */
+export function clampBrushSize(value: number, max: number = GNUMARUS_MAX_BRUSH_SIZE): number {
   if (!Number.isFinite(value)) {
     return GNUMARUS_MIN_BRUSH_SIZE;
   }
-  return Math.min(GNUMARUS_MAX_BRUSH_SIZE, Math.max(GNUMARUS_MIN_BRUSH_SIZE, Math.floor(value)));
+  return Math.min(max, Math.max(GNUMARUS_MIN_BRUSH_SIZE, Math.floor(value)));
 }
 
-/** Clamp a brush/line width to the supported float range 0.1..64 (no rounding). */
-export function clampBrushSizeFloat(value: number): number {
+/** Clamp a brush/line width to the supported float range 0.1..max (default 64, no rounding). */
+export function clampBrushSizeFloat(value: number, max: number = GNUMARUS_MAX_BRUSH_SIZE): number {
   if (!Number.isFinite(value)) {
     return GNUMARUS_MIN_BRUSH_SIZE;
   }
-  return Math.min(GNUMARUS_MAX_BRUSH_SIZE, Math.max(GNUMARUS_MIN_BRUSH_SIZE_FLOAT, value));
+  return Math.min(max, Math.max(GNUMARUS_MIN_BRUSH_SIZE_FLOAT, value));
 }
 
-/** Round a float width to the nearest integer for non-anti-aliased painting (min 1, max 64). */
-export function roundBrushSizeForAliased(value: number): number {
+/** Round a float width to the nearest integer for non-anti-aliased painting (min 1, max defaults to 64). */
+export function roundBrushSizeForAliased(value: number, max: number = GNUMARUS_MAX_BRUSH_SIZE): number {
   if (!Number.isFinite(value)) {
     return GNUMARUS_MIN_BRUSH_SIZE;
   }
-  return Math.min(GNUMARUS_MAX_BRUSH_SIZE, Math.max(GNUMARUS_MIN_BRUSH_SIZE, Math.round(value)));
+  return Math.min(max, Math.max(GNUMARUS_MIN_BRUSH_SIZE, Math.round(value)));
 }
 
 /** Parse a brush shape, defaulting to square for missing or invalid input. */
@@ -646,8 +646,9 @@ export function drawBrushStamp(
   locked: GnumarusChannelLock | undefined = undefined,
   blend: GnumarusBlendMode = "normal",
   wrap: GnumarusWrapMode = "off",
+  maxSize: number = GNUMARUS_MAX_BRUSH_SIZE,
 ): void {
-  const tip = clampBrushSize(size);
+  const tip = clampBrushSize(size, maxSize);
   const anchor = Math.floor((tip - 1) / 2);
   const left = centerX - anchor;
   const top = centerY - anchor;
@@ -689,8 +690,9 @@ export function drawBrushLine(
   locked: GnumarusChannelLock | undefined = undefined,
   blend: GnumarusBlendMode = "normal",
   wrap: GnumarusWrapMode = "off",
+  maxSize: number = GNUMARUS_MAX_BRUSH_SIZE,
 ): void {
-  const tip = clampBrushSize(size);
+  const tip = clampBrushSize(size, maxSize);
   if (tip <= 1) {
     drawPixelLine(buffer, width, height, x0, y0, x1, y1, color, locked, blend, wrap);
     return;
@@ -811,8 +813,9 @@ export function drawLineSegment(
   locked: GnumarusChannelLock | undefined = undefined,
   blend: GnumarusBlendMode = "normal",
   wrap: GnumarusWrapMode = "off",
+  maxSize: number = GNUMARUS_MAX_BRUSH_SIZE,
 ): void {
-  const thick = antialiased ? clampBrushSizeFloat(lineWidth) : roundBrushSizeForAliased(lineWidth);
+  const thick = antialiased ? clampBrushSizeFloat(lineWidth, maxSize) : roundBrushSizeForAliased(lineWidth, maxSize);
   if (!antialiased) {
     if (thick <= 1) {
       drawPixelLine(buffer, width, height, x0, y0, x1, y1, color, locked, blend, wrap);
@@ -888,12 +891,13 @@ export function drawCubicBezier(
   locked: GnumarusChannelLock | undefined = undefined,
   blend: GnumarusBlendMode = "normal",
   wrap: GnumarusWrapMode = "off",
+  maxSize: number = GNUMARUS_MAX_BRUSH_SIZE,
 ): void {
   const chord = (a: GnumarusBezierPoint, b: GnumarusBezierPoint): number =>
     Math.sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
   const polygon = chord(p0, p1) + chord(p1, p2) + chord(p2, p3);
   if (!(polygon > 1e-9)) {
-    drawLineSegment(buffer, width, height, p0.x, p0.y, p0.x, p0.y, lineWidth, shape, antialiased, color, locked, blend, wrap);
+    drawLineSegment(buffer, width, height, p0.x, p0.y, p0.x, p0.y, lineWidth, shape, antialiased, color, locked, blend, wrap, maxSize);
     return;
   }
   const segments = Math.min(200, Math.max(16, Math.ceil(polygon * 2)));
@@ -912,7 +916,7 @@ export function drawCubicBezier(
     const sy0 = antialiased ? prevY : Math.round(prevY);
     const sx1 = antialiased ? x : Math.round(x);
     const sy1 = antialiased ? y : Math.round(y);
-    drawLineSegment(buffer, width, height, sx0, sy0, sx1, sy1, lineWidth, shape, antialiased, color, locked, blend, wrap);
+    drawLineSegment(buffer, width, height, sx0, sy0, sx1, sy1, lineWidth, shape, antialiased, color, locked, blend, wrap, maxSize);
     prevX = x;
     prevY = y;
   }
@@ -1052,6 +1056,7 @@ export function stampSegmentCoverage(
   shape: GnumarusBrushShape,
   antialiased: boolean,
   wrap: GnumarusWrapMode = "off",
+  maxSize: number = GNUMARUS_MAX_BRUSH_SIZE,
 ): void {
   if (mask.length !== width * height) {
     return;
@@ -1077,7 +1082,7 @@ export function stampSegmentCoverage(
     }
   };
   if (!antialiased) {
-    const thick = roundBrushSizeForAliased(size);
+    const thick = roundBrushSizeForAliased(size, maxSize);
     // Integer rasterization (Bresenham walkers require integers to terminate).
     let x = Math.round(x0);
     let y = Math.round(y0);
@@ -1128,7 +1133,7 @@ export function stampSegmentCoverage(
     }
     return;
   }
-  const thick = clampBrushSizeFloat(size);
+  const thick = clampBrushSizeFloat(size, maxSize);
   const half = thick / 2;
   const pad = half + 1;
   const minX = wrap === "off" ? Math.max(0, Math.floor(Math.min(x0, x1) - pad)) : Math.floor(Math.min(x0, x1) - pad);

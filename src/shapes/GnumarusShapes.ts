@@ -15,6 +15,7 @@ import {
   drawCubicBezier,
   drawCubicBezierCoverage,
   drawLineSegment,
+  GNUMARUS_MAX_BRUSH_SIZE,
   setPixel,
   stampSegmentCoverage,
   type GnumarusBlendMode,
@@ -272,6 +273,7 @@ export function paintRectOutline(
   y0: number,
   x1: number,
   y1: number,
+  maxSize: number = GNUMARUS_MAX_BRUSH_SIZE,
 ): void {
   const corners = [
     { x: Math.round(x0), y: Math.round(y0) },
@@ -284,7 +286,7 @@ export function paintRectOutline(
     const b = corners[(i + 1) % corners.length] as { x: number; y: number };
     drawLineSegment(
       tex.buffer, tex.width, tex.height, a.x, a.y, b.x, b.y,
-      style.width, "square", style.antialias, style.color, style.locked, style.blend, style.wrap,
+      style.width, "square", style.antialias, style.color, style.locked, style.blend, style.wrap, maxSize,
     );
   }
 }
@@ -313,6 +315,7 @@ export function paintEllipseOutline(
   y0: number,
   x1: number,
   y1: number,
+  maxSize: number = GNUMARUS_MAX_BRUSH_SIZE,
 ): void {
   const cx = (x0 + x1) / 2;
   const cy = (y0 + y1) / 2;
@@ -324,7 +327,7 @@ export function paintEllipseOutline(
     const b = points[(i + 1) % points.length] as { x: number; y: number };
     drawLineSegment(
       tex.buffer, tex.width, tex.height, Math.round(a.x), Math.round(a.y), Math.round(b.x), Math.round(b.y),
-      style.width, "square", style.antialias, style.color, style.locked, style.blend, style.wrap,
+      style.width, "square", style.antialias, style.color, style.locked, style.blend, style.wrap, maxSize,
     );
   }
 }
@@ -350,6 +353,7 @@ export function paintPolygon(
   tex: GnumarusShapeTex,
   style: GnumarusShapeStyle,
   points: Array<{ x: number; y: number }>,
+  maxSize: number = GNUMARUS_MAX_BRUSH_SIZE,
 ): void {
   const rounded = points.map((point) => ({ x: Math.round(point.x), y: Math.round(point.y) }));
   if (style.filled) {
@@ -363,7 +367,7 @@ export function paintPolygon(
     }
     drawLineSegment(
       tex.buffer, tex.width, tex.height, a.x, a.y, b.x, b.y,
-      style.width, "square", style.antialias, style.color, style.locked, style.blend, style.wrap,
+      style.width, "square", style.antialias, style.color, style.locked, style.blend, style.wrap, maxSize,
     );
   }
 }
@@ -377,18 +381,19 @@ export function paintLineSegment(
   y0: number,
   x1: number,
   y1: number,
+  maxSize: number = GNUMARUS_MAX_BRUSH_SIZE,
 ): void {
   if (style.accumulate) {
     drawLineSegment(
       tex.buffer, tex.width, tex.height, x0, y0, x1, y1,
-      style.width, style.tip, style.antialias, style.color, style.locked, style.blend, style.wrap,
+      style.width, style.tip, style.antialias, style.color, style.locked, style.blend, style.wrap, maxSize,
     );
     return;
   }
   const mask = new Uint8Array(tex.width * tex.height);
   stampSegmentCoverage(
     mask, tex.width, tex.height, x0, y0, x1, y1,
-    style.width, style.tip, style.antialias, style.wrap,
+    style.width, style.tip, style.antialias, style.wrap, maxSize,
   );
   repaintShapeMask(tex, base, mask, style);
 }
@@ -402,6 +407,7 @@ export function paintCurveStroke(
   c1: { x: number; y: number },
   c2: { x: number; y: number },
   p3: { x: number; y: number },
+  maxSize: number = GNUMARUS_MAX_BRUSH_SIZE,
 ): void {
   if (style.pixelPerfect) {
     const stroke = new GnumarusPixelPerfectStroke();
@@ -444,7 +450,7 @@ export function paintCurveStroke(
   if (style.accumulate) {
     drawCubicBezier(
       tex.buffer, tex.width, tex.height, p0, c1, c2, p3,
-      style.width, style.tip, style.antialias, style.color, style.locked, style.blend, style.wrap,
+      style.width, style.tip, style.antialias, style.color, style.locked, style.blend, style.wrap, maxSize,
     );
     return;
   }
