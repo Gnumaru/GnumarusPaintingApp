@@ -29,6 +29,22 @@ async function setPencil(page: import("@playwright/test").Page, hex: string): Pr
   }, hex);
 }
 
+/**
+ * Fill a hue/saturation slider or its manual input, then wait until the
+ * live preview settled (spinner back hidden). Pixel assertions after this
+ * use expect.poll so fast and slow computes are both deterministic.
+ */
+async function fillHsAndWait(
+  dialog: import("@playwright/test").Locator,
+  selector: string,
+  value: string,
+): Promise<void> {
+  await dialog.locator(selector).fill(value);
+  await dialog.locator(selector).evaluate((el: HTMLElement) => el.blur());
+  // Wait until any running preview settled (spinner hidden at rest).
+  await expect(dialog.locator('[data-testid="hs-spinner"]')).toBeHidden();
+}
+
 async function setChecker(page: import("@playwright/test").Page, which: "A" | "B", hex: string): Promise<void> {
   await page.evaluate(
     ([side, value]: [string, string]) => {
@@ -1538,15 +1554,62 @@ test("final preview shows flattened render with zoom and pan", async ({ page }) 
   await expect(previewCanvas).toBeVisible();
   const size = await previewCanvas.evaluate((element: HTMLCanvasElement) => ({ width: element.width, height: element.height }));
   expect(size).toEqual({ width: 64, height: 64 });
-  await expect(preview).toContainText("400%");
+  const zoomInput = preview.locator('[data-testid="preview-zoom-input"]');
+  await expect(zoomInput).toHaveValue("400");
   await preview.getByRole("button", { name: "Zoom in preview" }).click();
-  await expect(preview).toContainText("800%");
+  await expect(zoomInput).toHaveValue("800");
   const scaledWidth = await previewCanvas.evaluate((element: HTMLCanvasElement) => element.style.width);
   expect(scaledWidth).toBe("512px");
   await preview.getByRole("button", { name: "Zoom out preview" }).click();
-  await expect(preview).toContainText("400%");
+  await expect(zoomInput).toHaveValue("400");
   await preview.getByRole("button", { name: "Close preview" }).click();
   await expect(preview).toHaveCount(0);
+});
+
+test("final preview zoom input, fit and 1:1 @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await page.getByRole("button", { name: "Final preview" }).click();
+  const preview = page.locator('gnumarus-shell [data-testid="final-preview"]');
+  await expect(preview).toBeVisible();
+  const zoomInput = preview.locator('[data-testid="preview-zoom-input"]');
+  await expect(zoomInput).toHaveValue("400");
+  const previewCanvas = page.locator("gnumarus-shell canvas#previewCanvas");
+  // 1:1 resets to a true 100%.
+  await preview.getByRole("button", { name: "Reset preview zoom" }).click();
+  await expect(zoomInput).toHaveValue("100");
+  expect(await previewCanvas.evaluate((element: HTMLCanvasElement) => element.style.width)).toBe("64px");
+  // Typed values apply on commit and clamp to 1..6400.
+  await zoomInput.fill("50");
+  await zoomInput.evaluate((el: HTMLElement) => el.blur());
+  await expect(zoomInput).toHaveValue("50");
+  expect(await previewCanvas.evaluate((element: HTMLCanvasElement) => element.style.width)).toBe("32px");
+  await zoomInput.fill("99999");
+  await zoomInput.evaluate((el: HTMLElement) => el.blur());
+  await expect(zoomInput).toHaveValue("6400");
+  await zoomInput.fill("0");
+  await zoomInput.evaluate((el: HTMLElement) => el.blur());
+  await expect(zoomInput).toHaveValue("1");
+  // Fit shows the whole image at once without scrolling.
+  await preview.getByRole("button", { name: "Fit", exact: true }).click();
+  const body = preview.locator(".preview-body");
+  const fits = await body.evaluate((element: HTMLElement) => {
+    const canvas = element.querySelector("canvas");
+    if (canvas === null) {
+      throw new Error("preview canvas is missing");
+    }
+    return {
+      styleWidth: Number.parseFloat(canvas.style.width),
+      styleHeight: Number.parseFloat(canvas.style.height),
+      clientWidth: element.clientWidth,
+      clientHeight: element.clientHeight,
+    };
+  });
+  expect(fits.styleWidth).toBeGreaterThan(0);
+  expect(fits.styleWidth).toBeLessThanOrEqual(fits.clientWidth);
+  expect(fits.styleHeight).toBeLessThanOrEqual(fits.clientHeight);
+  await expect(zoomInput).not.toHaveValue("1");
 });
 
 interface GnumarusTestMatrix {
@@ -12943,9 +13006,8 @@ test("adjust hue/saturation previews on release and cancels to revert @recent", 
   await expect(dialog.locator("#hsAlpha")).toHaveValue("0");
   await expect(dialog.locator("#hsModel")).toHaveValue("hsl");
   await expect(dialog.locator("#hsMode")).toHaveValue("additive");
-  await dialog.locator("#hsLightness").fill("100");
-  await dialog.locator("#hsLightness").evaluate((el: HTMLElement) => el.blur());
-  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
+  await fillHsAndWait(dialog, "#hsLightness", "100");
+  await expect.poll(() => readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
   await dialog.getByRole("button", { name: "Cancel" }).click();
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
@@ -12959,9 +13021,8 @@ test("adjust hue/saturation from Edit menu commits, applies and undoes @recent",
   await page.getByRole("button", { name: "Adjust hue/saturation" }).click();
   const dialog = page.locator('gnumarus-shell [data-testid="hs-window"]');
   await expect(dialog).toBeVisible();
-  await dialog.locator("#hsHue").fill("60");
-  await dialog.locator("#hsHue").evaluate((el: HTMLElement) => el.blur());
-  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 0, a: 255 });
+  await fillHsAndWait(dialog, "#hsHue", "60");
+  await expect.poll(() => readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 0, a: 255 });
   await dialog.getByRole("button", { name: "Apply" }).click();
   await expect(dialog).toBeVisible();
   await expect(dialog.locator("#hsHue")).toHaveValue("0");
@@ -12984,12 +13045,10 @@ test("hue slider spans -180 to 180 @recent", async ({ page }) => {
   });
   const dialog = page.locator('gnumarus-shell [data-testid="hs-window"]');
   await expect(dialog).toBeVisible();
-  await dialog.locator("#hsHue").fill("180");
-  await dialog.locator("#hsHue").evaluate((el: HTMLElement) => el.blur());
-  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 255, b: 255, a: 255 });
-  await dialog.locator("#hsHueNum").fill("-180");
-  await dialog.locator("#hsHueNum").evaluate((el: HTMLElement) => el.blur());
-  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 255, b: 255, a: 255 });
+  await fillHsAndWait(dialog, "#hsHue", "180");
+  await expect.poll(() => readPixel(page, 32, 32)).toEqual({ r: 0, g: 255, b: 255, a: 255 });
+  await fillHsAndWait(dialog, "#hsHueNum", "-180");
+  await expect.poll(() => readPixel(page, 32, 32)).toEqual({ r: 0, g: 255, b: 255, a: 255 });
   await dialog.getByRole("button", { name: "Cancel" }).click();
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
@@ -13030,18 +13089,39 @@ test("adjust hue/saturation proportional mode and manual inputs @recent", async 
   await expect(dialog).toBeVisible();
   await dialog.locator("#hsMode").selectOption("proportional");
   // Proportional hue on red (h=0) is a no-op: zeros stay zero.
-  await dialog.locator("#hsHueNum").fill("100");
-  await dialog.locator("#hsHueNum").evaluate((el: HTMLElement) => el.blur());
+  await fillHsAndWait(dialog, "#hsHueNum", "100");
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   // Manual lightness input to +100 doubles L=50% to white.
-  await dialog.locator("#hsLightnessNum").fill("100");
-  await dialog.locator("#hsLightnessNum").evaluate((el: HTMLElement) => el.blur());
-  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
+  await fillHsAndWait(dialog, "#hsLightnessNum", "100");
+  await expect.poll(() => readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
   // Black never moves in proportional mode.
   expect(await readPixel(page, 47, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
   // Switching the model keeps the dialog alive and still previews.
   await dialog.locator("#hsModel").selectOption("okhsl");
   await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("hue/saturation spinner shows while computing @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await paintLayerRect(page, "#ff0000", 24, 24, 39, 39);
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { runAction(id: string): boolean } } };
+    root.__gnumarus?.shell?.runAction("adjust-hue-saturation");
+  });
+  const dialog = page.locator('gnumarus-shell [data-testid="hs-window"]');
+  await expect(dialog).toBeVisible();
+  // The OKHSL path is slow enough (~0.5s on a full canvas) that the
+  // spinner is guaranteed to be observable while it computes.
+  await dialog.locator("#hsModel").selectOption("okhsl");
+  const becameVisible = expect(dialog.locator('[data-testid="hs-spinner"]')).toBeVisible();
+  await dialog.locator("#hsLightness").fill("100");
+  await dialog.locator("#hsLightness").evaluate((el: HTMLElement) => el.blur());
+  await becameVisible;
+  await expect(dialog.locator('[data-testid="hs-spinner"]')).toBeHidden();
+  await expect.poll(() => readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
   await dialog.getByRole("button", { name: "Cancel" }).click();
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });

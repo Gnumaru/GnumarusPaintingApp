@@ -1323,6 +1323,14 @@ export class GnumarusShell extends LitElement {
       padding: 2px 10px;
       cursor: pointer;
     }
+    .preview-toolbar input[type="number"] {
+      width: 64px;
+      background: #1e1e1e;
+      color: #fff;
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 2px 6px;
+    }
     .preview-body {
       flex: 1 1 auto;
       overflow: auto;
@@ -1388,6 +1396,31 @@ export class GnumarusShell extends LitElement {
       border-radius: 4px;
       padding: 4px 6px;
       max-width: 220px;
+    }
+    .adjust-spinner {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 18px;
+      font-size: 12px;
+      color: #b0b0b0;
+    }
+    .adjust-spinner[hidden] {
+      display: none;
+    }
+    .adjust-spinner-ring {
+      width: 14px;
+      height: 14px;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      border: 2px solid #555;
+      border-top-color: #fff;
+      animation: hs-spin 0.8s linear infinite;
+    }
+    @keyframes hs-spin {
+      to {
+        transform: rotate(360deg);
+      }
     }
     .toast {
       position: absolute;
@@ -1770,6 +1803,7 @@ export class GnumarusShell extends LitElement {
     hsModel: { type: String },
     hsMode: { type: String },
     hsOpen: { type: Boolean },
+    hsWorking: { type: Boolean },
     hsWindowX: { type: Number },
     hsWindowY: { type: Number },
     checkerColorA: { type: String },
@@ -1994,6 +2028,8 @@ export class GnumarusShell extends LitElement {
   declare hsModel: GnumarusHslAdjustModel;
   declare hsMode: GnumarusHslAdjustMode;
   declare hsOpen: boolean;
+  /** True while a hue/saturation preview is being computed. */
+  declare hsWorking: boolean;
   declare hsWindowX: number;
   declare hsWindowY: number;
   declare checkerColorA: string;
@@ -2234,6 +2270,7 @@ export class GnumarusShell extends LitElement {
     this.hsModel = "hsl";
     this.hsMode = "additive";
     this.hsOpen = false;
+    this.hsWorking = false;
     this.hsWindowX = 340;
     this.hsWindowY = 16;
     this.checkerColorA = DEFAULT_CHECKER_SETTINGS.colorA;
@@ -2646,12 +2683,25 @@ export class GnumarusShell extends LitElement {
                     <button aria-label=${tr("preview.zoomOut")} title=${tr("preview.zoomOut")} @click=${(): void => this.zoomPreview(0.5)}>
                       −
                     </button>
-                    <span>${Math.round(this.previewZoom * 100)}%</span>
+                    <input
+                      type="number"
+                      id="previewZoomInput"
+                      data-testid="preview-zoom-input"
+                      min="1"
+                      max="6400"
+                      step="1"
+                      aria-label=${tr("preview.zoomAria")}
+                      .value=${String(Math.round(this.previewZoom * 100))}
+                      @change=${(): void => this.applyPreviewZoomInput()}
+                    />
                     <button aria-label=${tr("preview.zoomIn")} title=${tr("preview.zoomIn")} @click=${(): void => this.zoomPreview(2)}>
                       +
                     </button>
                     <button aria-label=${tr("preview.resetZoom")} title=${tr("preview.resetZoom")} @click=${(): void => this.resetPreviewZoom()}>
                       1:1
+                    </button>
+                    <button aria-label=${tr("preview.fit")} title=${tr("preview.fitTitle")} @click=${(): void => this.fitPreviewZoom()}>
+                      ${tr("preview.fit")}
                     </button>
                   </div>
                   <div
@@ -2781,19 +2831,25 @@ export class GnumarusShell extends LitElement {
                 @keydown=${(event: KeyboardEvent): void => {
                   if (event.key === "Escape") {
                     event.stopPropagation();
-                    this.cancelHslAdjust();
+                    void this.cancelHslAdjust();
                   }
                 }}
               >
                 <div class="preview-header" @pointerdown=${(event: PointerEvent): void => this.onAdjustWindowDragStart(event, "hs")}>
                   <span>${tr("dialog.hsTitle")}</span>
                   <span class="spacer"></span>
-                  <button aria-label=${tr("btn.close")} title=${tr("btn.close")} @click=${(): void => this.cancelHslAdjust()}>
+                  <button aria-label=${tr("btn.close")} title=${tr("btn.close")} @click=${(): void => {
+                    void this.cancelHslAdjust();
+                  }}>
                     ×
                   </button>
                 </div>
                 <div class="adjust-body">
                   <p>${tr("dialog.hsHint")}</p>
+                  <div class="adjust-spinner" data-testid="hs-spinner" ?hidden=${!this.hsWorking}>
+                    <span class="adjust-spinner-ring" aria-hidden="true"></span>
+                    <span>${tr("dialog.hsWorking")}</span>
+                  </div>
             <label
               >${tr("dialog.hsModel")}
               <select
@@ -2961,9 +3017,15 @@ export class GnumarusShell extends LitElement {
               />
             </label>
                   <div class="dialog-actions">
-                    <button @click=${(): void => this.cancelHslAdjust()}>${tr("btn.cancel")}</button>
-                    <button id="hueSaturationApply" @click=${(): void => this.applyHslAdjust()}>${tr("btn.apply")}</button>
-                    <button id="hueSaturationOk" @click=${(): void => this.confirmHslAdjust()}>${tr("btn.ok")}</button>
+                    <button @click=${(): void => {
+                      void this.cancelHslAdjust();
+                    }}>${tr("btn.cancel")}</button>
+                    <button id="hueSaturationApply" @click=${(): void => {
+                      void this.applyHslAdjust();
+                    }}>${tr("btn.apply")}</button>
+                    <button id="hueSaturationOk" @click=${(): void => {
+                      void this.confirmHslAdjust();
+                    }}>${tr("btn.ok")}</button>
                   </div>
                 </div>
               </div>
@@ -6536,6 +6598,11 @@ export class GnumarusShell extends LitElement {
   private updateCheckInFlight = false;
   /** Test hook: force the check even on localhost (e2e with a mocked API). */
   private updateCheckForced = false;
+
+  /** Queued hue/saturation preview runs (coalesced by the pump). */
+  private hsPreviewQueued = 0;
+  /** True while a hue/saturation preview compute is in flight. */
+  private hsPreviewActive = false;
 
   /** Embedded build commit SHA (vite define, "unknown" when git was unavailable). */
   private buildSha(): string {
@@ -10155,13 +10222,48 @@ export class GnumarusShell extends LitElement {
   }
 
   private zoomPreview(factor: number): void {
-    const next = Math.min(64, Math.max(0.25, this.previewZoom * factor));
+    const next = Math.min(64, Math.max(0.01, this.previewZoom * factor));
     this.previewZoom = next;
     void this.refreshPreview();
   }
 
   private resetPreviewZoom(): void {
-    this.previewZoom = 4;
+    this.previewZoom = 1;
+    void this.refreshPreview();
+  }
+
+  /** Read the zoom percent input, clamped to 1..6400. */
+  private applyPreviewZoomInput(): void {
+    const input = this.shadowRoot?.getElementById("previewZoomInput") as HTMLInputElement | null;
+    const raw = Math.round(Number(input?.value ?? "100"));
+    const percent = Number.isFinite(raw) ? Math.min(6400, Math.max(1, raw)) : 100;
+    if (input !== null && input.value !== String(percent)) {
+      input.value = String(percent);
+    }
+    this.previewZoom = percent / 100;
+    void this.refreshPreview();
+  }
+
+  /**
+   * One-shot fit: set the zoom so the whole flattened image fits inside
+   * the preview body viewport (no scrolling needed to see it all).
+   */
+  private fitPreviewZoom(): void {
+    if (this.engine === null) {
+      return;
+    }
+    const size = this.engine.size;
+    if (size.width < 1 || size.height < 1) {
+      return;
+    }
+    const body = this.shadowRoot?.querySelector('[data-testid="final-preview"] .preview-body') as HTMLElement | null;
+    if (body === null || body.clientWidth < 1 || body.clientHeight < 1) {
+      return;
+    }
+    this.previewZoom = Math.min(
+      64,
+      Math.max(0.01, Math.min(body.clientWidth / size.width, body.clientHeight / size.height)),
+    );
     void this.refreshPreview();
   }
 
@@ -14191,6 +14293,9 @@ export class GnumarusShell extends LitElement {
 
   /** Open the live brightness/contrast floating window (two sliders + Cancel/Apply/OK). */
   private async openBrightnessContrastDialog(): Promise<void> {
+    if (this.bcOpen) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -14265,6 +14370,9 @@ export class GnumarusShell extends LitElement {
 
   /** Open the live hue/saturation floating window (four sliders + model/mode + Cancel/Apply/OK). */
   private async openHslAdjustDialog(): Promise<void> {
+    if (this.hsOpen) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -14280,6 +14388,8 @@ export class GnumarusShell extends LitElement {
     this.hsAlpha = 0;
     this.hsModel = "hsl";
     this.hsMode = "additive";
+    this.hsWorking = false;
+    this.hsPreviewQueued = 0;
     this.hsOpen = true;
     await this.updateComplete;
   }
@@ -14305,36 +14415,88 @@ export class GnumarusShell extends LitElement {
     };
   }
 
-  /** Slider released (or model/mode switched): re-apply over the session base (preview, no history). */
+  /** Slider released (or model/mode switched): queue a live preview over the session base (no history). */
   private previewHslAdjust(): void {
     if (this.engine === null || !this.hsOpen) {
       return;
     }
-    const levels = this.currentHslLevels();
-    this.hsHue = levels.hue;
-    this.hsSaturation = levels.saturation;
-    this.hsLightness = levels.lightness;
-    this.hsAlpha = levels.alpha;
-    this.hsModel = levels.model;
-    this.hsMode = levels.mode;
-    this.engine.previewHslAdjust(
-      levels.hue,
-      levels.saturation,
-      levels.lightness,
-      levels.alpha,
-      levels.model,
-      levels.mode,
-    );
+    this.hsWorking = true;
+    this.hsPreviewQueued += 1;
+    void this.pumpHslPreview();
+  }
+
+  /**
+   * Run queued previews one at a time, coalescing rapid changes: show the
+   * spinner, yield so it paints, compute from the newest state, and hide
+   * the spinner when no newer request arrived meanwhile.
+   */
+  private async pumpHslPreview(): Promise<void> {
+    if (this.hsPreviewActive) {
+      return;
+    }
+    this.hsPreviewActive = true;
+    try {
+      let served = 0;
+      while (served !== this.hsPreviewQueued) {
+        served = this.hsPreviewQueued;
+        this.hsWorking = true;
+        await this.updateComplete;
+        // Two frames: the first paints with the spinner while JS is idle
+        // (a single rAF callback still runs before that frame's paint, so
+        // a synchronous compute right after it would never show the spinner).
+        await this.nextPaintedFrame();
+        if (served !== this.hsPreviewQueued || !this.hsOpen || this.engine === null) {
+          continue;
+        }
+        const levels = this.currentHslLevels();
+        this.engine.previewHslAdjust(
+          levels.hue,
+          levels.saturation,
+          levels.lightness,
+          levels.alpha,
+          levels.model,
+          levels.mode,
+        );
+      }
+    } finally {
+      this.hsPreviewActive = false;
+      this.hsWorking = false;
+    }
+  }
+
+  /**
+   * Yield until the browser has painted a frame (a full idle frame between
+   * two rAF callbacks guarantees the spinner is on screen).
+   */
+  private nextPaintedFrame(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => resolve());
+      });
+    });
+  }
+
+  /** Wait until no preview is computing (confirm/apply/cancel serialize behind it). */
+  private async settleHslPreview(): Promise<void> {
+    while (this.hsPreviewActive) {
+      await new Promise<number>((resolve) => requestAnimationFrame(resolve));
+    }
   }
 
   /** Cancel: revert to the dialog-open snapshot with no history entry. */
-  private cancelHslAdjust(): void {
+  private async cancelHslAdjust(): Promise<void> {
+    await this.settleHslPreview();
     this.hsOpen = false;
+    this.hsWorking = false;
     this.engine?.cancelHslAdjust();
   }
 
   /** Apply: keep the visible change, rebase the session and reset the sliders (dialog stays open). */
-  private applyHslAdjust(): void {
+  private async applyHslAdjust(): Promise<void> {
+    if (this.engine === null || !this.hsOpen) {
+      return;
+    }
+    await this.settleHslPreview();
     if (this.engine === null || !this.hsOpen) {
       return;
     }
@@ -14356,11 +14518,16 @@ export class GnumarusShell extends LitElement {
   }
 
   /** OK: one undoable entry from the dialog-open snapshot to the current pixels. */
-  private confirmHslAdjust(): void {
+  private async confirmHslAdjust(): Promise<void> {
+    if (!this.hsOpen) {
+      return;
+    }
+    await this.settleHslPreview();
     if (!this.hsOpen) {
       return;
     }
     this.hsOpen = false;
+    this.hsWorking = false;
     if (this.engine === null) {
       return;
     }
