@@ -191,6 +191,40 @@ describe("layer masks", () => {
     expect(combineMasksForParent(1, 1, { ...IDENTITY_LAYER_TRANSFORM }, [])).toBeNull();
   });
 
+  it("matches the reference sampling on transformed inputs", async () => {
+    const tree = await import("../src/canvas/GnumarusLayerTree");
+    const math = await import("../src/canvas/GnumarusViewportMath");
+    const parent = { x: 3, y: -2, rotation: 0.3, flipX: false, flipY: true, scaleX: 1, scaleY: 1, skewX: 0.1, skewY: 0, rotationX: 0, rotationY: 0 };
+    const maskTransform = { x: -1, y: 4, rotation: -0.2, flipX: true, flipY: false, scaleX: 2, scaleY: 2, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 };
+    const w = 7;
+    const h = 5;
+    const mask = new Uint8ClampedArray(w * h * 4);
+    for (let i = 0; i < w * h; i += 1) {
+      mask[i * 4] = (i * 37) % 256;
+      mask[i * 4 + 1] = (i * 91) % 256;
+      mask[i * 4 + 2] = (i * 53) % 256;
+      mask[i * 4 + 3] = (i * 17) % 256;
+    }
+    const actual = tree.combineMasksForParent(6, 6, parent, [
+      { width: w, height: h, buffer: mask, transform: maskTransform, opacity: 0.7 },
+    ]);
+    expect(actual?.length).toBe(6 * 6 * 4);
+    // Reference: same math through the public pixel helpers.
+    for (let y = 0; y < 6; y += 1) {
+      for (let x = 0; x < 6; x += 1) {
+        const project = math.layerPixelCenterToProject(x, y, 6, 6, parent);
+        const sample = math.projectToLayerPixel(project.x, project.y, w, h, maskTransform);
+        let expected = 255;
+        if (sample !== null) {
+          const o = (sample.y * w + sample.x) * 4;
+          expected = Math.round(tree.maskTexelFactor(mask[o] as number, mask[o + 1] as number, mask[o + 2] as number, mask[o + 3] as number, 0.7) * 255);
+        }
+        const i = (y * 6 + x) * 4;
+        expect(actual?.[i]).toBe(expected);
+      }
+    }
+  });
+
   it("clears unworkable mask flags", async () => {
     const { sanitizeLayerMasks } = await import("../src/canvas/GnumarusLayerTree");
     const order = ["m", "p", "c", "q"];

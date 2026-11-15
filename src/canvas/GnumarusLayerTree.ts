@@ -14,7 +14,7 @@
  */
 
 import {
-  layerPixelCenterToProject,
+  layerLinearMatrix,
   projectToLayerPixel,
   type GnumarusLayerTransform,
 } from "./GnumarusViewportMath";
@@ -481,6 +481,48 @@ export interface GnumarusMaskContribution {
   opacity: number;
 }
 
+function isIdentityTransform(transform: GnumarusLayerTransform): boolean {
+  return (
+    transform.x === 0 &&
+    transform.y === 0 &&
+    transform.rotation === 0 &&
+    transform.flipX === false &&
+    transform.flipY === false &&
+    transform.scaleX === 1 &&
+    transform.scaleY === 1 &&
+    transform.skewX === 0 &&
+    transform.skewY === 0 &&
+    transform.rotationX === 0 &&
+    transform.rotationY === 0
+  );
+}
+
+/** Precomputed per-layer sampling constants for the slow combine path. */
+interface GnumarusMaskSampler {
+  width: number;
+  height: number;
+  buffer: Uint8ClampedArray;
+  opacity: number;
+  /** Parent texel (x,y) maps to project (pa*x + pb*y + ptx, pc*x + pd*y + pty). */
+  pa: number;
+  pb: number;
+  pc: number;
+  pd: number;
+  /** Inverse linear map for mask sampling (valid=false when degenerate). */
+  ia: number;
+  ib: number;
+  ic: number;
+  id: number;
+  idet: number;
+  mtx: number;
+  mty: number;
+  mfsx: number;
+  mfsy: number;
+  mhw: number;
+  mhh: number;
+  valid: boolean;
+}
+
 /**
  * Mask factor of a single mask texel (0..1): transparent texels are
  * identity (1, "no opinion", so fresh/empty masks show everything),
@@ -526,27 +568,127 @@ export function combineMasksForParent(
   if (usable.length === 0) {
     return null;
   }
-  const out = new Uint8ClampedArray(parentWidth * parentHeight * 4);
-  for (let y = 0; y < parentHeight; y += 1) {
-    for (let x = 0; x < parentWidth; x += 1) {
-      const project = layerPixelCenterToProject(x, y, parentWidth, parentHeight, parentTransform);
+  // Fast path (the common case: same-size, untransformed layers): direct
+  // 1:1 texel walk, no per-pixel calls, no allocations. Krita does the same
+  // kind of fast/slow split in KisLayer::applyMasks (in-place fast path
+  // when rects don't vary, temp-device slow path otherwise).
+  if (
+    isIdentityTransform(parentTransform) &&
+    usable.every(
+      (mask) =>
+        mask.width === parentWidth && mask.height === parentHeight && isIdentityTransform(mask.transform),
+    )
+  ) {
+    // Sparse-stroke fast path: strokes touch few texels, so pre-fill white
+    // (identity) and only compute/store texels where some mask paints.
+    const out = new Uint8ClampedArray(parentWidth * parentHeight * 4);
+    out.fill(255);
+    const opacities = usable.map((mask) => {
+      const opacity = mask.opacity;
+      return opacity >= 1 ? 1 : opacity <= 0 ? 0 : opacity;
+    });
+    const buffers = usable.map((mask) => mask.buffer);
+    for (let i = 0, n = parentWidth * parentHeight; i < n; i += 1) {
+      const o = i * 4;
       let factor = 1;
-      for (const mask of usable) {
-        const sample = projectToLayerPixel(project.x, project.y, mask.width, mask.height, mask.transform);
-        if (sample === null) {
+      let touched = false;
+      for (let m = 0; m < buffers.length; m += 1) {
+        const buffer = buffers[m] as Uint8ClampedArray;
+        const a = buffer[o + 3] as number;
+        if (a > 0) {
+          touched = true;
+          const luminance =
+            (0.299 * (buffer[o] as number) + 0.587 * (buffer[o + 1] as number) + 0.114 * (buffer[o + 2] as number)) / 255;
+          const alpha = a >= 255 ? 1 : a / 255;
+          const raw = luminance * alpha >= 1 ? 1 : luminance * alpha;
+          factor *= 1 - (1 - raw) * (opacities[m] as number);
+          if (!(factor > 0)) {
+            factor = 0;
+            break;
+          }
+        }
+      }
+      if (touched && factor < 1) {
+        const quantized = Math.round(factor * 255);
+        out[o] = quantized;
+        out[o + 1] = quantized;
+        out[o + 2] = quantized;
+      }
+    }
+    return out;
+  }
+  // Slow path: arbitrary transforms. All matrices are hoisted out of the
+  // pixel loop and the sampling math is inlined (no per-pixel calls or
+  // allocations), mirroring layerPixelCenterToProject/projectToLayerPixel.
+  const out = new Uint8ClampedArray(parentWidth * parentHeight * 4);
+  const parentMatrix = layerLinearMatrix(parentTransform);
+  const pfsx = parentTransform.flipX ? -1 : 1;
+  const pfsy = parentTransform.flipY ? -1 : 1;
+  const phw = parentWidth / 2;
+  const phh = parentHeight / 2;
+  const samplers: GnumarusMaskSampler[] = [];
+  for (const mask of usable) {
+    const matrix = layerLinearMatrix(mask.transform);
+    const determinant = matrix.a * matrix.d - matrix.b * matrix.c;
+    const opacity = mask.opacity >= 1 ? 1 : mask.opacity <= 0 ? 0 : mask.opacity;
+    samplers.push({
+      width: mask.width,
+      height: mask.height,
+      buffer: mask.buffer,
+      opacity,
+      pa: parentMatrix.a,
+      pb: parentMatrix.b,
+      pc: parentMatrix.c,
+      pd: parentMatrix.d,
+      ia: matrix.d,
+      ib: matrix.b,
+      ic: matrix.c,
+      id: matrix.a,
+      idet: determinant,
+      mtx: mask.transform.x,
+      mty: mask.transform.y,
+      mfsx: mask.transform.flipX ? -1 : 1,
+      mfsy: mask.transform.flipY ? -1 : 1,
+      mhw: mask.width / 2,
+      mhh: mask.height / 2,
+      valid: Math.abs(determinant) > 1e-9,
+    });
+  }
+  // Parent translation applies in project space (added after the linear map).
+  for (let y = 0; y < parentHeight; y += 1) {
+    const qy = (y + 0.5 - phh) * pfsy;
+    for (let x = 0; x < parentWidth; x += 1) {
+      const qx = (x + 0.5 - phw) * pfsx;
+      const projectX = parentMatrix.a * qx + parentMatrix.b * qy + parentTransform.x;
+      const projectY = parentMatrix.c * qx + parentMatrix.d * qy + parentTransform.y;
+      let factor = 1;
+      for (let s = 0; s < samplers.length; s += 1) {
+        const sampler = samplers[s] as GnumarusMaskSampler;
+        if (!sampler.valid) {
           continue;
         }
-        const o = (sample.y * mask.width + sample.x) * 4;
-        factor *= maskTexelFactor(
-          mask.buffer[o] as number,
-          mask.buffer[o + 1] as number,
-          mask.buffer[o + 2] as number,
-          mask.buffer[o + 3] as number,
-          mask.opacity,
-        );
-        if (!(factor > 0)) {
-          factor = 0;
-          break;
+        const rx = projectX - sampler.mtx;
+        const ry = projectY - sampler.mty;
+        const fqx = (sampler.id * rx - sampler.ib * ry) / sampler.idet;
+        const fqy = (-sampler.ic * rx + sampler.ia * ry) / sampler.idet;
+        const sx = Math.floor(fqx / sampler.mfsx + sampler.mhw);
+        const sy = Math.floor(fqy / sampler.mfsy + sampler.mhh);
+        if (sx < 0 || sy < 0 || sx >= sampler.width || sy >= sampler.height) {
+          continue;
+        }
+        const o = (sy * sampler.width + sx) * 4;
+        const buffer = sampler.buffer;
+        const a = buffer[o + 3] as number;
+        if (a > 0) {
+          const luminance =
+            (0.299 * (buffer[o] as number) + 0.587 * (buffer[o + 1] as number) + 0.114 * (buffer[o + 2] as number)) / 255;
+          const alpha = a >= 255 ? 1 : a / 255;
+          const raw = luminance * alpha >= 1 ? 1 : luminance * alpha;
+          factor *= 1 - (1 - raw) * sampler.opacity;
+          if (!(factor > 0)) {
+            factor = 0;
+            break;
+          }
         }
       }
       const i = (y * parentWidth + x) * 4;

@@ -2239,13 +2239,28 @@ export class GnumarusCanvasEngine {
       }
     }
     // Painting a mask's content changes its parent's combined mask texture.
-    const resolved = this.resolveFrame();
+    // Targeted cell/content lookup (no full-frame resolve or rasterization):
+    // painted textures are never async derived rasters.
+    let needsMask = false;
     for (const layer of this.layers) {
-      if (!layer.isMask) {
+      if (layer.isMask) {
+        needsMask = true;
+        break;
+      }
+    }
+    if (!needsMask) {
+      return;
+    }
+    const frame = this.currentFrame;
+    for (const layer of this.layers) {
+      if (!layer.isMask || layer.parentId === null) {
         continue;
       }
-      const cell = resolved.get(layer.id);
-      if (cell !== undefined && cell.textureId === textureId && layer.parentId !== null) {
+      const contentId = this.cells.get(animationCellKey(layer.id, frame)) ?? null;
+      if (contentId === null) {
+        continue;
+      }
+      if (this.contents.get(contentId)?.textureId === textureId) {
         this.queueMaskRefresh(layer.parentId);
       }
     }
