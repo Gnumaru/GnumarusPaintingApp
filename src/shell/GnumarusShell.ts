@@ -1511,6 +1511,25 @@ export class GnumarusShell extends LitElement {
       padding: 6px 12px;
       cursor: pointer;
     }
+    .export-tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid #444;
+      padding-bottom: 8px;
+    }
+    .export-tabs button {
+      background: transparent;
+      color: #e6e6e6;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      padding: 6px 12px;
+      cursor: pointer;
+    }
+    .export-tabs button[aria-selected="true"] {
+      background: #0e639c;
+      color: #fff;
+    }
     .dialog-error {
       color: #f48771;
       margin: 8px 0 0 0;
@@ -1899,6 +1918,7 @@ export class GnumarusShell extends LitElement {
     animationDeleteTarget: { type: String },
     animationError: { type: String },
     exportFrame: { type: Number },
+    exportTab: { type: String },
     exportFormat: { type: String },
     exportFormats: { type: Array },
     exportQuality: { type: Number },
@@ -2137,6 +2157,7 @@ export class GnumarusShell extends LitElement {
   declare animationDeleteTarget: string | null;
   declare animationError: string | null;
   declare exportFrame: number;
+  declare exportTab: string;
   declare exportFormat: string;
   declare exportFormats: GnumarusStillFormat[];
   declare exportQuality: number;
@@ -2397,6 +2418,7 @@ export class GnumarusShell extends LitElement {
     this.animationCreateFrames = null;
     this.animationDeleteTarget = null;
     this.exportFrame = 1;
+    this.exportTab = "frame";
     this.exportFormat = "image/png";
     this.exportFormats = [];
     this.exportQuality = GNUMARUS_DEFAULT_STILL_QUALITY;
@@ -4612,7 +4634,49 @@ export class GnumarusShell extends LitElement {
         </div>
       </dialog>
       <dialog id="exportDialog">
-        <h3>${tr("dialog.exportFrame")}</h3>
+        <div class="export-tabs" role="tablist" aria-label=${tr("menu.export")}>
+          <button
+            role="tab"
+            data-testid="export-tab-frame"
+            aria-selected=${this.exportTab === "frame" ? "true" : "false"}
+            @click=${(): void => {
+              this.exportTab = "frame";
+            }}
+          >
+            ${tr("dialog.exportFrame")}
+          </button>
+          <button
+            role="tab"
+            data-testid="export-tab-animation"
+            aria-selected=${this.exportTab === "animation" ? "true" : "false"}
+            @click=${(): void => {
+              this.exportTab = "animation";
+            }}
+          >
+            ${tr("dialog.exportAnimation")}
+          </button>
+          <button
+            role="tab"
+            data-testid="export-tab-sheet"
+            aria-selected=${this.exportTab === "sheet" ? "true" : "false"}
+            @click=${(): void => {
+              this.exportTab = "sheet";
+            }}
+          >
+            ${tr("dialog.exportSheet")}
+          </button>
+          <button
+            role="tab"
+            data-testid="export-tab-full"
+            aria-selected=${this.exportTab === "full" ? "true" : "false"}
+            @click=${(): void => {
+              this.exportTab = "full";
+            }}
+          >
+            ${tr("dialog.exportFullProject")}
+          </button>
+        </div>
+        <section ?hidden=${this.exportTab !== "frame"}>
         <label
           >${tr("dialog.frame")}
           <input
@@ -4678,9 +4742,12 @@ export class GnumarusShell extends LitElement {
             </label>`}
         <div class="dialog-actions">
           <button @click=${(): void => this.closeExportDialog()}>${tr("btn.cancel")}</button>
-          <button id="exportOk" @click=${(): void => void this.confirmExportFrame()}>${tr("btn.export")}</button>
+          <button id="exportOk" @click=${(): void => void this.confirmExportFrame()}>
+            ${tr("dialog.exportFrame")}
+          </button>
         </div>
-        <h3>${tr("dialog.exportAnimation")}</h3>
+        </section>
+        <section ?hidden=${this.exportTab !== "animation"}>
         <label
           >${tr("dialog.animation")}
           <select
@@ -4755,11 +4822,13 @@ export class GnumarusShell extends LitElement {
               />
             </label>`}
         <div class="dialog-actions">
+          <button @click=${(): void => this.closeExportDialog()}>${tr("btn.cancel")}</button>
           <button id="exportAnimatedOk" @click=${(): void => void this.confirmExportAnimated()}>
             ${tr("dialog.exportAnimation")}
           </button>
         </div>
-        <h3>${tr("dialog.exportSheet")}</h3>
+        </section>
+        <section ?hidden=${this.exportTab !== "sheet"}>
         <div class="export-sheet-animations">
           <label><input type="checkbox" id="exportSheetAll" />${tr("matrix.allFrames")}</label>
           ${this.engine?.getNamedAnimations().map(
@@ -4853,16 +4922,21 @@ export class GnumarusShell extends LitElement {
               />
             </label>`}
         <div class="dialog-actions">
+          <button @click=${(): void => this.closeExportDialog()}>${tr("btn.cancel")}</button>
           <button id="exportSheetOk" @click=${(): void => void this.confirmExportSheet()}>
             ${tr("dialog.exportSheet")}
           </button>
         </div>
-        <h3>${tr("dialog.exportFullProject")}</h3>
+        </section>
+        <section ?hidden=${this.exportTab !== "full"}>
+        <p>${tr("dialog.exportFullProjectHint")}</p>
         <div class="dialog-actions">
+          <button @click=${(): void => this.closeExportDialog()}>${tr("btn.cancel")}</button>
           <button id="exportFullProjectOk" @click=${(): void => void this.exportFullProject()}>
             ${tr("dialog.exportFullProject")}
           </button>
         </div>
+        </section>
       </dialog>
       <dialog id="frameRenameDialog">
         <h3>${tr("dialog.renameFrame")}</h3>
@@ -13713,6 +13787,7 @@ export class GnumarusShell extends LitElement {
     if (findStillFormat(this.exportFormats, this.exportSheetFormat) === null) {
       this.exportSheetFormat = this.exportFormats[0]?.mime ?? "image/png";
     }
+    this.exportTab = "frame";
     await this.updateComplete;
     const dialog = this.shadowRoot?.getElementById("exportDialog") as HTMLDialogElement | null;
     dialog?.showModal();

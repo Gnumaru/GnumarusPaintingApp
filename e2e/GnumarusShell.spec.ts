@@ -16050,7 +16050,7 @@ test("export full project downloads a .gpp that re-uploads @recent", async ({ pa
   await page.locator("gnumarus-shell .menubar .dropdown").getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("heading", { name: "Export full project" })).toBeVisible();
+  await dialog.locator('[data-testid="export-tab-full"]').click();
   await dialog.locator("#exportFullProjectOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("Exported Untitled.gpp");
   const packaged = await page.evaluate(() => {
@@ -16106,4 +16106,46 @@ test("export full project downloads a .gpp that re-uploads @recent", async ({ pa
   await expect(page.locator("gnumarus-shell")).toContainText("Opened Untitled");
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
   await removeEmbeddedProject(page, "Untitled");
+});
+
+test("export dialog tabs isolate sections with per-tab actions @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await paintCenter(page);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.locator("gnumarus-shell .menubar .dropdown").getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  const tabs = dialog.locator('[role="tab"]');
+  await expect(tabs).toHaveText(["Export frame", "Export animation", "Export spritesheet", "Export full project"]);
+  const panelOf = (buttonId: string): import("@playwright/test").Locator =>
+    dialog.locator(`#${buttonId}`).locator("xpath=ancestor::section[1]");
+  // Frame tab is active on open; other panels are hidden.
+  await expect(dialog.locator("#exportFrame")).toBeVisible();
+  await expect(dialog.locator("#exportAnimation")).toBeHidden();
+  await expect(dialog.locator("#exportSheetLayout")).toBeHidden();
+  await expect(dialog.locator("#exportFullProjectOk")).toBeHidden();
+  await expect(panelOf("exportOk").getByRole("button", { name: "Cancel" })).toBeVisible();
+  await expect(dialog.locator("#exportOk")).toHaveText("Export frame");
+  // Animation tab.
+  await dialog.locator('[data-testid="export-tab-animation"]').click();
+  await expect(dialog.locator("#exportFrame")).toBeHidden();
+  await expect(dialog.locator("#exportAnimation")).toBeVisible();
+  await expect(panelOf("exportAnimatedOk").getByRole("button", { name: "Cancel" })).toBeVisible();
+  await expect(dialog.locator("#exportAnimatedOk")).toHaveText("Export animation");
+  // Spritesheet tab.
+  await dialog.locator('[data-testid="export-tab-sheet"]').click();
+  await expect(dialog.locator("#exportSheetLayout")).toBeVisible();
+  await expect(dialog.locator("#exportAnimation")).toBeHidden();
+  await expect(panelOf("exportSheetOk").getByRole("button", { name: "Cancel" })).toBeVisible();
+  await expect(dialog.locator("#exportSheetOk")).toHaveText("Export spritesheet");
+  // Full project tab explains the .gpp and exports from there.
+  await dialog.locator('[data-testid="export-tab-full"]').click();
+  await expect(dialog.locator("#exportSheetLayout")).toBeHidden();
+  await expect(dialog).toContainText("re-importable via Upload project");
+  await expect(panelOf("exportFullProjectOk").getByRole("button", { name: "Cancel" })).toBeVisible();
+  await dialog.locator("#exportFullProjectOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported Untitled.gpp");
 });
