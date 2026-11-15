@@ -16195,7 +16195,14 @@ test("export dialog tabs and fields all carry tooltips @recent", async ({ page }
   await expect(dialog.locator(".export-sheet-animations")).toHaveAttribute("title", /include/);
   await expect(labelOf("exportSheetFrames")).toHaveAttribute("title", /append/);
   await expect(labelOf("exportSheetLayout")).toHaveAttribute("title", /arranged/);
+  await expect(labelOf("exportSheetCount")).toBeHidden();
+  await dialog.locator("#exportSheetLayout").selectOption("fixed-rows");
+  await expect(labelOf("exportSheetCount")).toBeVisible();
   await expect(labelOf("exportSheetCount")).toHaveAttribute("title", /grid/);
+  await dialog.locator("#exportSheetLayout").selectOption("fixed-cols");
+  await expect(labelOf("exportSheetCount")).toBeVisible();
+  await dialog.locator("#exportSheetLayout").selectOption("line");
+  await expect(labelOf("exportSheetCount")).toBeHidden();
   await expect(labelOf("exportSheetFormat")).toHaveAttribute("title", /format/);
   await dialog.locator("#exportSheetFormat").selectOption("image/jpeg");
   await expect(labelOf("exportSheetQuality")).toHaveAttribute("title", /1\.\.100/);

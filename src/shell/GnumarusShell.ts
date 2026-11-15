@@ -4836,7 +4836,9 @@ export class GnumarusShell extends LitElement {
             <option value="individual">${tr("dialog.sheetIndividual")}</option>
           </select>
         </label>
-        <label title=${tr("dialog.linesCountTitle")}
+        <label
+          title=${tr("dialog.linesCountTitle")}
+          ?hidden=${this.exportSheetLayout !== "fixed-rows" && this.exportSheetLayout !== "fixed-cols"}
           >${tr("dialog.linesCount")}
           <input
             type="number"
