@@ -15315,3 +15315,69 @@ test("masks never render alone and reject nesting and merges @recent", async ({ 
   await expect(page.getByRole("button", { name: "Merge Down" })).toBeDisabled();
   await page.locator("gnumarus-shell .context-blocker").click();
 });
+
+async function canvasCenterPixel(page: import("@playwright/test").Page): Promise<string> {
+  const value: unknown = await page.evaluate(() => {
+    const shell = document.querySelector("gnumarus-shell");
+    const canvas = shell?.shadowRoot?.querySelector("canvas") as HTMLCanvasElement | null;
+    const engine = (window as unknown as { __gnumarus?: { engine?: unknown } }).__gnumarus?.engine as unknown as
+      | { render(): void }
+      | undefined;
+    if (canvas === null || canvas === undefined || engine === undefined) {
+      return null;
+    }
+    // Same-task render + readback: valid without preserveDrawingBuffer.
+    engine.render();
+    const gl = canvas.getContext("webgl2");
+    if (gl === null) {
+      return null;
+    }
+    const pixel = new Uint8Array(4);
+    gl.readPixels(
+      Math.floor(canvas.width / 2),
+      Math.floor(canvas.height / 2),
+      1,
+      1,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      pixel,
+    );
+    return `${pixel[0]},${pixel[1]},${pixel[2]},${pixel[3]}`;
+  });
+  if (typeof value !== "string") {
+    throw new Error("canvas pixel is missing");
+  }
+  return value;
+}
+
+test("toggling visibility off and on preserves masking @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await page.getByRole("button", { name: "Add layer" }).click();
+  expect(await engineReparent(page, "layer2", "layer1")).toBe(true);
+  await page.locator('gnumarus-shell [data-layer-id="layer1"] .layer-name').click();
+  await selectTool(page, "Bucket fill");
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  await page.locator('gnumarus-shell [data-layer-id="layer2"] .layer-name').click();
+  await setPencil(page, "#000000");
+  await paintCenter(page);
+  await page.locator('gnumarus-shell [data-layer-id="layer2"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Convert to mask" }).click();
+  expect(await canvasCenterPixel(page)).not.toBe("255,0,0,255");
+  // Parent off/on must keep the mask wired on canvas.
+  await page.locator('gnumarus-shell [data-layer-id="layer1"] input[type="checkbox"]').click();
+  await page.locator('gnumarus-shell [data-layer-id="layer1"] input[type="checkbox"]').click();
+  expect(await canvasCenterPixel(page)).not.toBe("255,0,0,255");
+  // Mask off shows the parent; mask on hides it again.
+  await page.locator('gnumarus-shell [data-layer-id="layer2"] input[type="checkbox"]').click();
+  expect(await canvasCenterPixel(page)).toBe("255,0,0,255");
+  await page.locator('gnumarus-shell [data-layer-id="layer2"] input[type="checkbox"]').click();
+  expect(await canvasCenterPixel(page)).not.toBe("255,0,0,255");
+  // Repainting the mask white lifts the mask everywhere.
+  await setPencil(page, "#ffffff");
+  await paintCenter(page);
+  expect(await canvasCenterPixel(page)).toBe("255,0,0,255");
+});

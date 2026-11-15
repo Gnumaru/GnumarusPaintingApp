@@ -6454,12 +6454,14 @@ export class GnumarusCanvasEngine {
       texture.flipY = true;
       texture.needsUpdate = true;
       parent.maskTexture = texture;
-      if (maskMap !== undefined) {
-        maskMap.value = texture;
-      }
     } else {
       (existing.image.data as Uint8ClampedArray).set(combined);
       existing.needsUpdate = true;
+    }
+    // Always rebind: a previous empty pass may have pointed the uniform at
+    // the shared white texture while keeping the real texture cached.
+    if (maskMap !== undefined && parent.maskTexture !== null) {
+      maskMap.value = parent.maskTexture;
     }
     if (useMask !== undefined) {
       useMask.value = 1;
