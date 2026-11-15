@@ -4809,7 +4809,9 @@ export class GnumarusShell extends LitElement {
         </section>
         <section ?hidden=${this.exportTab !== "sheet"}>
         <div class="export-sheet-animations" title=${tr("dialog.sheetAnimationsTitle")}>
-          <label><input type="checkbox" id="exportSheetAll" />${tr("matrix.allFrames")}</label>
+          <label title=${tr("dialog.sheetAllFramesTitle")}
+            ><input type="checkbox" id="exportSheetAll" />${tr("matrix.allFrames")}</label
+          >
           ${this.engine?.getNamedAnimations().map(
             (animation) =>
               html`<label

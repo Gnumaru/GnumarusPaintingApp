@@ -16193,6 +16193,7 @@ test("export dialog tabs and fields all carry tooltips @recent", async ({ page }
   // Spritesheet tab fields.
   await dialog.locator('[data-testid="export-tab-sheet"]').click();
   await expect(dialog.locator(".export-sheet-animations")).toHaveAttribute("title", /include/);
+  await expect(labelOf("exportSheetAll")).toHaveAttribute("title", /every project frame/);
   await expect(labelOf("exportSheetFrames")).toHaveAttribute("title", /append/);
   await expect(labelOf("exportSheetLayout")).toHaveAttribute("title", /arranged/);
   await expect(labelOf("exportSheetCount")).toBeHidden();
