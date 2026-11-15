@@ -13,7 +13,7 @@ import {
   parseSvgDimensions,
   withSvgSize,
 } from "../vector/GnumarusSvg";
-import { GNUMARUS_MODEL3D_DEFAULT_VIEW, parseModel3dView, type GnumarusModel3dView } from "../project/GnumarusProjectFormat";
+import { GNUMARUS_MODEL3D_DEFAULT_VIEW, parseModel3dView, SUPPORTED_MODEL3D_EXTENSIONS, type GnumarusModel3dExtension, type GnumarusModel3dView } from "../project/GnumarusProjectFormat";
 import {
   applyNewProjectPreset,
   DEFAULT_NEW_PROJECT_PRESET,
@@ -3102,6 +3102,67 @@ export class GnumarusCanvasEngine {
     this.onLayersChanged?.();
     this.emitStats();
     return textureId;
+  }
+
+  /**
+   * Register decoded pixels as a standalone pool texture (no cell linked),
+   * e.g. from content-manager discovery. Returns the new texture id, or
+   * null for invalid dimensions or buffer mismatches. Structural, no history.
+   */
+  registerTexturePixels(name: string, width: number, height: number, buffer: Uint8ClampedArray): string | null {
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
+      return null;
+    }
+    if (buffer.length !== width * height * 4) {
+      return null;
+    }
+    const textureId = this.nextTextureId();
+    this.textures.set(textureId, {
+      id: textureId,
+      name: name === "" ? this.nextTextureName() : name,
+      width,
+      height,
+      buffer: new Uint8ClampedArray(buffer),
+    });
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return textureId;
+  }
+
+  /**
+   * Register raw model bytes as a standalone pool entry (no cell linked),
+   * e.g. from content-manager discovery. Returns null for unsupported
+   * extensions or empty payloads. Structural, no history.
+   */
+  registerModel3d(name: string, ext: string, bytes: Uint8Array): string | null {
+    const cleanExt = ext.toLowerCase();
+    if (
+      !(SUPPORTED_MODEL3D_EXTENSIONS as readonly string[]).includes(cleanExt) ||
+      !(bytes instanceof Uint8Array) ||
+      bytes.length === 0
+    ) {
+      return null;
+    }
+    const modelId = this.nextModelId();
+    this.models3d.set(modelId, {
+      id: modelId,
+      name: name === "" ? this.nextModelName() : name,
+      ext: cleanExt as GnumarusModel3dExtension,
+      bytes: new Uint8Array(bytes),
+      view: { ...GNUMARUS_MODEL3D_DEFAULT_VIEW },
+      lighting: this.modelLighting,
+    });
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return modelId;
   }
 
   dissociateCellContent(layerId: string, frame: number): boolean {

@@ -29,6 +29,7 @@ import {
 } from "../vector/GnumarusSvg";
 import {
   downloadBlob,
+  ensureProjectContentDirs,
   isFilePickerSupported,
   isFileSaveSupported,
   isFileSystemAccessSupported,
@@ -44,10 +45,12 @@ import {
   readProjectFiles,
   readProjectMeta,
   removeProjectFile,
+  scanProjectContentFiles,
   writeBlobToDirectory,
   writeBlobToFile,
   writeProjectFiles,
   type GnumarusDirectoryHandle,
+  type GnumarusDiscoveredContentFile,
 } from "../project/GnumarusFileSystem";
 import {
   DEFAULT_ONION_SETTINGS,
@@ -64,6 +67,7 @@ import {
   SWATCH_SETTINGS_STORAGE_KEY,
 } from "../settings/GnumarusSwatchSettings";
 import {
+  collectProjectFileReferences,
   decodeSvgFile,
   decodeTextFile,
   encodeProjectArchive,
@@ -1906,6 +1910,7 @@ export class GnumarusShell extends LitElement {
     selectedCells: { type: Array },
     contentPickerMode: { type: String },
     contentManagerOpen: { type: Boolean },
+    discoveredFiles: { type: Array },
     contentManagerQuery: { type: String },
     deleteFramesTarget: { type: Array },
     brushSize: { type: Number },
@@ -2140,6 +2145,7 @@ export class GnumarusShell extends LitElement {
   declare selectedCells: Array<{ layerId: string; frame: number }>;
   declare contentPickerMode: "single" | "relink";
   declare contentManagerOpen: boolean;
+  declare discoveredFiles: GnumarusDiscoveredContentFile[] | null;
   declare contentManagerQuery: string;
   /** Read-only snapshot behind the content manager dialog. */
   private contentManagerData: GnumarusContentSnapshot | null = null;
@@ -2220,6 +2226,8 @@ export class GnumarusShell extends LitElement {
   private toastTimer: number | null = null;
 
   private actionRegistry = new GnumarusActionRegistry();
+  /** Discovered files already imported this session (stay hidden from discovery). */
+  private importedDiscoveredFiles = new Set<string>();
 
   constructor() {
     super();
@@ -2385,6 +2393,7 @@ export class GnumarusShell extends LitElement {
     this.selectedCells = [];
     this.contentPickerMode = "single";
     this.contentManagerOpen = false;
+    this.discoveredFiles = null;
     this.contentManagerQuery = "";
     this.layerAnchor = null;
     this.contextMenuLayerIds = null;
@@ -11411,6 +11420,8 @@ export class GnumarusShell extends LitElement {
       });
     }
     void this.refreshContentManagerDiskSizes();
+    this.discoveredFiles = null;
+    void this.refreshDiscoveredFiles();
     this.requestUpdate();
     void this.updateComplete.then(() => {
       const dialog = this.shadowRoot?.getElementById("contentManagerDialog") as HTMLDialogElement | null;
@@ -11454,6 +11465,108 @@ export class GnumarusShell extends LitElement {
   private onContentManagerClosed(): void {
     this.contentManagerOpen = false;
     this.contentManagerData = null;
+    this.discoveredFiles = null;
+  }
+
+  /**
+   * Scan the project content directories for files the project does not
+   * reference yet. Runs on content-manager open; only the right type in
+   * the right directory counts, independent of storage settings. Files
+   * imported earlier this session stay hidden. Best effort: unreadable
+   * projects scan with an empty reference set, unlistable directories
+   * contribute nothing.
+   */
+  private async refreshDiscoveredFiles(): Promise<void> {
+    if (this.engine === null || this.directoryHandle === null) {
+      this.discoveredFiles = [];
+      return;
+    }
+    const dir = this.directoryHandle;
+    let referenced = new Set<string>();
+    try {
+      referenced = collectProjectFileReferences(await readProjectMeta(dir));
+    } catch {
+      referenced = new Set<string>();
+    }
+    let scanned: GnumarusDiscoveredContentFile[];
+    try {
+      scanned = await scanProjectContentFiles(dir, referenced);
+    } catch {
+      return;
+    }
+    this.discoveredFiles = scanned.filter((entry) => !this.importedDiscoveredFiles.has(entry.file));
+    if (this.contentManagerOpen) {
+      this.requestUpdate();
+    }
+  }
+
+  /** Import one discovered file into the project pool (no cell is linked). */
+  private async importDiscoveredFile(file: string): Promise<void> {
+    if (this.engine === null || this.directoryHandle === null) {
+      return;
+    }
+    const name = file
+      .slice(file.lastIndexOf("/") + 1)
+      .replace(/\.[^.]+$/, "")
+      .replace(/[^A-Za-z0-9-_]+/g, "_")
+      .slice(0, 48);
+    try {
+      const bytes = await readFileBytes(this.directoryHandle, file);
+      if (bytes === null) {
+        throw new Error(`Missing file: ${file}`);
+      }
+      if (file.startsWith("textures/")) {
+        const decoded = await this.decodeDiscoveredTexture(file, bytes);
+        if (decoded === null) {
+          throw new Error(`Unsupported image: ${file}`);
+        }
+        if (decoded.width > 16384 || decoded.height > 16384) {
+          throw new Error(`Image too large: ${file}`);
+        }
+        if (this.engine.registerTexturePixels(name, decoded.width, decoded.height, decoded.buffer) === null) {
+          throw new Error(`Invalid image: ${file}`);
+        }
+      } else if (file.startsWith("texts/")) {
+        const html = decodeTextFile(file, bytes);
+        this.engine.createTextEntry(html);
+      } else if (file.startsWith("svgs/")) {
+        const svg = decodeSvgFile(file, bytes);
+        this.engine.createSvgEntry(svg);
+      } else if (file.startsWith("3dmodels/")) {
+        const ext = file.slice(file.lastIndexOf(".") + 1);
+        if (this.engine.registerModel3d(name, ext, bytes) === null) {
+          throw new Error(`Unsupported model: ${file}`);
+        }
+      } else {
+        return;
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.statusMessage = tr("status.importFailed", { reason });
+      this.showToast(tr("status.importFailed", { reason }));
+      return;
+    }
+    this.importedDiscoveredFiles.add(file);
+    this.contentManagerData = this.engine.getContentManagerData();
+    this.refreshLayers();
+    this.dirty = true;
+    this.statusMessage = tr("status.discoveredImported", { name });
+    await this.refreshDiscoveredFiles();
+  }
+
+  /** Decode a discovered texture with the same rules as saved projects. */
+  private async decodeDiscoveredTexture(
+    file: string,
+    bytes: Uint8Array,
+  ): Promise<{ width: number; height: number; buffer: Uint8ClampedArray } | null> {
+    if (this.directoryHandle === null) {
+      return null;
+    }
+    try {
+      return await this.decodeStoredTextureBytes(this.directoryHandle, file, bytes);
+    } catch {
+      return null;
+    }
   }
 
   /** Translated kind label for a cell content record. */
@@ -11688,6 +11801,46 @@ export class GnumarusShell extends LitElement {
                   </div>
                 `;
               })}
+        ${this.discoveredFiles !== null && this.discoveredFiles.length > 0
+          ? html`
+              <h4 data-testid="content-manager-discovered-title">
+                ${tr("manager.discovered")} (${this.discoveredFiles.length})
+              </h4>
+              <div class="picker-grid" data-testid="content-manager-discovered">
+                ${this.discoveredFiles.map((entry) => {
+                  const kindTitle =
+                    entry.kind === "texture"
+                      ? tr("manager.textures")
+                      : entry.kind === "text"
+                        ? tr("manager.texts")
+                        : entry.kind === "svg"
+                          ? tr("manager.vectors")
+                          : tr("manager.models");
+                  return html`
+                    <div
+                      class="picker-item manager-item"
+                      data-testid="content-manager-discovered-item"
+                      data-file=${entry.file}
+                      data-kind=${entry.kind}
+                      title=${entry.file}
+                    >
+                      <span class="picker-name">${entry.file}</span>
+                      <span class="manager-meta">${kindTitle}</span>
+                      <button
+                        data-testid="content-manager-discovered-import"
+                        data-file=${entry.file}
+                        @click=${(): void => {
+                          void this.importDiscoveredFile(entry.file);
+                        }}
+                      >
+                        ${tr("manager.import")}
+                      </button>
+                    </div>
+                  `;
+                })}
+              </div>
+            `
+          : html``}
         <div class="dialog-actions">
           <button @click=${(): void => this.closeContentManager()}>${tr("btn.close")}</button>
         </div>
@@ -16444,6 +16597,9 @@ export class GnumarusShell extends LitElement {
         );
       }
       await writeProjectFiles(dir, blobs);
+      // Content directories always exist, even when empty, so users can
+      // drop files in for content-manager discovery.
+      await ensureProjectContentDirs(dir);
       const newPaths = new Set(blobs.keys());
       for (const stale of findStaleProjectPaths(oldPaths, newPaths)) {
         await removeProjectFile(dir, stale);

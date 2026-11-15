@@ -454,6 +454,62 @@ export function textureAlphaCompanion(file: string): string | null {
 }
 
 /**
+ * Content directories owned by a project folder. Created on every save even
+ * when empty so users can drop files in for the content-manager discovery.
+ * Legacy `cells/` is read-only (migration source, never written) and
+ * tilemaps live inline in project.json, so neither is included; the
+ * `brushes/` cache lives in origin private storage, not in projects.
+ */
+export const GNUMARUS_PROJECT_CONTENT_DIRS = ["textures", "texts", "svgs", "3dmodels"] as const;
+
+export type GnumarusDiscoveredContentKind = "texture" | "text" | "svg" | "model3d";
+
+/**
+ * Classify a project-relative file path for content discovery: only the
+ * right type in the right directory counts, regardless of the current
+ * storage settings (any supported extension/mode). JPEG alpha companions
+ * (`*.alpha.jpg`) are storage artifacts, never standalone content, so they
+ * are ignored. Returns null for anything else (wrong dir, wrong type,
+ * traversal attempts, companions).
+ */
+export function classifyDiscoveredContentFile(file: unknown): GnumarusDiscoveredContentKind | null {
+  if (typeof file !== "string" || file.includes("\\")) {
+    return null;
+  }
+  const lower = file.toLowerCase();
+  if (lower.startsWith("textures/")) {
+    if (lower.endsWith(".alpha.jpg")) {
+      return null;
+    }
+    const dot = lower.lastIndexOf(".");
+    if (dot < 0) {
+      return null;
+    }
+    const ext = lower.slice(dot + 1);
+    if (!(GNUMARUS_TEXTURE_EXTENSIONS as readonly string[]).includes(ext)) {
+      return null;
+    }
+    return parseTextureStem(file) === null ? null : "texture";
+  }
+  if (lower.startsWith("texts/")) {
+    return parseTextFilePath(file) === null ? null : "text";
+  }
+  if (lower.startsWith("svgs/")) {
+    return parseSvgFilePath(file) === null ? null : "svg";
+  }
+  if (lower.startsWith("3dmodels/")) {
+    return parseModel3dFilePath(file) === null ? null : "model3d";
+  }
+  return null;
+}
+
+/** Stem of a `textures/<stem>.<ext>` path, or null when malformed. */
+function parseTextureStem(file: string): string | null {
+  const match = /^textures\/([A-Za-z0-9_-]+)\.[A-Za-z0-9]+$/.exec(file);
+  return match === null || match[1] === undefined ? null : match[1];
+}
+
+/**
  * Every file path referenced by a project: texture files, their JPEG alpha
  * companions, external text files, and legacy per-cell files.
  */

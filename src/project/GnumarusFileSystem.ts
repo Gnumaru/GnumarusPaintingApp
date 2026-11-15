@@ -1,9 +1,12 @@
 import {
+  classifyDiscoveredContentFile,
   collectProjectFileReferences,
   decodeProjectArchive,
   GNUMARUS_PROJECT_ARCHIVE_FILE,
+  GNUMARUS_PROJECT_CONTENT_DIRS,
   GNUMARUS_PROJECT_FILE,
   parseProject,
+  type GnumarusDiscoveredContentKind,
   type GnumarusProjectMeta,
 } from "./GnumarusProjectFormat";
 
@@ -29,6 +32,8 @@ interface GnumarusDirectoryHandle {
   getFileHandle(name: string, options?: { create?: boolean }): Promise<GnumarusFileHandle>;
   getDirectoryHandle(name: string, options?: { create?: boolean }): Promise<GnumarusDirectoryHandle>;
   removeEntry(name: string, options?: { recursive?: boolean }): Promise<void>;
+  /** Directory listing (native `values()`); absent on handles that cannot list. */
+  values?: () => AsyncIterable<{ kind: string; name: string }>;
 }
 
 interface GnumarusOpenFilePickerOptions {
@@ -453,6 +458,71 @@ export async function writeProjectFiles(
       await writable.close();
     }
   }
+}
+
+/**
+ * Create every project content directory (`textures/`, `texts/`, `svgs/`,
+ * `3dmodels/`), even when nothing is stored inside, so users always have a
+ * stable place to drop files for content-manager discovery.
+ */
+export async function ensureProjectContentDirs(root: GnumarusDirectoryHandle): Promise<void> {
+  for (const dir of GNUMARUS_PROJECT_CONTENT_DIRS) {
+    await root.getDirectoryHandle(dir, { create: true });
+  }
+}
+
+export interface GnumarusDiscoveredContentFile {
+  kind: GnumarusDiscoveredContentKind;
+  /** Project-relative path (`textures/extra.png`). */
+  file: string;
+}
+
+/**
+ * Scan the project content directories for files the project does not
+ * reference yet. Only the right type in the right directory counts
+ * (companions, wrong extensions and wrong directories are ignored),
+ * independent of the current storage settings. Unlistable or missing
+ * directories contribute nothing. Throws only when `root` itself is
+ * unusable; per-entry I/O errors are skipped.
+ */
+export async function scanProjectContentFiles(
+  root: GnumarusDirectoryHandle,
+  referenced: ReadonlySet<string>,
+): Promise<GnumarusDiscoveredContentFile[]> {
+  const found: GnumarusDiscoveredContentFile[] = [];
+  for (const dir of GNUMARUS_PROJECT_CONTENT_DIRS) {
+    let handle: GnumarusDirectoryHandle;
+    try {
+      handle = await root.getDirectoryHandle(dir, { create: false });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "NotFoundError") {
+        continue;
+      }
+      throw error;
+    }
+    if (typeof handle.values !== "function") {
+      continue;
+    }
+    for await (const entry of handle.values()) {
+      if (entry === null || typeof entry !== "object" || entry.kind !== "file" || typeof entry.name !== "string") {
+        continue;
+      }
+      if (entry.name === "" || entry.name === "." || entry.name === ".." || entry.name.includes("/")) {
+        continue;
+      }
+      const file = `${dir}/${entry.name}`;
+      if (referenced.has(file)) {
+        continue;
+      }
+      const kind = classifyDiscoveredContentFile(file);
+      if (kind === null) {
+        continue;
+      }
+      found.push({ kind, file });
+    }
+  }
+  found.sort((left, right) => left.file.localeCompare(right.file));
+  return found;
 }
 
 export type { GnumarusDirectoryHandle };

@@ -15532,3 +15532,238 @@ test("Set total duration splits evenly across contiguous and scattered frames @r
   expect(await getFrameDuration(page, 2)).toBe(0.5);
   await expect(page.locator("gnumarus-shell")).toContainText("Total 1 s split over 2 frames (0.5 s each)");
 });
+
+async function stubFsProjectDir(
+  page: import("@playwright/test").Page,
+  dirName: string,
+  seed: Record<string, number[]>,
+): Promise<{
+  dirs: () => Promise<string[]>;
+  files: () => Promise<string[]>;
+  seedFile: (path: string, bytes: number[]) => Promise<void>;
+}> {
+  await page.evaluate(
+    ({ dir, seedFiles }: { dir: string; seedFiles: Record<string, number[]> }) => {
+      const files = new Map<string, Blob>();
+      for (const [path, bytes] of Object.entries(seedFiles)) {
+        files.set(path, new Blob([new Uint8Array(bytes)]));
+      }
+      const knownDirs = new Set<string>();
+      const makeFileHandle = (path: string): unknown => ({
+        getFile: async (): Promise<Blob> => {
+          const found = files.get(path);
+          if (found === undefined) {
+            throw new DOMException("File not found", "NotFoundError");
+          }
+          return found;
+        },
+        createWritable: async () => ({
+          write: async (data: string | Blob): Promise<void> => {
+            files.set(path, data instanceof Blob ? data : new Blob([data]));
+          },
+          close: async (): Promise<void> => {},
+        }),
+      });
+      const makeDir = (prefix: string): unknown => ({
+        name: prefix === "" ? dir : prefix.split("/").pop(),
+        getFileHandle: async (name: string, options?: { create?: boolean }): Promise<unknown> => {
+          const path = prefix === "" ? name : `${prefix}/${name}`;
+          if (!files.has(path)) {
+            if (options?.create !== true) {
+              throw new DOMException("File not found", "NotFoundError");
+            }
+            files.set(path, new Blob([]));
+          }
+          return makeFileHandle(path);
+        },
+        getDirectoryHandle: async (name: string, options?: { create?: boolean }): Promise<unknown> => {
+          const path = prefix === "" ? name : `${prefix}/${name}`;
+          const has = [...files.keys()].some((key) => key === path || key.startsWith(`${path}/`));
+          if (!has && !knownDirs.has(path)) {
+            if (options?.create !== true) {
+              throw new DOMException("File not found", "NotFoundError");
+            }
+            knownDirs.add(path);
+          } else {
+            knownDirs.add(path);
+          }
+          return makeDir(path);
+        },
+        removeEntry: async (name: string): Promise<void> => {
+          const path = prefix === "" ? name : `${prefix}/${name}`;
+          let removed = files.delete(path);
+          for (const key of [...files.keys()]) {
+            if (key === path || key.startsWith(`${path}/`)) {
+              files.delete(key);
+              removed = true;
+            }
+          }
+          if (!removed) {
+            throw new DOMException("File not found", "NotFoundError");
+          }
+        },
+        values: async function* (): AsyncIterable<{ kind: string; name: string }> {
+          const seen = new Set<string>();
+          for (const key of files.keys()) {
+            const leaf = prefix === "" ? key : key.startsWith(`${prefix}/`) ? key.slice(prefix.length + 1) : null;
+            if (leaf === null || leaf.includes("/")) {
+              continue;
+            }
+            if (!seen.has(leaf)) {
+              seen.add(leaf);
+              yield { kind: "file", name: leaf };
+            }
+          }
+          const subs = new Set<string>();
+          const collect = (key: string): void => {
+            const rest = prefix === "" ? key : key.slice(prefix.length + 1);
+            const slash = rest.indexOf("/");
+            if (slash >= 0) {
+              subs.add(rest.slice(0, slash));
+            }
+          };
+          for (const key of files.keys()) {
+            if (prefix === "" || key.startsWith(`${prefix}/`)) {
+              collect(key);
+            }
+          }
+          for (const known of knownDirs) {
+            if (prefix === "") {
+              if (!known.includes("/")) {
+                subs.add(known);
+              }
+            } else if (known.startsWith(`${prefix}/`)) {
+              const rest = known.slice(prefix.length + 1);
+              if (rest !== "" && !rest.includes("/")) {
+                subs.add(rest);
+              }
+            }
+          }
+          for (const name of subs) {
+            yield { kind: "directory", name };
+          }
+        },
+      });
+      const root = window as unknown as {
+        showDirectoryPicker?: () => Promise<unknown>;
+        __gnumarusFsDiscoveryTest?: { files: Map<string, Blob>; knownDirs: Set<string> };
+      };
+      root.showDirectoryPicker = async (): Promise<unknown> => makeDir("");
+      root.__gnumarusFsDiscoveryTest = { files, knownDirs };
+    },
+    { dir: dirName, seedFiles: seed },
+  );
+  return {
+    dirs: (): Promise<string[]> =>
+      page.evaluate(() => {
+        const root = window as unknown as { __gnumarusFsDiscoveryTest?: { knownDirs: Set<string> } };
+        return [...(root.__gnumarusFsDiscoveryTest?.knownDirs ?? [])];
+      }),
+    files: (): Promise<string[]> =>
+      page.evaluate(() => {
+        const root = window as unknown as { __gnumarusFsDiscoveryTest?: { files: Map<string, Blob> } };
+        return [...(root.__gnumarusFsDiscoveryTest?.files.keys() ?? [])].sort();
+      }),
+    seedFile: (path: string, bytes: number[]): Promise<void> =>
+      page.evaluate(
+        ([filePath, content]: [string, number[]]) => {
+          const root = window as unknown as { __gnumarusFsDiscoveryTest?: { files: Map<string, Blob> } };
+          root.__gnumarusFsDiscoveryTest?.files.set(filePath, new Blob([new Uint8Array(content)]));
+        },
+        [path, bytes] as [string, number[]],
+      ),
+  };
+}
+
+test("saving a project creates every content directory even when empty @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const fs = await stubFsProjectDir(page, "MockProject", {});
+  await loadBlankProject(page, 64);
+  await page.keyboard.press("Control+s");
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  const dirs = await fs.dirs();
+  for (const expected of ["textures", "texts", "svgs", "3dmodels"]) {
+    expect(dirs).toContain(expected);
+  }
+});
+
+test("content manager discovers only correctly-typed files and imports them @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const redPng = [
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0,
+    0, 144, 119, 83, 222, 0, 0, 0, 12, 73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 0, 0, 3, 1, 1, 0,
+    201, 254, 146, 239, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+  ];
+  const packedZip = [
+    80, 75, 3, 4, 20, 0, 0, 0, 8, 0, 160, 188, 110, 93, 127, 225, 81, 134, 16, 0, 0, 0, 17, 0, 0, 0,
+    11, 0, 0, 0, 112, 97, 99, 107, 101, 100, 46, 104, 116, 109, 108, 179, 73, 201, 44, 179, 11, 72, 76,
+    206, 78, 77, 177, 209, 7, 177, 1, 80, 75, 1, 2, 20, 3, 20, 0, 0, 0, 8, 0, 160, 188, 110, 93, 127,
+    225, 81, 134, 16, 0, 0, 0, 17, 0, 0, 0, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128, 1, 0, 0, 0, 0,
+    112, 97, 99, 107, 101, 100, 46, 104, 116, 109, 108, 80, 75, 5, 6, 0, 0, 0, 0, 1, 0, 1, 0, 57, 0,
+    0, 0, 57, 0, 0, 0, 0, 0,
+  ];
+  const fs = await stubFsProjectDir(page, "MockProject", {
+    "textures/extra.png": redPng,
+    "textures/notes.txt": [110, 111, 116, 101],
+    "textures/x.alpha.jpg": [1, 2, 3],
+    "svgs/note.png": [4, 5, 6],
+    "svgs/art.svg": [
+      60, 115, 118, 103, 32, 120, 109, 108, 110, 115, 61, 34, 104, 116, 116, 112, 58, 47, 47, 119, 119,
+      119, 46, 119, 51, 46, 111, 114, 103, 47, 50, 48, 48, 48, 47, 115, 118, 103, 34, 32, 119, 105, 100,
+      116, 104, 61, 34, 52, 34, 32, 104, 101, 105, 103, 104, 116, 61, 34, 52, 34, 62, 60, 47, 115, 118,
+      103, 62,
+    ],
+    "texts/doc.html": [60, 100, 105, 118, 62, 68, 111, 99, 60, 47, 100, 105, 118, 62],
+    "texts/packed.zip": packedZip,
+    "3dmodels/part.obj": [111, 32, 112, 97, 114, 116, 10, 118, 32, 48, 32, 48, 32, 49, 10],
+    "3dmodels/junk.png": [7, 8, 9],
+  });
+  await loadBlankProject(page, 64);
+  await page.keyboard.press("Control+s");
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Content manager" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#contentManagerDialog");
+  await expect(dialog).toBeVisible();
+  const discovered = dialog.locator('[data-testid="content-manager-discovered-item"]');
+  await expect(discovered).toHaveCount(5);
+  const listed = await discovered.evaluateAll((elements) =>
+    elements.map((element) => element.getAttribute("data-file")),
+  );
+  expect(listed).toEqual([
+    "3dmodels/part.obj",
+    "svgs/art.svg",
+    "texts/doc.html",
+    "texts/packed.zip",
+    "textures/extra.png",
+  ]);
+  const managerCounts = (): Promise<{ textures: number; texts: number; svgs: number; models: number }> =>
+    page.evaluate(() => {
+      const engine = (window as unknown as { __gnumarus?: { engine?: unknown } }).__gnumarus?.engine as unknown as
+        | { getContentManagerData(): { textures: unknown[]; texts: unknown[]; svgs: unknown[]; models: unknown[] } }
+        | undefined;
+      const data = engine?.getContentManagerData();
+      return {
+        textures: data?.textures.length ?? -1,
+        texts: data?.texts.length ?? -1,
+        svgs: data?.svgs.length ?? -1,
+        models: data?.models.length ?? -1,
+      };
+    });
+  await expect.poll(managerCounts).toEqual({ textures: 0, texts: 0, svgs: 0, models: 0 });
+  const importFile = async (file: string): Promise<void> => {
+    await dialog.locator(`[data-testid="content-manager-discovered-import"][data-file="${file}"]`).click();
+  };
+  await importFile("textures/extra.png");
+  await expect.poll(managerCounts).toEqual({ textures: 1, texts: 0, svgs: 0, models: 0 });
+  await expect(page.locator("gnumarus-shell")).toContainText('Imported "extra"');
+  await importFile("texts/doc.html");
+  await importFile("texts/packed.zip");
+  await importFile("svgs/art.svg");
+  await importFile("3dmodels/part.obj");
+  await expect.poll(managerCounts).toEqual({ textures: 1, texts: 2, svgs: 1, models: 1 });
+  await expect(dialog.locator('[data-testid="content-manager-discovered-item"]')).toHaveCount(0);
+  expect(await fs.files()).toContain("project.gpa");
+});
