@@ -16149,3 +16149,43 @@ test("export dialog tabs isolate sections with per-tab actions @recent", async (
   await dialog.locator("#exportFullProjectOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("Exported Untitled.gpp");
 });
+
+test("export dialog tabs and fields all carry tooltips @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.locator("gnumarus-shell .menubar .dropdown").getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  const labelOf = (id: string): import("@playwright/test").Locator =>
+    dialog.locator(`#${id}`).locator("xpath=ancestor::label[1]");
+  // Tab buttons.
+  await expect(dialog.locator('[data-testid="export-tab-frame"]')).toHaveAttribute("title", /.+/);
+  await expect(dialog.locator('[data-testid="export-tab-animation"]')).toHaveAttribute("title", /.+/);
+  await expect(dialog.locator('[data-testid="export-tab-sheet"]')).toHaveAttribute("title", /.+/);
+  await expect(dialog.locator('[data-testid="export-tab-full"]')).toHaveAttribute("title", /.+/);
+  await expect(dialog.locator('[data-testid="export-tab-frame"]')).toHaveAttribute("title", /single frame/);
+  // Frame tab fields (defaults: PNG still, so switch formats to reveal quality/lossless).
+  await expect(labelOf("exportFrame")).toHaveAttribute("title", /1-based/);
+  await expect(labelOf("exportFormat")).toHaveAttribute("title", /format/);
+  await dialog.locator("#exportFormat").selectOption("image/jpeg");
+  await expect(labelOf("exportQuality")).toHaveAttribute("title", /1\.\.100/);
+  // Animation tab fields.
+  await dialog.locator('[data-testid="export-tab-animation"]').click();
+  await expect(labelOf("exportAnimation")).toHaveAttribute("title", /all frames/);
+  await expect(labelOf("exportAnimatedFormat")).toHaveAttribute("title", /format/);
+  await dialog.locator("#exportAnimatedFormat").selectOption("image/jpeg");
+  await expect(labelOf("exportAnimatedQuality")).toHaveAttribute("title", /1\.\.100/);
+  await dialog.locator("#exportAnimatedFormat").selectOption("jxl");
+  await expect(labelOf("exportAnimatedJxlLossless")).toHaveAttribute("title", /loss/);
+  // Spritesheet tab fields.
+  await dialog.locator('[data-testid="export-tab-sheet"]').click();
+  await expect(dialog.locator(".export-sheet-animations")).toHaveAttribute("title", /include/);
+  await expect(labelOf("exportSheetFrames")).toHaveAttribute("title", /append/);
+  await expect(labelOf("exportSheetLayout")).toHaveAttribute("title", /arranged/);
+  await expect(labelOf("exportSheetCount")).toHaveAttribute("title", /grid/);
+  await expect(labelOf("exportSheetFormat")).toHaveAttribute("title", /format/);
+  await dialog.locator("#exportSheetFormat").selectOption("image/jpeg");
+  await expect(labelOf("exportSheetQuality")).toHaveAttribute("title", /1\.\.100/);
+});

@@ -4638,6 +4638,7 @@ export class GnumarusShell extends LitElement {
           <button
             role="tab"
             data-testid="export-tab-frame"
+            title=${tr("dialog.exportFrameTitle")}
             aria-selected=${this.exportTab === "frame" ? "true" : "false"}
             @click=${(): void => {
               this.exportTab = "frame";
@@ -4648,6 +4649,7 @@ export class GnumarusShell extends LitElement {
           <button
             role="tab"
             data-testid="export-tab-animation"
+            title=${tr("dialog.exportAnimationTitle")}
             aria-selected=${this.exportTab === "animation" ? "true" : "false"}
             @click=${(): void => {
               this.exportTab = "animation";
@@ -4658,6 +4660,7 @@ export class GnumarusShell extends LitElement {
           <button
             role="tab"
             data-testid="export-tab-sheet"
+            title=${tr("dialog.exportSheetTitle")}
             aria-selected=${this.exportTab === "sheet" ? "true" : "false"}
             @click=${(): void => {
               this.exportTab = "sheet";
@@ -4668,6 +4671,7 @@ export class GnumarusShell extends LitElement {
           <button
             role="tab"
             data-testid="export-tab-full"
+            title=${tr("dialog.exportFullProjectTitle")}
             aria-selected=${this.exportTab === "full" ? "true" : "false"}
             @click=${(): void => {
               this.exportTab = "full";
@@ -4677,7 +4681,7 @@ export class GnumarusShell extends LitElement {
           </button>
         </div>
         <section ?hidden=${this.exportTab !== "frame"}>
-        <label
+        <label title=${tr("dialog.frameTitle")}
           >${tr("dialog.frame")}
           <input
             type="number"
@@ -4688,7 +4692,7 @@ export class GnumarusShell extends LitElement {
             .value=${String(this.exportFrame)}
           />
         </label>
-        <label
+        <label title=${tr("dialog.formatTitle")}
           >${tr("dialog.format")}
           <select
             id="exportFormat"
@@ -4703,7 +4707,7 @@ export class GnumarusShell extends LitElement {
           </select>
         </label>
         ${this.exportFormat === JXL_MIME || this.exportFormat === WEBP_MIME
-          ? html`<label
+          ? html`<label title=${tr("dialog.losslessTitle")}
               >${tr("val.lossless")}
               <input
                 type="checkbox"
@@ -4724,7 +4728,7 @@ export class GnumarusShell extends LitElement {
         (this.exportFormat === JXL_MIME && this.exportJxlLossless) ||
         (this.exportFormat === WEBP_MIME && this.exportWebpLossless)
           ? html``
-          : html`<label
+          : html`<label title=${tr("dialog.qualityTitle")}
               >${tr("dialog.quality")}
               <input
                 type="number"
@@ -4748,7 +4752,7 @@ export class GnumarusShell extends LitElement {
         </div>
         </section>
         <section ?hidden=${this.exportTab !== "animation"}>
-        <label
+        <label title=${tr("dialog.animationTitle")}
           >${tr("dialog.animation")}
           <select
             id="exportAnimation"
@@ -4763,7 +4767,7 @@ export class GnumarusShell extends LitElement {
             ) ?? html``}
           </select>
         </label>
-        <label
+        <label title=${tr("dialog.formatTitle")}
           >${tr("dialog.format")}
           <select
             id="exportAnimatedFormat"
@@ -4781,7 +4785,7 @@ export class GnumarusShell extends LitElement {
           </select>
         </label>
         ${this.exportAnimatedFormat === "jxl" || this.exportAnimatedFormat === "webp"
-          ? html`<label
+          ? html`<label title=${tr("dialog.losslessTitle")}
               >${tr("val.lossless")}
               <input
                 type="checkbox"
@@ -4805,7 +4809,7 @@ export class GnumarusShell extends LitElement {
         (this.exportAnimatedFormat === "jxl" && this.exportAnimatedJxlLossless) ||
         (this.exportAnimatedFormat === "webp" && this.exportAnimatedWebpLossless)
           ? html``
-          : html`<label
+          : html`<label title=${tr("dialog.qualityTitle")}
               >${tr("dialog.quality")}
               <input
                 type="number"
@@ -4829,7 +4833,7 @@ export class GnumarusShell extends LitElement {
         </div>
         </section>
         <section ?hidden=${this.exportTab !== "sheet"}>
-        <div class="export-sheet-animations">
+        <div class="export-sheet-animations" title=${tr("dialog.sheetAnimationsTitle")}>
           <label><input type="checkbox" id="exportSheetAll" />${tr("matrix.allFrames")}</label>
           ${this.engine?.getNamedAnimations().map(
             (animation) =>
@@ -4838,11 +4842,11 @@ export class GnumarusShell extends LitElement {
               >`,
           ) ?? html``}
         </div>
-        <label
+        <label title=${tr("dialog.extraFramesTitle")}
           >${tr("dialog.extraFrames")}
           <input type="text" id="exportSheetFrames" placeholder=${tr("dialog.extraFrames")} />
         </label>
-        <label
+        <label title=${tr("dialog.sheetLayoutTitle")}
           >${tr("dialog.layout")}
           <select
             id="exportSheetLayout"
@@ -4857,7 +4861,7 @@ export class GnumarusShell extends LitElement {
             <option value="individual">${tr("dialog.sheetIndividual")}</option>
           </select>
         </label>
-        <label
+        <label title=${tr("dialog.linesCountTitle")}
           >${tr("dialog.linesCount")}
           <input
             type="number"
@@ -4867,7 +4871,7 @@ export class GnumarusShell extends LitElement {
             .value=${String(this.exportSheetCount)}
           />
         </label>
-        <label
+        <label title=${tr("dialog.formatTitle")}
           >${tr("dialog.format")}
           <select
             id="exportSheetFormat"
@@ -4882,7 +4886,7 @@ export class GnumarusShell extends LitElement {
           </select>
         </label>
         ${this.exportSheetFormat === JXL_MIME || this.exportSheetFormat === WEBP_MIME
-          ? html`<label
+          ? html`<label title=${tr("dialog.losslessTitle")}
               >${tr("val.lossless")}
               <input
                 type="checkbox"
@@ -4905,7 +4909,7 @@ export class GnumarusShell extends LitElement {
         (this.exportSheetFormat === JXL_MIME && this.exportSheetJxlLossless) ||
         (this.exportSheetFormat === WEBP_MIME && this.exportSheetWebpLossless)
           ? html``
-          : html`<label
+          : html`<label title=${tr("dialog.qualityTitle")}
               >${tr("dialog.quality")}
               <input
                 type="number"
