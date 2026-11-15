@@ -5749,12 +5749,15 @@ test("quick action palette filters and runs actions", async ({ page }) => {
     "Make root layer",
     "New animation",
     "New Project",
+    "Open embedded project",
     "Open Project",
     "Redo",
     "Relink cell content",
     "Reload All Contents Except Textures",
     "Reload All Textures",
     "Reset Canvas Transform",
+    "Save embedded project",
+    "Save embedded project as",
     "Save Project",
     "Save project as",
     "Set total duration",
@@ -5764,6 +5767,7 @@ test("quick action palette filters and runs actions", async ({ page }) => {
     "Toggle layer mask",
     "Undo",
     "Unlink cell content",
+    "Upload project",
   ]);
   await input.fill("xyz-nothing");
   await expect(dialog.locator('[data-testid="action-palette-empty"]')).toBeVisible();
@@ -12266,7 +12270,10 @@ test("save project as lists its action and tooltip @recent", async ({ page }) =>
   await page.keyboard.press("Control+Shift+P");
   const dialog = page.locator("gnumarus-shell dialog#actionPaletteDialog");
   await dialog.locator('[data-testid="action-palette-input"]').fill("save project as");
-  await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveText(["Save project as"]);
+  await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveText([
+    "Save project as",
+    "Save embedded project as",
+  ]);
 });
 
 test("brush size range paints max without pressure response @recent", async ({ page }) => {
@@ -15862,4 +15869,172 @@ test("reload all contents without a saved project shows an error toast @recent",
   await page.waitForSelector("gnumarus-shell canvas");
   await runPaletteAction(page, "reload all contents");
   await expect(page.locator("gnumarus-shell")).toContainText("Reload contents failed: the project has not been saved yet");
+});
+
+async function forceNoFileSystemApi(page: import("@playwright/test").Page): Promise<void> {
+  await page.evaluate(() => {
+    const shell = document.querySelector("gnumarus-shell") as unknown as {
+      fsSupported: boolean;
+    } | null;
+    if (shell === null) {
+      throw new Error("shell is missing");
+    }
+    shell.fsSupported = false;
+  });
+}
+
+async function removeEmbeddedProject(page: import("@playwright/test").Page, name: string): Promise<void> {
+  await page.evaluate(async (project: string) => {
+    const root = await navigator.storage.getDirectory();
+    await root.removeEntry(project, { recursive: true });
+  }, name);
+}
+
+async function saveEmbeddedAs(page: import("@playwright/test").Page, name: string): Promise<void> {
+  await page.keyboard.press("Control+Shift+P");
+  const palette = page.locator("gnumarus-shell dialog#actionPaletteDialog");
+  await expect(palette).toBeVisible();
+  await palette.locator('[data-testid="action-palette-input"]').fill("save embedded project as");
+  await page.keyboard.press("Enter");
+  await expect(palette).toBeHidden();
+  const dialog = page.locator("gnumarus-shell dialog#embeddedSaveDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator("#embeddedSaveName").fill(name);
+  await dialog.locator('[data-testid="embedded-save-confirm"]').click();
+}
+
+test("embedded file menu replaces native items without File System Access API @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await forceNoFileSystemApi(page);
+  await page.getByRole("button", { name: "File" }).click();
+  const menu = page.locator("gnumarus-shell .dropdown");
+  await expect(menu.getByRole("button", { name: "New Project" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "Upload project" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "Open embedded project" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "Save embedded project", exact: true })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "Save embedded project as" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "Open Project", exact: true })).toHaveCount(0);
+  await expect(menu.getByRole("button", { name: "Save Project", exact: true })).toHaveCount(0);
+  await expect(menu.getByRole("button", { name: "Save project as", exact: true })).toHaveCount(0);
+});
+
+test("embedded save-as, save and open round-trip pixels @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await forceNoFileSystemApi(page);
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  await saveEmbeddedAs(page, "RoundTrip");
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to RoundTrip");
+  // Paint more, then Ctrl+S must save into the same embedded project.
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.keyboard.press("Control+s");
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to RoundTrip");
+  // Fresh canvas, then reopen from OPFS: the red dot comes back.
+  await loadBlankProject(page, 64);
+  expect(await readPixel(page, 32, 32)).toBeNull();
+  await page.keyboard.press("Control+Shift+P");
+  const palette = page.locator("gnumarus-shell dialog#actionPaletteDialog");
+  await expect(palette).toBeVisible();
+  await palette.locator('[data-testid="action-palette-input"]').fill("open embedded project");
+  await page.keyboard.press("Enter");
+  await expect(palette).toBeHidden();
+  const dialog = page.locator("gnumarus-shell dialog#embeddedOpenDialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("RoundTrip");
+  await dialog.getByText("RoundTrip", { exact: true }).click();
+  await dialog.locator('[data-testid="embedded-open-confirm"]').click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened RoundTrip");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await removeEmbeddedProject(page, "RoundTrip");
+});
+
+test("embedded save-as rejects duplicate project names @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await forceNoFileSystemApi(page);
+  await saveEmbeddedAs(page, "DupName");
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to DupName");
+  await saveEmbeddedAs(page, "DupName");
+  const dialog = page.locator("gnumarus-shell dialog#embeddedSaveDialog");
+  await expect(dialog).toContainText('Project "DupName" already exists');
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await removeEmbeddedProject(page, "DupName");
+});
+
+test("embedded upload unpacks a .gpp and opens it @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await forceNoFileSystemApi(page);
+  await setPencil(page, "#00ff00");
+  await paintCenter(page);
+  await saveEmbeddedAs(page, "UpSrc");
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to UpSrc");
+  // Collect the saved OPFS files, repackage them as UpSrc/... and wipe the project.
+  const entries = await page.evaluate(async () => {
+    const out: Array<{ path: string; data: string }> = [];
+    const encode = (buffer: ArrayBuffer): string => {
+      const bytes = new Uint8Array(buffer);
+      let text = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) {
+        text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      }
+      return btoa(text);
+    };
+    const walk = async (dir: FileSystemDirectoryHandle, prefix: string): Promise<void> => {
+      for await (const entry of dir.values()) {
+        if (entry.kind === "file") {
+          const handle = await dir.getFileHandle(entry.name);
+          const buffer = await (await handle.getFile()).arrayBuffer();
+          out.push({ path: `${prefix}${entry.name}`, data: encode(buffer) });
+        } else if (entry.kind === "directory") {
+          await walk(await dir.getDirectoryHandle(entry.name), `${prefix}${entry.name}/`);
+        }
+      }
+    };
+    const root = await navigator.storage.getDirectory();
+    await walk(await root.getDirectoryHandle("UpSrc"), "");
+    return out;
+  });
+  expect(entries.length).toBeGreaterThan(0);
+  expect(entries.some((entry) => entry.path === "project.gpa" || entry.path === "project.json")).toBe(true);
+  const packaged = await page.evaluate((files: Array<{ path: string; data: string }>) => {
+    const shell = document.querySelector("gnumarus-shell") as unknown as {
+      zipTestEntries(entries: Array<{ path: string; data: string }>): string;
+    } | null;
+    if (shell === null) {
+      throw new Error("shell is missing");
+    }
+    return shell.zipTestEntries(files.map((file) => ({ path: `UpSrc/${file.path}`, data: file.data })));
+  }, entries);
+  await removeEmbeddedProject(page, "UpSrc");
+  await loadBlankProject(page, 64);
+  expect(await readPixel(page, 32, 32)).toBeNull();
+  // Feed the package through the real hidden file input (same path as the OS picker).
+  await page.evaluate((payload: string) => {
+    const shell = document.querySelector("gnumarus-shell") as unknown as HTMLElement | null;
+    const input = shell?.shadowRoot?.getElementById("gppUpload") as HTMLInputElement | null;
+    if (input === null || input === undefined) {
+      throw new Error("upload input is missing");
+    }
+    const bin = atob(payload);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) {
+      bytes[i] = bin.charCodeAt(i);
+    }
+    const file = new File([bytes as Uint8Array<ArrayBuffer>], "UpSrc.gpp", { type: "application/zip" });
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, packaged);
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened UpSrc");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 255, b: 0, a: 255 });
+  await removeEmbeddedProject(page, "UpSrc");
 });

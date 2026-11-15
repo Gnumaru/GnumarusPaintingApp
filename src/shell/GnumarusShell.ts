@@ -22,17 +22,21 @@ import {
   type GnumarusContentSnapshot,
   type GnumarusManagedItem,
 } from "../content/GnumarusContentManager";
-import { gunzipSync } from "fflate";
+import { gunzipSync, zipSync } from "fflate";
 import {
   detectUnsupportedSvgFeatures,
   sanitizeSvg,
 } from "../vector/GnumarusSvg";
 import {
+  createEmbeddedProjectStore,
   downloadBlob,
   ensureProjectContentDirs,
   isFilePickerSupported,
   isFileSaveSupported,
   isFileSystemAccessSupported,
+  isOpfsSupported,
+  listEmbeddedProjects,
+  openEmbeddedProjectStore,
   pickImportFile,
   pickImageFile,
   pickModel3dFile,
@@ -45,7 +49,9 @@ import {
   readProjectFiles,
   readProjectMeta,
   removeProjectFile,
+  sanitizeEmbeddedProjectName,
   scanProjectContentFiles,
+  unpackGppToEmbedded,
   writeBlobToDirectory,
   writeBlobToFile,
   writeProjectFiles,
@@ -388,6 +394,25 @@ interface GnumarusShortcutEntry {
 interface GnumarusShortcutSection {
   title: string;
   entries: GnumarusShortcutEntry[];
+}
+
+/** Decode a base64 string into raw bytes (chunked, no dependency). */
+function decodeBase64Bytes(data: string): Uint8Array {
+  const text = atob(data);
+  const out = new Uint8Array(text.length);
+  for (let index = 0; index < text.length; index += 1) {
+    out[index] = text.charCodeAt(index);
+  }
+  return out;
+}
+
+/** Encode raw bytes as a base64 string (chunked, no dependency). */
+function encodeBase64Bytes(bytes: Uint8Array): string {
+  let text = "";
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    text += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  }
+  return btoa(text);
 }
 
 /** True when the bytes start with the Photoshop `8BPS` signature. */
@@ -1490,6 +1515,19 @@ export class GnumarusShell extends LitElement {
       color: #f48771;
       margin: 8px 0 0 0;
     }
+    .embedded-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin: 8px 0;
+      max-height: 240px;
+      overflow-y: auto;
+    }
+    .embedded-list label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
     .animation-list {
       list-style: none;
       margin: 12px 0 0 0;
@@ -1910,6 +1948,11 @@ export class GnumarusShell extends LitElement {
     selectedCells: { type: Array },
     contentPickerMode: { type: String },
     contentManagerOpen: { type: Boolean },
+    embeddedOpenList: { type: Array },
+    embeddedOpenSelected: { type: String },
+    embeddedSaveOpen: { type: Boolean },
+    embeddedSaveName: { type: String },
+    embeddedDialogError: { type: String },
     discoveredFiles: { type: Array },
     contentManagerQuery: { type: String },
     deleteFramesTarget: { type: Array },
@@ -2145,6 +2188,11 @@ export class GnumarusShell extends LitElement {
   declare selectedCells: Array<{ layerId: string; frame: number }>;
   declare contentPickerMode: "single" | "relink";
   declare contentManagerOpen: boolean;
+  declare embeddedOpenList: string[] | null;
+  declare embeddedOpenSelected: string;
+  declare embeddedSaveOpen: boolean;
+  declare embeddedSaveName: string;
+  declare embeddedDialogError: string | null;
   declare discoveredFiles: GnumarusDiscoveredContentFile[] | null;
   declare contentManagerQuery: string;
   /** Read-only snapshot behind the content manager dialog. */
@@ -2219,6 +2267,11 @@ export class GnumarusShell extends LitElement {
 
   private engine: GnumarusCanvasEngine | null = null;
   private directoryHandle: GnumarusDirectoryHandle | null = null;
+  /**
+   * OPFS embedded project name when `directoryHandle` is an embedded root.
+   * Null for native (File System Access) projects and unsaved projects.
+   */
+  private embeddedProjectName: string | null = null;
   private playTimer: number | null = null;
   private playbackAnimation: GnumarusNamedAnimation | null = null;
   private playbackIndex = 0;
@@ -2393,6 +2446,11 @@ export class GnumarusShell extends LitElement {
     this.selectedCells = [];
     this.contentPickerMode = "single";
     this.contentManagerOpen = false;
+    this.embeddedOpenList = null;
+    this.embeddedOpenSelected = "";
+    this.embeddedSaveOpen = false;
+    this.embeddedSaveName = "";
+    this.embeddedDialogError = null;
     this.discoveredFiles = null;
     this.contentManagerQuery = "";
     this.layerAnchor = null;
@@ -2460,6 +2518,15 @@ export class GnumarusShell extends LitElement {
 
   render() {
     return html`
+      <input
+        type="file"
+        id="gppUpload"
+        accept=".gpp,.zip,application/zip"
+        hidden
+        @change=${(): void => {
+          void this.onGppUploadChanged();
+        }}
+      />
       <div class="menubar" ?hidden=${this.uiHidden}>
         <div class="menu">
           <button
@@ -2473,9 +2540,18 @@ export class GnumarusShell extends LitElement {
             ? html`
                 <div class="dropdown">
                   <button title=${tr("menu.newProjectTitle")} @click=${(): void => void this.runAction("new-project")}>${tr("menu.newProject")}</button>
-                  <button title=${tr("menu.openProjectTitle")} @click=${(): void => void this.runAction("open-project")}>${tr("menu.openProject")}</button>
-                  <button title=${tr("menu.saveTitle")} @click=${(): void => void this.runAction("save-project")}>${tr("menu.saveProject")}</button>
-                  <button title=${tr("menu.saveProjectAsTitle")} @click=${(): void => void this.runAction("save-project-as")}>${tr("menu.saveProjectAs")}</button>
+                  ${this.fsSupported
+                    ? html`
+                        <button title=${tr("menu.openProjectTitle")} @click=${(): void => void this.runAction("open-project")}>${tr("menu.openProject")}</button>
+                        <button title=${tr("menu.saveTitle")} @click=${(): void => void this.runAction("save-project")}>${tr("menu.saveProject")}</button>
+                        <button title=${tr("menu.saveProjectAsTitle")} @click=${(): void => void this.runAction("save-project-as")}>${tr("menu.saveProjectAs")}</button>
+                      `
+                    : html`
+                        <button title=${tr("menu.uploadProjectTitle")} @click=${(): void => void this.runAction("upload-project")}>${tr("menu.uploadProject")}</button>
+                        <button title=${tr("menu.openEmbeddedTitle")} @click=${(): void => void this.runAction("open-embedded-project")}>${tr("menu.openEmbeddedProject")}</button>
+                        <button title=${tr("menu.saveEmbeddedTitle")} @click=${(): void => void this.runAction("save-embedded-project")}>${tr("menu.saveEmbeddedProject")}</button>
+                        <button title=${tr("menu.saveEmbeddedAsTitle")} @click=${(): void => void this.runAction("save-embedded-project-as")}>${tr("menu.saveEmbeddedProjectAs")}</button>
+                      `}
                   <button title=${tr("menu.importTitle")} @click=${(): void => void this.runAction("import")}>${tr("menu.import")}</button>
                   <button title=${tr("menu.importSvgTitle")} @click=${(): void => void this.runAction("import-svg")}>${tr("menu.importSvg")}</button>
                   <button title=${tr("menu.importModel3dTitle")} @click=${(): void => void this.runAction("import-3d-model")}>${tr("menu.importModel3d")}</button>
@@ -4804,6 +4880,8 @@ export class GnumarusShell extends LitElement {
           <button @click=${(): void => this.confirmLayerRename()}>${tr("btn.rename")}</button>
         </div>
       </dialog>
+      ${this.embeddedOpenList !== null ? this.renderEmbeddedOpenDialog() : html``}
+      ${this.embeddedSaveOpen ? this.renderSaveEmbeddedAsDialog() : html``}
       ${this.contentPickerTarget !== null || this.contentPickerMode === "relink" ? this.renderContentPickerDialog() : html``}
       ${this.contentManagerOpen ? this.renderContentManagerDialog() : html``}
       ${this.texturePickerContentId !== null || this.texturePickerTileset ? this.renderTexturePickerDialog() : html``}
@@ -6889,7 +6967,7 @@ export class GnumarusShell extends LitElement {
     const key = event.key.toLowerCase();
     if ((event.ctrlKey || event.metaKey) && !event.altKey && key === "s") {
       event.preventDefault();
-      void this.runAction("save-project");
+      void this.runAction(this.fsSupported ? "save-project" : "save-embedded-project");
       return;
     }
     if ((event.ctrlKey || event.metaKey) && !event.altKey && key === "e") {
@@ -7461,6 +7539,38 @@ export class GnumarusShell extends LitElement {
       requirements: [],
       run: (): void => {
         void this.saveProjectAs();
+      },
+    });
+    this.actionRegistry.register({
+      id: "upload-project",
+      name: tr("menu.uploadProject"),
+      requirements: [],
+      run: (): void => {
+        void this.uploadEmbeddedProject();
+      },
+    });
+    this.actionRegistry.register({
+      id: "open-embedded-project",
+      name: tr("menu.openEmbeddedProject"),
+      requirements: [],
+      run: (): void => {
+        void this.openEmbeddedProjectDialog();
+      },
+    });
+    this.actionRegistry.register({
+      id: "save-embedded-project",
+      name: tr("menu.saveEmbeddedProject"),
+      requirements: [],
+      run: (): void => {
+        void this.saveEmbeddedProject();
+      },
+    });
+    this.actionRegistry.register({
+      id: "save-embedded-project-as",
+      name: tr("menu.saveEmbeddedProjectAs"),
+      requirements: [],
+      run: (): void => {
+        void this.openSaveEmbeddedAsDialog();
       },
     });
     this.actionRegistry.register({
@@ -15708,6 +15818,7 @@ export class GnumarusShell extends LitElement {
     this.selectSingleFrame(0);
     this.collapseLayerSelectionToActive();
     this.directoryHandle = null;
+    this.embeddedProjectName = null;
     this.projectName = "Untitled";
     this.dirty = true;
     this.statusMessage = tr("status.newCanvas", { width: this.newWidth, height: this.newHeight });
@@ -15862,11 +15973,28 @@ export class GnumarusShell extends LitElement {
       this.statusMessage = tr("status.openNeedsFs");
       return;
     }
-    this.stopPlayback();
-    this.exitFlycam();
     try {
       this.statusMessage = tr("status.opening");
       const dir = await pickProjectDirectory();
+      await this.loadProjectFromDirectory(dir, dir.name, null);
+    } catch (error) {
+      this.statusMessage = error instanceof Error ? tr("status.openFailed", { reason: error.message }) : tr("status.openFailedPlain");
+    }
+  }
+
+  /**
+   * Load a project from any directory handle (a native picked folder or an
+   * embedded OPFS subdirectory): the same call path for both backends.
+   * Throws on unreadable or invalid projects (callers report the reason).
+   */
+  private async loadProjectFromDirectory(
+    dir: GnumarusDirectoryHandle,
+    displayName: string,
+    embeddedName: string | null,
+  ): Promise<void> {
+    this.stopPlayback();
+    this.exitFlycam();
+    {
       const { project, fileBlobs } = await readProjectFiles(dir);
       const textures: GnumarusTexturePixels[] = [];
       for (const texture of project.animation.textures) {
@@ -15939,13 +16067,12 @@ export class GnumarusShell extends LitElement {
       });
       this.refreshLayers();
       this.directoryHandle = dir;
-      this.projectName = dir.name;
+      this.embeddedProjectName = embeddedName;
+      this.projectName = displayName;
       this.dirty = false;
       this.selectSingleFrame(this.engine?.getCurrentFrame() ?? 0);
       this.collapseLayerSelectionToActive();
-      this.statusMessage = tr("status.opened", { dir: dir.name, cleanup: "" });
-    } catch (error) {
-      this.statusMessage = error instanceof Error ? tr("status.openFailed", { reason: error.message }) : tr("status.openFailedPlain");
+      this.statusMessage = tr("status.opened", { dir: displayName, cleanup: "" });
     }
   }
 
@@ -16276,6 +16403,7 @@ export class GnumarusShell extends LitElement {
       this.selectSingleFrame(this.engine?.getCurrentFrame() ?? 0);
       this.collapseLayerSelectionToActive();
       this.directoryHandle = null;
+    this.embeddedProjectName = null;
       this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
       this.dirty = true;
       const animationSuffix =
@@ -16337,6 +16465,7 @@ export class GnumarusShell extends LitElement {
     this.selectSingleFrame(this.engine?.getCurrentFrame() ?? 0);
     this.collapseLayerSelectionToActive();
     this.directoryHandle = null;
+    this.embeddedProjectName = null;
     this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
     this.dirty = true;
     const summary =
@@ -16383,6 +16512,7 @@ export class GnumarusShell extends LitElement {
     this.selectSingleFrame(this.engine?.getCurrentFrame() ?? 0);
     this.collapseLayerSelectionToActive();
     this.directoryHandle = null;
+    this.embeddedProjectName = null;
     this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
     this.dirty = true;
     const summary =
@@ -16430,6 +16560,7 @@ export class GnumarusShell extends LitElement {
     this.selectSingleFrame(this.engine?.getCurrentFrame() ?? 0);
     this.collapseLayerSelectionToActive();
     this.directoryHandle = null;
+    this.embeddedProjectName = null;
     this.projectName = dot > 0 ? fileName.slice(0, dot) : fileName;
     this.dirty = true;
     const summary =
@@ -16461,6 +16592,31 @@ export class GnumarusShell extends LitElement {
         pickNewDirectory || this.directoryHandle === null
           ? await pickProjectDirectory()
           : this.directoryHandle;
+      await this.writeProjectToDirectory(dir);
+      this.directoryHandle = dir;
+      this.embeddedProjectName = null;
+      this.projectName = dir.name;
+      this.dirty = false;
+      this.statusMessage = tr("status.saved", { dir: dir.name });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        this.statusMessage = tr("status.ready");
+        return;
+      }
+      this.statusMessage = error instanceof Error ? tr("status.saveFailed", { reason: error.message }) : tr("status.saveFailedPlain");
+    }
+  }
+
+  /**
+   * Serialize the engine project and write every file into any directory
+   * handle (a native picked folder or an embedded OPFS subdirectory): the
+   * same call path for both storage backends. Throws on failure.
+   */
+  private async writeProjectToDirectory(dir: GnumarusDirectoryHandle): Promise<void> {
+    if (this.engine === null) {
+      return;
+    }
+    {
       let oldPaths = new Set<string>();
       try {
         oldPaths = await readOldProjectFileReferences(dir);
@@ -16724,22 +16880,281 @@ export class GnumarusShell extends LitElement {
         dir,
         this.storageProjectFile === "json" ? GNUMARUS_PROJECT_ARCHIVE_FILE : GNUMARUS_PROJECT_FILE,
       );
-      this.directoryHandle = dir;
-      this.projectName = dir.name;
-      this.dirty = false;
-      this.statusMessage = tr("status.saved", { dir: dir.name });
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        this.statusMessage = tr("status.ready");
-        return;
-      }
-      this.statusMessage = error instanceof Error ? tr("status.saveFailed", { reason: error.message }) : tr("status.saveFailedPlain");
+      await removeProjectFile(
+        dir,
+        this.storageProjectFile === "json" ? GNUMARUS_PROJECT_ARCHIVE_FILE : GNUMARUS_PROJECT_FILE,
+      );
     }
   }
 
   /** Save the project into a new user-chosen directory (always prompts). */
   private async saveProjectAs(): Promise<void> {
     await this.saveProject(true);
+  }
+
+  /**
+   * Upload a `.gpp` project package (a zip holding exactly one root directory
+   * with the normal project layout) and unpack it into a new OPFS embedded
+   * project, then open it. Only available where OPFS exists; the File menu
+   * only offers it when the File System Access API is missing. The actual
+   * bytes arrive through the hidden `#gppUpload` input (plain file input, so
+   * no File System Access API is needed).
+   */
+  private async uploadEmbeddedProject(): Promise<void> {
+    this.fileMenuOpen = false;
+    if (!isOpfsSupported()) {
+      this.statusMessage = tr("status.embeddedNoOpfs");
+      return;
+    }
+    const input = this.shadowRoot?.getElementById("gppUpload") as HTMLInputElement | null;
+    input?.click();
+  }
+
+  private async onGppUploadChanged(): Promise<void> {
+    const input = this.shadowRoot?.getElementById("gppUpload") as HTMLInputElement | null;
+    const file = input?.files?.[0] ?? null;
+    if (input !== null) {
+      input.value = "";
+    }
+    if (file === null) {
+      return;
+    }
+    let bytes: Uint8Array;
+    try {
+      bytes = new Uint8Array(await file.arrayBuffer());
+    } catch {
+      return;
+    }
+    try {
+      this.statusMessage = tr("status.uploading");
+      const store = await unpackGppToEmbedded(bytes);
+      await this.loadProjectFromDirectory(store.root, store.name, store.name);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.statusMessage = tr("status.uploadFailed", { reason });
+      this.showToast(tr("status.uploadFailed", { reason }));
+    }
+  }
+
+  /**
+   * Test hook: zip base64-encoded entries (`UpSrc/project.gpa`, ...) into a
+   * `.gpp`-style package, returned base64-encoded.
+   */
+  zipTestEntries(entries: Array<{ path: string; data: string }>): string {
+    const raw: Record<string, Uint8Array> = {};
+    for (const entry of entries) {
+      raw[entry.path] = decodeBase64Bytes(entry.data);
+    }
+    return encodeBase64Bytes(zipSync(raw));
+  }
+
+  /** Open the embedded-project picker (lists every project saved in OPFS). */
+  private async openEmbeddedProjectDialog(): Promise<void> {
+    this.fileMenuOpen = false;
+    if (!isOpfsSupported()) {
+      this.statusMessage = tr("status.embeddedNoOpfs");
+      return;
+    }
+    try {
+      this.embeddedOpenList = await listEmbeddedProjects();
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.statusMessage = tr("status.openFailed", { reason });
+      return;
+    }
+    this.embeddedOpenSelected = "";
+    this.embeddedDialogError = null;
+    await this.updateComplete;
+    const dialog = this.shadowRoot?.getElementById("embeddedOpenDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+  }
+
+  private closeEmbeddedOpenDialog(): void {
+    const dialog = this.shadowRoot?.getElementById("embeddedOpenDialog") as HTMLDialogElement | null;
+    dialog?.close();
+    this.embeddedOpenList = null;
+    this.embeddedOpenSelected = "";
+    this.embeddedDialogError = null;
+  }
+
+  private confirmEmbeddedOpen(): void {
+    const name = this.embeddedOpenSelected;
+    if (name === "") {
+      this.embeddedDialogError = tr("status.embeddedPickOne");
+      return;
+    }
+    this.closeEmbeddedOpenDialog();
+    void this.openEmbeddedByName(name);
+  }
+
+  private async openEmbeddedByName(name: string): Promise<void> {
+    try {
+      this.statusMessage = tr("status.opening");
+      const store = await openEmbeddedProjectStore(name);
+      await this.loadProjectFromDirectory(store.root, store.name, store.name);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.statusMessage = tr("status.openFailed", { reason });
+      this.showToast(tr("status.openFailed", { reason }));
+    }
+  }
+
+  /**
+   * Save the current project as an embedded OPFS project: writes into the
+   * current embedded directory when there is one, otherwise asks for a name
+   * like Save As does.
+   */
+  private async saveEmbeddedProject(): Promise<void> {
+    this.fileMenuOpen = false;
+    if (this.engine === null) {
+      return;
+    }
+    if (!isOpfsSupported()) {
+      this.statusMessage = tr("status.embeddedNoOpfs");
+      return;
+    }
+    if (this.directoryHandle !== null && this.embeddedProjectName !== null) {
+      try {
+        this.statusMessage = tr("status.saving");
+        await this.writeProjectToDirectory(this.directoryHandle);
+        this.dirty = false;
+        this.statusMessage = tr("status.saved", { dir: this.embeddedProjectName });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.statusMessage = tr("status.saveFailed", { reason });
+        this.showToast(tr("status.saveFailed", { reason }));
+      }
+      return;
+    }
+    await this.openSaveEmbeddedAsDialog();
+  }
+
+  /** Open the Save-embedded-as dialog (asks for a new unique project name). */
+  private async openSaveEmbeddedAsDialog(): Promise<void> {
+    this.fileMenuOpen = false;
+    if (this.engine === null) {
+      return;
+    }
+    if (!isOpfsSupported()) {
+      this.statusMessage = tr("status.embeddedNoOpfs");
+      return;
+    }
+    this.embeddedSaveName = this.embeddedProjectName ?? (this.projectName === "Untitled" ? "" : this.projectName);
+    this.embeddedDialogError = null;
+    this.embeddedSaveOpen = true;
+    await this.updateComplete;
+    const dialog = this.shadowRoot?.getElementById("embeddedSaveDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+    const input = this.shadowRoot?.getElementById("embeddedSaveName") as HTMLInputElement | null;
+    input?.focus();
+    input?.select();
+  }
+
+  private closeSaveEmbeddedAsDialog(): void {
+    const dialog = this.shadowRoot?.getElementById("embeddedSaveDialog") as HTMLDialogElement | null;
+    dialog?.close();
+    this.embeddedSaveOpen = false;
+    this.embeddedDialogError = null;
+  }
+
+  private async confirmSaveEmbeddedAs(): Promise<void> {
+    if (this.engine === null) {
+      this.closeSaveEmbeddedAsDialog();
+      return;
+    }
+    const input = this.shadowRoot?.getElementById("embeddedSaveName") as HTMLInputElement | null;
+    const clean = sanitizeEmbeddedProjectName(input?.value ?? "");
+    if (clean === null) {
+      this.embeddedDialogError = tr("status.embeddedInvalidName");
+      return;
+    }
+    let store;
+    try {
+      store = await createEmbeddedProjectStore(clean);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.embeddedDialogError = reason.includes("already exists")
+        ? tr("status.embeddedExists", { name: clean })
+        : tr("status.saveFailed", { reason });
+      return;
+    }
+    try {
+      this.statusMessage = tr("status.saving");
+      await this.writeProjectToDirectory(store.root);
+      this.closeSaveEmbeddedAsDialog();
+      this.directoryHandle = store.root;
+      this.embeddedProjectName = store.name;
+      this.projectName = store.name;
+      this.dirty = false;
+      this.statusMessage = tr("status.saved", { dir: store.name });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.statusMessage = tr("status.saveFailed", { reason });
+      this.showToast(tr("status.saveFailed", { reason }));
+      this.closeSaveEmbeddedAsDialog();
+    }
+  }
+
+  private renderEmbeddedOpenDialog(): ReturnType<typeof html> {
+    const projects = this.embeddedOpenList ?? [];
+    return html`
+      <dialog id="embeddedOpenDialog" @close=${(): void => this.closeEmbeddedOpenDialog()}>
+        <h3>${tr("dialog.openEmbedded")}</h3>
+        ${projects.length === 0
+          ? html`<p>${tr("status.embeddedEmpty")}</p>`
+          : html`
+              <div class="embedded-list" role="radiogroup" aria-label=${tr("dialog.openEmbedded")}>
+                ${projects.map(
+                  (name) => html`
+                    <label>
+                      <input
+                        type="radio"
+                        name="embeddedProject"
+                        .value=${name}
+                        .checked=${this.embeddedOpenSelected === name}
+                        @change=${(): void => {
+                          this.embeddedOpenSelected = name;
+                          this.embeddedDialogError = null;
+                        }}
+                      />
+                      ${name}
+                    </label>
+                  `,
+                )}
+              </div>
+            `}
+        ${this.embeddedDialogError !== null
+          ? html`<p class="dialog-error" role="alert">${this.embeddedDialogError}</p>`
+          : html``}
+        <div class="dialog-actions">
+          <button @click=${(): void => this.closeEmbeddedOpenDialog()}>${tr("btn.cancel")}</button>
+          <button data-testid="embedded-open-confirm" @click=${(): void => this.confirmEmbeddedOpen()}>
+            ${tr("btn.open")}
+          </button>
+        </div>
+      </dialog>
+    `;
+  }
+
+  private renderSaveEmbeddedAsDialog(): ReturnType<typeof html> {
+    return html`
+      <dialog id="embeddedSaveDialog" @close=${(): void => this.closeSaveEmbeddedAsDialog()}>
+        <h3>${tr("dialog.saveEmbeddedAs")}</h3>
+        <label
+          >${tr("dialog.projectName")}
+          <input type="text" id="embeddedSaveName" maxlength="64" .value=${this.embeddedSaveName} />
+        </label>
+        ${this.embeddedDialogError !== null
+          ? html`<p class="dialog-error" role="alert">${this.embeddedDialogError}</p>`
+          : html``}
+        <div class="dialog-actions">
+          <button @click=${(): void => this.closeSaveEmbeddedAsDialog()}>${tr("btn.cancel")}</button>
+          <button data-testid="embedded-save-confirm" @click=${(): void => void this.confirmSaveEmbeddedAs()}>
+            ${tr("btn.save")}
+          </button>
+        </div>
+      </dialog>
+    `;
   }
 }
 

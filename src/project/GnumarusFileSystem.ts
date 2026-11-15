@@ -9,6 +9,7 @@ import {
   type GnumarusDiscoveredContentKind,
   type GnumarusProjectMeta,
 } from "./GnumarusProjectFormat";
+import { unzipSync } from "fflate";
 
 interface GnumarusWritableStream {
   write(data: string | Blob): Promise<void>;
@@ -526,3 +527,185 @@ export async function scanProjectContentFiles(
 }
 
 export type { GnumarusDirectoryHandle };
+
+/**
+ * A project store is the unit the shell opens and saves: a display name plus
+ * the directory its files live in. The native backend is a user-picked folder
+ * (File System Access API); the embedded backend is an OPFS subdirectory.
+ * Every file operation (`readFileBytes`, `writeProjectFiles`, ...) takes a
+ * plain `GnumarusDirectoryHandle`, so both backends share the exact same
+ * call path — only how the root handle is obtained differs.
+ */
+export interface GnumarusProjectStore {
+  readonly name: string;
+  readonly root: GnumarusDirectoryHandle;
+  /** True when the root is an OPFS subdirectory (embedded project). */
+  readonly embedded: boolean;
+}
+
+export function nativeProjectStore(root: GnumarusDirectoryHandle): GnumarusProjectStore {
+  return { name: root.name, root, embedded: false };
+}
+
+export function embeddedProjectStore(name: string, root: GnumarusDirectoryHandle): GnumarusProjectStore {
+  return { name, root, embedded: true };
+}
+
+interface GnumarusOpfsStorage {
+  getDirectory?: () => Promise<GnumarusDirectoryHandle>;
+}
+
+function opfsStorage(): GnumarusOpfsStorage | null {
+  const nav = navigator as unknown as { storage?: GnumarusOpfsStorage };
+  return nav.storage ?? null;
+}
+
+/** True when the Origin Private File System is reachable (Firefox, Safari, Chromium). */
+export function isOpfsSupported(): boolean {
+  return typeof opfsStorage()?.getDirectory === "function";
+}
+
+/** OPFS root handle. Every subdirectory is one embedded project (except the `brushes/` app cache). */
+export async function opfsRoot(): Promise<GnumarusDirectoryHandle> {
+  const storage = opfsStorage();
+  if (typeof storage?.getDirectory !== "function") {
+    throw new Error("The Origin Private File System is not available in this browser.");
+  }
+  return storage.getDirectory();
+}
+
+/** Directories reserved by the app itself inside OPFS (never listed as projects). */
+export const GNUMARUS_OPFS_RESERVED_DIRS: readonly string[] = ["brushes"];
+
+/**
+ * Validate an embedded project name (also an OPFS subdirectory name):
+ * trimmed 1..64 chars, not `.`/`..`, no slashes or control characters.
+ * Returns the trimmed name, or null when invalid.
+ */
+export function sanitizeEmbeddedProjectName(name: string): string | null {
+  const clean = name.trim();
+  if (clean.length === 0 || clean.length > 64 || clean === "." || clean === "..") {
+    return null;
+  }
+  for (const char of clean) {
+    const code = char.codePointAt(0) ?? 0;
+    if (char === "/" || char === "\\" || code < 32 || code === 127) {
+      return null;
+    }
+  }
+  return clean;
+}
+
+/** Sorted names of every embedded project (every OPFS root dir except app caches). */
+export async function listEmbeddedProjects(): Promise<string[]> {
+  const root = await opfsRoot();
+  if (typeof root.values !== "function") {
+    return [];
+  }
+  const out: string[] = [];
+  for await (const entry of root.values()) {
+    if (entry === null || typeof entry !== "object" || entry.kind !== "directory") {
+      continue;
+    }
+    const name = (entry as { name?: unknown }).name;
+    if (typeof name !== "string" || name === "" || GNUMARUS_OPFS_RESERVED_DIRS.includes(name)) {
+      continue;
+    }
+    out.push(name);
+  }
+  out.sort((left, right) => left.localeCompare(right));
+  return out;
+}
+
+/** Open an existing embedded project by name. Throws when missing or invalid. */
+export async function openEmbeddedProjectStore(name: string): Promise<GnumarusProjectStore> {
+  const clean = sanitizeEmbeddedProjectName(name);
+  if (clean === null) {
+    throw new Error(`Invalid project name: ${name}`);
+  }
+  const root = await opfsRoot();
+  const dir = await root.getDirectoryHandle(clean, { create: false });
+  return embeddedProjectStore(clean, dir);
+}
+
+/**
+ * Create a new embedded project directory. Throws on invalid names and when
+ * a project with the same name already exists (names are unique by construction).
+ */
+export async function createEmbeddedProjectStore(name: string): Promise<GnumarusProjectStore> {
+  const clean = sanitizeEmbeddedProjectName(name);
+  if (clean === null) {
+    throw new Error(`Invalid project name: ${name}`);
+  }
+  const existing = await listEmbeddedProjects();
+  if (existing.includes(clean)) {
+    throw new Error(`Project "${clean}" already exists`);
+  }
+  const root = await opfsRoot();
+  const dir = await root.getDirectoryHandle(clean, { create: true });
+  return embeddedProjectStore(clean, dir);
+}
+
+export interface GnumarusGppContents {
+  /** Top-level directory inside the archive (the project name). */
+  projectName: string;
+  /** Project-relative paths (`project.gpa`, `textures/t1.jxl`, ...) to raw bytes. */
+  files: Map<string, Uint8Array>;
+}
+
+/**
+ * Unpack a `.gpp` archive (a zip holding exactly one root directory with the
+ * normal project layout inside). Throws on multi-root archives, files outside
+ * the single directory, missing project data files, or invalid names.
+ */
+export function parseGppArchive(bytes: Uint8Array): GnumarusGppContents {
+  let entries: Record<string, Uint8Array>;
+  try {
+    entries = unzipSync(bytes) as Record<string, Uint8Array>;
+  } catch (error) {
+    throw new Error(`Invalid project package: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const names = Object.keys(entries).filter((name) => !name.endsWith("/"));
+  if (names.length === 0) {
+    throw new Error("Invalid project package: the archive is empty");
+  }
+  const roots = new Set<string>();
+  for (const name of names) {
+    const slash = name.indexOf("/");
+    if (slash <= 0) {
+      throw new Error("Invalid project package: it must contain exactly one directory at its root");
+    }
+    roots.add(name.slice(0, slash));
+  }
+  if (roots.size !== 1) {
+    throw new Error("Invalid project package: it must contain exactly one directory at its root");
+  }
+  const projectName = [...roots][0] as string;
+  if (sanitizeEmbeddedProjectName(projectName) === null) {
+    throw new Error(`Invalid project package: invalid project name "${projectName}"`);
+  }
+  const files = new Map<string, Uint8Array>();
+  for (const name of names) {
+    files.set(name.slice(projectName.length + 1), entries[name] as Uint8Array);
+  }
+  if (!files.has(GNUMARUS_PROJECT_ARCHIVE_FILE) && !files.has(GNUMARUS_PROJECT_FILE)) {
+    throw new Error(`Invalid project package: ${GNUMARUS_PROJECT_ARCHIVE_FILE} or ${GNUMARUS_PROJECT_FILE} is missing`);
+  }
+  return { projectName, files };
+}
+
+/**
+ * Unpack a `.gpp` archive into a new OPFS embedded project directory and
+ * return its store. Throws when a project with the same name already exists.
+ */
+export async function unpackGppToEmbedded(bytes: Uint8Array): Promise<GnumarusProjectStore> {
+  const gpp = parseGppArchive(bytes);
+  const store = await createEmbeddedProjectStore(gpp.projectName);
+  const blobs = new Map<string, Blob>();
+  for (const [path, data] of gpp.files) {
+    blobs.set(path, new Blob([data as Uint8Array<ArrayBuffer>], { type: "application/octet-stream" }));
+  }
+  await writeProjectFiles(store.root, blobs);
+  await ensureProjectContentDirs(store.root);
+  return store;
+}
