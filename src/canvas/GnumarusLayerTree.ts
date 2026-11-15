@@ -634,3 +634,72 @@ export function sanitizeLayerMasks(
   }
   return cleared;
 }
+
+/**
+ * Outdent: `id` leaves its parent and becomes a sibling right below the old
+ * parent's whole block (display: immediately below the ex-parent). The new
+ * parent is the ex-parent's parent (possibly null = root). Pure and testable.
+ */
+export function outdentLayer(
+  order: readonly string[],
+  parents: ReadonlyMap<string, string | null>,
+  id: string,
+): { order: string[]; parents: GnumarusLayerParentMap } | null {
+  if (!order.includes(id)) {
+    return null;
+  }
+  const oldParent = parents.get(id) ?? null;
+  if (oldParent === null || !order.includes(oldParent)) {
+    return null;
+  }
+  const moving = layerBlockRange(order, parents, id);
+  if (moving === null) {
+    return null;
+  }
+  const { block, rest } = spliceBlock(order, moving.start, moving.end);
+  const parentRange = layerBlockRange(rest, parents, oldParent);
+  if (parentRange === null) {
+    return null;
+  }
+  const next = new Map(parents);
+  next.set(id, parents.get(oldParent) ?? null);
+  return { order: insertBlockAt(rest, block, parentRange.start), parents: next };
+}
+
+/**
+ * Indent: `id` nests into the sibling directly above it (display order =
+ * storage order reversed) as the last (bottom-most) child. Rejects missing
+ * above-siblings and mask targets. Pure and testable; callers keep `isMask`.
+ */
+export function indentLayerIntoAbove(
+  order: readonly string[],
+  parents: ReadonlyMap<string, string | null>,
+  id: string,
+  isMaskTarget: (layerId: string) => boolean,
+): { order: string[]; parents: GnumarusLayerParentMap } | null {
+  const siblings = layerSiblings(order, parents, id);
+  if (siblings === null) {
+    return null;
+  }
+  const pos = siblings.indexOf(id);
+  const target = pos < 0 || pos + 1 >= siblings.length ? undefined : siblings[pos + 1];
+  if (target === undefined || isMaskTarget(target) || target === id) {
+    return null;
+  }
+  if (isLayerAncestor(id, target, parents)) {
+    return null;
+  }
+  const moving = layerBlockRange(order, parents, id);
+  if (moving === null) {
+    return null;
+  }
+  const { block, rest } = spliceBlock(order, moving.start, moving.end);
+  const targetRange = layerBlockRange(rest, parents, target);
+  if (targetRange === null) {
+    return null;
+  }
+  const next = new Map(parents);
+  next.set(id, target);
+  // Bottom of the new child list = start of the target's block.
+  return { order: insertBlockAt(rest, block, targetRange.start), parents: next };
+}

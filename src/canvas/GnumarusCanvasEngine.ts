@@ -141,11 +141,13 @@ import {
 } from "./GnumarusPaintBrush";
 import {
   combineMasksForParent,
+  indentLayerIntoAbove,
   isEffectivelyVisible,
   layerBlockRange,
   makeRootLayer,
   moveLayerBlock,
   moveLayerBlockWrapping,
+  outdentLayer,
   rebuildLayerOrder,
   reparentLayer,
   sanitizeLayerMasks,
@@ -290,6 +292,7 @@ import {
   removeFramesDurations,
   removeFramesNames,
   resolveAnimationFrame,
+  holdEmptyCellsForward,
   swapFrameCells,
   swapFrameDurations,
   swapFrameNames,
@@ -2045,13 +2048,27 @@ export class GnumarusCanvasEngine {
       }
       contents.set(id, { textureId, transform: content.transform });
     }
-    return resolveAnimationFrame(
-      this.layers.map((layer) => layer.id),
-      textures,
-      contents,
-      this.cells,
-      frame,
-    );
+    const layerIds = this.layers.map((layer) => layer.id);
+    const resolved = resolveAnimationFrame(layerIds, textures, contents, this.cells, frame);
+    if (this.holdEmptyCells) {
+      holdEmptyCellsForward(layerIds, textures, contents, this.cells, frame, resolved);
+    }
+    return resolved;
+  }
+
+  /** Whether empty cells render the layer's last non-empty content (keyframes). */
+  private holdEmptyCells = true;
+
+  /** Switch empty-cell rendering between holding and transparency. No history entry. */
+  setEmptyCellHold(hold: boolean): void {
+    if (this.holdEmptyCells === hold) {
+      return;
+    }
+    this.holdEmptyCells = hold;
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.emitStats();
   }
 
   /**
@@ -6563,6 +6580,63 @@ export class GnumarusCanvasEngine {
     this.onLayersChanged?.();
     this.emitStats();
     return "ok";
+  }
+
+  /**
+   * Alt+Right: nest the layer into the sibling directly above it (display
+   * order) as its last child. Masks keep their flag; mask targets reject.
+   * No history entry.
+   */
+  indentLayerIntoAboveSibling(id: string): boolean {
+    const layer = this.findLayer(id);
+    if (layer === null) {
+      return false;
+    }
+    const order = this.layerOrderIds();
+    const parents = this.layerParentMap();
+    const result = indentLayerIntoAbove(order, parents, id, (target) => this.findLayer(target)?.isMask === true);
+    if (result === null) {
+      return false;
+    }
+    this.applyParentMap(result.parents);
+    this.applyLayerOrder(result.order);
+    this.refreshLayerStacking();
+    this.refreshBlockVisibility(result.order);
+    this.queueAllMaskRefreshes();
+    this.render();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return true;
+  }
+
+  /**
+   * Alt+Left: lift the layer out of its parent, becoming a sibling right
+   * below the old parent's whole block. Masks lifted to root level become
+   * normal layers (a root mask would have no target). No history entry.
+   */
+  outdentLayerBelowParent(id: string): boolean {
+    const layer = this.findLayer(id);
+    if (layer === null) {
+      return false;
+    }
+    const order = this.layerOrderIds();
+    const parents = this.layerParentMap();
+    const result = outdentLayer(order, parents, id);
+    if (result === null) {
+      return false;
+    }
+    if (layer.isMask && (result.parents.get(id) ?? null) === null) {
+      layer.isMask = false;
+    }
+    this.applyParentMap(result.parents);
+    this.applyLayerOrder(result.order);
+    this.refreshLayerStacking();
+    this.refreshBlockVisibility(result.order);
+    this.queueAllMaskRefreshes();
+    this.render();
+    this.onLayersChanged?.();
+    this.emitStats();
+    return true;
   }
 
   /**

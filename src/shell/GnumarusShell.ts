@@ -150,6 +150,14 @@ import {
   serializeFitSettings,
 } from "../settings/GnumarusFitSettings";
 import {
+  DEFAULT_EMPTY_CELL_SETTINGS,
+  EMPTY_CELL_SETTINGS_STORAGE_KEY,
+  parseEmptyCellMode,
+  parseEmptyCellSettings,
+  serializeEmptyCellSettings,
+  type GnumarusEmptyCellMode,
+} from "../settings/GnumarusEmptyCellSettings";
+import {
   applyNewProjectPreset,
   DEFAULT_NEW_PROJECT_PRESET,
   GNUMARUS_NEW_PROJECT_PRESETS,
@@ -433,6 +441,8 @@ function gnumarusShortcuts(): GnumarusShortcutSection[] {
         { keys: "ArrowDown", action: tr("sc.layerBelow") },
         { keys: "Shift+ArrowUp", action: tr("sc.moveLayerUp") },
         { keys: "Shift+ArrowDown", action: tr("sc.moveLayerDown") },
+        { keys: "Alt+ArrowLeft", action: tr("sc.nestOut") },
+        { keys: "Alt+ArrowRight", action: tr("sc.nestIn") },
         { keys: "Insert", action: tr("sc.insertLayer") },
         { keys: "Delete", action: tr("sc.deleteCell") },
         { keys: "Ctrl+Shift+ArrowUp (Cmd+Shift+ArrowUp on macOS)", action: tr("sc.newLayerAbove") },
@@ -1784,6 +1794,7 @@ export class GnumarusShell extends LitElement {
     zoomMinPercent: { type: Number },
     floatingActive: { type: Boolean },
     backgroundMode: { type: String },
+    emptyCellMode: { type: String },
     backgroundColor: { type: String },
     previewOpen: { type: Boolean },
     previewZoom: { type: Number },
@@ -1998,6 +2009,7 @@ export class GnumarusShell extends LitElement {
   declare zoomMinPercent: number;
   declare floatingActive: boolean;
   declare backgroundMode: GnumarusBackgroundMode;
+  declare emptyCellMode: GnumarusEmptyCellMode;
   declare backgroundColor: string;
   declare previewOpen: boolean;
   declare previewZoom: number;
@@ -2255,6 +2267,7 @@ export class GnumarusShell extends LitElement {
     this.zoomMinPercent = DEFAULT_ZOOM_SETTINGS.minZoomPercent;
     this.floatingActive = false;
     this.backgroundMode = DEFAULT_BACKGROUND_SETTINGS.mode;
+    this.emptyCellMode = DEFAULT_EMPTY_CELL_SETTINGS.mode;
     this.backgroundColor = DEFAULT_BACKGROUND_SETTINGS.color;
     this.previewOpen = false;
     this.previewZoom = 4;
@@ -3945,6 +3958,25 @@ export class GnumarusShell extends LitElement {
                 aria-label=${tr("a11y.resetFrameDuration")}
                 title=${tr("a11y.resetToDefault")}
                 @click=${(): void => this.resetDefaultFrameDuration()}
+              >
+                ↻
+              </button>`
+            : html``}
+        </div>
+        <div class="setting-row">
+          <label
+            >${tr("setting.emptyCells")}
+            <select id="emptyCellMode" .value=${this.emptyCellMode} @change=${(): void => this.applyEmptyCellFromDialog()}>
+              <option value="hold">${tr("setting.emptyCellsHold")}</option>
+              <option value="nothing">${tr("setting.emptyCellsNothing")}</option>
+            </select>
+          </label>
+          ${this.emptyCellMode !== DEFAULT_EMPTY_CELL_SETTINGS.mode
+            ? html`<button
+                class="reset-btn"
+                aria-label=${tr("a11y.resetEmptyCells")}
+                title=${tr("a11y.resetToDefault")}
+                @click=${(): void => this.resetEmptyCellsToDefault()}
               >
                 ↻
               </button>`
@@ -6415,6 +6447,8 @@ export class GnumarusShell extends LitElement {
     this.locale = storedLocale.locale;
     this.applyActiveLocale();
     const storedFit = this.loadFitSettings();
+    const storedEmptyCells = this.loadEmptyCellSettings();
+    this.emptyCellMode = storedEmptyCells.mode;
     this.fitDefaultThreshold = storedFit.alphaThreshold;
     const storedStorage = this.loadStorageSettings();
     this.storageLossless = storedStorage.lossless;
@@ -6566,6 +6600,7 @@ export class GnumarusShell extends LitElement {
       this.engine.setCurvePixelPerfect(this.curvePixelPerfect);
       this.engine.setModelLighting(this.storageModelLighting);
       this.engine.setMaxBrushSize(this.maxBrushSize);
+      this.engine.setEmptyCellHold(this.emptyCellMode === "hold");
       this.refreshLayers();
       // The engine fits the zoom during construction, before the animation
       // matrix above the status bar takes part in the layout. Re-fit once the
@@ -6894,6 +6929,25 @@ export class GnumarusShell extends LitElement {
         return;
       }
     }
+    if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+      if (
+        this.eventInField(event) ||
+        this.eventInColorPicker(event) ||
+        this.shadowRoot?.querySelector("dialog[open]") !== null ||
+        this.isAdjustWindowOpen()
+      ) {
+        return;
+      }
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault();
+        if (event.key === "ArrowLeft") {
+          this.outdentActiveLayer();
+        } else {
+          this.indentActiveLayer();
+        }
+        return;
+      }
+    }
     if ((event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey && key === "p") {
       const palette = this.shadowRoot?.getElementById("actionPaletteDialog") as HTMLDialogElement | null;
       if (palette?.open === true || (!this.eventInField(event) && !this.eventInColorPicker(event))) {
@@ -7172,6 +7226,42 @@ export class GnumarusShell extends LitElement {
       this.refreshLayers();
       this.dirty = true;
       this.statusMessage = direction === "up" ? tr("status.layerMovedUp") : tr("status.layerMovedDown");
+    }
+  }
+
+  /** Alt+Left: lift the active layer out below its old parent. */
+  private outdentActiveLayer(): void {
+    if (this.engine === null) {
+      return;
+    }
+    const id = this.engine.getActiveLayerId();
+    const parent = this.layers.find((entry) => entry.id === id)?.parentId ?? null;
+    if (parent === null) {
+      this.statusMessage = tr("status.layerAlreadyRoot");
+      return;
+    }
+    const parentName = this.layers.find((entry) => entry.id === parent)?.name ?? parent;
+    if (this.engine.outdentLayerBelowParent(id)) {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = tr("status.layerNestedOut", { name: parentName });
+    }
+  }
+
+  /** Alt+Right: nest the active layer into the sibling above it. */
+  private indentActiveLayer(): void {
+    if (this.engine === null) {
+      return;
+    }
+    const id = this.engine.getActiveLayerId();
+    if (this.engine.indentLayerIntoAboveSibling(id)) {
+      const parent = this.layers.find((entry) => entry.id === id)?.parentId ?? null;
+      const parentName = this.layers.find((entry) => entry.id === parent)?.name ?? parent ?? id;
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = tr("status.layerNestedIn", { name: parentName });
+    } else {
+      this.statusMessage = tr("status.layerNestNoAbove");
     }
   }
 
@@ -8032,6 +8122,42 @@ export class GnumarusShell extends LitElement {
       // Corrupt or unavailable storage falls back to defaults.
     }
     return { ...DEFAULT_FIT_SETTINGS };
+  }
+
+  private loadEmptyCellSettings(): { mode: GnumarusEmptyCellMode } {
+    try {
+      const stored = window.localStorage.getItem(EMPTY_CELL_SETTINGS_STORAGE_KEY);
+      if (stored !== null) {
+        return parseEmptyCellSettings(stored);
+      }
+    } catch {
+      // Corrupt or unavailable storage falls back to defaults.
+    }
+    return { ...DEFAULT_EMPTY_CELL_SETTINGS };
+  }
+
+  private persistEmptyCells(): void {
+    try {
+      window.localStorage.setItem(
+        EMPTY_CELL_SETTINGS_STORAGE_KEY,
+        serializeEmptyCellSettings({ mode: this.emptyCellMode }),
+      );
+    } catch {
+      // Storage failures must not break the settings flow.
+    }
+  }
+
+  private applyEmptyCellFromDialog(): void {
+    const select = this.shadowRoot?.getElementById("emptyCellMode") as HTMLSelectElement | null;
+    this.emptyCellMode = parseEmptyCellMode(select?.value ?? this.emptyCellMode);
+    this.engine?.setEmptyCellHold(this.emptyCellMode === "hold");
+    this.persistEmptyCells();
+  }
+
+  private resetEmptyCellsToDefault(): void {
+    this.emptyCellMode = DEFAULT_EMPTY_CELL_SETTINGS.mode;
+    this.engine?.setEmptyCellHold(this.emptyCellMode === "hold");
+    this.persistEmptyCells();
   }
 
   private persistFit(): void {

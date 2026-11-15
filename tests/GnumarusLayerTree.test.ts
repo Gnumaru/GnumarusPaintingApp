@@ -211,3 +211,48 @@ describe("layer masks", () => {
     expect(isMask.get("c")).toBe(false);
   });
 });
+
+describe("indent and outdent", () => {
+  it("outdents below the old parent block as its sibling", async () => {
+    const { outdentLayer } = await import("../src/canvas/GnumarusLayerTree");
+    // Storage bottom -> top: B root, then A's children, then A on top.
+    const order = ["b", "c0", "c1", "a"];
+    const parents = parentsOf(order, { b: null, c0: "a", c1: "a", a: null });
+    const moved = outdentLayer(order, parents, "c1");
+    expect(moved?.order).toEqual(["b", "c1", "c0", "a"]);
+    expect(moved?.parents.get("c1")).toBeNull();
+    // Roots and unknown ids cannot outdent.
+    expect(outdentLayer(order, parents, "a")).toBeNull();
+    expect(outdentLayer(order, parents, "missing")).toBeNull();
+  });
+
+  it("indents into the sibling above as the last child", async () => {
+    const { indentLayerIntoAbove } = await import("../src/canvas/GnumarusLayerTree");
+    const noMasks = (): boolean => false;
+    // Display top -> bottom: P, C1, C0, B. C0's above sibling is C1.
+    const order = ["b", "c0", "c1", "p"];
+    const parents = parentsOf(order, { b: null, c0: "p", c1: "p", p: null });
+    const moved = indentLayerIntoAbove(order, parents, "c0", noMasks);
+    expect(moved?.order).toEqual(["b", "c0", "c1", "p"]);
+    expect(moved?.parents.get("c0")).toBe("c1");
+    // Top child has no sibling above.
+    expect(indentLayerIntoAbove(order, parents, "c1", noMasks)).toBeNull();
+    // Mask targets reject.
+    expect(indentLayerIntoAbove(order, parents, "c0", (target) => target === "c1")).toBeNull();
+  });
+
+  it("round-trips indent then outdent", async () => {
+    const { indentLayerIntoAbove, outdentLayer } = await import("../src/canvas/GnumarusLayerTree");
+    const noMasks = (): boolean => false;
+    const order = ["b", "c0", "c1", "p"];
+    const parents = parentsOf(order, { b: null, c0: "p", c1: "p", p: null });
+    const indented = indentLayerIntoAbove(order, parents, "c0", noMasks);
+    expect(indented).not.toBeNull();
+    if (indented === null) {
+      return;
+    }
+    const restored = outdentLayer(indented.order, indented.parents, "c0");
+    expect(restored?.order).toEqual(["b", "c0", "c1", "p"]);
+    expect(restored?.parents.get("c0")).toBe("p");
+  });
+});

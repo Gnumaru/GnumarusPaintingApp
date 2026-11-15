@@ -235,3 +235,72 @@ describe("GnumarusAnimationModel", () => {
     expect(removeFramesNames(["A", "B", "C", "D"], new Set([1, 2]))).toEqual(["A", "D"]);
   });
 });
+
+describe("holdEmptyCellsForward", () => {
+  const transform = { x: 0, y: 0, rotation: 0, flipX: false, flipY: false, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, rotationX: 0, rotationY: 0 };
+
+  function setup(): {
+    textures: Map<string, { width: number; height: number; buffer: Uint8ClampedArray }>;
+    contents: Map<string, { textureId: string | null; transform: typeof transform }>;
+    cells: Map<string, string>;
+  } {
+    const textures = new Map([
+      ["texFirst", { width: 2, height: 2, buffer: bufferOf(2, 2, 11) }],
+      ["texLast", { width: 2, height: 2, buffer: bufferOf(2, 2, 99) }],
+    ]);
+    const contents = new Map([
+      ["contentFirst", { textureId: "texFirst", transform }],
+      ["contentLast", { textureId: "texLast", transform }],
+      ["contentEmpty", { textureId: null, transform }],
+    ]);
+    const cells = new Map([
+      [animationCellKey("layer0", 0), "contentFirst"],
+      [animationCellKey("layer0", 8), "contentLast"],
+      [animationCellKey("layer1", 4), "contentEmpty"],
+    ]);
+    return { textures, contents, cells };
+  }
+
+  it("holds the last non-empty content for interior frames", async () => {
+    const { holdEmptyCellsForward } = await import("../src/animation/GnumarusAnimationModel");
+    const { textures, contents, cells } = setup();
+    for (const frame of [1, 2, 7]) {
+      const resolved = resolveAnimationFrame(["layer0"], textures, contents, cells, frame);
+      expect(resolved.get("layer0")?.buffer).toBeNull();
+      holdEmptyCellsForward(["layer0"], textures, contents, cells, frame, resolved);
+      const held = resolved.get("layer0");
+      expect(held?.contentId).toBe("contentFirst");
+      expect(held?.buffer?.[0]).toBe(11);
+    }
+  });
+
+  it("keeps own content and stays empty without a prior frame", async () => {
+    const { holdEmptyCellsForward } = await import("../src/animation/GnumarusAnimationModel");
+    const { textures, contents, cells } = setup();
+    const own = resolveAnimationFrame(["layer0"], textures, contents, cells, 8);
+    holdEmptyCellsForward(["layer0"], textures, contents, cells, 8, own);
+    expect(own.get("layer0")?.contentId).toBe("contentLast");
+    const none = resolveAnimationFrame(["layer0"], textures, contents, cells, 0);
+    none.set("layer0", {
+      layerId: "layer0",
+      contentId: null,
+      textureId: null,
+      buffer: null,
+      width: 0,
+      height: 0,
+      transform: { ...transform },
+    });
+    holdEmptyCellsForward(["layer0"], textures, contents, cells, 0, none);
+    expect(none.get("layer0")?.buffer).toBeNull();
+  });
+
+  it("skips contents without usable textures", async () => {
+    const { holdEmptyCellsForward } = await import("../src/animation/GnumarusAnimationModel");
+    const { textures, contents, cells } = setup();
+    const resolved = resolveAnimationFrame(["layer1"], textures, contents, cells, 5);
+    expect(resolved.get("layer1")?.buffer).toBeNull();
+    holdEmptyCellsForward(["layer1"], textures, contents, cells, 5, resolved);
+    // Frame 4 holds a content without texture: still renders nothing.
+    expect(resolved.get("layer1")?.buffer).toBeNull();
+  });
+});

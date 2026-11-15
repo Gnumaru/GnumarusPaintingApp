@@ -340,3 +340,50 @@ export function resolveAnimationFrame(
   }
   return resolved;
 }
+
+/**
+ * Keyframe hold for empty cells: layers whose resolved cell renders nothing
+ * (no content, or content without a usable texture) fall back to the same
+ * layer's last non-empty content strictly below `frame`. Pure and testable;
+ * buffers stay shared references like `resolveAnimationFrame`.
+ */
+export function holdEmptyCellsForward(
+  layerIds: readonly string[],
+  textures: ReadonlyMap<string, { width: number; height: number; buffer: Uint8ClampedArray }>,
+  contents: ReadonlyMap<string, { textureId: string | null; transform: GnumarusLayerTransform }>,
+  cells: ReadonlyMap<string, string>,
+  frame: number,
+  resolved: Map<string, GnumarusResolvedCell>,
+): Map<string, GnumarusResolvedCell> {
+  for (const layerId of layerIds) {
+    const cell = resolved.get(layerId);
+    if (cell !== undefined && cell.buffer !== null) {
+      continue;
+    }
+    for (let probe = frame - 1; probe >= 0; probe -= 1) {
+      const contentId = cells.get(animationCellKey(layerId, probe));
+      if (contentId === undefined) {
+        continue;
+      }
+      const content = contents.get(contentId);
+      if (content === undefined || content.textureId === null) {
+        continue;
+      }
+      const texture = textures.get(content.textureId);
+      if (texture === undefined) {
+        continue;
+      }
+      resolved.set(layerId, {
+        layerId,
+        contentId,
+        textureId: content.textureId,
+        buffer: texture.buffer,
+        width: texture.width,
+        height: texture.height,
+        transform: { ...content.transform },
+      });
+      break;
+    }
+  }
+  return resolved;
+}

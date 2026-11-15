@@ -896,6 +896,7 @@ test("merge down links the upper texture when the lower content has none", async
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
+  await setEmptyCellHold(page, false);
   await paintCenter(page);
   await page.getByRole("button", { name: "Add layer" }).click();
   await setPencil(page, "#ff0000");
@@ -1666,6 +1667,7 @@ test("new frames start empty and painting a frame does not leak into others", as
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
+  await setEmptyCellHold(page, false);
   await paintCenter(page);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
@@ -9818,6 +9820,7 @@ test("File > Export saves an animation as a WebP spritesheet", async ({ page }) 
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
+  await setEmptyCellHold(page, false);
   await addFrames(page, 1);
   await addAnimation(page, "go,none,1,2");
   await page.locator('gnumarus-shell [data-testid="anim-frame"][data-frame="0"]').click();
@@ -9847,6 +9850,7 @@ test("File > Export saves an animation as a JXL spritesheet", async ({ page }) =
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
+  await setEmptyCellHold(page, false);
   await addFrames(page, 1);
   await addAnimation(page, "go,none,1,2");
   await page.locator('gnumarus-shell [data-testid="anim-frame"][data-frame="0"]').click();
@@ -10188,6 +10192,7 @@ test("File > Export saves a named animation as a PNG sequence", async ({ page })
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
+  await setEmptyCellHold(page, false);
   await addFrames(page, 1);
   await addAnimation(page, "go,none,1,2");
   // Frame 1 keeps a black center dot; frame 2 stays blank.
@@ -10212,6 +10217,7 @@ test("File > Export saves an animation as a single-line spritesheet", async ({ p
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
+  await setEmptyCellHold(page, false);
   await addFrames(page, 1);
   await addAnimation(page, "go,none,1,2");
   // Frame 1 keeps a black center dot; frame 2 stays blank.
@@ -10277,6 +10283,7 @@ test("File > Export saves one animation per line with ragged rows", async ({ pag
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
+  await setEmptyCellHold(page, false);
   await addFrames(page, 2);
   await addAnimation(page, "a,none,1,2");
   await addAnimation(page, "b,none,3");
@@ -10306,6 +10313,7 @@ test("File > Export saves a manual frame list as individual files", async ({ pag
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
+  await setEmptyCellHold(page, false);
   await addFrames(page, 1);
   await page.locator('gnumarus-shell [data-testid="anim-frame"][data-frame="0"]').click();
   await paintCenter(page);
@@ -14911,6 +14919,15 @@ async function engineReparent(page: import("@playwright/test").Page, childId: st
   }, [childId, parentId] as string[]);
 }
 
+async function setEmptyCellHold(page: import("@playwright/test").Page, hold: boolean): Promise<void> {
+  await page.evaluate((value: boolean) => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { setEmptyCellHold(hold: boolean): void } };
+    };
+    root.__gnumarus?.engine?.setEmptyCellHold(value);
+  }, hold);
+}
+
 async function dropLayerOnto(page: import("@playwright/test").Page, childId: string, parentId: string): Promise<void> {
   await page.evaluate(([child, parent]: string[]) => {
     const shell = document.querySelector("gnumarus-shell");
@@ -15380,4 +15397,67 @@ test("toggling visibility off and on preserves masking @recent", async ({ page }
   await setPencil(page, "#ffffff");
   await paintCenter(page);
   expect(await canvasCenterPixel(page)).toBe("255,0,0,255");
+});
+
+test("empty cells hold the last non-empty frame by default and respect the setting @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await paintCenter(page);
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click();
+  // Default (hold): the empty frame renders frame 0's dot, but stays assigned empty.
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  await expect(matrix.locator('[data-testid="anim-cell"][data-matrix-frame="1"]')).toHaveAttribute(
+    "aria-label",
+    /empty/,
+  );
+  // Switch the setting to nothing: the empty frame renders transparent.
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.locator("gnumarus-shell select#emptyCellMode").selectOption("nothing");
+  await page.keyboard.press("Escape");
+  expect(await readPixel(page, 32, 32)).toBeNull();
+  // Back to hold: the dot renders again.
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.locator("gnumarus-shell select#emptyCellMode").selectOption("hold");
+  await page.keyboard.press("Escape");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+});
+
+test("Alt+Left outdents below the parent and Alt+Right nests into the sibling above @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await page.getByRole("button", { name: "Add layer" }).click();
+  expect(await engineReparent(page, "layer0", "layer2")).toBe(true);
+  expect(await engineReparent(page, "layer1", "layer2")).toBe(true);
+  let parents = await getLayerParents(page);
+  expect(parents.find((layer) => layer.id === "layer1")?.parentId).toBe("layer2");
+  // Bottom child indents into the sibling above as its last child.
+  await page.locator('gnumarus-shell [data-layer-id="layer1"] .layer-name').click();
+  await page.keyboard.press("Alt+ArrowRight");
+  parents = await getLayerParents(page);
+  expect(parents.find((layer) => layer.id === "layer1")?.parentId).toBe("layer0");
+  await expect(page.locator("gnumarus-shell")).toContainText("nested into");
+  await expect(page.locator('gnumarus-shell .layer-row[data-layer-id="layer1"]')).toHaveAttribute("data-depth", "2");
+  // Outdent puts it back as a sibling right below the old parent block.
+  await page.keyboard.press("Alt+ArrowLeft");
+  parents = await getLayerParents(page);
+  expect(parents.find((layer) => layer.id === "layer1")?.parentId).toBe("layer2");
+  await expect(page.locator("gnumarus-shell")).toContainText("moved out below");
+  // Top child has no sibling above: nothing happens.
+  await page.locator('gnumarus-shell [data-layer-id="layer0"] .layer-name').click();
+  await page.keyboard.press("Alt+ArrowRight");
+  parents = await getLayerParents(page);
+  expect(parents.find((layer) => layer.id === "layer0")?.parentId).toBe("layer2");
+  await expect(page.locator("gnumarus-shell")).toContainText("No sibling above");
+  // Roots cannot outdent.
+  await page.locator('gnumarus-shell [data-layer-id="layer2"] .layer-name').click();
+  await page.keyboard.press("Alt+ArrowLeft");
+  expect((await getLayerParents(page)).find((layer) => layer.id === "layer2")?.parentId).toBeNull();
+  await expect(page.locator("gnumarus-shell")).toContainText("already a root");
 });
