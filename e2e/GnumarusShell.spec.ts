@@ -5752,6 +5752,7 @@ test("quick action palette filters and runs actions", async ({ page }) => {
     "Open Project",
     "Redo",
     "Relink cell content",
+    "Reload All Contents Except Textures",
     "Reload All Textures",
     "Reset Canvas Transform",
     "Save Project",
@@ -5770,8 +5771,10 @@ test("quick action palette filters and runs actions", async ({ page }) => {
   await page.keyboard.press("Enter");
   await expect(dialog).toBeVisible();
   await input.fill("reset");
-  await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveText(["Reset Canvas Transform"]);
-  await page.keyboard.press("ArrowDown");
+  await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveText([
+    "Reset Canvas Transform",
+    "Reload All Contents Except Textures",
+  ]);
   await page.keyboard.press("Enter");
   await expect(dialog).toBeHidden();
   await expect(page.locator("gnumarus-shell")).toContainText("Canvas transform reset");
@@ -5975,7 +5978,7 @@ async function runPaletteAction(page: import("@playwright/test").Page, query: st
 test("Reload All Textures without a saved project shows an error toast", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await runPaletteAction(page, "reload all");
+  await runPaletteAction(page, "reload all textures");
   await expect(page.locator("gnumarus-shell")).toContainText(
     "Reload textures failed: the project has not been saved yet",
   );
@@ -5999,7 +6002,7 @@ test("Reload All Textures restores saved files, skips new textures and undoes", 
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
   await page.getByRole("button", { name: "Add layer" }).click();
   await paintCenter(page);
-  await runPaletteAction(page, "reload all");
+  await runPaletteAction(page, "reload all textures");
   await expect(page.locator("gnumarus-shell")).toContainText("Reloaded 1 texture (1 skipped)");
   // The saved layer is back to its on-disk (blank) pixels.
   await page.locator('gnumarus-shell [data-layer-id="layer0"] .layer-name').click();
@@ -9506,7 +9509,7 @@ test("project textures save as JPEG with a grayscale alpha companion", async ({ 
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 255, b: 0, a: 255 });
-  await runPaletteAction(page, "reload all");
+  await runPaletteAction(page, "reload all textures");
   await expect(page.locator("gnumarus-shell")).toContainText("Reloaded 1 texture");
   const restored = await readPixel(page, 32, 32);
   expect(restored?.r ?? 0).toBeGreaterThan(200);
@@ -15766,4 +15769,97 @@ test("content manager discovers only correctly-typed files and imports them @rec
   await expect.poll(managerCounts).toEqual({ textures: 1, texts: 2, svgs: 1, models: 1 });
   await expect(dialog.locator('[data-testid="content-manager-discovered-item"]')).toHaveCount(0);
   expect(await fs.files()).toContain("project.gpa");
+});
+
+async function getSvgSource(page: import("@playwright/test").Page, svgId: string): Promise<string | null> {
+  return page.evaluate((id: string) => {
+    const engine = (window as unknown as { __gnumarus?: { engine?: unknown } }).__gnumarus?.engine as unknown as
+      | { svgs: Map<string, { svg: string }> }
+      | undefined;
+    return engine?.svgs.get(id)?.svg ?? null;
+  }, svgId);
+}
+
+async function getModelBytes(page: import("@playwright/test").Page, modelId: string): Promise<number[] | null> {
+  return page.evaluate((id: string) => {
+    const engine = (window as unknown as { __gnumarus?: { engine?: unknown } }).__gnumarus?.engine as unknown as
+      | { models3d: Map<string, { bytes: Uint8Array }> }
+      | undefined;
+    const bytes = engine?.models3d.get(id)?.bytes;
+    return bytes === undefined ? null : Array.from(bytes);
+  }, modelId);
+}
+
+test("reload all contents reprocesses texts, vectors and models, not textures @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  const textId = await createHelloText(page);
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await page.getByRole("button", { name: "Pencil" }).click();
+  await paintCenter(page);
+  const svgId = await page.evaluate(() => {
+    const engine = (window as unknown as { __gnumarus?: { engine?: unknown } }).__gnumarus?.engine as unknown as
+      | { createSvgEntry(svg: string): string }
+      | undefined;
+    return engine?.createSvgEntry('<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"></svg>');
+  });
+  expect(typeof svgId).toBe("string");
+  const modelId = await page.evaluate(() => {
+    const engine = (window as unknown as { __gnumarus?: { engine?: unknown } }).__gnumarus?.engine as unknown as
+      | { registerModel3d(name: string, ext: string, bytes: Uint8Array): string | null }
+      | undefined;
+    return engine?.registerModel3d("Part", "obj", new Uint8Array([111, 32, 112, 10]));
+  });
+  expect(typeof modelId).toBe("string");
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setProjectStorage(l: boolean, q: number, f?: string, p?: number, j?: number, b?: number, pf?: string, t?: string, s?: string): void } };
+    };
+    root.__gnumarus?.shell?.setProjectStorage(true, 50, "jxl", 9, 95, 90, "gpa", "html", "raw");
+  });
+  await stubDirectoryWithFileStore(page);
+  await page.keyboard.press("Control+s");
+  await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockDir");
+  // External edits: new text, new vector, new model bytes, plus garbage in a texture file.
+  const savedTexture = await page.evaluate(() => {
+    const root = window as unknown as { __gnumarusDirTest?: { files: Record<string, Blob> } };
+    return Object.keys(root.__gnumarusDirTest?.files ?? {}).find((path) => path.startsWith("textures/")) ?? null;
+  });
+  expect(typeof savedTexture).toBe("string");
+  await page.evaluate(
+    ([textPath, svgPath, modelPath, texturePath]: string[]) => {
+      const root = window as unknown as { __gnumarusDirTest?: { files: Record<string, Blob> } };
+      const files = root.__gnumarusDirTest?.files;
+      if (files === undefined) {
+        throw new Error("mock dir is missing");
+      }
+      files[textPath] = new Blob(["<div>Edited</div>"], { type: "text/html" });
+      files[svgPath] = new Blob(['<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></svg>'], { type: "image/svg+xml" });
+      files[modelPath] = new Blob([new Uint8Array([111, 32, 113, 10, 118, 32, 49, 10])]);
+      files[texturePath] = new Blob([new Uint8Array([9, 9, 9])]);
+    },
+    [`texts/${textId}.html`, `svgs/${svgId}.svg`, `3dmodels/${modelId}.obj`, savedTexture as string] as string[],
+  );
+  await runPaletteAction(page, "reload all contents");
+  await expect(page.locator("gnumarus-shell")).toContainText('Reloaded 3 contents');
+  expect(await textHtml(page, textId as string)).toContain("Edited");
+  expect(await getSvgSource(page, svgId as string)).toContain("<rect");
+  expect(await getModelBytes(page, modelId as string)).toEqual([111, 32, 113, 10, 118, 32, 49, 10]);
+  // The painted texture is untouched even though its file is now garbage.
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  // Deleting a file turns its entry into a skip on the next run.
+  await page.evaluate((textPath: string) => {
+    const root = window as unknown as { __gnumarusDirTest?: { files: Record<string, Blob> } };
+    delete root.__gnumarusDirTest?.files[textPath];
+  }, `texts/${textId}.html`);
+  await runPaletteAction(page, "reload all contents");
+  await expect(page.locator("gnumarus-shell")).toContainText("Reloaded 2 contents (1 skipped)");
+});
+
+test("reload all contents without a saved project shows an error toast @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await runPaletteAction(page, "reload all contents");
+  await expect(page.locator("gnumarus-shell")).toContainText("Reload contents failed: the project has not been saved yet");
 });

@@ -7608,6 +7608,14 @@ export class GnumarusShell extends LitElement {
       },
     });
     this.actionRegistry.register({
+      id: "reload-all-contents",
+      name: tr("action.reloadContents"),
+      requirements: [],
+      run: (): void => {
+        void this.reloadAllContents();
+      },
+    });
+    this.actionRegistry.register({
       id: "reload-all-textures",
       name: tr("action.reloadAll"),
       requirements: [],
@@ -15419,6 +15427,107 @@ export class GnumarusShell extends LitElement {
     }
     const summary =
       (result.applied === 1 ? tr("status.reloadedOne", { skipped: "" }) : tr("status.reloadedMany", { count: result.applied, skipped: "" })) +
+      (skipped > 0 ? tr("status.reloadSkipped", { skipped }) : "");
+    this.statusMessage = summary;
+    this.showToast(summary);
+  }
+
+  /**
+   * Reprocess every saved non-texture content (texts, vectors, 3D models)
+   * from the project directory: external edits made elsewhere (Inkscape,
+   * Blender, a text editor) show up in the app. Textures are untouched
+   * (see Reload All Textures). Missing or undecodable files are skipped.
+   */
+  private async reloadAllContents(): Promise<void> {
+    if (this.engine === null) {
+      return;
+    }
+    if (this.directoryHandle === null) {
+      this.statusMessage = tr("status.contentsReloadUnsaved");
+      this.showToast(tr("status.contentsReloadUnsaved"));
+      return;
+    }
+    let project: GnumarusProjectMeta;
+    try {
+      project = await readProjectMeta(this.directoryHandle);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.statusMessage = tr("status.contentsReloadFailed", { reason });
+      this.showToast(tr("status.contentsReloadFailed", { reason }));
+      return;
+    }
+    let applied = 0;
+    let skipped = 0;
+    const texts: Array<{ textId: string; html: string }> = [];
+    for (const text of project.animation.texts) {
+      if (text.file === undefined) {
+        continue;
+      }
+      let bytes: Uint8Array | null = null;
+      try {
+        bytes = await readFileBytes(this.directoryHandle, text.file);
+      } catch {
+        bytes = null;
+      }
+      if (bytes === null) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        texts.push({ textId: text.id, html: decodeTextFile(text.file, bytes) });
+      } catch {
+        skipped += 1;
+      }
+    }
+    const svgs: Array<{ svgId: string; svg: string }> = [];
+    for (const vector of project.animation.svgs) {
+      if (vector.file === undefined) {
+        continue;
+      }
+      let bytes: Uint8Array | null = null;
+      try {
+        bytes = await readFileBytes(this.directoryHandle, vector.file);
+      } catch {
+        bytes = null;
+      }
+      if (bytes === null) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        svgs.push({ svgId: vector.id, svg: decodeSvgFile(vector.file, bytes) });
+      } catch {
+        skipped += 1;
+      }
+    }
+    const models: Array<{ modelId: string; ext: string; bytes: Uint8Array }> = [];
+    for (const model of project.animation.models3d) {
+      let bytes: Uint8Array | null = null;
+      try {
+        bytes = await readFileBytes(this.directoryHandle, model.file);
+      } catch {
+        bytes = null;
+      }
+      if (bytes === null) {
+        skipped += 1;
+        continue;
+      }
+      const ext = model.file.slice(model.file.lastIndexOf(".") + 1);
+      models.push({ modelId: model.id, ext, bytes });
+    }
+    const textResult = this.engine.reloadTextDocuments(texts);
+    const svgResult = this.engine.reloadSvgDocuments(svgs);
+    const modelResult = this.engine.reloadModel3dBytes(models);
+    applied = textResult.applied + svgResult.applied + modelResult.applied;
+    skipped += textResult.skipped + svgResult.skipped + modelResult.skipped;
+    if (applied > 0) {
+      this.refreshLayers();
+      this.dirty = true;
+    }
+    const summary =
+      (applied === 1
+        ? tr("status.contentsReloadedOne", { skipped: "" })
+        : tr("status.contentsReloadedMany", { count: applied, skipped: "" })) +
       (skipped > 0 ? tr("status.reloadSkipped", { skipped }) : "");
     this.statusMessage = summary;
     this.showToast(summary);

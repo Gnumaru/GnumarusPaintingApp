@@ -3105,6 +3105,104 @@ export class GnumarusCanvasEngine {
   }
 
   /**
+   * Reload text documents from decoded file contents (no history, like an
+   * import). Entries are sanitized on the way in; unchanged documents are
+   * still counted as applied so callers refresh uniformly.
+   */
+  reloadTextDocuments(entries: Array<{ textId: string; html: string }>): { applied: number; skipped: number } {
+    let applied = 0;
+    let skipped = 0;
+    for (const { textId, html } of entries) {
+      const entry = this.texts.get(textId);
+      if (entry === undefined) {
+        skipped += 1;
+        continue;
+      }
+      const sanitized = sanitizeTextHtml(html);
+      if (entry.document.html !== sanitized) {
+        entry.document = { html: sanitized };
+      }
+      this.textRasters.delete(textId);
+      applied += 1;
+    }
+    if (applied > 0) {
+      this.syncAllLayerRenders();
+      this.refreshLayerStacking();
+      this.render();
+      this.onPixelsChanged();
+      this.onLayersChanged?.();
+    }
+    return { applied, skipped };
+  }
+
+  /**
+   * Reload vector documents from decoded file contents (no history).
+   * Unchanged documents still count as applied; the async raster picks the
+   * new source up through the regular resolve path.
+   */
+  reloadSvgDocuments(entries: Array<{ svgId: string; svg: string }>): { applied: number; skipped: number } {
+    let applied = 0;
+    let skipped = 0;
+    for (const { svgId, svg } of entries) {
+      const entry = this.svgs.get(svgId);
+      if (entry === undefined || typeof svg !== "string" || svg.length === 0) {
+        skipped += 1;
+        continue;
+      }
+      if (entry.svg !== svg) {
+        entry.svg = svg;
+      }
+      this.svgRasters.delete(svgId);
+      applied += 1;
+    }
+    if (applied > 0) {
+      this.syncAllLayerRenders();
+      this.refreshLayerStacking();
+      this.render();
+      this.onPixelsChanged();
+      this.onLayersChanged?.();
+    }
+    return { applied, skipped };
+  }
+
+  /**
+   * Reload raw 3D model bytes (no history). Entries keep their view and
+   * lighting; the raster cache is dropped so the next resolve re-decodes.
+   */
+  reloadModel3dBytes(entries: Array<{ modelId: string; ext: string; bytes: Uint8Array }>): { applied: number; skipped: number } {
+    let applied = 0;
+    let skipped = 0;
+    for (const { modelId, ext, bytes } of entries) {
+      const entry = this.models3d.get(modelId);
+      if (entry === undefined || !(bytes instanceof Uint8Array) || bytes.length === 0) {
+        skipped += 1;
+        continue;
+      }
+      const cleanExt = ext.toLowerCase();
+      if (!(SUPPORTED_MODEL3D_EXTENSIONS as readonly string[]).includes(cleanExt)) {
+        skipped += 1;
+        continue;
+      }
+      const sameBytes =
+        entry.bytes.length === bytes.length && entry.bytes.every((value, index) => value === (bytes as Uint8Array)[index]);
+      if (entry.ext !== cleanExt || !sameBytes) {
+        entry.ext = cleanExt as GnumarusModel3dExtension;
+        entry.bytes = bytes.slice();
+      }
+      this.modelRasters.delete(modelId);
+      applied += 1;
+    }
+    if (applied > 0) {
+      this.syncAllLayerRenders();
+      this.refreshLayerStacking();
+      this.render();
+      this.onPixelsChanged();
+      this.onLayersChanged?.();
+    }
+    return { applied, skipped };
+  }
+
+  /**
    * Register decoded pixels as a standalone pool texture (no cell linked),
    * e.g. from content-manager discovery. Returns the new texture id, or
    * null for invalid dimensions or buffer mismatches. Structural, no history.
