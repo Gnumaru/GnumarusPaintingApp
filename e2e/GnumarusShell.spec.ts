@@ -9653,7 +9653,7 @@ test("File > Export saves the current frame as lossless JXL", async ({ page }) =
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator("select#exportFormat").selectOption("image/jxl");
-  await expect(dialog.locator('input#exportJxlLossless')).toBeChecked();
+  await expect(dialog.locator('input#exportLossless')).toBeChecked();
   await dialog.locator("#exportOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("Exported");
   const file = await exportedJxlBytes(page);
@@ -9678,7 +9678,7 @@ test("File > Export saves lossy JXL when lossless is off", async ({ page }) => {
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator("select#exportFormat").selectOption("image/jxl");
-  await dialog.locator("#exportJxlLossless").uncheck();
+  await dialog.locator("#exportLossless").uncheck();
   await dialog.locator("input#exportQuality").fill("50");
   await dialog.locator("#exportOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("Exported");
@@ -9701,6 +9701,7 @@ test("File > Export saves all frames as a single-file JXL animation", async ({ p
   await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
+  await dialog.locator('[data-testid="export-tab-animation"]').click();
   await dialog.locator("select#exportAnimatedFormat").selectOption("jxl");
   await dialog.locator("#exportAnimatedOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("Exported");
@@ -9763,7 +9764,7 @@ test("File > Export saves the current frame as lossless WebP", async ({ page }) 
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator("select#exportFormat").selectOption("image/webp");
-  await expect(dialog.locator('input#exportWebpLossless')).toBeChecked();
+  await expect(dialog.locator('input#exportLossless')).toBeChecked();
   await dialog.locator("#exportOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("Exported");
   const file = await exportedJxlBytes(page);
@@ -9789,7 +9790,7 @@ test("File > Export saves lossy WebP when lossless is off", async ({ page }) => 
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator("select#exportFormat").selectOption("image/webp");
-  await dialog.locator("#exportWebpLossless").uncheck();
+  await dialog.locator("#exportLossless").uncheck();
   await dialog.locator("input#exportQuality").fill("50");
   await dialog.locator("#exportOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("Exported");
@@ -9812,6 +9813,7 @@ test("File > Export saves all frames as a single-file WebP animation", async ({ 
   await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
+  await dialog.locator('[data-testid="export-tab-animation"]').click();
   await dialog.locator("select#exportAnimatedFormat").selectOption("webp");
   await dialog.locator("#exportAnimatedOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("Exported");
@@ -9838,6 +9840,7 @@ test("File > Export saves an animation as a WebP spritesheet", async ({ page }) 
   await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
+  await dialog.locator('[data-testid="export-tab-sheet"]').click();
   await dialog.getByRole("checkbox", { name: "go" }).check();
   await expect(dialog.locator("select#exportSheetLayout")).toHaveValue("line");
   await dialog.locator("select#exportSheetFormat").selectOption("image/webp");
@@ -9868,6 +9871,7 @@ test("File > Export saves an animation as a JXL spritesheet", async ({ page }) =
   await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
+  await dialog.locator('[data-testid="export-tab-sheet"]').click();
   await dialog.getByRole("checkbox", { name: "go" }).check();
   await expect(dialog.locator("select#exportSheetLayout")).toHaveValue("line");
   await dialog.locator("select#exportSheetFormat").selectOption("image/jxl");
@@ -10161,6 +10165,7 @@ test("File > Export saves all frames as a looping GIF", async ({ page }) => {
   await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
+  await dialog.locator('[data-testid="export-tab-animation"]').click();
   await expect(dialog.locator("select#exportAnimation")).toHaveValue("");
   await expect(dialog.locator("select#exportAnimatedFormat")).toHaveValue("gif");
   await dialog.locator("#exportAnimatedOk").click();
@@ -10186,6 +10191,7 @@ test("File > Export saves a play-once animation as GIF without repeat", async ({
   await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
+  await dialog.locator('[data-testid="export-tab-animation"]').click();
   await dialog.locator("select#exportAnimation").selectOption("once");
   await dialog.locator("#exportAnimatedOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("Exported");
@@ -10211,6 +10217,7 @@ test("File > Export saves a named animation as a PNG sequence", async ({ page })
   await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
+  await dialog.locator('[data-testid="export-tab-animation"]').click();
   await dialog.locator("select#exportAnimation").selectOption("go");
   await dialog.locator("select#exportAnimatedFormat").selectOption("image/png");
   await dialog.locator("#exportAnimatedOk").click();
@@ -10236,6 +10243,7 @@ test("File > Export saves an animation as a single-line spritesheet", async ({ p
   await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
+  await dialog.locator('[data-testid="export-tab-sheet"]').click();
   await dialog.getByRole("checkbox", { name: "go" }).check();
   await expect(dialog.locator("select#exportSheetLayout")).toHaveValue("line");
   await dialog.locator("#exportSheetOk").click();
@@ -10303,6 +10311,7 @@ test("File > Export saves one animation per line with ragged rows", async ({ pag
   await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
+  await dialog.locator('[data-testid="export-tab-sheet"]').click();
   await dialog.getByRole("checkbox", { name: "a", exact: true }).check();
   await dialog.getByRole("checkbox", { name: "b", exact: true }).check();
   await dialog.locator("select#exportSheetLayout").selectOption("per-line");
@@ -10330,6 +10339,7 @@ test("File > Export saves a manual frame list as individual files", async ({ pag
   await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
+  await dialog.locator('[data-testid="export-tab-sheet"]').click();
   await dialog.locator("input#exportSheetFrames").fill("1,2");
   await dialog.locator("select#exportSheetLayout").selectOption("individual");
   await dialog.locator("#exportSheetOk").click();
@@ -10347,6 +10357,7 @@ test("File > Export spritesheet without sources fails loudly", async ({ page }) 
   await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
+  await dialog.locator('[data-testid="export-tab-sheet"]').click();
   await dialog.locator("#exportSheetOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("select an animation");
 });
@@ -16178,7 +16189,7 @@ test("export dialog tabs and fields all carry tooltips @recent", async ({ page }
   await dialog.locator("#exportAnimatedFormat").selectOption("image/jpeg");
   await expect(labelOf("exportAnimatedQuality")).toHaveAttribute("title", /1\.\.100/);
   await dialog.locator("#exportAnimatedFormat").selectOption("jxl");
-  await expect(labelOf("exportAnimatedJxlLossless")).toHaveAttribute("title", /loss/);
+  await expect(labelOf("exportAnimatedLossless")).toHaveAttribute("title", /loss/);
   // Spritesheet tab fields.
   await dialog.locator('[data-testid="export-tab-sheet"]').click();
   await expect(dialog.locator(".export-sheet-animations")).toHaveAttribute("title", /include/);
@@ -16188,4 +16199,50 @@ test("export dialog tabs and fields all carry tooltips @recent", async ({ page }
   await expect(labelOf("exportSheetFormat")).toHaveAttribute("title", /format/);
   await dialog.locator("#exportSheetFormat").selectOption("image/jpeg");
   await expect(labelOf("exportSheetQuality")).toHaveAttribute("title", /1\.\.100/);
+});
+
+test("export lossless is one shared flag and sequences offer it too @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await paintCenter(page);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.locator("gnumarus-shell .menubar .dropdown").getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  const labelOf = (id: string): import("@playwright/test").Locator =>
+    dialog.locator(`#${id}`).locator("xpath=ancestor::label[1]");
+  // Frame tab: uncheck under WebP, switch to JXL -> still unchecked, quality stays.
+  await dialog.locator("#exportFormat").selectOption("image/webp");
+  await dialog.locator("#exportLossless").uncheck();
+  await expect(labelOf("exportQuality")).toBeVisible();
+  await dialog.locator("#exportFormat").selectOption("image/jxl");
+  await expect(dialog.locator("#exportLossless")).not.toBeChecked();
+  await expect(labelOf("exportQuality")).toBeVisible();
+  await dialog.locator("#exportLossless").check();
+  await expect(labelOf("exportQuality")).toBeHidden();
+  // Animation tab: WebP sequence offers lossless too.
+  await dialog.locator('[data-testid="export-tab-animation"]').click();
+  await dialog.locator("#exportAnimatedFormat").selectOption("image/webp");
+  await expect(dialog.locator("#exportAnimatedLossless")).toBeChecked();
+  await expect(labelOf("exportAnimatedQuality")).toBeHidden();
+  await dialog.locator("#exportAnimatedLossless").uncheck();
+  await expect(labelOf("exportAnimatedQuality")).toBeVisible();
+  await dialog.locator("#exportAnimatedFormat").selectOption("image/jxl");
+  await expect(dialog.locator("#exportAnimatedLossless")).not.toBeChecked();
+  await expect(labelOf("exportAnimatedQuality")).toBeVisible();
+  // Sheet tab: same shared flag as the frame tab.
+  await dialog.locator('[data-testid="export-tab-sheet"]').click();
+  await dialog.locator("#exportSheetFormat").selectOption("image/webp");
+  await dialog.locator("#exportSheetLossless").uncheck();
+  await dialog.locator("#exportSheetFormat").selectOption("image/jxl");
+  await expect(dialog.locator("#exportSheetLossless")).not.toBeChecked();
+  await expect(labelOf("exportSheetQuality")).toBeVisible();
+  // Lossy JXL still exports fine from the shared flag path.
+  await dialog.locator('[data-testid="export-tab-frame"]').click();
+  await dialog.locator("#exportFormat").selectOption("image/jxl");
+  await expect(dialog.locator("#exportLossless")).toBeChecked();
+  await dialog.locator("#exportOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported");
 });

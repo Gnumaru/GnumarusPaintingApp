@@ -1922,19 +1922,16 @@ export class GnumarusShell extends LitElement {
     exportFormat: { type: String },
     exportFormats: { type: Array },
     exportQuality: { type: Number },
-    exportJxlLossless: { type: Boolean },
-    exportWebpLossless: { type: Boolean },
+    exportLossless: { type: Boolean },
     exportAnimation: { type: String },
     exportAnimatedFormat: { type: String },
     exportAnimatedQuality: { type: Number },
-    exportAnimatedJxlLossless: { type: Boolean },
-    exportAnimatedWebpLossless: { type: Boolean },
+    exportAnimatedLossless: { type: Boolean },
     exportSheetLayout: { type: String },
     exportSheetFormat: { type: String },
     exportSheetCount: { type: Number },
     exportSheetQuality: { type: Number },
-    exportSheetJxlLossless: { type: Boolean },
-    exportSheetWebpLossless: { type: Boolean },
+    exportSheetLossless: { type: Boolean },
     playing: { type: Boolean },
     uiHidden: { type: Boolean },
     matrixHeightPx: { type: Number },
@@ -2161,19 +2158,16 @@ export class GnumarusShell extends LitElement {
   declare exportFormat: string;
   declare exportFormats: GnumarusStillFormat[];
   declare exportQuality: number;
-  declare exportJxlLossless: boolean;
-  declare exportWebpLossless: boolean;
+  declare exportLossless: boolean;
   declare exportAnimation: string;
   declare exportAnimatedFormat: string;
   declare exportAnimatedQuality: number;
-  declare exportAnimatedJxlLossless: boolean;
-  declare exportAnimatedWebpLossless: boolean;
+  declare exportAnimatedLossless: boolean;
   declare exportSheetLayout: string;
   declare exportSheetFormat: string;
   declare exportSheetCount: number;
   declare exportSheetQuality: number;
-  declare exportSheetJxlLossless: boolean;
-  declare exportSheetWebpLossless: boolean;
+  declare exportSheetLossless: boolean;
   declare playing: boolean;
   declare uiHidden: boolean;
   /** Explicit animation-matrix height in px (null = automatic). */
@@ -2422,19 +2416,16 @@ export class GnumarusShell extends LitElement {
     this.exportFormat = "image/png";
     this.exportFormats = [];
     this.exportQuality = GNUMARUS_DEFAULT_STILL_QUALITY;
-    this.exportJxlLossless = true;
-    this.exportWebpLossless = true;
+    this.exportLossless = true;
     this.exportAnimation = "";
     this.exportAnimatedFormat = "gif";
     this.exportAnimatedQuality = GNUMARUS_DEFAULT_STILL_QUALITY;
-    this.exportAnimatedJxlLossless = true;
-    this.exportAnimatedWebpLossless = true;
+    this.exportAnimatedLossless = true;
     this.exportSheetLayout = "line";
     this.exportSheetFormat = "image/png";
     this.exportSheetCount = 2;
     this.exportSheetQuality = GNUMARUS_DEFAULT_STILL_QUALITY;
-    this.exportSheetJxlLossless = true;
-    this.exportSheetWebpLossless = true;
+    this.exportSheetLossless = true;
     this.playing = false;
     this.playTimer = null;
     this.uiHidden = false;
@@ -4711,22 +4702,16 @@ export class GnumarusShell extends LitElement {
               >${tr("val.lossless")}
               <input
                 type="checkbox"
-                id=${this.exportFormat === WEBP_MIME ? "exportWebpLossless" : "exportJxlLossless"}
-                ?checked=${this.exportFormat === WEBP_MIME ? this.exportWebpLossless : this.exportJxlLossless}
+                id="exportLossless"
+                ?checked=${this.exportLossless}
                 @change=${(event: Event): void => {
-                  const checked = (event.target as HTMLInputElement).checked;
-                  if (this.exportFormat === WEBP_MIME) {
-                    this.exportWebpLossless = checked;
-                  } else {
-                    this.exportJxlLossless = checked;
-                  }
+                  this.exportLossless = (event.target as HTMLInputElement).checked;
                 }}
               />
             </label>`
           : html``}
         ${this.exportFormat === "image/png" ||
-        (this.exportFormat === JXL_MIME && this.exportJxlLossless) ||
-        (this.exportFormat === WEBP_MIME && this.exportWebpLossless)
+        ((this.exportFormat === JXL_MIME || this.exportFormat === WEBP_MIME) && this.exportLossless)
           ? html``
           : html`<label title=${tr("dialog.qualityTitle")}
               >${tr("dialog.quality")}
@@ -4784,30 +4769,20 @@ export class GnumarusShell extends LitElement {
             )}
           </select>
         </label>
-        ${this.exportAnimatedFormat === "jxl" || this.exportAnimatedFormat === "webp"
+        ${this.animatedFormatUsesLossless()
           ? html`<label title=${tr("dialog.losslessTitle")}
               >${tr("val.lossless")}
               <input
                 type="checkbox"
-                id=${this.exportAnimatedFormat === "webp" ? "exportAnimatedWebpLossless" : "exportAnimatedJxlLossless"}
-                ?checked=${this.exportAnimatedFormat === "webp"
-                  ? this.exportAnimatedWebpLossless
-                  : this.exportAnimatedJxlLossless}
+                id="exportAnimatedLossless"
+                ?checked=${this.exportAnimatedLossless}
                 @change=${(event: Event): void => {
-                  const checked = (event.target as HTMLInputElement).checked;
-                  if (this.exportAnimatedFormat === "webp") {
-                    this.exportAnimatedWebpLossless = checked;
-                  } else {
-                    this.exportAnimatedJxlLossless = checked;
-                  }
+                  this.exportAnimatedLossless = (event.target as HTMLInputElement).checked;
                 }}
               />
             </label>`
           : html``}
-        ${this.exportAnimatedFormat === "gif" ||
-        this.exportAnimatedFormat === "image/png" ||
-        (this.exportAnimatedFormat === "jxl" && this.exportAnimatedJxlLossless) ||
-        (this.exportAnimatedFormat === "webp" && this.exportAnimatedWebpLossless)
+        ${this.animatedFormatHidesQuality()
           ? html``
           : html`<label title=${tr("dialog.qualityTitle")}
               >${tr("dialog.quality")}
@@ -4890,24 +4865,16 @@ export class GnumarusShell extends LitElement {
               >${tr("val.lossless")}
               <input
                 type="checkbox"
-                id=${this.exportSheetFormat === WEBP_MIME ? "exportSheetWebpLossless" : "exportSheetJxlLossless"}
-                ?checked=${this.exportSheetFormat === WEBP_MIME
-                  ? this.exportSheetWebpLossless
-                  : this.exportSheetJxlLossless}
+                id="exportSheetLossless"
+                ?checked=${this.exportSheetLossless}
                 @change=${(event: Event): void => {
-                  const checked = (event.target as HTMLInputElement).checked;
-                  if (this.exportSheetFormat === WEBP_MIME) {
-                    this.exportSheetWebpLossless = checked;
-                  } else {
-                    this.exportSheetJxlLossless = checked;
-                  }
+                  this.exportSheetLossless = (event.target as HTMLInputElement).checked;
                 }}
               />
             </label>`
           : html``}
         ${this.exportSheetFormat === "image/png" ||
-        (this.exportSheetFormat === JXL_MIME && this.exportSheetJxlLossless) ||
-        (this.exportSheetFormat === WEBP_MIME && this.exportSheetWebpLossless)
+        ((this.exportSheetFormat === JXL_MIME || this.exportSheetFormat === WEBP_MIME) && this.exportSheetLossless)
           ? html``
           : html`<label title=${tr("dialog.qualityTitle")}
               >${tr("dialog.quality")}
@@ -13945,7 +13912,7 @@ export class GnumarusShell extends LitElement {
         size.height,
         format,
         format.mime === "image/png" ? undefined : quality,
-        format.mime === WEBP_MIME ? this.exportWebpLossless : this.exportJxlLossless,
+        this.exportLossless,
       );
       if (blob === null) {
         this.closeExportDialog();
@@ -13965,6 +13932,39 @@ export class GnumarusShell extends LitElement {
       this.statusMessage = tr("status.exportFailed", { reason });
       this.showToast(tr("status.exportFailed", { reason }));
     }
+  }
+
+  /**
+   * True when the animation export format goes through a WASM codec with a
+   * lossless toggle (single-file jxl/webp or a jxl/webp still sequence).
+   */
+  private animatedFormatUsesLossless(): boolean {
+    if (this.exportAnimatedFormat === "jxl" || this.exportAnimatedFormat === "webp") {
+      return true;
+    }
+    const mime = findStillFormat(this.exportFormats, this.exportAnimatedFormat)?.mime;
+    return mime === JXL_MIME || mime === WEBP_MIME;
+  }
+
+  /** True when the animation export format has no quality control. */
+  private animatedFormatHidesQuality(): boolean {
+    if (this.exportAnimatedFormat === "gif") {
+      return true;
+    }
+    if (this.exportAnimatedFormat === "jxl" || this.exportAnimatedFormat === "webp") {
+      return this.exportAnimatedLossless;
+    }
+    const mime = findStillFormat(this.exportFormats, this.exportAnimatedFormat)?.mime;
+    if (mime === "image/png") {
+      return true;
+    }
+    if (mime === undefined) {
+      return false;
+    }
+    if (mime !== JXL_MIME && mime !== WEBP_MIME) {
+      return false;
+    }
+    return this.exportAnimatedLossless;
   }
 
   /**
@@ -14065,7 +14065,7 @@ export class GnumarusShell extends LitElement {
         }
         try {
           const bytes = await encodeJxlAnimation(frames, size.width, size.height, resolved.loop, {
-            lossless: this.exportAnimatedJxlLossless,
+            lossless: this.exportAnimatedLossless,
             quality: animatedQuality,
           });
           const blob = new Blob([bytes as Uint8Array<ArrayBuffer>], { type: JXL_MIME });
@@ -14104,7 +14104,7 @@ export class GnumarusShell extends LitElement {
         }
         try {
           const bytes = await encodeWebpAnimation(frames, size.width, size.height, resolved.loop, {
-            lossless: this.exportAnimatedWebpLossless,
+            lossless: this.exportAnimatedLossless,
             quality: animatedQuality,
           });
           const blob = new Blob([bytes as Uint8Array<ArrayBuffer>], { type: WEBP_MIME });
@@ -14151,7 +14151,7 @@ export class GnumarusShell extends LitElement {
           size.height,
           format,
           animatedQualityOrDefault,
-          format.mime === WEBP_MIME ? this.exportAnimatedWebpLossless : this.exportAnimatedJxlLossless,
+          this.exportAnimatedLossless,
         );
         if (blob === null) {
           this.failAnimatedExport(tr("status.exportUnsupported", { label: format.label }));
@@ -14326,7 +14326,7 @@ export class GnumarusShell extends LitElement {
             size.height,
             format,
             sheetQualityValue,
-            format.mime === WEBP_MIME ? this.exportSheetWebpLossless : this.exportSheetJxlLossless,
+            this.exportSheetLossless,
           );
           if (blob === null) {
             fail(tr("status.exportUnsupported", { label: format.label }));
@@ -14359,7 +14359,7 @@ export class GnumarusShell extends LitElement {
         sheet.height,
         format,
         sheetQualityValue,
-        format.mime === WEBP_MIME ? this.exportSheetWebpLossless : this.exportSheetJxlLossless,
+        this.exportSheetLossless,
       );
       if (blob === null) {
         fail(tr("status.exportUnsupported", { label: format.label }));
