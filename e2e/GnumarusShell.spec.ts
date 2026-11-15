@@ -5756,6 +5756,7 @@ test("quick action palette filters and runs actions", async ({ page }) => {
     "Reset Canvas Transform",
     "Save Project",
     "Save project as",
+    "Set total duration",
     "Settings",
     "Shortcuts",
     "Source code",
@@ -15460,4 +15461,74 @@ test("Alt+Left outdents below the parent and Alt+Right nests into the sibling ab
   await page.keyboard.press("Alt+ArrowLeft");
   expect((await getLayerParents(page)).find((layer) => layer.id === "layer2")?.parentId).toBeNull();
   await expect(page.locator("gnumarus-shell")).toContainText("already a root");
+});
+
+test("Set frame duration applies one value to every selected frame @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="2"]').click({ modifiers: ["Control"] });
+  await expect(page.locator("gnumarus-shell")).toContainText("2 frames selected");
+  await matrix.locator('[data-testid="anim-frame"][data-frame="2"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Set frame duration…" }).click();
+  await page.locator("gnumarus-shell input#frameDuration").fill("0.1");
+  await page.getByRole("button", { name: "Set", exact: true }).click();
+  expect(await getFrameDuration(page, 0)).toBe(0.1);
+  expect(await getFrameDuration(page, 1)).toBeNull();
+  expect(await getFrameDuration(page, 2)).toBe(0.1);
+  await expect(page.locator("gnumarus-shell")).toContainText("2 frames set to 0.1 s");
+  // Clear removes the override from every selected frame.
+  await matrix.locator('[data-testid="anim-frame"][data-frame="2"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Set frame duration…" }).click();
+  await page.getByRole("button", { name: "Clear" }).click();
+  expect(await getFrameDuration(page, 0)).toBeNull();
+  expect(await getFrameDuration(page, 2)).toBeNull();
+  await expect(page.locator("gnumarus-shell")).toContainText("2 frames use the project default");
+});
+
+test("Set total duration splits evenly across contiguous and scattered frames @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  // The run action needs at least two selected frames.
+  await page.keyboard.press("Control+Shift+P");
+  const palette = page.locator("gnumarus-shell dialog#actionPaletteDialog");
+  await expect(palette).toBeVisible();
+  await palette.locator('[data-testid="action-palette-input"]').fill("total duration");
+  await expect(palette.locator('[data-testid="action-palette-item"]')).toHaveText(["Set total duration"]);
+  await palette.locator('[data-testid="action-palette-item"]').click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Select at least two frames first");
+  // Non-contiguous pair via the context menu.
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="2"]').click({ modifiers: ["Control"] });
+  await matrix.locator('[data-testid="anim-frame"][data-frame="2"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Set total duration…" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#frameDurationDialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("evenly divided");
+  await page.locator("gnumarus-shell input#frameDuration").fill("3");
+  await page.getByRole("button", { name: "Set", exact: true }).click();
+  expect(await getFrameDuration(page, 0)).toBe(1.5);
+  expect(await getFrameDuration(page, 1)).toBeNull();
+  expect(await getFrameDuration(page, 2)).toBe(1.5);
+  await expect(page.locator("gnumarus-shell")).toContainText("Total 3 s split over 2 frames (1.5 s each)");
+  // Same split through the run action palette on another pair.
+  await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="2"]').click({ modifiers: ["Control"] });
+  await page.keyboard.press("Control+Shift+P");
+  await expect(palette).toBeVisible();
+  await palette.locator('[data-testid="action-palette-input"]').fill("total duration");
+  await palette.locator('[data-testid="action-palette-item"]').click();
+  await page.locator("gnumarus-shell input#frameDuration").fill("1");
+  await page.getByRole("button", { name: "Set", exact: true }).click();
+  expect(await getFrameDuration(page, 1)).toBe(0.5);
+  expect(await getFrameDuration(page, 2)).toBe(0.5);
+  await expect(page.locator("gnumarus-shell")).toContainText("Total 1 s split over 2 frames (0.5 s each)");
 });

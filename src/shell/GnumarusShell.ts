@@ -1846,6 +1846,8 @@ export class GnumarusShell extends LitElement {
     checkerColorB: { type: String },
     defaultFrameDuration: { type: Number },
     durationTargetFrame: { type: Number },
+    durationTargetFrames: { type: Array },
+    durationTotal: { type: Boolean },
     durationValue: { type: Number },
     animationInput: { type: String },
     animationCreateName: { type: String },
@@ -2076,6 +2078,8 @@ export class GnumarusShell extends LitElement {
   declare checkerColorB: string;
   declare defaultFrameDuration: number;
   declare durationTargetFrame: number | null;
+  declare durationTargetFrames: number[] | null;
+  declare durationTotal: boolean;
   declare durationValue: number | null;
   declare animationInput: string;
   declare animationCreateName: string;
@@ -2321,6 +2325,8 @@ export class GnumarusShell extends LitElement {
     this.checkerColorB = DEFAULT_CHECKER_SETTINGS.colorB;
     this.defaultFrameDuration = DEFAULT_ANIMATION_FRAME_DURATION;
     this.durationTargetFrame = null;
+    this.durationTargetFrames = null;
+    this.durationTotal = false;
     this.durationValue = null;
     this.animationInput = "";
     this.animationError = null;
@@ -4385,6 +4391,9 @@ export class GnumarusShell extends LitElement {
       <dialog id="frameDurationDialog">
         <h3>${tr("dialog.duration")}</h3>
         <p>${tr("dialog.durationHint")}</p>
+        ${this.durationTotal
+          ? html`<p>${tr("dialog.durationTotalHint")}</p>`
+          : html``}
         <label
           >${tr("dialog.durationLabel")}
           <input
@@ -6288,6 +6297,8 @@ export class GnumarusShell extends LitElement {
           <button @click=${(): void => this.onDeleteFrames([...frames])}>
             ${tr("matrix.deleteFrames", { count: frames.length })}
           </button>
+          <button @click=${(): void => this.onOpenFramesDuration(false)}>${tr("matrix.setDuration")}</button>
+          <button @click=${(): void => this.onOpenFramesDuration(true)}>${tr("matrix.setTotalDuration")}</button>
           <button @click=${(): void => this.openNewAnimationDialog([...frames])}>${tr("action.newAnimation")}</button>
         </div>
       `;
@@ -7609,6 +7620,14 @@ export class GnumarusShell extends LitElement {
       requirements: [],
       run: (): void => {
         this.openRelinkDialog(this.resolveCellActionTargets());
+      },
+    });
+    this.actionRegistry.register({
+      id: "set-total-duration",
+      name: tr("action.totalDuration"),
+      requirements: [],
+      run: (): void => {
+        this.openTotalDurationFromSelection();
       },
     });
     this.actionRegistry.register({
@@ -13138,10 +13157,46 @@ export class GnumarusShell extends LitElement {
     this.openFrameDurationDialog(frame);
   }
 
+  private openFrameDurationsDialog(frames: number[], total: boolean): void {
+    if (this.engine === null || frames.length === 0) {
+      return;
+    }
+    this.durationTargetFrame = null;
+    this.durationTargetFrames = [...frames];
+    this.durationTotal = total;
+    this.durationValue = null;
+    this.requestUpdate();
+    const dialog = this.shadowRoot?.getElementById("frameDurationDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+  }
+
+  private onOpenFramesDuration(total: boolean): void {
+    if (this.matrixMenu === null || this.matrixMenu.kind !== "frames") {
+      this.closeMatrixMenu();
+      return;
+    }
+    const frames = [...this.matrixMenu.frames];
+    this.closeMatrixMenu();
+    this.openFrameDurationsDialog(frames, total);
+  }
+
+  /** Run-action entry for total duration: splits over the current selection. */
+  private openTotalDurationFromSelection(): void {
+    const frames = [...this.selectedFrameSet()].sort((a, b) => a - b);
+    if (frames.length < 2) {
+      this.statusMessage = tr("status.framesNeedTwo");
+      this.showToast(tr("status.framesNeedTwo"));
+      return;
+    }
+    this.openFrameDurationsDialog(frames, true);
+  }
+
   private closeFrameDurationDialog(): void {
     const dialog = this.shadowRoot?.getElementById("frameDurationDialog") as HTMLDialogElement | null;
     dialog?.close();
     this.durationTargetFrame = null;
+    this.durationTargetFrames = null;
+    this.durationTotal = false;
   }
 
   private openAnimationDialog(): void {
@@ -13932,25 +13987,49 @@ export class GnumarusShell extends LitElement {
   }
 
   private confirmFrameDuration(): void {
-    const target = this.durationTargetFrame;
-    if (target === null || this.engine === null) {
+    const engine = this.engine;
+    const input = this.shadowRoot?.getElementById("frameDuration") as HTMLInputElement | null;
+    const raw = (input?.value ?? "").trim();
+    const targets = this.durationTargetFrames ?? (this.durationTargetFrame === null ? [] : [this.durationTargetFrame]);
+    const total = this.durationTotal && this.durationTargetFrames !== null;
+    if (targets.length === 0 || engine === null) {
       this.closeFrameDurationDialog();
       return;
     }
-    const input = this.shadowRoot?.getElementById("frameDuration") as HTMLInputElement | null;
-    const raw = (input?.value ?? "").trim();
     if (raw === "") {
-      this.engine.setFrameDuration(target, null);
-      this.statusMessage = tr("status.frameUsesDefault", { frame: target + 1 });
+      let cleared = false;
+      for (const frame of targets) {
+        cleared = engine.setFrameDuration(frame, null) || cleared;
+      }
+      if (targets.length === 1) {
+        this.statusMessage = tr("status.frameUsesDefault", { frame: targets[0] as number + 1 });
+      } else {
+        this.statusMessage = tr("status.framesUseDefault", { count: targets.length });
+      }
+      void cleared;
     } else {
       const value = Number(raw);
       if (!Number.isFinite(value) || value <= 0) {
         this.closeFrameDurationDialog();
         return;
       }
-      const duration = clampFrameDurationSec(value);
-      this.engine.setFrameDuration(target, duration);
-      this.statusMessage = tr("status.frameDuration", { frame: target + 1, value: duration });
+      if (total) {
+        const each = clampFrameDurationSec(value / targets.length);
+        for (const frame of targets) {
+          engine.setFrameDuration(frame, each);
+        }
+        this.statusMessage = tr("status.framesTotalDuration", { count: targets.length, value, each });
+      } else if (targets.length === 1) {
+        const duration = clampFrameDurationSec(value);
+        engine.setFrameDuration(targets[0] as number, duration);
+        this.statusMessage = tr("status.frameDuration", { frame: (targets[0] as number) + 1, value: duration });
+      } else {
+        const duration = clampFrameDurationSec(value);
+        for (const frame of targets) {
+          engine.setFrameDuration(frame, duration);
+        }
+        this.statusMessage = tr("status.framesDuration", { count: targets.length, value: duration });
+      }
     }
     this.refreshLayers();
     this.dirty = true;
@@ -13958,15 +14037,24 @@ export class GnumarusShell extends LitElement {
   }
 
   private clearFrameDuration(): void {
-    const target = this.durationTargetFrame;
+    const engine = this.engine;
+    const targets = this.durationTargetFrames ?? (this.durationTargetFrame === null ? [] : [this.durationTargetFrame]);
     this.closeFrameDurationDialog();
-    if (target === null || this.engine === null) {
+    if (targets.length === 0 || engine === null) {
       return;
     }
-    if (this.engine.setFrameDuration(target, null)) {
+    let cleared = false;
+    for (const frame of targets) {
+      cleared = engine.setFrameDuration(frame, null) || cleared;
+    }
+    if (cleared) {
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = tr("status.frameUsesDefault", { frame: target + 1 });
+      if (targets.length === 1) {
+        this.statusMessage = tr("status.frameUsesDefault", { frame: (targets[0] as number) + 1 });
+      } else {
+        this.statusMessage = tr("status.framesUseDefault", { count: targets.length });
+      }
     }
   }
 
