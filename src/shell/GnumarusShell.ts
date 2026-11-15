@@ -4857,6 +4857,12 @@ export class GnumarusShell extends LitElement {
             ${tr("dialog.exportSheet")}
           </button>
         </div>
+        <h3>${tr("dialog.exportFullProject")}</h3>
+        <div class="dialog-actions">
+          <button id="exportFullProjectOk" @click=${(): void => void this.exportFullProject()}>
+            ${tr("dialog.exportFullProject")}
+          </button>
+        </div>
       </dialog>
       <dialog id="frameRenameDialog">
         <h3>${tr("dialog.renameFrame")}</h3>
@@ -13720,6 +13726,40 @@ export class GnumarusShell extends LitElement {
   }
 
   /**
+   * Download the whole project as a `.gpp` package (a zip with a single
+   * root directory holding every project file, exactly what File > Upload
+   * project imports). Uses the same entry builder as save, so the bytes
+   * always match the current storage settings.
+   */
+  private async exportFullProject(): Promise<void> {
+    if (this.engine === null) {
+      this.closeExportDialog();
+      return;
+    }
+    try {
+      const { blobs } = await this.buildProjectFileBlobs();
+      const rootName = sanitizeEmbeddedProjectName(this.projectName) ?? "project";
+      const raw: Record<string, Uint8Array> = {};
+      for (const [path, blob] of blobs) {
+        raw[`${rootName}/${path}`] = new Uint8Array(await blob.arrayBuffer());
+      }
+      const zipped = zipSync(raw, { level: 9 });
+      const blob = new Blob([zipped as Uint8Array<ArrayBuffer>], { type: "application/zip" });
+      const fileName = `${exportBaseName(rootName)}.gpp`;
+      this.closeExportDialog();
+      if (await this.saveExportBlob(blob, fileName, "Gnumaru paint project")) {
+        this.statusMessage = tr("status.exported", { file: fileName });
+        this.showToast(tr("status.exported", { file: fileName }));
+      }
+    } catch (error) {
+      this.closeExportDialog();
+      const reason = error instanceof Error ? error.message : String(error);
+      this.statusMessage = tr("status.exportFailed", { reason });
+      this.showToast(tr("status.exportFailed", { reason }));
+    }
+  }
+
+  /**
    * Save one blob through the OS save dialog (or the download fallback),
    * returning false only when the user cancels.
    */
@@ -16608,6 +16648,257 @@ export class GnumarusShell extends LitElement {
   }
 
   /**
+   * Serialize the engine project into project-relative path-to-blob entries
+   * (textures, texts, vectors, models, metadata) honoring the storage
+   * settings. Shared by save (writes the entries into a directory) and
+   * full-project export (zips them into a `.gpp` package). Throws on failure.
+   */
+  private async buildProjectFileBlobs(): Promise<{ blobs: Map<string, Blob>; stems: string[] }> {
+    if (this.engine === null) {
+      return { blobs: new Map<string, Blob>(), stems: [] };
+    }
+    const size = this.engine.size;
+    const exported = this.engine.exportAnimationProject();
+    const texturesMeta: GnumarusTextureMeta[] = [];
+    const blobs = new Map<string, Blob>();
+    const stems: string[] = [];
+    const lossless = this.storageLossless;
+    const quality = this.storageQuality;
+    for (let index = 0; index < exported.textures.length; index += 1) {
+      const texture = exported.textures[index] as (typeof exported.textures)[number];
+      const stem = `t${index + 1}`;
+      stems.push(stem);
+      if (this.storageFormat === "jpg") {
+        const colorBlob = await encodeStillImage(
+          texture.buffer,
+          texture.width,
+          texture.height,
+          "image/jpeg",
+          this.storageJpegQuality / 100,
+        );
+        if (colorBlob === null) {
+          throw new Error("Failed to encode JPEG.");
+        }
+        const colorFile = textureFilePath(stem, "jpg");
+        texturesMeta.push({
+          id: texture.id,
+          name: texture.name,
+          width: texture.width,
+          height: texture.height,
+          file: colorFile,
+        });
+        blobs.set(colorFile, colorBlob);
+        const alphaBlob = await encodeStillImage(
+          extractAlphaPlane(texture.buffer, texture.width, texture.height),
+          texture.width,
+          texture.height,
+          "image/jpeg",
+          this.storageJpegQuality / 100,
+        );
+        if (alphaBlob === null) {
+          throw new Error("Failed to encode JPEG.");
+        }
+        blobs.set(textureFilePath(`${stem}.alpha`, "jpg"), alphaBlob);
+        continue;
+      }
+      if (this.storageFormat === "png") {
+        const file = textureFilePath(stem, "png");
+        texturesMeta.push({
+          id: texture.id,
+          name: texture.name,
+          width: texture.width,
+          height: texture.height,
+          file,
+        });
+        blobs.set(
+          file,
+          await encodeBufferToPngBlob(texture.buffer, texture.width, texture.height, this.storagePngLevel),
+        );
+        continue;
+      }
+      if (this.storageFormat === "webp") {
+        try {
+          const bytes = await encodeWebpStill(texture.buffer, texture.width, texture.height, {
+            lossless,
+            quality,
+            effort: WEBP_STORAGE_EFFORT,
+          });
+          const file = textureFilePath(stem, "webp");
+          texturesMeta.push({
+            id: texture.id,
+            name: texture.name,
+            width: texture.width,
+            height: texture.height,
+            file,
+          });
+          blobs.set(file, new Blob([bytes as Uint8Array<ArrayBuffer>], { type: "image/webp" }));
+        } catch {
+          const file = textureFilePath(stem, "png");
+          texturesMeta.push({
+            id: texture.id,
+            name: texture.name,
+            width: texture.width,
+            height: texture.height,
+            file,
+          });
+          blobs.set(
+            file,
+            await encodeBufferToPngBlob(texture.buffer, texture.width, texture.height, this.storagePngLevel),
+          );
+        }
+        continue;
+      }
+      try {
+        const bytes = await encodeJxlStill(texture.buffer, texture.width, texture.height, {
+          lossless,
+          quality,
+          effort: 1,
+        });
+        const file = textureFilePath(stem, "jxl");
+        texturesMeta.push({
+          id: texture.id,
+          name: texture.name,
+          width: texture.width,
+          height: texture.height,
+          file,
+        });
+        blobs.set(file, new Blob([bytes as Uint8Array<ArrayBuffer>], { type: "image/jxl" }));
+      } catch {
+        const file = textureFilePath(stem, "png");
+        texturesMeta.push({
+          id: texture.id,
+          name: texture.name,
+          width: texture.width,
+          height: texture.height,
+          file,
+        });
+        blobs.set(
+          file,
+          await encodeBufferToPngBlob(texture.buffer, texture.width, texture.height, this.storagePngLevel),
+        );
+      }
+    }
+    const contentsMeta: GnumarusContentMeta[] = exported.contents.map((content) => ({
+      id: content.id,
+      name: content.name,
+      textureId: content.textureId,
+      textId: content.textId ?? null,
+      svgId: content.svgId ?? null,
+      model3dId: content.model3dId ?? null,
+      tilemapId: content.tilemapId ?? null,
+      flyCam: content.flyCam === null || content.flyCam === undefined ? null : { ...content.flyCam },
+      transform: { ...content.transform },
+    }));
+    const textsMeta: GnumarusTextMeta[] = [];
+    const svgsMeta: GnumarusSvgMeta[] = [];
+    const models3dMeta: GnumarusModel3dMeta[] = [];
+    const tilemapsMeta: GnumarusTilemapMeta[] = [];
+    for (const text of exported.texts ?? []) {
+      if (this.storageTextStorage === "html") {
+        const file = textFilePath(text.id);
+        textsMeta.push({ id: text.id, name: text.name, file });
+        blobs.set(file, new Blob([text.document.html], { type: "text/html" }));
+      } else if (this.storageTextStorage === "htmlZip") {
+        const file = textArchivePath(text.id);
+        textsMeta.push({ id: text.id, name: text.name, file });
+        blobs.set(
+          file,
+          new Blob([encodeTextArchive(text.id, text.document.html) as Uint8Array<ArrayBuffer>], {
+            type: "application/zip",
+          }),
+        );
+      } else {
+        textsMeta.push({ id: text.id, name: text.name, document: { ...text.document } });
+      }
+    }
+    for (const vector of exported.svgs ?? []) {
+      if (this.storageSvgStorage === "raw") {
+        const file = svgFilePath(vector.id);
+        svgsMeta.push({ id: vector.id, name: vector.name, file });
+        blobs.set(file, new Blob([vector.svg], { type: "image/svg+xml" }));
+      } else if (this.storageSvgStorage === "compressed") {
+        const file = svgArchivePath(vector.id);
+        svgsMeta.push({ id: vector.id, name: vector.name, file });
+        blobs.set(
+          file,
+          new Blob([encodeSvgArchive(vector.id, vector.svg) as Uint8Array<ArrayBuffer>], {
+            type: "application/zip",
+          }),
+        );
+      } else {
+        svgsMeta.push({ id: vector.id, name: vector.name, document: { svg: vector.svg } });
+      }
+    }
+    for (const model of exported.models3d ?? []) {
+      const file = model3dFilePath(model.id, model.ext);
+      models3dMeta.push({
+        id: model.id,
+        name: model.name,
+        file,
+        view: model.view === undefined ? { ...GNUMARUS_MODEL3D_DEFAULT_VIEW } : { ...model.view },
+        lighting: model.lighting ?? "unlit",
+      });
+      blobs.set(file, new Blob([model.bytes as Uint8Array<ArrayBuffer>], { type: "application/octet-stream" }));
+    }
+    for (const tilemap of exported.tilemaps ?? []) {
+      tilemapsMeta.push({
+        id: tilemap.id,
+        name: tilemap.name,
+        tilesetId: tilemap.tilesetId,
+        tileWidth: tilemap.tileWidth,
+        tileHeight: tilemap.tileHeight,
+        tiles: tilemap.tiles.map((tile) => ({ ...tile })),
+      });
+    }
+    const meta: GnumarusProjectMeta = {
+      app: GNUMARUS_APP_ID,
+      version: 3,
+      width: size.width,
+      height: size.height,
+      layers: exported.layers.map((layer) => ({
+        id: layer.id,
+        name: layer.name,
+        visible: layer.visible,
+        opacity: layer.opacity,
+        blend: layer.blend,
+        lockedChannels: { ...layer.lockedChannels },
+        ...(layer.parentId === null ? {} : { parentId: layer.parentId }),
+        ...(layer.isMask ? { mask: true as const } : {}),
+      })),
+      animation: {
+        frames: exported.frames,
+        currentFrame: exported.currentFrame,
+        defaultFrameDuration: exported.defaultFrameDuration,
+        frameDurations: exported.frameDurations.map((entry) => ({ ...entry })),
+        frameNames: [...exported.frameNames],
+        namedAnimations: exported.namedAnimations.map((entry) => ({
+          name: entry.name,
+          loop: entry.loop,
+          frames: entry.frames.map((item) => ({ ...item })),
+        })),
+        activeAnimation: exported.activeAnimation,
+        textures: texturesMeta,
+        texts: textsMeta,
+        svgs: svgsMeta,
+        models3d: models3dMeta,
+        tilemaps: tilemapsMeta,
+        contents: contentsMeta,
+        cells: exported.cells.map((cell) => ({ ...cell })),
+      },
+    };
+    const jsonText = serializeProject(meta);
+    if (this.storageProjectFile === "json") {
+      blobs.set(GNUMARUS_PROJECT_FILE, new Blob([jsonText], { type: "application/json" }));
+    } else {
+      blobs.set(
+        GNUMARUS_PROJECT_ARCHIVE_FILE,
+        new Blob([encodeProjectArchive(jsonText) as Uint8Array<ArrayBuffer>], { type: "application/zip" }),
+      );
+    }
+    return { blobs, stems };
+  }
+
+  /**
    * Serialize the engine project and write every file into any directory
    * handle (a native picked folder or an embedded OPFS subdirectory): the
    * same call path for both storage backends. Throws on failure.
@@ -16623,244 +16914,7 @@ export class GnumarusShell extends LitElement {
       } catch {
         oldPaths = new Set<string>();
       }
-      const size = this.engine.size;
-      const exported = this.engine.exportAnimationProject();
-      const texturesMeta: GnumarusTextureMeta[] = [];
-      const blobs = new Map<string, Blob>();
-      const stems: string[] = [];
-      const lossless = this.storageLossless;
-      const quality = this.storageQuality;
-      for (let index = 0; index < exported.textures.length; index += 1) {
-        const texture = exported.textures[index] as (typeof exported.textures)[number];
-        const stem = `t${index + 1}`;
-        stems.push(stem);
-        if (this.storageFormat === "jpg") {
-          const colorBlob = await encodeStillImage(
-            texture.buffer,
-            texture.width,
-            texture.height,
-            "image/jpeg",
-            this.storageJpegQuality / 100,
-          );
-          if (colorBlob === null) {
-            throw new Error("Failed to encode JPEG.");
-          }
-          const colorFile = textureFilePath(stem, "jpg");
-          texturesMeta.push({
-            id: texture.id,
-            name: texture.name,
-            width: texture.width,
-            height: texture.height,
-            file: colorFile,
-          });
-          blobs.set(colorFile, colorBlob);
-          const alphaBlob = await encodeStillImage(
-            extractAlphaPlane(texture.buffer, texture.width, texture.height),
-            texture.width,
-            texture.height,
-            "image/jpeg",
-            this.storageJpegQuality / 100,
-          );
-          if (alphaBlob === null) {
-            throw new Error("Failed to encode JPEG.");
-          }
-          blobs.set(textureFilePath(`${stem}.alpha`, "jpg"), alphaBlob);
-          continue;
-        }
-        if (this.storageFormat === "png") {
-          const file = textureFilePath(stem, "png");
-          texturesMeta.push({
-            id: texture.id,
-            name: texture.name,
-            width: texture.width,
-            height: texture.height,
-            file,
-          });
-          blobs.set(
-            file,
-            await encodeBufferToPngBlob(texture.buffer, texture.width, texture.height, this.storagePngLevel),
-          );
-          continue;
-        }
-        if (this.storageFormat === "webp") {
-          try {
-            const bytes = await encodeWebpStill(texture.buffer, texture.width, texture.height, {
-              lossless,
-              quality,
-              effort: WEBP_STORAGE_EFFORT,
-            });
-            const file = textureFilePath(stem, "webp");
-            texturesMeta.push({
-              id: texture.id,
-              name: texture.name,
-              width: texture.width,
-              height: texture.height,
-              file,
-            });
-            blobs.set(file, new Blob([bytes as Uint8Array<ArrayBuffer>], { type: "image/webp" }));
-          } catch {
-            const file = textureFilePath(stem, "png");
-            texturesMeta.push({
-              id: texture.id,
-              name: texture.name,
-              width: texture.width,
-              height: texture.height,
-              file,
-            });
-            blobs.set(
-              file,
-              await encodeBufferToPngBlob(texture.buffer, texture.width, texture.height, this.storagePngLevel),
-            );
-          }
-          continue;
-        }
-        try {
-          const bytes = await encodeJxlStill(texture.buffer, texture.width, texture.height, {
-            lossless,
-            quality,
-            effort: 1,
-          });
-          const file = textureFilePath(stem, "jxl");
-          texturesMeta.push({
-            id: texture.id,
-            name: texture.name,
-            width: texture.width,
-            height: texture.height,
-            file,
-          });
-          blobs.set(file, new Blob([bytes as Uint8Array<ArrayBuffer>], { type: "image/jxl" }));
-        } catch {
-          const file = textureFilePath(stem, "png");
-          texturesMeta.push({
-            id: texture.id,
-            name: texture.name,
-            width: texture.width,
-            height: texture.height,
-            file,
-          });
-          blobs.set(
-            file,
-            await encodeBufferToPngBlob(texture.buffer, texture.width, texture.height, this.storagePngLevel),
-          );
-        }
-      }
-      const contentsMeta: GnumarusContentMeta[] = exported.contents.map((content) => ({
-        id: content.id,
-        name: content.name,
-        textureId: content.textureId,
-        textId: content.textId ?? null,
-        svgId: content.svgId ?? null,
-        model3dId: content.model3dId ?? null,
-        tilemapId: content.tilemapId ?? null,
-        flyCam: content.flyCam === null || content.flyCam === undefined ? null : { ...content.flyCam },
-        transform: { ...content.transform },
-      }));
-      const textsMeta: GnumarusTextMeta[] = [];
-      const svgsMeta: GnumarusSvgMeta[] = [];
-      const models3dMeta: GnumarusModel3dMeta[] = [];
-      const tilemapsMeta: GnumarusTilemapMeta[] = [];
-      for (const text of exported.texts ?? []) {
-        if (this.storageTextStorage === "html") {
-          const file = textFilePath(text.id);
-          textsMeta.push({ id: text.id, name: text.name, file });
-          blobs.set(file, new Blob([text.document.html], { type: "text/html" }));
-        } else if (this.storageTextStorage === "htmlZip") {
-          const file = textArchivePath(text.id);
-          textsMeta.push({ id: text.id, name: text.name, file });
-          blobs.set(
-            file,
-            new Blob([encodeTextArchive(text.id, text.document.html) as Uint8Array<ArrayBuffer>], {
-              type: "application/zip",
-            }),
-          );
-        } else {
-          textsMeta.push({ id: text.id, name: text.name, document: { ...text.document } });
-        }
-      }
-      for (const vector of exported.svgs ?? []) {
-        if (this.storageSvgStorage === "raw") {
-          const file = svgFilePath(vector.id);
-          svgsMeta.push({ id: vector.id, name: vector.name, file });
-          blobs.set(file, new Blob([vector.svg], { type: "image/svg+xml" }));
-        } else if (this.storageSvgStorage === "compressed") {
-          const file = svgArchivePath(vector.id);
-          svgsMeta.push({ id: vector.id, name: vector.name, file });
-          blobs.set(
-            file,
-            new Blob([encodeSvgArchive(vector.id, vector.svg) as Uint8Array<ArrayBuffer>], {
-              type: "application/zip",
-            }),
-          );
-        } else {
-          svgsMeta.push({ id: vector.id, name: vector.name, document: { svg: vector.svg } });
-        }
-      }
-      for (const model of exported.models3d ?? []) {
-        const file = model3dFilePath(model.id, model.ext);
-        models3dMeta.push({
-          id: model.id,
-          name: model.name,
-          file,
-          view: model.view === undefined ? { ...GNUMARUS_MODEL3D_DEFAULT_VIEW } : { ...model.view },
-          lighting: model.lighting ?? "unlit",
-        });
-        blobs.set(file, new Blob([model.bytes as Uint8Array<ArrayBuffer>], { type: "application/octet-stream" }));
-      }
-      for (const tilemap of exported.tilemaps ?? []) {
-        tilemapsMeta.push({
-          id: tilemap.id,
-          name: tilemap.name,
-          tilesetId: tilemap.tilesetId,
-          tileWidth: tilemap.tileWidth,
-          tileHeight: tilemap.tileHeight,
-          tiles: tilemap.tiles.map((tile) => ({ ...tile })),
-        });
-      }
-      const meta: GnumarusProjectMeta = {
-        app: GNUMARUS_APP_ID,
-        version: 3,
-        width: size.width,
-        height: size.height,
-        layers: exported.layers.map((layer) => ({
-          id: layer.id,
-          name: layer.name,
-          visible: layer.visible,
-          opacity: layer.opacity,
-          blend: layer.blend,
-          lockedChannels: { ...layer.lockedChannels },
-          ...(layer.parentId === null ? {} : { parentId: layer.parentId }),
-          ...(layer.isMask ? { mask: true as const } : {}),
-        })),
-        animation: {
-          frames: exported.frames,
-          currentFrame: exported.currentFrame,
-          defaultFrameDuration: exported.defaultFrameDuration,
-          frameDurations: exported.frameDurations.map((entry) => ({ ...entry })),
-          frameNames: [...exported.frameNames],
-          namedAnimations: exported.namedAnimations.map((entry) => ({
-            name: entry.name,
-            loop: entry.loop,
-            frames: entry.frames.map((item) => ({ ...item })),
-          })),
-          activeAnimation: exported.activeAnimation,
-          textures: texturesMeta,
-          texts: textsMeta,
-          svgs: svgsMeta,
-          models3d: models3dMeta,
-          tilemaps: tilemapsMeta,
-          contents: contentsMeta,
-          cells: exported.cells.map((cell) => ({ ...cell })),
-        },
-      };
-      const jsonText = serializeProject(meta);
-      if (this.storageProjectFile === "json") {
-        blobs.set(GNUMARUS_PROJECT_FILE, new Blob([jsonText], { type: "application/json" }));
-      } else {
-        blobs.set(
-          GNUMARUS_PROJECT_ARCHIVE_FILE,
-          new Blob([encodeProjectArchive(jsonText) as Uint8Array<ArrayBuffer>], { type: "application/zip" }),
-        );
-      }
+      const { blobs, stems } = await this.buildProjectFileBlobs();
       await writeProjectFiles(dir, blobs);
       // Content directories always exist, even when empty, so users can
       // drop files in for content-manager discovery.

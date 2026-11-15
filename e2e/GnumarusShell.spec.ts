@@ -16038,3 +16038,72 @@ test("embedded upload unpacks a .gpp and opens it @recent", async ({ page }) => 
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 255, b: 0, a: 255 });
   await removeEmbeddedProject(page, "UpSrc");
 });
+
+test("export full project downloads a .gpp that re-uploads @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.locator("gnumarus-shell .menubar .dropdown").getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: "Export full project" })).toBeVisible();
+  await dialog.locator("#exportFullProjectOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported Untitled.gpp");
+  const packaged = await page.evaluate(() => {
+    const root = window as unknown as { __gnumarusExportTest?: { fileName: string | null; blob: Blob | null } };
+    const state = root.__gnumarusExportTest;
+    if (state?.blob == null) {
+      throw new Error("no exported blob captured");
+    }
+    if (state.fileName !== "Untitled.gpp") {
+      throw new Error(`unexpected file name: ${state.fileName}`);
+    }
+    return state.blob.arrayBuffer().then((buffer) => {
+      const bytes = new Uint8Array(buffer);
+      let text = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) {
+        text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      }
+      return btoa(text);
+    });
+  });
+  const bin = atob(packaged);
+  const zipped = Uint8Array.from(bin, (char) => char.charCodeAt(0));
+  const raw: Record<string, Uint8Array> = {};
+  for (const [name, data] of Object.entries(unzipSync(zipped))) {
+    raw[name] = data as Uint8Array;
+  }
+  const names = Object.keys(raw).filter((name) => !name.endsWith("/"));
+  expect(names.length).toBeGreaterThan(0);
+  const roots = new Set(names.map((name) => name.split("/")[0]));
+  expect([...roots]).toEqual(["Untitled"]);
+  expect(names.some((name) => name === "Untitled/project.gpa" || name === "Untitled/project.json")).toBe(true);
+  expect(names.some((name) => name.startsWith("Untitled/textures/"))).toBe(true);
+  // The package must import through the same path as File > Upload project.
+  await loadBlankProject(page, 64);
+  expect(await readPixel(page, 32, 32)).toBeNull();
+  await page.evaluate((payload: string) => {
+    const shell = document.querySelector("gnumarus-shell") as unknown as HTMLElement | null;
+    const input = shell?.shadowRoot?.getElementById("gppUpload") as HTMLInputElement | null;
+    if (input === null || input === undefined) {
+      throw new Error("upload input is missing");
+    }
+    const bin = atob(payload);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) {
+      bytes[i] = bin.charCodeAt(i);
+    }
+    const file = new File([bytes as Uint8Array<ArrayBuffer>], "Untitled.gpp", { type: "application/zip" });
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, packaged);
+  await expect(page.locator("gnumarus-shell")).toContainText("Opened Untitled");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  await removeEmbeddedProject(page, "Untitled");
+});
