@@ -208,6 +208,7 @@ import {
   parseExpandSettings,
   serializeExpandSettings,
 } from "../settings/GnumarusExpandSettings";
+import { installNumberInputHelpers } from "../settings/GnumarusNumberSlider";
 import {
   BRUSH_SETTINGS_STORAGE_KEY,
   clampMaxBrushSize,
@@ -1503,13 +1504,41 @@ export class GnumarusShell extends LitElement {
       justify-content: flex-end;
       margin-top: 12px;
     }
-    .dialog-actions button {
+    .dialog-actions button,
+    dialog button,
+    .tool-options button {
       background: #0e639c;
       color: #fff;
       border: none;
       border-radius: 4px;
       padding: 6px 12px;
       cursor: pointer;
+    }
+    dialog button:hover,
+    .tool-options button:hover {
+      background: #1177b3;
+    }
+    dialog button:disabled,
+    .tool-options button:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+    /* Native number spinners clash with the dark theme; the floating
+       slider plus PageUp/PageDown cover stepping instead. */
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    input[type="number"] {
+      -moz-appearance: textfield;
+      appearance: textfield;
+    }
+    input:focus-visible,
+    select:focus-visible,
+    button:focus-visible {
+      outline: 1px solid #0e639c;
+      outline-offset: 1px;
     }
     .export-tabs {
       display: flex;
@@ -6593,6 +6622,9 @@ export class GnumarusShell extends LitElement {
 
   firstUpdated(): void {
     this.fsSupported = isFileSystemAccessSupported();
+    if (this.shadowRoot !== null) {
+      installNumberInputHelpers(this.shadowRoot);
+    }
     window.addEventListener("keydown", this.onGlobalKeyDown);
     window.addEventListener("pointerdown", this.onGlobalPointerDown);
     // Desktop-like chrome: no native browser menu on our own buttons and

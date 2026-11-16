@@ -29,6 +29,7 @@ import {
   type GnumarusRgbaBytes,
 } from "./GnumarusColorModels";
 import { tr, type GnumarusMessageKey } from "../i18n/GnumarusI18n";
+import { installNumberInputHelpers } from "../settings/GnumarusNumberSlider";
 import { pickImageFile } from "../project/GnumarusFileSystem";
 
 /** Catalog key for each English color-model axis label. */
@@ -176,6 +177,23 @@ export class GnumarusColorPicker extends LitElement {
       border: 1px solid #555;
       border-radius: 4px;
       padding: 4px 6px;
+    }
+    /* Native number spinners clash with the dark theme; the floating
+       slider plus PageUp/PageDown cover stepping instead. */
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    input[type="number"] {
+      -moz-appearance: textfield;
+      appearance: textfield;
+    }
+    input:focus-visible,
+    select:focus-visible,
+    button:focus-visible {
+      outline: 1px solid #0e639c;
+      outline-offset: 1px;
     }
     .axis-unit {
       flex: 0 0 20px;
@@ -957,6 +975,13 @@ export class GnumarusColorPicker extends LitElement {
       this.closePopup();
     }
   };
+
+  connectedCallback(): void {
+    super.connectedCallback();
+    if (this.shadowRoot !== null) {
+      installNumberInputHelpers(this.shadowRoot);
+    }
+  }
 
   disconnectedCallback(): void {
     window.removeEventListener("pointerdown", this.onDocumentPointerDown);
