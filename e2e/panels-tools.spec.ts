@@ -596,3 +596,28 @@ test("brush settings side panel collapses and expands with the top-left arrow @r
   expect(colorMode).toBe("palette");
   await page.keyboard.press("Escape");
 });
+
+test("brush collapse arrow never overlaps the first brush field @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const canvas = page.locator("gnumarus-shell canvas[data-engine]");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "right" });
+  const picker = page.locator("gnumarus-shell #pencilColor");
+  await expect(picker.getByRole("dialog", { name: "Color picker" })).toBeVisible();
+  const toggleBox = await picker.getByTestId("brush-toggle").boundingBox();
+  const labelBox = await picker.locator("[data-testid='brush-side-panel'] label").first().boundingBox();
+  if (toggleBox === null || labelBox === null) {
+    throw new Error("brush toggle or first field has no bounding box");
+  }
+  const intersects =
+    toggleBox.x < labelBox.x + labelBox.width &&
+    toggleBox.x + toggleBox.width > labelBox.x &&
+    toggleBox.y < labelBox.y + labelBox.height &&
+    toggleBox.y + toggleBox.height > labelBox.y;
+  expect(intersects).toBe(false);
+  await page.keyboard.press("Escape");
+});

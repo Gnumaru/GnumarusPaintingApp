@@ -311,6 +311,10 @@ export class GnumarusColorPicker extends LitElement {
       flex: 0 0 auto;
       overflow-y: auto;
       min-height: 0;
+      /* The collapse arrow floats top-left of the popup: keep the first
+         field's label clear of it. */
+      padding-top: 28px;
+      box-sizing: border-box;
     }
     .palette-swatch .remove {
       position: absolute;

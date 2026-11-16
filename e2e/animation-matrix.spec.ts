@@ -429,16 +429,23 @@ test("toolbar icons fill buttons without growing them", async ({ page }) => {
   const boxes = await page.evaluate(() => {
     const root = document.querySelector("gnumarus-shell")?.shadowRoot;
     const buttons = Array.from(root?.querySelectorAll(".toolbar button") ?? []);
-    return buttons.map((button) => {
+    return buttons.flatMap((button) => {
       const rect = (button as HTMLElement).getBoundingClientRect();
       const icon = (button as HTMLElement).querySelector(".tool-icon");
       const transform = icon === null ? "none" : getComputedStyle(icon).transform;
-      return {
-        label: (button as HTMLElement).getAttribute("aria-label"),
-        w: rect.width,
-        h: rect.height,
-        transform,
-      };
+      if (rect.width <= 0 || rect.height <= 0) {
+        // Slot content of a closed popup (e.g. the picker's brush side
+        // panel) stays in the DOM unprojected: not a rendered button.
+        return [];
+      }
+      return [
+        {
+          label: (button as HTMLElement).getAttribute("aria-label"),
+          w: rect.width,
+          h: rect.height,
+          transform,
+        },
+      ];
     });
   });
   expect(boxes).toHaveLength(16);

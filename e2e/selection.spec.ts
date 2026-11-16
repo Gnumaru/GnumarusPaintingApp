@@ -561,6 +561,10 @@ test("tool tooltips start with the selection shortcut", async ({ page }) => {
     const entries: Array<{ label: string | null; title: string | null }> = [];
     for (const button of buttons) {
       const element = button as HTMLElement;
+      // Slot content of a closed popup stays in the DOM unprojected.
+      if (element.getBoundingClientRect().width <= 0) {
+        continue;
+      }
       if (element.getAttribute("aria-label") === "Final preview") {
         continue;
       }

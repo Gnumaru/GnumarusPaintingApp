@@ -5787,7 +5787,7 @@ export class GnumarusShell extends LitElement {
                     (preset) => html`<option value=${preset.name}>${preset.name}</option>`,
                   )}
                 </select>
-                <button data-testid="brush-presets" title=${tr("opt.presetsHint")} @click=${(): void => this.openBrushPresetDialog()}>${tr("opt.presets")}</button>
+                <button data-testid="brush-presets${sfx}" aria-label=${tr("opt.presets")} title=${tr("opt.presetsHint")} @click=${(): void => this.openBrushPresetDialog()}>${tr("opt.presets")}</button>
               </label>
     `;
   }

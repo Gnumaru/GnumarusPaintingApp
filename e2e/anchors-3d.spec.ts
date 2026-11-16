@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { cutRedBlock, cutSingleRedPixel, floatingRect, getAxisOverlay, getFloatingTransform, getLayerTransform, getPlaneMatrix, getSelectionHandle, getViewState, layerDragHandle, layerScreenTarget, loadBlankProject, loadRedProject, paintCenter, readPixel, redPixelCount, rot3DCenter, rot3DHandle, selectTool, setPencil, zoomToFitLayer } from "./e2e-helpers";
+import { cutRedBlock, cutSingleRedPixel, floatingRect, getAxisOverlay, getFloatingTransform, getLayerTransform, getPlaneMatrix, getSelectionHandle, getViewState, layerDragHandle, layerScreenTarget, loadBlankProject, loadRedProject, paintCenter, readPixel, redPixelCount, rot3DCenter, rot3DHandle, selectTool, setEmptyCellHold, setPencil, zoomToFitLayer } from "./e2e-helpers";
 
 test("final preview follows non-destructive transforms live", async ({ page }) => {
   await page.goto("/");
@@ -69,6 +69,7 @@ test("canvas shows red X and green Y axis lines following the cell transform", a
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
+  await setEmptyCellHold(page, false);
   await paintCenter(page);
   const zoom = (await getViewState(page)).zoom;
   const span = 64 * zoom;
