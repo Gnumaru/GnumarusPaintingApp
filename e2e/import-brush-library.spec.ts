@@ -134,7 +134,7 @@ test("brush presets apply, save and persist", async ({ page }) => {
   await expect(options.locator("select#brushTipKind")).toHaveValue("soft");
   await expect(options.locator("input#paintGrainStrength")).toHaveValue("60");
   await options.getByRole("button", { name: "Presets", exact: true }).click();
-  const presetDialog = page.locator('gnumarus-shell dialog#brushPresetDialog');
+  const presetDialog = page.locator('gnumarus-shell dialog#brushPresetManagerDialog');
   await expect(presetDialog).toBeVisible();
   await presetDialog.locator("input#presetNameDialog").fill("E2E Custom");
   await presetDialog.getByRole("button", { name: "Save", exact: true }).click();
@@ -257,4 +257,43 @@ test("airbrush builds paint up while held", async ({ page }) => {
     };
     root.__gnumarus?.shell?.setAirbrushRate(0);
   });
+});
+
+test("new built-in presets apply and erase @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  const bar = page.locator('gnumarus-shell [data-testid="tool-options"]');
+  await bar.getByRole("button", { name: "Presets", exact: true }).click();
+  const dialog = page.locator("gnumarus-shell dialog#brushPresetManagerDialog");
+  await expect(dialog).toBeVisible();
+  for (const name of [
+    "Eraser Hard",
+    "Eraser Soft",
+    "Glaze",
+    "Dry Brush",
+    "Charcoal",
+    "Blender",
+    "Spray",
+    "Chisel Marker",
+    "Velocity Ink",
+    "Tilt Pencil",
+  ]) {
+    await expect(dialog.locator("select#brushPresetDialog")).toContainText(name);
+  }
+  await dialog.locator("select#brushPresetDialog").selectOption("Glaze");
+  await expect(page.locator("gnumarus-shell")).toContainText("Preset: Glaze");
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  // Eraser Hard actually erases painted pixels and undoes cleanly.
+  await setPencil(page, "#ff0000");
+  await bar.locator("select#brushPreset").selectOption("Pixel Hard");
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await bar.locator("select#brushPreset").selectOption("Eraser Hard");
+  await expect(page.locator("gnumarus-shell")).toContainText("Preset: Eraser Hard");
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 0 });
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });

@@ -4618,7 +4618,7 @@ export class GnumarusShell extends LitElement {
           <button @click=${(): void => this.confirmFrameDuration()}>${tr("btn.set")}</button>
         </div>
       </dialog>
-      <dialog id="brushPresetDialog" data-testid="brush-preset-dialog">
+      <dialog id="brushPresetManagerDialog" data-testid="brush-preset-dialog">
         <h3>${tr("dialog.presetsTitle")}</h3>
         <label title=${tr("opt.presetHint")}
           >${tr("opt.preset")}
@@ -10132,12 +10132,12 @@ export class GnumarusShell extends LitElement {
 
   /** Open the brush preset manager dialog. */
   private openBrushPresetDialog(): void {
-    const dialog = this.shadowRoot?.getElementById("brushPresetDialog") as HTMLDialogElement | null;
+    const dialog = this.shadowRoot?.getElementById("brushPresetManagerDialog") as HTMLDialogElement | null;
     dialog?.showModal();
   }
 
   private closeBrushPresetDialog(): void {
-    const dialog = this.shadowRoot?.getElementById("brushPresetDialog") as HTMLDialogElement | null;
+    const dialog = this.shadowRoot?.getElementById("brushPresetManagerDialog") as HTMLDialogElement | null;
     dialog?.close();
   }
 

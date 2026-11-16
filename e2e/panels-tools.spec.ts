@@ -466,7 +466,7 @@ test("right-click with pencil shows the brush settings side panel @recent", asyn
   await expect(panel.locator("input#brushSizePanel")).toHaveValue("16");
   // The presets button opens the manager dialog.
   await panel.getByRole("button", { name: "Presets", exact: true }).click();
-  await expect(page.locator("gnumarus-shell dialog#brushPresetDialog")).toBeVisible();
+  await expect(page.locator('gnumarus-shell dialog[data-testid="brush-preset-dialog"]')).toBeVisible();
   await page.keyboard.press("Escape");
 });
 

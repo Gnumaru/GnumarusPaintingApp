@@ -29,6 +29,30 @@ describe("GnumarusBrushPresets", () => {
     }
   });
 
+  it("ships the extended preset set", () => {
+    const names = BUILT_IN_BRUSH_PRESETS.map((preset) => preset.name);
+    for (const expected of [
+      "Pixel Hard",
+      "Soft Round",
+      "Chalk",
+      "Ink",
+      "Airbrush",
+      "Smudge",
+      "Eraser Hard",
+      "Eraser Soft",
+      "Glaze",
+      "Dry Brush",
+      "Charcoal",
+      "Blender",
+      "Spray",
+      "Chisel Marker",
+      "Velocity Ink",
+      "Tilt Pencil",
+    ]) {
+      expect(names).toContain(expected);
+    }
+  });
+
   it("round-trips custom preset lists", () => {
     const first = BUILT_IN_BRUSH_PRESETS[0];
     if (first === undefined) {
