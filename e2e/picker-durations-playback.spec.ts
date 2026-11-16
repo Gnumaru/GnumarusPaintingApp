@@ -253,3 +253,89 @@ test("playback advances frames by duration and stops on demand", async ({ page }
   expect(await getMatrixFrame(page)).toBe(stoppedAt);
   await expect(matrix.getByRole("button", { name: "Play animation", exact: true })).toBeVisible();
 });
+
+test("black switches out to vivid colors when changing color models @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const picker = await openPicker(page, "pencilColor");
+  const modelSelect = picker.locator("select#modelSelect");
+  const hexInput = picker.locator("#hexInput");
+  await expect(modelSelect.locator("option")).toHaveCount(7);
+  const optionValues = await modelSelect.locator("option").evaluateAll((options) =>
+    options.map((option) => (option as HTMLOptionElement).value),
+  );
+  expect(optionValues).toEqual(["hsl", "okhsl", "hsv", "okhsv", "ard", "rgb", "cmyk"]);
+
+  await hexInput.fill("#000000");
+  await modelSelect.selectOption("rgb");
+  await modelSelect.selectOption("hsl");
+  await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("100.0");
+  await expect(picker.getByLabel("Lightness", { exact: true })).toHaveValue("50.0");
+  await expect(hexInput).toHaveValue("#ff0000");
+
+  await hexInput.fill("#000000");
+  await modelSelect.selectOption("rgb");
+  await modelSelect.selectOption("okhsl");
+  await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("100.0");
+  await expect(picker.getByLabel("Lightness", { exact: true })).toHaveValue("56.8");
+  await expect(picker.getByLabel("Hue", { exact: true })).toHaveValue("29.2");
+
+  await hexInput.fill("#000000");
+  await modelSelect.selectOption("hsv");
+  await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("100.0");
+  await expect(picker.getByLabel("Value", { exact: true })).toHaveValue("100.0");
+
+  await hexInput.fill("#000000");
+  await modelSelect.selectOption("okhsv");
+  await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("100.0");
+  await expect(picker.getByLabel("Value", { exact: true })).toHaveValue("100.0");
+  await expect(picker.getByLabel("Hue", { exact: true })).toHaveValue("29.2");
+
+  await hexInput.fill("#000000");
+  await modelSelect.selectOption("ard");
+  await expect(picker.getByLabel("Angle", { exact: true })).toHaveValue("30.0");
+  await expect(picker.getByLabel("Ratio", { exact: true })).toHaveValue("255");
+  await expect(picker.getByLabel("Diagonal", { exact: true })).toHaveValue("120.0");
+
+  // rgb and cmyk keep the legacy behavior (no switch).
+  await hexInput.fill("#000000");
+  await modelSelect.selectOption("rgb");
+  await expect(picker.getByLabel("Red", { exact: true })).toHaveValue("0");
+  await modelSelect.selectOption("cmyk");
+  await expect(picker.getByLabel("Black", { exact: true })).toHaveValue("100.0");
+  await expect(hexInput).toHaveValue("#000000");
+});
+
+test("black switch can be disabled in settings @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => window.localStorage.setItem("gnumarus.settings.blackSwitch.v1", '{"switchOutOfBlack":false}'));
+  await page.reload();
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.locator("gnumarus-shell input#blackSwitchOutOfBlack")).not.toBeChecked();
+  await page.keyboard.press("Escape");
+  const picker = await openPicker(page, "pencilColor");
+  const modelSelect = picker.locator("select#modelSelect");
+  const hexInput = picker.locator("#hexInput");
+  await hexInput.fill("#000000");
+  await modelSelect.selectOption("hsl");
+  await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("0.0");
+  await expect(picker.getByLabel("Lightness", { exact: true })).toHaveValue("0.0");
+  await expect(hexInput).toHaveValue("#000000");
+  // Re-enabling restores the switch and persists it.
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.locator("gnumarus-shell input#blackSwitchOutOfBlack").check();
+  const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.blackSwitch.v1"));
+  expect(persisted).toContain("true");
+  await page.keyboard.press("Escape");
+  if (!(await hexInput.isVisible())) {
+    await openPicker(page, "pencilColor");
+  }
+  await hexInput.fill("#000000");
+  await modelSelect.selectOption("hsv");
+  await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("100.0");
+  await expect(picker.getByLabel("Value", { exact: true })).toHaveValue("100.0");
+});

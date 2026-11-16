@@ -1,5 +1,6 @@
 import { LitElement, css, html } from "lit";
 import {
+  blackSwitchModelValues,
   defaultHslPalette,
   getColorModelDef,
   GNUMARUS_PALETTE_MAX_COLORS,
@@ -367,6 +368,7 @@ export class GnumarusColorPicker extends LitElement {
     model: { type: String },
     open: { type: Boolean },
     hideSwatch: { type: Boolean },
+    switchOutOfBlack: { type: Boolean },
     swatches: { attribute: false },
     recents: { attribute: false },
   };
@@ -376,6 +378,8 @@ export class GnumarusColorPicker extends LitElement {
   declare open: boolean;
   /** Hide the inline swatch toggle button (the popup still opens programmatically). */
   declare hideSwatch: boolean;
+  /** Switch out of black to a vivid color when changing models on black. */
+  declare switchOutOfBlack: boolean;
   /** Saved swatch palette (hex colors), owned by the host shell. */
   declare swatches: string[];
   /** Recently used colors (hex), owned by the host shell. */
@@ -409,6 +413,7 @@ export class GnumarusColorPicker extends LitElement {
     this.model = "hsl";
     this.open = false;
     this.hideSwatch = false;
+    this.switchOutOfBlack = true;
     this.swatches = [];
     this.recents = [];
     this.syncFromValue(this.value, "hsl");
@@ -648,6 +653,13 @@ export class GnumarusColorPicker extends LitElement {
       return;
     }
     this.model = next;
+    if (this.switchOutOfBlack) {
+      const switched = blackSwitchModelValues(next, this.rgba, this.hsvHue);
+      if (switched !== null) {
+        this.applyModelValues(switched);
+        return;
+      }
+    }
     this.modelValues = rgbBytesToModelAxes(this.rgba, next);
   }
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseHexColor } from "../src/canvas/GnumarusPixelBuffer";
 import {
   ardToRgb01,
+  blackSwitchModelValues,
   cmykToRgb01,
   defaultHslPalette,
   getColorModelDef,
@@ -409,5 +410,64 @@ describe("image palette", () => {
       "#0000ff",
     ]);
     expect(sortPaletteEntries(entries.slice(0, 3), "lightness", true)[0]?.hex).toBe("#00ff00");
+  });
+});
+
+describe("GnumarusColorModels black switch", () => {
+  const black = { r: 0, g: 0, b: 0, a: 255 };
+  const translucentBlack = { r: 0, g: 0, b: 0, a: 128 };
+
+  it("lists models in the picker order", async () => {
+    const { GNUMARUS_COLOR_MODELS } = await import("../src/color/GnumarusColorModels");
+    expect(GNUMARUS_COLOR_MODELS.map((entry) => entry.id)).toEqual([
+      "hsl",
+      "okhsl",
+      "hsv",
+      "okhsv",
+      "ard",
+      "rgb",
+      "cmyk",
+    ]);
+  });
+
+  it("returns the prescribed vivid values for black", () => {
+    expect(blackSwitchModelValues("hsl", black, 0)).toEqual([0, 100, 50, 255]);
+    expect(blackSwitchModelValues("okhsl", black, 0)).toEqual([29.2, 100, 56.8, 255]);
+    expect(blackSwitchModelValues("hsv", black, 0)).toEqual([0, 100, 100, 255]);
+    expect(blackSwitchModelValues("okhsv", black, 0)).toEqual([29.2, 100, 100, 255]);
+    expect(blackSwitchModelValues("ard", black, 0)).toEqual([30, 255, 120, 255]);
+  });
+
+  it("preserves the tracked hue and the alpha channel", () => {
+    expect(blackSwitchModelValues("hsv", translucentBlack, 120)).toEqual([120, 100, 100, 128]);
+    expect(blackSwitchModelValues("hsl", translucentBlack, 200)).toEqual([200, 100, 50, 128]);
+    expect(blackSwitchModelValues("ard", translucentBlack, 0)).toEqual([30, 255, 120, 128]);
+  });
+
+  it("returns null for rgb/cmyk and non-black colors", () => {
+    expect(blackSwitchModelValues("rgb", black, 0)).toBeNull();
+    expect(blackSwitchModelValues("cmyk", black, 0)).toBeNull();
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    expect(blackSwitchModelValues("hsl", red, 0)).toBeNull();
+    expect(blackSwitchModelValues("hsv", red, 0)).toBeNull();
+    expect(blackSwitchModelValues("okhsl", red, 0)).toBeNull();
+    expect(blackSwitchModelValues("okhsv", red, 0)).toBeNull();
+    expect(blackSwitchModelValues("ard", red, 0)).toBeNull();
+  });
+
+  it("treats sub-one channel values as black", () => {
+    expect(blackSwitchModelValues("hsl", { r: 0.5, g: 0, b: 0.9, a: 255 }, 0)).toEqual([0, 100, 50, 255]);
+    expect(blackSwitchModelValues("hsl", { r: 1, g: 0, b: 0, a: 255 }, 0)).toBeNull();
+  });
+
+  it("converts back to non-black vivid colors", async () => {
+    const { modelAxesToRgbBytes } = await import("../src/color/GnumarusColorModels");
+    const black = { r: 0, g: 0, b: 0, a: 255 };
+    for (const model of ["hsl", "okhsl", "hsv", "okhsv", "ard"] as const) {
+      const values = blackSwitchModelValues(model, black, 0);
+      expect(values).not.toBeNull();
+      const rgb = modelAxesToRgbBytes(model, values ?? []);
+      expect(rgb.r + rgb.g + rgb.b).toBeGreaterThan(0);
+    }
   });
 });

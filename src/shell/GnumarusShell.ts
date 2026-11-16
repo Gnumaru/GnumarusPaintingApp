@@ -168,6 +168,12 @@ import {
   type GnumarusEmptyCellMode,
 } from "../settings/GnumarusEmptyCellSettings";
 import {
+  BLACK_SWITCH_SETTINGS_STORAGE_KEY,
+  DEFAULT_BLACK_SWITCH_SETTINGS,
+  parseBlackSwitchSettings,
+  serializeBlackSwitchSettings,
+} from "../settings/GnumarusBlackSwitchSettings";
+import {
   applyNewProjectPreset,
   DEFAULT_NEW_PROJECT_PRESET,
   GNUMARUS_NEW_PROJECT_PRESETS,
@@ -1976,6 +1982,7 @@ export class GnumarusShell extends LitElement {
     onionPast: { type: Number },
     onionFuture: { type: Number },
     onionTint: { type: Boolean },
+    colorSwitchOutOfBlack: { type: Boolean },
     locale: { type: String },
     fitDefaultThreshold: { type: Number },
     storageLossless: { type: Boolean },
@@ -2214,6 +2221,7 @@ export class GnumarusShell extends LitElement {
   declare onionPast: number;
   declare onionFuture: number;
   declare onionTint: boolean;
+  declare colorSwitchOutOfBlack: boolean;
   declare swatches: string[];
   declare recentColors: string[];
   declare locale: GnumarusLocaleSetting;
@@ -2473,6 +2481,7 @@ export class GnumarusShell extends LitElement {
     this.onionPast = DEFAULT_ONION_SETTINGS.past;
     this.onionFuture = DEFAULT_ONION_SETTINGS.future;
     this.onionTint = DEFAULT_ONION_SETTINGS.tint;
+    this.colorSwitchOutOfBlack = DEFAULT_BLACK_SWITCH_SETTINGS.switchOutOfBlack;
     this.swatches = [];
     this.recentColors = [];
     this.locale = DEFAULT_LOCALE_SETTINGS.locale;
@@ -2780,6 +2789,7 @@ export class GnumarusShell extends LitElement {
           <gnumarus-color-picker
             id="pencilColor"
             hideSwatch
+            .switchOutOfBlack=${this.colorSwitchOutOfBlack}
             .value=${this.pickerTarget === "background" ? this.secondaryColorValue : this.colorValue}
             .swatches=${this.swatches}
             .recents=${this.recentColors}
@@ -3854,6 +3864,7 @@ export class GnumarusShell extends LitElement {
                 <span>${tr("setting.solidColor")}</span>
                 <gnumarus-color-picker
                   id="backgroundColor"
+                  .switchOutOfBlack=${this.colorSwitchOutOfBlack}
                   .value=${this.backgroundColor}
                   model="hsl"
                   @gnumarus-color-change=${(event: Event): void => {
@@ -3952,6 +3963,7 @@ export class GnumarusShell extends LitElement {
                 <span>${tr("setting.checkerColorA")}</span>
                 <gnumarus-color-picker
                   id="checkerColorA"
+                  .switchOutOfBlack=${this.colorSwitchOutOfBlack}
                   .value=${this.checkerColorA}
                   model="hsl"
                   @gnumarus-color-change=${(event: Event): void => {
@@ -3976,6 +3988,7 @@ export class GnumarusShell extends LitElement {
                 <span>${tr("setting.checkerColorB")}</span>
                 <gnumarus-color-picker
                   id="checkerColorB"
+                  .switchOutOfBlack=${this.colorSwitchOutOfBlack}
                   .value=${this.checkerColorB}
                   model="hsl"
                   @gnumarus-color-change=${(event: Event): void => {
@@ -4272,6 +4285,27 @@ export class GnumarusShell extends LitElement {
                 aria-label=${tr("a11y.resetFit")}
                 title=${tr("a11y.resetToDefault")}
                 @click=${(): void => this.resetFitToDefault()}
+              >
+                ↻
+              </button>`
+            : html``}
+        </div>
+        <div class="setting-row">
+          <label title=${tr("setting.switchOutOfBlackHint")}
+            ><input
+              type="checkbox"
+              id="blackSwitchOutOfBlack"
+              .checked=${this.colorSwitchOutOfBlack}
+              @change=${(): void => this.applyBlackSwitchFromDialog()}
+            />
+            ${tr("setting.switchOutOfBlack")}
+          </label>
+          ${this.colorSwitchOutOfBlack !== DEFAULT_BLACK_SWITCH_SETTINGS.switchOutOfBlack
+            ? html`<button
+                class="reset-btn"
+                aria-label=${tr("a11y.resetBlackSwitch")}
+                title=${tr("a11y.resetToDefault")}
+                @click=${(): void => this.resetBlackSwitchToDefault()}
               >
                 ↻
               </button>`
@@ -6663,6 +6697,8 @@ export class GnumarusShell extends LitElement {
     this.onionPast = storedOnion.past;
     this.onionFuture = storedOnion.future;
     this.onionTint = storedOnion.tint;
+    const storedBlackSwitch = this.loadBlackSwitchSettings();
+    this.colorSwitchOutOfBlack = storedBlackSwitch.switchOutOfBlack;
     const storedLocale = this.loadLocaleSettings();
     this.locale = storedLocale.locale;
     this.applyActiveLocale();
@@ -8194,6 +8230,40 @@ export class GnumarusShell extends LitElement {
     } catch {
       // Storage failures must not break the settings flow.
     }
+  }
+
+  private loadBlackSwitchSettings(): { switchOutOfBlack: boolean } {
+    try {
+      const stored = window.localStorage.getItem(BLACK_SWITCH_SETTINGS_STORAGE_KEY);
+      if (stored !== null) {
+        return parseBlackSwitchSettings(stored);
+      }
+    } catch {
+      // Corrupt or unavailable storage falls back to defaults.
+    }
+    return { ...DEFAULT_BLACK_SWITCH_SETTINGS };
+  }
+
+  private persistBlackSwitch(): void {
+    try {
+      window.localStorage.setItem(
+        BLACK_SWITCH_SETTINGS_STORAGE_KEY,
+        serializeBlackSwitchSettings({ switchOutOfBlack: this.colorSwitchOutOfBlack }),
+      );
+    } catch {
+      // Storage failures must not break the settings flow.
+    }
+  }
+
+  private applyBlackSwitchFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("blackSwitchOutOfBlack") as HTMLInputElement | null;
+    this.colorSwitchOutOfBlack = input?.checked ?? this.colorSwitchOutOfBlack;
+    this.persistBlackSwitch();
+  }
+
+  private resetBlackSwitchToDefault(): void {
+    this.colorSwitchOutOfBlack = DEFAULT_BLACK_SWITCH_SETTINGS.switchOutOfBlack;
+    this.persistBlackSwitch();
   }
 
   private loadOnionSettings(): { enabled: boolean; past: number; future: number; tint: boolean } {
@@ -12804,6 +12874,7 @@ export class GnumarusShell extends LitElement {
             <span>${tr("dialog.textColor")}</span>
             <gnumarus-color-picker
               id="textEditorColor"
+              .switchOutOfBlack=${this.colorSwitchOutOfBlack}
               .value=${this.textEditorColor}
               model="hsl"
               @gnumarus-color-change=${(event: Event): void => {

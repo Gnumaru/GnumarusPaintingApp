@@ -66,27 +66,6 @@ const BYTE_AXIS = (key: string, label: string): GnumarusColorAxis => ({
 
 export const GNUMARUS_COLOR_MODELS: GnumarusColorModelDef[] = [
   {
-    id: "rgb",
-    label: "RGB",
-    axes: [BYTE_AXIS("r", "Red"), BYTE_AXIS("g", "Green"), BYTE_AXIS("b", "Blue"), BYTE_AXIS("a", "Alpha")],
-  },
-  {
-    id: "cmyk",
-    label: "CMYK",
-    axes: [
-      PERCENT_AXIS("c", "Cyan"),
-      PERCENT_AXIS("m", "Magenta"),
-      PERCENT_AXIS("y", "Yellow"),
-      PERCENT_AXIS("k", "Black"),
-      BYTE_AXIS("a", "Alpha"),
-    ],
-  },
-  {
-    id: "hsv",
-    label: "HSV",
-    axes: [HUE_AXIS("h", "Hue"), PERCENT_AXIS("s", "Saturation"), PERCENT_AXIS("v", "Value"), BYTE_AXIS("a", "Alpha")],
-  },
-  {
     id: "hsl",
     label: "HSL",
     axes: [HUE_AXIS("h", "Hue"), PERCENT_AXIS("s", "Saturation"), PERCENT_AXIS("l", "Lightness"), BYTE_AXIS("a", "Alpha")],
@@ -95,6 +74,11 @@ export const GNUMARUS_COLOR_MODELS: GnumarusColorModelDef[] = [
     id: "okhsl",
     label: "OKHSL",
     axes: [HUE_AXIS("h", "Hue"), PERCENT_AXIS("s", "Saturation"), PERCENT_AXIS("l", "Lightness"), BYTE_AXIS("a", "Alpha")],
+  },
+  {
+    id: "hsv",
+    label: "HSV",
+    axes: [HUE_AXIS("h", "Hue"), PERCENT_AXIS("s", "Saturation"), PERCENT_AXIS("v", "Value"), BYTE_AXIS("a", "Alpha")],
   },
   {
     id: "okhsv",
@@ -109,6 +93,22 @@ export const GNUMARUS_COLOR_MODELS: GnumarusColorModelDef[] = [
       { key: "r", label: "Ratio", min: 0, max: 255, decimals: 0, unit: "byte" },
       { key: "d", label: "Diagonal", min: 0, max: 360, decimals: 1, unit: "scalar" },
       BYTE_AXIS("alpha", "Alpha"),
+    ],
+  },
+  {
+    id: "rgb",
+    label: "RGB",
+    axes: [BYTE_AXIS("r", "Red"), BYTE_AXIS("g", "Green"), BYTE_AXIS("b", "Blue"), BYTE_AXIS("a", "Alpha")],
+  },
+  {
+    id: "cmyk",
+    label: "CMYK",
+    axes: [
+      PERCENT_AXIS("c", "Cyan"),
+      PERCENT_AXIS("m", "Magenta"),
+      PERCENT_AXIS("y", "Yellow"),
+      PERCENT_AXIS("k", "Black"),
+      BYTE_AXIS("a", "Alpha"),
     ],
   },
 ];
@@ -1105,6 +1105,46 @@ export function modelAxisGradientCss(model: GnumarusColorModelId, axisIndex: num
     parts.push(`rgb(${rgb.r}, ${rgb.g}, ${rgb.b}) ${percent}%`);
   }
   return `linear-gradient(to right, ${parts.join(", ")})`;
+}
+
+/** Black below which the picker switches out instead of converting (bytes). */
+const BLACK_SWITCH_CUTOFF = 1;
+
+/** True for black in every channel (the degenerate point of every model). */
+export function isSwitchableBlack(color: GnumarusRgbaBytes): boolean {
+  return color.r < BLACK_SWITCH_CUTOFF && color.g < BLACK_SWITCH_CUTOFF && color.b < BLACK_SWITCH_CUTOFF;
+}
+
+/**
+ * Display-unit axis values that switch out of black when changing to the
+ * given model: vivid, opinionated starting points instead of the degenerate
+ * all-zero conversion. `hue` seeds the hue axes the spec leaves untouched
+ * (the picker's tracked hue); alpha is always preserved. Null for models
+ * without a switch (rgb/cmyk) or for non-black colors.
+ */
+export function blackSwitchModelValues(
+  model: GnumarusColorModelId,
+  color: GnumarusRgbaBytes,
+  hue: number,
+): number[] | null {
+  if (!isSwitchableBlack(color)) {
+    return null;
+  }
+  const alpha = clampByte(color.a);
+  switch (model) {
+    case "hsl":
+      return [clampHue(hue), 100, 50, alpha];
+    case "okhsl":
+      return [29.2, 100, 56.8, alpha];
+    case "hsv":
+      return [clampHue(hue), 100, 100, alpha];
+    case "okhsv":
+      return [29.2, 100, 100, alpha];
+    case "ard":
+      return [30, 255, 120, alpha];
+    default:
+      return null;
+  }
 }
 
 /** Round display values to their axis precision (used when committing manual input). */
