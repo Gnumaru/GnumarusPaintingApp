@@ -565,59 +565,6 @@ export function clampPaintGrainScale(value: number): number {
 }
 
 /**
- * Palette-shading step: index of the entry to paint for a stroke.
- * An exact foreground match advances one step; an off-palette foreground
- * snaps to the nearest entry (RGB distance) and then advances one step,
- * so off-palette colors never reach the canvas. Returns -1 when empty.
- */
-export function findPaletteShadeIndex(
-  entries: ReadonlyArray<{ r: number; g: number; b: number }>,
-  r: number,
-  g: number,
-  b: number,
-): number {
-  if (entries.length === 0) {
-    return -1;
-  }
-  let best = 0;
-  let bestDist = Number.POSITIVE_INFINITY;
-  for (let index = 0; index < entries.length; index += 1) {
-    const entry = entries[index];
-    if (entry === undefined) {
-      continue;
-    }
-    if (entry.r === r && entry.g === g && entry.b === b) {
-      return index;
-    }
-    const dr = entry.r - r;
-    const dg = entry.g - g;
-    const db = entry.b - b;
-    const dist = dr * dr + dg * dg + db * db;
-    if (dist < bestDist) {
-      bestDist = dist;
-      best = index;
-    }
-  }
-  return best;
-}
-
-/**
- * Palette-shading step: index of the entry to paint for a stroke.
- * An exact foreground match advances one step; an off-palette foreground
- * snaps to the nearest entry (RGB distance) and then advances one step,
- * so off-palette colors never reach the canvas. Returns -1 when empty.
- */
-export function nextPaletteShadeIndex(
-  entries: ReadonlyArray<{ r: number; g: number; b: number }>,
-  r: number,
-  g: number,
-  b: number,
-): number {
-  const found = findPaletteShadeIndex(entries, r, g, b);
-  return found < 0 ? -1 : (found + 1) % entries.length;
-}
-
-/**
  * Deterministic 0..1 hash of a seed plus dab index (integer mix, no RNG
  * state): the same stroke replays identically, which keeps undo/redo and
  * tests stable while every dab still varies.

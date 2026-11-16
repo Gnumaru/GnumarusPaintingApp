@@ -345,63 +345,40 @@ test("pixel-art spray dither and palette shade @recent", async ({ page }) => {
   expect(dithered).toBeGreaterThan(0);
   expect(dithered).toBeLessThan(solid);
 
-  // Palette Shade paints one palette color per stroke, stepping each stroke.
-  const distinctLayerColors = (): Promise<string[]> =>
-    page.evaluate(() => {
-      const root = window as unknown as {
-        __gnumarus?: { engine?: { exportTextures(): Array<{ buffer: Uint8ClampedArray }> } };
-      };
-      const buffer = root.__gnumarus?.engine?.exportTextures()[0]?.buffer;
-      const seen = new Set<string>();
-      if (buffer !== undefined) {
-        for (let index = 0; index < buffer.length; index += 4) {
-          if ((buffer[index + 3] ?? 0) > 0) {
-            seen.add(`${buffer[index]},${buffer[index + 1]},${buffer[index + 2]}`);
-          }
-        }
-      }
-      return [...seen];
-    });
-  const shadingAt = (at: number): Promise<{ r: number; g: number; b: number } | null> =>
+  // Palette Shade steps each canvas pixel from its stroke-start value.
+  const paletteEntry = (at: number): Promise<{ r: number; g: number; b: number }> =>
     page.evaluate((index: number) => {
       const root = window as unknown as {
         __gnumarus?: { engine?: { getShadingPalette(): Array<{ r: number; g: number; b: number }> } };
       };
-      return root.__gnumarus?.engine?.getShadingPalette()[index] ?? null;
+      const entry = root.__gnumarus?.engine?.getShadingPalette()[index];
+      if (entry === undefined) {
+        throw new Error("palette entry missing");
+      }
+      return { r: entry.r, g: entry.g, b: entry.b };
     }, at);
+  const toHex = (entry: { r: number; g: number; b: number }): string =>
+    `#${entry.r.toString(16).padStart(2, "0")}${entry.g.toString(16).padStart(2, "0")}${entry.b.toString(16).padStart(2, "0")}`;
+  await loadBlankProject(page, 64);
+  // Paint a dot in a mid-palette color, then shade over it twice.
+  const source = await paletteEntry(5);
+  const first = await paletteEntry(6);
+  const second = await paletteEntry(7);
+  await setPencil(page, toHex(source));
+  await bar.locator("select#brushPreset").selectOption("Pixel Hard");
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ ...source, a: 255 });
+  await bar.locator("select#brushPreset").selectOption("Palette Shade");
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ ...first, a: 255 });
+  // The second stroke reads the first stroke's result and steps again.
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ ...second, a: 255 });
+  // Transparent pixels and off-palette colors are left alone.
   await loadBlankProject(page, 64);
   await bar.locator("select#brushPreset").selectOption("Palette Shade");
   await paintCenter(page);
-  const firstStroke = await distinctLayerColors();
-  expect(firstStroke.length).toBe(1);
-  // A second stroke over the same spot paints exactly one new color: the next entry.
-  await paintCenter(page);
-  const secondStroke = await distinctLayerColors();
-  expect(secondStroke.length).toBe(1);
-  expect(secondStroke[0]).not.toBe(firstStroke[0]);
-  const paletteFirst = await shadingAt(0);
-  expect(paletteFirst).not.toBeNull();
-  const firstIndex = await page.evaluate((hex: string | undefined) => {
-    const root = window as unknown as {
-      __gnumarus?: { engine?: { getShadingPalette(): Array<{ r: number; g: number; b: number }> } };
-    };
-    const list = root.__gnumarus?.engine?.getShadingPalette() ?? [];
-    return list.findIndex(
-      (entry) => `${entry.r},${entry.g},${entry.b}` === hex,
-    );
-  }, firstStroke[0]);
-  expect(firstIndex).toBeGreaterThanOrEqual(0);
-  const paletteLength = await page.evaluate(() => {
-    const root = window as unknown as {
-      __gnumarus?: { engine?: { getShadingPalette(): Array<unknown> } };
-    };
-    return root.__gnumarus?.engine?.getShadingPalette().length ?? 0;
-  });
-  expect(paletteLength).toBeGreaterThan(1);
-  const expectedNext = await shadingAt((firstIndex + 1) % paletteLength);
-  expect(secondStroke[0]).toBe(
-    `${expectedNext?.r},${expectedNext?.g},${expectedNext?.b}`,
-  );
+  expect(await paintedPixelCount(page)).toBe(0);
 
   // Re-sorting the palette panel reorders the shading sequence live.
   const before = await page.evaluate(() => {

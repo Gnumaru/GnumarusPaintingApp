@@ -1673,6 +1673,130 @@ export function applyCoverageMask(
   }
 }
 
+/**
+ * Palette-shading lookup: source RGB key to the next palette entry.
+ * Needs at least two entries (a single color has nowhere to step).
+ */
+export function buildShadeRemap(palette: GnumarusRgba[]): Map<number, GnumarusRgba> {
+  const stepped = new Map<number, GnumarusRgba>();
+  for (let index = 0; index + 1 < palette.length; index += 1) {
+    const from = palette[index];
+    const to = palette[index + 1];
+    if (from === undefined || to === undefined) {
+      continue;
+    }
+    stepped.set(((from.r | 0) << 16) | (((from.g | 0) << 8) | ((from.b | 0) | 0)), {
+      r: to.r | 0,
+      g: to.g | 0,
+      b: to.b | 0,
+      a: 255,
+    });
+  }
+  return stepped;
+}
+
+/**
+ * Palette shading remap (Aseprite Shade ink / Pixelorama COLOR_REPLACE
+ * behavior): every masked pixel is read from the stroke-start `base`
+ * snapshot, exact-matched (RGB) against `palette`, and repainted with the
+ * next entry. Misses (including transparent pixels) and the last entry
+ * leave the pixel untouched. Partial coverage blends toward the stepped
+ * color. Eraser blend falls back to normal shading.
+ */
+export function applyShadeMask(
+  buffer: Uint8ClampedArray,
+  base: Uint8ClampedArray,
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  palette: GnumarusRgba[],
+  locked: GnumarusChannelLock | undefined = undefined,
+  blend: GnumarusBlendMode = "normal",
+  rect?: { left: number; top: number; width: number; height: number },
+): void {
+  if (mask.length !== width * height || buffer.length !== width * height * 4 || base.length !== buffer.length) {
+    return;
+  }
+  if (palette.length < 2) {
+    return;
+  }
+  const stepped = buildShadeRemap(palette);
+  const effective: GnumarusBlendMode = blend === "eraser" ? "normal" : blend;
+  const shadeAt = (x: number, y: number): void => {
+    const m = mask[y * width + x];
+    if (m === undefined || m <= 0) {
+      return;
+    }
+    const at = (y * width + x) * 4;
+    const sa = base[at + 3] ?? 0;
+    if (!(sa > 0)) {
+      return;
+    }
+    const target = stepped.get(
+      (((base[at] ?? 0) | 0) << 16) | (((base[at + 1] ?? 0) | 0) << 8) | ((base[at + 2] ?? 0) | 0),
+    );
+    if (target === undefined) {
+      return;
+    }
+    const shade: GnumarusRgba = { r: target.r, g: target.g, b: target.b, a: sa };
+    const mValue = m as number;
+    if (mValue >= 255) {
+      // Full coverage replaces the RGB (source alpha kept), honoring locks.
+      if (locked === undefined || areAllChannelsUnlocked(locked)) {
+        buffer[at] = shade.r;
+        buffer[at + 1] = shade.g;
+        buffer[at + 2] = shade.b;
+        buffer[at + 3] = sa;
+        return;
+      }
+      if (locked.r !== true) {
+        buffer[at] = shade.r;
+      }
+      if (locked.g !== true) {
+        buffer[at + 1] = shade.g;
+      }
+      if (locked.b !== true) {
+        buffer[at + 2] = shade.b;
+      }
+      if (locked.a !== true) {
+        buffer[at + 3] = sa;
+      }
+      return;
+    }
+    blendPixelCoverage(
+      buffer,
+      width,
+      height,
+      x,
+      y,
+      shade,
+      mValue / 255,
+      locked,
+      effective,
+    );
+  };
+  if (rect !== undefined) {
+    const rx0 = Math.max(0, Math.floor(rect.left));
+    const ry0 = Math.max(0, Math.floor(rect.top));
+    const rx1 = Math.min(width - 1, Math.ceil(rect.left + rect.width - 1));
+    const ry1 = Math.min(height - 1, Math.ceil(rect.top + rect.height - 1));
+    if (rx1 < rx0 || ry1 < ry0) {
+      return;
+    }
+    for (let y = ry0; y <= ry1; y += 1) {
+      for (let x = rx0; x <= rx1; x += 1) {
+        shadeAt(x, y);
+      }
+    }
+    return;
+  }
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      shadeAt(x, y);
+    }
+  }
+}
+
 /** Dirty bounding box of one dab (inclusive min, exclusive max), clamped later. */
 export interface GnumarusDabDirtyRect {
   left: number;

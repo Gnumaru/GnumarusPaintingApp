@@ -75,6 +75,8 @@ import {
   resizePixelBuffer,
   setPixel,
   stampSegmentCoverage,
+  applyShadeMask,
+  buildShadeRemap,
   type GnumarusBlendMode,
   type GnumarusBrushShape,
   type GnumarusChannelLock,
@@ -128,7 +130,6 @@ import {
   parseSymmetryMode,
   parseTipAngleMode,
   mirrorSegmentEndsOnAxis,
-  nextPaletteShadeIndex,
   pixelSprayAllow,
   smoothStrokeVelocity,
   stampPaintDabCoverage,
@@ -1010,10 +1011,8 @@ export class GnumarusCanvasEngine {
   private brushDither = false;
   private brushColorMode: GnumarusBrushColorMode = "solid";
   private shadingPalette: GnumarusRgba[] = [];
-  /** Palette-shading color resolved once per stroke (null = paint solid). */
-  private strokeShadeColor: GnumarusRgba | null = null;
-  /** Palette-shading cursor: each stroke paints one entry, then advances. */
-  private shadingCursor = 0;
+  /** Per-stroke palette remap (source RGB -> stepped entry), built at stroke start. */
+  private shadeRemap: Map<number, GnumarusRgba> | null = null;
   /** Per-stroke salt so spray patterns vary between strokes, deterministically. */
   private strokeSalt = 0;
   private strokeTiltMag = 0;
@@ -9065,17 +9064,6 @@ export class GnumarusCanvasEngine {
       return false;
     }
     this.brushColorMode = next;
-    if (next === "palette" && this.shadingPalette.length > 0) {
-      // Anchor the walk at the foreground color (exact match, else nearest),
-      // so the first stroke advances one step from a sensible entry.
-      const anchor = nextPaletteShadeIndex(
-        this.shadingPalette,
-        this.color.r,
-        this.color.g,
-        this.color.b,
-      );
-      this.shadingCursor = anchor >= 0 ? anchor : 0;
-    }
     this.emitStats();
     this.updatePreviews();
     return true;
@@ -9608,14 +9596,7 @@ export class GnumarusCanvasEngine {
     this.strokeVelocity = 0;
     this.strokeDabAngle = 0;
     this.strokeSalt += 1;
-    this.strokeShadeColor = null;
-    if (this.brushColorMode === "palette" && this.shadingPalette.length > 0) {
-      const entry = this.shadingPalette[this.shadingCursor % this.shadingPalette.length];
-      this.shadingCursor += 1;
-      if (entry !== undefined) {
-        this.strokeShadeColor = { r: entry.r, g: entry.g, b: entry.b, a: this.color.a };
-      }
-    }
+    this.shadeRemap = this.shadeModeActive() ? buildShadeRemap(this.shadingPalette) : null;
     this.strokeLastMovePos = null;
     this.strokeLastMoveT = 0;
   }
@@ -9670,11 +9651,23 @@ export class GnumarusCanvasEngine {
   private pressureBrushColor(): GnumarusRgba {
     const active = this.pressureResponse === "opacity" || this.pressureResponse === "size+opacity";
     const gain = active ? evalPressureCurve(this.pressureAlphaCurve, this.strokePressure) : 1;
-    const base = this.strokeShadeColor ?? this.color;
     return {
-      ...base,
-      a: Math.round(base.a * gain),
+      ...this.color,
+      a: Math.round(this.color.a * gain),
     };
+  }
+
+  /**
+   * Palette shading applies to pixel-tip strokes: each masked pixel is read
+   * from the stroke-start snapshot and stepped one palette entry. Soft and
+   * image tips fall back to the solid foreground color.
+   */
+  private shadeModeActive(): boolean {
+    return (
+      this.brushColorMode === "palette" &&
+      this.brushTipKind === "pixel" &&
+      this.shadingPalette.length > 1
+    );
   }
 
   getPencilAntialias(): boolean {
@@ -10398,6 +10391,46 @@ export class GnumarusCanvasEngine {
     });
   }
 
+  /**
+   * Repaint the dirty region from the stroke-start snapshot through the
+   * palette remap (shading). Like repaintFromMask, the buffer is restored
+   * from base first so repaints stay idempotent across segments and mirrors.
+   */
+  private repaintShadeFromMask(
+    tex: { buffer: Uint8ClampedArray; width: number; height: number },
+    base: Uint8ClampedArray,
+    mask: Uint8Array,
+    locked: GnumarusChannelLock,
+    dirty?: GnumarusDabDirtyRect | null,
+  ): void {
+    if (this.shadeRemap === null) {
+      return;
+    }
+    if (dirty === undefined || dirty === null || this.wrapMode !== "off") {
+      tex.buffer.set(base);
+      applyShadeMask(tex.buffer, base, mask, tex.width, tex.height, this.shadingPalette, locked, this.blendMode);
+      return;
+    }
+    const x0 = Math.max(0, dirty.left);
+    const y0 = Math.max(0, dirty.top);
+    const x1 = Math.min(tex.width - 1, dirty.right - 1);
+    const y1 = Math.min(tex.height - 1, dirty.bottom - 1);
+    if (x1 < x0 || y1 < y0) {
+      return;
+    }
+    const rowBytes = (x1 - x0 + 1) * 4;
+    for (let y = y0; y <= y1; y += 1) {
+      const at = (y * tex.width + x0) * 4;
+      tex.buffer.set(base.subarray(at, at + rowBytes), at);
+    }
+    applyShadeMask(tex.buffer, base, mask, tex.width, tex.height, this.shadingPalette, locked, this.blendMode, {
+      left: x0,
+      top: y0,
+      width: x1 - x0 + 1,
+      height: y1 - y0 + 1,
+    });
+  }
+
   /** Merge one dab bbox into a dirty union (null starts the box). */
   private unionDabDirty(
     acc: GnumarusDabDirtyRect | null,
@@ -10598,11 +10631,15 @@ export class GnumarusCanvasEngine {
     const size = this.pressureBrushSize();
     const color = this.pressureBrushColor();
     const gate = this.pixelArtGate(color);
+    const shade = this.shadeModeActive();
+    // Shading always goes through the union mask (repainted from the
+    // stroke-start snapshot), so both accumulate settings behave the same.
+    const accumulating = this.accumulate && !shade;
     if (this.pencilPixelPerfectActive()) {
       const stroke = this.pencilPixelPerfectStroke;
       const base = this.strokeBase;
       const mask = this.strokeMask;
-      if (!this.accumulate && base !== null && mask !== null) {
+      if (!accumulating && base !== null && mask !== null) {
         walkBresenhamLinePixels(x0, y0, x1, y1, (x: number, y: number): void => {
           if (!stroke.add(x, y)) {
             return;
@@ -10625,10 +10662,14 @@ export class GnumarusCanvasEngine {
           right: Math.max(x0, x1) + 2,
           bottom: Math.max(y0, y1) + 2,
         };
-        this.repaintFromMask(tex, base, mask, locked, color, dirty);
+        if (shade) {
+          this.repaintShadeFromMask(tex, base, mask, locked, dirty);
+        } else {
+          this.repaintFromMask(tex, base, mask, locked, color, dirty);
+        }
         return;
       }
-      if (this.accumulate && base !== null) {
+      if (accumulating && base !== null) {
         walkBresenhamLinePixels(x0, y0, x1, y1, (x: number, y: number): void => {
           if (!stroke.add(x, y)) {
             return;
@@ -10651,7 +10692,33 @@ export class GnumarusCanvasEngine {
       this.paintPaintSegment(tex, locked, x0, y0, x1, y1);
       return;
     }
-    if (!this.accumulate && this.strokeBase !== null && this.strokeMask !== null) {
+    if (shade && this.strokeBase !== null && this.strokeMask !== null) {
+      stampSegmentCoverage(
+        this.strokeMask,
+        tex.width,
+        tex.height,
+        x0,
+        y0,
+        x1,
+        y1,
+        size,
+        this.brushShape,
+        this.pencilAntialias,
+        this.wrapMode,
+        this.maxBrushSize,
+        gate,
+      );
+      const reach = (this.pencilAntialias ? size : Math.round(size)) / 2 + 1;
+      const dirty: GnumarusDabDirtyRect = {
+        left: Math.floor(Math.min(x0, x1) - reach),
+        top: Math.floor(Math.min(y0, y1) - reach),
+        right: Math.ceil(Math.max(x0, x1) + reach) + 1,
+        bottom: Math.ceil(Math.max(y0, y1) + reach) + 1,
+      };
+      this.repaintShadeFromMask(tex, this.strokeBase, this.strokeMask, locked, dirty);
+      return;
+    }
+    if (!accumulating && this.strokeBase !== null && this.strokeMask !== null) {
       stampSegmentCoverage(
         this.strokeMask,
         tex.width,
@@ -13018,6 +13085,42 @@ export class GnumarusCanvasEngine {
     }
     if (this.brushTipKind !== "pixel") {
       this.paintPaintSegment(tex, locked, from.x, from.y, to.x, to.y);
+      return;
+    }
+    const shade = this.shadeModeActive();
+    if (shade && this.strokeBase !== null && this.strokeMask !== null) {
+      const reach = (this.pencilAntialias ? size : Math.round(size)) / 2 + 1;
+      let dirty: GnumarusDabDirtyRect | null = null;
+      const ends = [
+        { x0: qx0, y0: qy0, x1: qx1, y1: qy1 },
+        ...(this.symmetryMode === "off"
+          ? []
+          : mirrorSegmentEndsOnAxis(qx0, qy0, qx1, qy1, this.symmetryCenter.x, this.symmetryCenter.y, this.symmetryMode)),
+      ];
+      for (const end of ends) {
+        stampSegmentCoverage(
+          this.strokeMask,
+          tex.width,
+          tex.height,
+          end.x0,
+          end.y0,
+          end.x1,
+          end.y1,
+          size,
+          this.brushShape,
+          this.pencilAntialias,
+          this.wrapMode,
+          this.maxBrushSize,
+          gate,
+        );
+        dirty = this.unionDabDirty(
+          this.unionDabDirty(dirty, end.x0, end.y0, reach),
+          end.x1,
+          end.y1,
+          reach,
+        );
+      }
+      this.repaintShadeFromMask(tex, this.strokeBase, this.strokeMask, locked, dirty);
       return;
     }
     if (!this.accumulate && this.strokeBase !== null && this.strokeMask !== null) {
@@ -16719,7 +16822,7 @@ export class GnumarusCanvasEngine {
         this.stabilizerTarget = { x: floatPos.x, y: floatPos.y };
         this.strokeBase = tex.buffer.slice();
         this.strokeLayerId = tex.id;
-        if (!this.accumulate) {
+        if (!this.accumulate || this.shadeModeActive()) {
           this.strokeMask = new Uint8Array(tex.width * tex.height);
         }
         this.resetPencilPixelPerfect();
@@ -16746,7 +16849,7 @@ export class GnumarusCanvasEngine {
       this.lastPixel = pixel;
       this.strokeBase = tex.buffer.slice();
       this.strokeLayerId = tex.id;
-      if (!this.accumulate) {
+      if (!this.accumulate || this.shadeModeActive()) {
         this.strokeMask = new Uint8Array(tex.width * tex.height);
       }
       this.resetPencilPixelPerfect();

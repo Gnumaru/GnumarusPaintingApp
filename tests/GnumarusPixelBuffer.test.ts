@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   applyCoverageMask,
+  applyShadeMask,
   applyAlphaPlane,
+  buildShadeRemap,
   blendLayerChannel,
   buffersEqual,
   clampBrushSize,
@@ -659,5 +661,49 @@ describe("GnumarusPixelBuffer", () => {
     expect(pressureSizeInRange("opacity", 0.5, 2, 10)).toBe(10);
     expect(pressureSizeInRange("size", 0.5, 10, 10)).toBe(10);
     expect(pressureSizeInRange("size", Number.NaN, 2, 10)).toBe(10);
+  });
+  it("buildShadeRemap steps each entry to the next and drops the last", () => {
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    const green = { r: 0, g: 255, b: 0, a: 255 };
+    const blue = { r: 0, g: 0, b: 255, a: 255 };
+    expect(buildShadeRemap([]).size).toBe(0);
+    expect(buildShadeRemap([red]).size).toBe(0);
+    const remap = buildShadeRemap([red, green, blue]);
+    expect(remap.get((255 << 16) | (0 << 8) | 0)).toEqual({ r: 0, g: 255, b: 0, a: 255 });
+    expect(remap.get((0 << 16) | (255 << 8) | 0)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+    expect(remap.has((0 << 16) | (0 << 8) | 255)).toBe(false);
+  });
+
+  it("applyShadeMask steps base pixels and leaves misses alone", () => {
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    const green = { r: 0, g: 255, b: 0, a: 255 };
+    const blue = { r: 0, g: 0, b: 255, a: 255 };
+    const palette = [red, green, blue];
+    const base = createPixelBuffer(4, 1);
+    setPixel(base, 4, 1, 0, 0, red);
+    setPixel(base, 4, 1, 1, 0, green);
+    setPixel(base, 4, 1, 2, 0, blue);
+    // x=3 stays transparent.
+    const mask = new Uint8Array([255, 255, 255, 255]);
+    const buffer = base.slice();
+    applyShadeMask(buffer, base, mask, 4, 1, palette);
+    // Red -> green, green -> blue, blue (last) untouched, transparent untouched.
+    expect(getPixel(buffer, 4, 1, 0, 0)).toEqual({ r: 0, g: 255, b: 0, a: 255 });
+    expect(getPixel(buffer, 4, 1, 1, 0)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+    expect(getPixel(buffer, 4, 1, 2, 0)).toEqual(blue);
+    expect(getPixel(buffer, 4, 1, 3, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  });
+
+  it("applyShadeMask ignores off-palette colors and preserves source alpha", () => {
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    const green = { r: 0, g: 255, b: 0, a: 255 };
+    const base = createPixelBuffer(2, 1);
+    setPixel(base, 2, 1, 0, 0, { r: 1, g: 2, b: 3, a: 128 });
+    setPixel(base, 2, 1, 1, 0, { ...red, a: 128 });
+    const mask = new Uint8Array([255, 255]);
+    const buffer = base.slice();
+    applyShadeMask(buffer, base, mask, 2, 1, [red, green]);
+    expect(getPixel(buffer, 2, 1, 0, 0)).toEqual({ r: 1, g: 2, b: 3, a: 128 });
+    expect(getPixel(buffer, 2, 1, 1, 0)).toEqual({ r: 0, g: 255, b: 0, a: 128 });
   });
 });
