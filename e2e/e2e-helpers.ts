@@ -1595,15 +1595,22 @@ export function buildKraBytes(
   return zipSync(files);
 }
 
-export async function loadBlankProject(page: import("@playwright/test").Page, canvasSize: number): Promise<void> {
+export async function loadBlankProject(
+  page: import("@playwright/test").Page,
+  canvasSize: number,
+  canvasHeight?: number,
+): Promise<void> {
   // Fresh empty project at an explicit size (same path as File > New):
   // layers carry no texture until painting materializes one.
-  await page.evaluate((canvas: number) => {
-    const root = window as unknown as {
-      __gnumarus?: { engine?: { newProject(width: number, height: number): void } };
-    };
-    root.__gnumarus?.engine?.newProject(canvas, canvas);
-  }, canvasSize);
+  await page.evaluate(
+    ([width, height]: number[]) => {
+      const root = window as unknown as {
+        __gnumarus?: { engine?: { newProject(width: number, height: number): void } };
+      };
+      root.__gnumarus?.engine?.newProject(width as number, (height ?? width) as number);
+    },
+    [canvasSize, canvasHeight ?? canvasSize],
+  );
 };
 
 export async function loadRedProject(

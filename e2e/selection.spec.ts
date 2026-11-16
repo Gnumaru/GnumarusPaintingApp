@@ -579,11 +579,11 @@ test("tool tooltips start with the selection shortcut", async ({ page }) => {
     { label: "Shading", title: expect.stringMatching(/^S: Shading \(/) },
     { label: "3D model transform", title: expect.stringMatching(/^3D model transform \(drag to orbit/) },
     { label: "Rectangular selection", title: expect.stringMatching(/^R: Rectangular selection \(/) },
-    { label: "Background paint color (X swaps)", title: "Background paint color (X swaps)" },
-    { label: "Foreground paint color (paints)", title: "Foreground paint color (paints)" },
-    { label: "Swap paint colors", title: "Swap foreground and background paint colors (X)" },
     { label: "Destructive selection transform", title: expect.stringMatching(/^V: Destructive selection transform \(/) },
     { label: "Non-destructive cell transform", title: expect.stringMatching(/^T: Non-destructive cell transform \(/) },
+    { label: "Background paint color (X swaps)", title: "Edit the background color" },
+    { label: "Foreground paint color (paints)", title: "Edit the foreground color" },
+    { label: "Swap paint colors", title: "Swap foreground and background paint colors (X)" },
   ]);
 });
 

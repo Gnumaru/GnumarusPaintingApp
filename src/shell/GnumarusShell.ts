@@ -282,6 +282,7 @@ import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
 import {
   applyAlphaPlane,
   clampBrushSizeFloat,
+  clampLayerDim,
   cropBufferBox,
   extractAlphaPlane,
   findAlphaBoundingBox,
@@ -2774,42 +2775,6 @@ export class GnumarusShell extends LitElement {
           ${this.renderToolDrawer("model")}
 
           ${this.renderToolDrawer("selection")}
-          <div class="paint-wells" title=${tr("color.wellsHint")}>
-            <button
-              class="paint-well paint-well-back"
-              data-testid="bg-well"
-              style="background-color: ${this.secondaryColorValue};"
-              aria-label=${tr("color.background")}
-              title=${tr("color.editBackground")}
-              @click=${(event: Event): void => {
-                const anchor = event.currentTarget as HTMLElement | null;
-                if (anchor !== null) {
-                  this.openWellPicker("background", anchor);
-                }
-              }}
-            ></button>
-            <button
-              class="paint-well paint-well-front"
-              data-testid="fg-well"
-              style="background-color: ${this.colorValue};"
-              aria-label=${tr("color.foreground")}
-              title=${tr("color.editForeground")}
-              @click=${(event: Event): void => {
-                const anchor = event.currentTarget as HTMLElement | null;
-                if (anchor !== null) {
-                  this.openWellPicker("foreground", anchor);
-                }
-              }}
-            ></button>
-            <button
-              class="paint-swap"
-              data-testid="swap-colors"
-              aria-label=${tr("color.swap")}
-              title=${tr("color.swapHint")}
-              @click=${(): void => this.swapPaintColors()}
-              >⇄</button
-            >
-          </div>
           ${this.renderToolDrawer("destructive")}
           ${this.renderToolDrawer("transform")}
           <gnumarus-color-picker
@@ -2852,6 +2817,42 @@ export class GnumarusShell extends LitElement {
               }
             }}
           ></gnumarus-color-picker>
+          <div class="paint-wells" title=${tr("color.wellsHint")}>
+            <button
+              class="paint-well paint-well-back"
+              data-testid="bg-well"
+              style="background-color: ${this.secondaryColorValue};"
+              aria-label=${tr("color.background")}
+              title=${tr("color.editBackground")}
+              @click=${(event: Event): void => {
+                const anchor = event.currentTarget as HTMLElement | null;
+                if (anchor !== null) {
+                  this.openWellPicker("background", anchor);
+                }
+              }}
+            ></button>
+            <button
+              class="paint-well paint-well-front"
+              data-testid="fg-well"
+              style="background-color: ${this.colorValue};"
+              aria-label=${tr("color.foreground")}
+              title=${tr("color.editForeground")}
+              @click=${(event: Event): void => {
+                const anchor = event.currentTarget as HTMLElement | null;
+                if (anchor !== null) {
+                  this.openWellPicker("foreground", anchor);
+                }
+              }}
+            ></button>
+            <button
+              class="paint-swap"
+              data-testid="swap-colors"
+              aria-label=${tr("color.swap")}
+              title=${tr("color.swapHint")}
+              @click=${(): void => this.swapPaintColors()}
+              >⇄</button
+            >
+          </div>
           <button
             class=${this.previewOpen ? "active" : ""}
             title=${tr("preview.hint")}
@@ -3701,8 +3702,8 @@ export class GnumarusShell extends LitElement {
       <dialog id="resizeDialog">
         <h3>${tr("dialog.resize")}</h3>
         <p>${tr("dialog.resizeHint")}</p>
-        <label>${tr("dialog.width")} <input type="number" id="resizeWidth" min="1" max="1024" .value=${String(this.resizeWidth)} /></label>
-        <label>${tr("dialog.height")} <input type="number" id="resizeHeight" min="1" max="1024" .value=${String(this.resizeHeight)} /></label>
+        <label>${tr("dialog.width")} <input type="number" id="resizeWidth" min="1" max="4096" .value=${String(this.resizeWidth)} /></label>
+        <label>${tr("dialog.height")} <input type="number" id="resizeHeight" min="1" max="4096" .value=${String(this.resizeHeight)} /></label>
         <div class="dialog-actions">
           <button @click=${(): void => this.closeResizeDialog()}>${tr("btn.cancel")}</button>
           <button @click=${(): void => this.confirmResize()}>${tr("btn.resize")}</button>
@@ -7598,8 +7599,8 @@ export class GnumarusShell extends LitElement {
     }
     const widthInput = this.shadowRoot?.getElementById("resizeWidth") as HTMLInputElement | null;
     const heightInput = this.shadowRoot?.getElementById("resizeHeight") as HTMLInputElement | null;
-    const width = Math.min(1024, Math.max(1, Math.floor(Number(widthInput?.value ?? "1") || 1)));
-    const height = Math.min(1024, Math.max(1, Math.floor(Number(heightInput?.value ?? "1") || 1)));
+    const width = clampLayerDim(Number(widthInput?.value ?? "1"));
+    const height = clampLayerDim(Number(heightInput?.value ?? "1"));
     this.resizeWidth = width;
     this.resizeHeight = height;
     if (this.engine.resizeLayer(targetId, width, height)) {

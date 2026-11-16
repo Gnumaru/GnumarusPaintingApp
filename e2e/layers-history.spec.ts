@@ -671,3 +671,32 @@ test("layer resize is undoable and preserves top-left pixels", async ({ page }) 
   });
   expect(afterRedo).toMatchObject({ width: 4, height: 4 });
 });
+
+test("layer resize reaches 1920x1080 canvas sizes @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 1920, 1080);
+  const row0 = page.locator('gnumarus-shell [data-layer-id="layer0"]');
+  await expect(row0).toContainText("1920×1080");
+  const dimsOf = (): Promise<{ width: number; height: number } | null> =>
+    page.evaluate(() => {
+      const root = window as unknown as {
+        __gnumarus?: { engine?: { getLayers(): Array<{ width: number; height: number }> } };
+      };
+      return root.__gnumarus?.engine?.getLayers()[0] ?? null;
+    });
+  // 1080x1080 used to clamp to 1024x1024.
+  await row0.getByRole("button", { name: "Resize layer" }).click();
+  await page.locator("gnumarus-shell input#resizeWidth").fill("1080");
+  await page.locator("gnumarus-shell input#resizeHeight").fill("1080");
+  await page.getByRole("button", { name: "Resize", exact: true }).click();
+  expect(await dimsOf()).toMatchObject({ width: 1080, height: 1080 });
+  await expect(row0).toContainText("1080×1080");
+  // 1920x1024 used to be a silent no-op on a 1024 layer.
+  await row0.getByRole("button", { name: "Resize layer" }).click();
+  await page.locator("gnumarus-shell input#resizeWidth").fill("1920");
+  await page.locator("gnumarus-shell input#resizeHeight").fill("1024");
+  await page.getByRole("button", { name: "Resize", exact: true }).click();
+  expect(await dimsOf()).toMatchObject({ width: 1920, height: 1024 });
+  await expect(row0).toContainText("1920×1024");
+});

@@ -9,12 +9,13 @@ import {
 import { GnumarusHistory } from "../src/history/GnumarusHistory";
 
 describe("GnumarusLayerResize", () => {
-  it("clamps dimensions to 1..1024", () => {
+  it("clamps dimensions to 1..4096", () => {
     expect(clampLayerDim(64)).toBe(64);
     expect(clampLayerDim(64.9)).toBe(64);
     expect(clampLayerDim(0)).toBe(1);
     expect(clampLayerDim(-5)).toBe(1);
-    expect(clampLayerDim(5000)).toBe(1024);
+    expect(clampLayerDim(1920)).toBe(1920);
+    expect(clampLayerDim(5000)).toBe(4096);
     expect(clampLayerDim(Number.NaN)).toBe(1);
     expect(clampLayerDim(Number.POSITIVE_INFINITY)).toBe(1);
   });
