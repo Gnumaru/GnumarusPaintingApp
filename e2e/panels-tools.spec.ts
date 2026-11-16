@@ -485,3 +485,37 @@ test("right-click without pencil shows no brush side panel @recent", async ({ pa
   await expect(picker.locator("[data-testid='brush-side-panel']")).toHaveCount(0);
   await page.keyboard.press("Escape");
 });
+
+test("palette panel keeps the central picker width @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const picker = await openPicker(page, "pencilColor");
+  const main = picker.locator(".popup-main");
+  const before = await main.boundingBox();
+  if (before === null) {
+    throw new Error("popup main has no bounding box");
+  }
+  await picker.getByTestId("palette-toggle").click();
+  const panel = picker.getByTestId("palette-panel");
+  await expect(panel).toBeVisible();
+  const after = await main.boundingBox();
+  if (after === null) {
+    throw new Error("popup main has no bounding box after opening the palette");
+  }
+  expect(after.width).toBeCloseTo(before.width, 0);
+  // The palette grid sits beside the central panel, never over the channel rows.
+  const gridBox = await panel.getByTestId("palette-grid").boundingBox();
+  const axisBox = await picker.locator(".axis-row").first().boundingBox();
+  if (gridBox === null || axisBox === null) {
+    throw new Error("palette grid or axis row has no bounding box");
+  }
+  expect(gridBox.x).toBeGreaterThanOrEqual(axisBox.x + axisBox.width - 1);
+  await picker.getByTestId("palette-toggle").click();
+  await expect(panel).toBeHidden();
+  const closed = await main.boundingBox();
+  if (closed === null) {
+    throw new Error("popup main has no bounding box after closing the palette");
+  }
+  expect(closed.width).toBeCloseTo(before.width, 0);
+  await page.keyboard.press("Escape");
+});

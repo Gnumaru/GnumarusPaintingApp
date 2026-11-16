@@ -313,6 +313,12 @@ test("pixel-art spray dither and palette shade @recent", async ({ page }) => {
       new Function("engine", body)(engine);
     }, expression);
   await setPencil(page, "#ff0000");
+  // Pixel-art brushes lead the preset list.
+  expect(await bar.locator("select#brushPreset option").allTextContents()).toEqual(
+    expect.arrayContaining(["Pixel Hard", "Pixel Spray", "Pixel Dither", "Palette Shade"]),
+  );
+  const firstOptions = (await bar.locator("select#brushPreset option").allTextContents()).slice(0, 4);
+  expect(firstOptions).toEqual(["Pixel Hard", "Pixel Spray", "Pixel Dither", "Palette Shade"]);
 
   // Solid reference: Pixel Hard at size 8.
   await loadBlankProject(page, 64);

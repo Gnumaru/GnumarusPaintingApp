@@ -56,6 +56,11 @@ describe("GnumarusBrushPresets", () => {
     }
   });
 
+  it("lists pixel-art brushes first", () => {
+    const names = BUILT_IN_BRUSH_PRESETS.map((preset) => preset.name);
+    expect(names.slice(0, 4)).toEqual(["Pixel Hard", "Pixel Spray", "Pixel Dither", "Palette Shade"]);
+  });
+
   it("fills pixel-art defaults for older preset files", () => {
     const legacy = JSON.stringify({
       version: 1,

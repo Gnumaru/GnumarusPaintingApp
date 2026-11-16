@@ -246,11 +246,14 @@ export class GnumarusColorPicker extends LitElement {
     .popup.palette-open {
       display: flex;
       gap: 12px;
-      max-width: min(580px, 96vw);
+      max-width: min(556px, 96vw);
     }
     .popup-main {
       min-width: 0;
-      flex: 1 1 auto;
+      flex: 0 1 336px;
+    }
+    .popup.side-open.palette-open {
+      max-width: min(818px, 96vw);
     }
     .palette-panel {
       width: 172px;
@@ -879,7 +882,7 @@ export class GnumarusColorPicker extends LitElement {
   /** Open the popup at a viewport position (e.g. canvas right-click). */
   openAt(clientX: number, clientY: number): void {
     this.open = true;
-    const reserve = this.hasSidePanel ? 660 : this.paletteOpen ? 580 : 380;
+    const reserve = this.hasSidePanel ? 660 : this.paletteOpen ? 556 : 380;
     this.popupPos = {
       left: Math.min(clientX + 8, Math.max(8, window.innerWidth - reserve)),
       top: Math.min(clientY, Math.max(8, window.innerHeight - 420)),
@@ -954,7 +957,7 @@ export class GnumarusColorPicker extends LitElement {
     this.paletteOpen = !this.paletteOpen;
     if (this.paletteOpen && this.popupPos !== null) {
       this.popupPos = {
-        left: Math.min(this.popupPos.left, Math.max(8, window.innerWidth - 580)),
+        left: Math.min(this.popupPos.left, Math.max(8, window.innerWidth - 556)),
         top: this.popupPos.top,
       };
     }
