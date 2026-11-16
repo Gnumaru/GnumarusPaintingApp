@@ -17,6 +17,17 @@ export interface GnumarusChannelLock {
 /** How painted colors combine with existing pixels. */
 export type GnumarusBlendMode = "normal" | "copy" | "eraser";
 
+/**
+ * Per-pixel write gate for pixel-art brushes (spray, dither, palette
+ * shading). `allow` decides whether the pixel is written at all;
+ * `colorFor` may substitute the paint color (palette stepping). It is only
+ * consulted when explicitly passed, so every existing caller is unaffected.
+ */
+export interface GnumarusPixelWriteGate {
+  allow(x: number, y: number): boolean;
+  colorFor(x: number, y: number, base: GnumarusRgba): GnumarusRgba;
+}
+
 /** Per-layer compositing blend mode (paint blend modes are separate). */
 export type GnumarusLayerBlendMode = "normal" | "multiply" | "screen" | "darken" | "lighten" | "add";
 
@@ -348,7 +359,14 @@ export function setPixel(
   locked: GnumarusChannelLock | undefined = undefined,
   blend: GnumarusBlendMode = "normal",
   wrap: GnumarusWrapMode = "off",
+  gate: GnumarusPixelWriteGate | undefined = undefined,
 ): boolean {
+  if (gate !== undefined && !gate.allow(x, y)) {
+    return false;
+  }
+  if (gate !== undefined) {
+    color = gate.colorFor(x, y, color);
+  }
   let px = x;
   let py = y;
   if (wrap !== "off") {
@@ -423,6 +441,7 @@ export function drawPixelLine(
   locked: GnumarusChannelLock | undefined = undefined,
   blend: GnumarusBlendMode = "normal",
   wrap: GnumarusWrapMode = "off",
+  gate: GnumarusPixelWriteGate | undefined = undefined,
 ): void {
   let x = x0;
   let y = y0;
@@ -432,7 +451,7 @@ export function drawPixelLine(
   const sy = y0 < y1 ? 1 : -1;
   let err = dx - dy;
   for (;;) {
-    setPixel(buffer, width, height, x, y, color, locked, blend, wrap);
+    setPixel(buffer, width, height, x, y, color, locked, blend, wrap, gate);
     if (x === x1 && y === y1) {
       break;
     }
@@ -647,16 +666,40 @@ export function drawBrushStamp(
   blend: GnumarusBlendMode = "normal",
   wrap: GnumarusWrapMode = "off",
   maxSize: number = GNUMARUS_MAX_BRUSH_SIZE,
+  gate: GnumarusPixelWriteGate | undefined = undefined,
 ): void {
   const tip = clampBrushSize(size, maxSize);
   const anchor = Math.floor((tip - 1) / 2);
   const left = Math.round(centerX) - anchor;
   const top = Math.round(centerY) - anchor;
+  if (gate !== undefined && wrap === "off") {
+    // Pixel-art brushes (spray/dither/shade) need per-pixel decisions, so
+    // they take the instructive setPixel path instead of the fast blits.
+    if (shape === "square") {
+      for (let dy = 0; dy < tip; dy += 1) {
+        for (let dx = 0; dx < tip; dx += 1) {
+          setPixel(buffer, width, height, left + dx, top + dy, color, locked, blend, wrap, gate);
+        }
+      }
+      return;
+    }
+    const centerG = (tip - 1) / 2;
+    const thresholdG = Math.max(0, (tip * tip) / 4 - 0.5);
+    for (let dy = 0; dy < tip; dy += 1) {
+      for (let dx = 0; dx < tip; dx += 1) {
+        const distSquared = (dx - centerG) * (dx - centerG) + (dy - centerG) * (dy - centerG);
+        if (distSquared <= thresholdG + 1e-9) {
+          setPixel(buffer, width, height, left + dx, top + dy, color, locked, blend, wrap, gate);
+        }
+      }
+    }
+    return;
+  }
   if (wrap !== "off") {
     if (shape === "square") {
       for (let dy = 0; dy < tip; dy += 1) {
         for (let dx = 0; dx < tip; dx += 1) {
-          setPixel(buffer, width, height, left + dx, top + dy, color, locked, blend, wrap);
+          setPixel(buffer, width, height, left + dx, top + dy, color, locked, blend, wrap, gate);
         }
       }
       return;
@@ -667,7 +710,7 @@ export function drawBrushStamp(
       for (let dx = 0; dx < tip; dx += 1) {
         const distSquared = (dx - centerW) * (dx - centerW) + (dy - centerW) * (dy - centerW);
         if (distSquared <= thresholdW + 1e-9) {
-          setPixel(buffer, width, height, left + dx, top + dy, color, locked, blend, wrap);
+          setPixel(buffer, width, height, left + dx, top + dy, color, locked, blend, wrap, gate);
         }
       }
     }
@@ -931,10 +974,11 @@ export function drawBrushLine(
   blend: GnumarusBlendMode = "normal",
   wrap: GnumarusWrapMode = "off",
   maxSize: number = GNUMARUS_MAX_BRUSH_SIZE,
+  gate: GnumarusPixelWriteGate | undefined = undefined,
 ): void {
   const tip = clampBrushSize(size, maxSize);
   if (tip <= 1) {
-    drawPixelLine(buffer, width, height, x0, y0, x1, y1, color, locked, blend, wrap);
+    drawPixelLine(buffer, width, height, x0, y0, x1, y1, color, locked, blend, wrap, gate);
     return;
   }
   const step = tip * 0.15;
@@ -949,7 +993,7 @@ export function drawBrushLine(
   let err = dx - dy;
   if (!useSpacing) {
     for (;;) {
-      drawBrushStamp(buffer, width, height, x, y, tip, shape, color, locked, blend, wrap, maxSize);
+      drawBrushStamp(buffer, width, height, x, y, tip, shape, color, locked, blend, wrap, maxSize, gate);
       if (x === x1 && y === y1) {
         break;
       }
@@ -967,7 +1011,7 @@ export function drawBrushLine(
   }
   let lastX = x0;
   let lastY = y0;
-  drawBrushStamp(buffer, width, height, x0, y0, tip, shape, color, locked, blend, wrap, maxSize);
+  drawBrushStamp(buffer, width, height, x0, y0, tip, shape, color, locked, blend, wrap, maxSize, gate);
   for (;;) {
     if (x === x1 && y === y1) {
       break;
@@ -987,7 +1031,7 @@ export function drawBrushLine(
     const ddx = x - lastX;
     const ddy = y - lastY;
     if (ddx * ddx + ddy * ddy >= stepSquared) {
-      drawBrushStamp(buffer, width, height, x, y, tip, shape, color, locked, blend, wrap, maxSize);
+      drawBrushStamp(buffer, width, height, x, y, tip, shape, color, locked, blend, wrap, maxSize, gate);
       lastX = x;
       lastY = y;
     }
@@ -995,7 +1039,7 @@ export function drawBrushLine(
   const edx = x1 - lastX;
   const edy = y1 - lastY;
   if (edx !== 0 || edy !== 0) {
-    drawBrushStamp(buffer, width, height, x1, y1, tip, shape, color, locked, blend, wrap, maxSize);
+    drawBrushStamp(buffer, width, height, x1, y1, tip, shape, color, locked, blend, wrap, maxSize, gate);
   }
 }
 
@@ -1011,9 +1055,16 @@ export function blendPixelCoverage(
   locked: GnumarusChannelLock | undefined = undefined,
   blend: GnumarusBlendMode = "normal",
   wrap: GnumarusWrapMode = "off",
+  gate: GnumarusPixelWriteGate | undefined = undefined,
 ): void {
   if (!(coverage > 0)) {
     return;
+  }
+  if (gate !== undefined && !gate.allow(x, y)) {
+    return;
+  }
+  if (gate !== undefined) {
+    color = gate.colorFor(x, y, color);
   }
   let px = x;
   let py = y;
@@ -1092,13 +1143,14 @@ export function drawLineSegment(
   blend: GnumarusBlendMode = "normal",
   wrap: GnumarusWrapMode = "off",
   maxSize: number = GNUMARUS_MAX_BRUSH_SIZE,
+  gate: GnumarusPixelWriteGate | undefined = undefined,
 ): void {
   const thick = antialiased ? clampBrushSizeFloat(lineWidth, maxSize) : roundBrushSizeForAliased(lineWidth, maxSize);
   if (!antialiased) {
     if (thick <= 1) {
-      drawPixelLine(buffer, width, height, x0, y0, x1, y1, color, locked, blend, wrap);
+      drawPixelLine(buffer, width, height, x0, y0, x1, y1, color, locked, blend, wrap, gate);
     } else {
-      drawBrushLine(buffer, width, height, x0, y0, x1, y1, thick, shape, color, locked, blend, wrap, maxSize);
+      drawBrushLine(buffer, width, height, x0, y0, x1, y1, thick, shape, color, locked, blend, wrap, maxSize, gate);
     }
     return;
   }
@@ -1114,7 +1166,7 @@ export function drawLineSegment(
     const maxY = Math.ceil(y0 + reach);
     for (let y = minY; y <= maxY; y += 1) {
       for (let x = minX; x <= maxX; x += 1) {
-        blendPixelCoverage(buffer, width, height, x, y, color, aaDotCoverageAt(x, y, x0, y0, half, shape), locked, blend, wrap);
+        blendPixelCoverage(buffer, width, height, x, y, color, aaDotCoverageAt(x, y, x0, y0, half, shape), locked, blend, wrap, gate);
       }
     }
     return;
@@ -1137,6 +1189,7 @@ export function drawLineSegment(
         locked,
         blend,
         wrap,
+        gate,
       );
     }
   }
@@ -1278,12 +1331,16 @@ function stampDotCoverage(
   tip: number,
   shape: GnumarusBrushShape,
   wrap: GnumarusWrapMode = "off",
+  allow: ((x: number, y: number) => boolean) | undefined = undefined,
 ): void {
   const anchor = Math.floor((tip - 1) / 2);
   const left = Math.round(centerX) - anchor;
   const top = Math.round(centerY) - anchor;
   if (wrap !== "off") {
     const stamp = (x: number, y: number): void => {
+      if (allow !== undefined && !allow(x, y)) {
+        return;
+      }
       const wrapped = wrapLayerPixel(x, y, width, height, wrap);
       if (wrapped === null) {
         return;
@@ -1318,6 +1375,16 @@ function stampDotCoverage(
     if (x1 < x0 || y1 < y0) {
       return;
     }
+    if (allow !== undefined) {
+      for (let y = y0; y <= y1; y += 1) {
+        for (let x = x0; x <= x1; x += 1) {
+          if (allow(x, y)) {
+            mask[y * width + x] = 255;
+          }
+        }
+      }
+      return;
+    }
     for (let y = y0; y <= y1; y += 1) {
       mask.fill(255, y * width + x0, y * width + x1 + 1);
     }
@@ -1339,6 +1406,14 @@ function stampDotCoverage(
     const x0 = Math.max(0, left + Math.ceil(center - extent));
     const x1 = Math.min(width - 1, left + Math.floor(center + extent));
     if (x1 < x0) {
+      continue;
+    }
+    if (allow !== undefined) {
+      for (let x = x0; x <= x1; x += 1) {
+        if (allow(x, y)) {
+          mask[y * width + x] = 255;
+        }
+      }
       continue;
     }
     mask.fill(255, y * width + x0, y * width + x1 + 1);
@@ -1364,11 +1439,15 @@ export function stampSegmentCoverage(
   antialiased: boolean,
   wrap: GnumarusWrapMode = "off",
   maxSize: number = GNUMARUS_MAX_BRUSH_SIZE,
+  gate: GnumarusPixelWriteGate | undefined = undefined,
 ): void {
   if (mask.length !== width * height) {
     return;
   }
   const plot = (x: number, y: number, value: number): void => {
+    if (gate !== undefined && !gate.allow(x, y)) {
+      return;
+    }
     if (wrap !== "off") {
       const wrapped = wrapLayerPixel(x, y, width, height, wrap);
       if (wrapped === null) {
@@ -1429,7 +1508,7 @@ export function stampSegmentCoverage(
       const sy = y < endY ? 1 : -1;
       let err = dx - dy;
       for (;;) {
-        stampDotCoverage(mask, width, height, x, y, thick, shape, wrap);
+        stampDotCoverage(mask, width, height, x, y, thick, shape, wrap, gate === undefined ? undefined : (x, y) => gate.allow(x, y));
         if (x === endX && y === endY) {
           break;
         }
@@ -1445,7 +1524,7 @@ export function stampSegmentCoverage(
       }
       return;
     }
-    stampDotCoverage(mask, width, height, x, y, thick, shape, wrap);
+    stampDotCoverage(mask, width, height, x, y, thick, shape, wrap, gate === undefined ? undefined : (x, y) => gate.allow(x, y));
     let lastX = x;
     let lastY = y;
     const dx = Math.abs(endX - x);
@@ -1472,13 +1551,13 @@ export function stampSegmentCoverage(
       const ddx = x - lastX;
       const ddy = y - lastY;
       if (ddx * ddx + ddy * ddy >= stepSquared) {
-        stampDotCoverage(mask, width, height, x, y, thick, shape, wrap);
+        stampDotCoverage(mask, width, height, x, y, thick, shape, wrap, gate === undefined ? undefined : (x, y) => gate.allow(x, y));
         lastX = x;
         lastY = y;
       }
     }
     if (lastX !== endX || lastY !== endY) {
-      stampDotCoverage(mask, width, height, endX, endY, thick, shape, wrap);
+      stampDotCoverage(mask, width, height, endX, endY, thick, shape, wrap, gate === undefined ? undefined : (x, y) => gate.allow(x, y));
     }
     return;
   }

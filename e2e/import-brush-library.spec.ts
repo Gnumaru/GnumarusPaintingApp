@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { blurActiveElement, buildXcfBytes, decodeJxlInPage, getLayers, layerScreenTarget, loadBlankProject, paintCenter, paintedPixelCount, readPixel, setImportCleanup, setPaintDynamics, setPaintTip, setPencil, stubAsepritePicker, stubProjectDirectory, textureDims } from "./e2e-helpers";
+import { blurActiveElement, buildXcfBytes, decodeJxlInPage, getLayers, layerScreenTarget, loadBlankProject, openPicker, paintCenter, paintedPixelCount, readPixel, setImportCleanup, setPaintDynamics, setPaintTip, setPencil, stubAsepritePicker, stubProjectDirectory, textureDims } from "./e2e-helpers";
 
 test("import cleanup setting is configurable and persists", async ({ page }) => {
   await page.goto("/");
@@ -296,4 +296,89 @@ test("new built-in presets apply and erase @recent", async ({ page }) => {
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 0 });
   await page.keyboard.press("Control+z");
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("pixel-art spray dither and palette shade @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const bar = page.locator('gnumarus-shell [data-testid="tool-options"]');
+  const setEngine = (expression: string): Promise<void> =>
+    page.evaluate((body: string) => {
+      const root = window as unknown as { __gnumarus?: { engine?: Record<string, (value: number) => void> } };
+      const engine = root.__gnumarus?.engine;
+      if (engine === undefined) {
+        throw new Error("engine unavailable");
+      }
+      // eslint-disable-next-line @typescript-eslint/no-implied-eval
+      new Function("engine", body)(engine);
+    }, expression);
+  await setPencil(page, "#ff0000");
+
+  // Solid reference: Pixel Hard at size 8.
+  await loadBlankProject(page, 64);
+  await bar.locator("select#brushPreset").selectOption("Pixel Hard");
+  await setEngine("engine.setBrushSize(8)");
+  await paintCenter(page);
+  const solid = await paintedPixelCount(page);
+  expect(solid).toBeGreaterThan(20);
+
+  // Pixel Spray keeps a deterministic subset of the same stamp.
+  await loadBlankProject(page, 64);
+  await bar.locator("select#brushPreset").selectOption("Pixel Spray");
+  await paintCenter(page);
+  const sprayed = await paintedPixelCount(page);
+  expect(sprayed).toBeGreaterThan(0);
+  expect(sprayed).toBeLessThan(solid);
+
+  // Pixel Dither with partial flow keeps only Bayer-passing pixels.
+  await loadBlankProject(page, 64);
+  await bar.locator("select#brushPreset").selectOption("Pixel Dither");
+  await setEngine("engine.setBrushFlow(0.4)");
+  await paintCenter(page);
+  const dithered = await paintedPixelCount(page);
+  expect(dithered).toBeGreaterThan(0);
+  expect(dithered).toBeLessThan(solid);
+
+  // Palette Shade steps through the picker palette in displayed order.
+  await loadBlankProject(page, 64);
+  await bar.locator("select#brushPreset").selectOption("Palette Shade");
+  await paintCenter(page);
+  const distinct = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { exportTextures(): Array<{ buffer: Uint8ClampedArray }> } };
+    };
+    const buffer = root.__gnumarus?.engine?.exportTextures()[0]?.buffer;
+    const seen = new Set<string>();
+    if (buffer !== undefined) {
+      for (let index = 0; index < buffer.length; index += 4) {
+        if ((buffer[index + 3] ?? 0) > 0) {
+          seen.add(`${buffer[index]},${buffer[index + 1]},${buffer[index + 2]}`);
+        }
+      }
+    }
+    return [...seen];
+  });
+  expect(distinct.length).toBeGreaterThanOrEqual(3);
+
+  // Re-sorting the palette panel reorders the shading sequence live.
+  const before = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getShadingPalette(): Array<{ r: number; g: number; b: number }> } };
+    };
+    return root.__gnumarus?.engine?.getShadingPalette().slice(0, 4) ?? [];
+  });
+  expect(before.length).toBe(4);
+  const picker = await openPicker(page, "pencilColor");
+  await picker.getByTestId("palette-toggle").click();
+  const panel = picker.getByTestId("palette-panel");
+  await expect(panel).toBeVisible();
+  await panel.getByTestId("palette-sort").selectOption("brightness-desc");
+  const after = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getShadingPalette(): Array<{ r: number; g: number; b: number }> } };
+    };
+    return root.__gnumarus?.engine?.getShadingPalette().slice(0, 4) ?? [];
+  });
+  expect(after).not.toEqual(before);
+  await page.keyboard.press("Escape");
 });

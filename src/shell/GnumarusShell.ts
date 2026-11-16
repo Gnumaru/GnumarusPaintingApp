@@ -351,6 +351,7 @@ import {
   parseBrushPresetList,
   serializeBrushPreset,
   serializeBrushPresetList,
+  type GnumarusBrushColorMode,
   type GnumarusBrushPreset,
 } from "../canvas/GnumarusBrushPresets";
 import { parseHexToRgbaBytes, rgbaBytesToHex } from "../color/GnumarusColorModels";
@@ -2035,6 +2036,9 @@ export class GnumarusShell extends LitElement {
     brushHardness: { type: Number },
     brushSpacing: { type: Number },
     brushFlow: { type: Number },
+    pixelSprayDensity: { type: Number },
+    brushDither: { type: Boolean },
+    brushColorMode: { type: String },
     paintFuzzy: { type: Number },
     paintGrainStrength: { type: Number },
     paintGrainScale: { type: Number },
@@ -2285,6 +2289,9 @@ export class GnumarusShell extends LitElement {
   declare brushHardness: number;
   declare brushSpacing: number;
   declare brushFlow: number;
+  declare pixelSprayDensity: number;
+  declare brushDither: boolean;
+  declare brushColorMode: GnumarusBrushColorMode;
   declare paintFuzzy: number;
   declare paintGrainStrength: number;
   declare paintGrainScale: number;
@@ -2536,6 +2543,9 @@ export class GnumarusShell extends LitElement {
     this.brushHardness = DEFAULT_BRUSH_HARDNESS;
     this.brushSpacing = DEFAULT_BRUSH_SPACING;
     this.brushFlow = DEFAULT_BRUSH_FLOW;
+    this.pixelSprayDensity = 1;
+    this.brushDither = false;
+    this.brushColorMode = "solid";
     this.paintFuzzy = DEFAULT_PAINT_FUZZY;
     this.paintGrainStrength = DEFAULT_PAINT_GRAIN_STRENGTH;
     this.paintGrainScale = DEFAULT_PAINT_GRAIN_SCALE;
@@ -2825,6 +2835,16 @@ export class GnumarusShell extends LitElement {
               if (typeof detail?.value === "string") {
                 this.pushRecentColor(detail.value);
               }
+            }}
+            @gnumarus-palette-change=${(event: Event): void => {
+              const detail = (event as CustomEvent<{ hexes?: unknown }>).detail;
+              if (!Array.isArray(detail?.hexes)) {
+                return;
+              }
+              if (this.brushColorMode !== "palette") {
+                return;
+              }
+              this.refreshShadingPalette();
             }}
             @gnumarus-swatches-edit=${(event: Event): void => {
               const detail = (event as CustomEvent<{ kind?: unknown; hex?: unknown }>).detail;
@@ -5811,6 +5831,34 @@ export class GnumarusShell extends LitElement {
                   <option value="image">${tr("val.image")}</option>
                 </select>
               </label>
+              <label title=${tr("opt.sprayHint")}
+                >${tr("opt.spray")}
+                <input
+                  type="number"
+                  id="pixelSpray${sfx}"
+                  min="1"
+                  max="100"
+                  step="1"
+                  .value=${String(Math.round(this.pixelSprayDensity * 100))}
+                  @input=${(): void => this.applyPixelSprayFromDialog(sfx)}
+                />
+              </label>
+              <label title=${tr("opt.colorModeHint")}
+                >${tr("opt.colorMode")}
+                <select id="brushColorMode${sfx}" .value=${this.brushColorMode} @change=${(): void => this.applyBrushColorModeFromDialog(sfx)}>
+                  <option value="solid">${tr("val.solid")}</option>
+                  <option value="palette">${tr("val.palette")}</option>
+                </select>
+              </label>
+              <label title=${tr("opt.ditherHint")}
+                ><input
+                  type="checkbox"
+                  id="brushDither${sfx}"
+                  .checked=${this.brushDither}
+                  @change=${(): void => this.applyBrushDitherFromDialog(sfx)}
+                />
+                ${tr("opt.dither")}
+              </label>
               ${this.brushTipKind === "pixel"
                 ? html``
                 : html`<label title=${tr("opt.softnessHint")}
@@ -6904,6 +6952,10 @@ export class GnumarusShell extends LitElement {
       this.engine.setCurvePixelPerfect(this.curvePixelPerfect);
       this.engine.setModelLighting(this.storageModelLighting);
       this.engine.setMaxBrushSize(this.maxBrushSize);
+      this.engine.setPixelSprayDensity(this.pixelSprayDensity);
+      this.engine.setBrushDither(this.brushDither);
+      this.engine.setBrushColorMode(this.brushColorMode);
+      this.refreshShadingPalette();
       this.engine.setEmptyCellHold(this.emptyCellMode === "hold");
       this.refreshLayers();
       // The engine fits the zoom during construction, before the animation
@@ -9671,6 +9723,64 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.flow", { value: Math.round(clamped * 100) });
   }
 
+  /** Test hook: set the pixel-spray density (1..100 percent kept, clamped). */
+  setPixelSpray(percent: number): void {
+    const clamped = Number.isFinite(percent) ? Math.min(100, Math.max(1, Math.round(percent))) : 100;
+    this.pixelSprayDensity = clamped / 100;
+    this.engine?.setPixelSprayDensity(clamped / 100);
+    this.statusMessage = tr("status.spray", { value: clamped });
+  }
+
+  private applyPixelSprayFromDialog(scope = ""): void {
+    const input = this.shadowRoot?.getElementById("pixelSpray" + scope) as HTMLInputElement | null;
+    const raw = Number(input?.value ?? "100");
+    const clamped = Number.isFinite(raw) ? Math.min(100, Math.max(1, Math.round(raw))) : 100;
+    this.pixelSprayDensity = clamped / 100;
+    this.engine?.setPixelSprayDensity(clamped / 100);
+    this.statusMessage = tr("status.spray", { value: clamped });
+  }
+
+  private applyBrushDitherFromDialog(scope = ""): void {
+    const input = this.shadowRoot?.getElementById("brushDither" + scope) as HTMLInputElement | null;
+    const enabled = input?.checked === true;
+    this.brushDither = enabled;
+    this.engine?.setBrushDither(enabled);
+  }
+
+  private applyBrushColorModeFromDialog(scope = ""): void {
+    const select = this.shadowRoot?.getElementById("brushColorMode" + scope) as HTMLSelectElement | null;
+    const next: GnumarusBrushColorMode = select?.value === "palette" ? "palette" : "solid";
+    this.brushColorMode = next;
+    this.engine?.setBrushColorMode(next);
+    if (next === "palette") {
+      this.refreshShadingPalette();
+    }
+    this.statusMessage = tr("status.colorMode", {
+      value: next === "palette" ? tr("val.palette") : tr("val.solid"),
+    });
+  }
+
+  /**
+   * Push the foreground picker's displayed palette (in order) to the
+   * engine as the shading sequence. No-op when the picker is not mounted.
+   */
+  private refreshShadingPalette(): void {
+    const picker = this.shadowRoot?.getElementById("pencilColor") as unknown as {
+      getPaletteHexes?: () => string[];
+    } | null;
+    let hexes: string[] = [];
+    try {
+      hexes = picker?.getPaletteHexes?.() ?? [];
+    } catch {
+      hexes = [];
+    }
+    const colors = hexes
+      .map((hex) => parseHexToRgbaBytes(hex))
+      .filter((parsed): parsed is { r: number; g: number; b: number; a: number } => parsed !== null)
+      .map((parsed) => ({ r: parsed.r, g: parsed.g, b: parsed.b, a: 255 }));
+    this.engine?.setShadingPalette(colors);
+  }
+
   /** Test hook: set the fuzzy jitter amount (0..100 percent, clamped). */
   setPaintFuzzy(percent: number): void {
     const clamped = clampPaintFuzzy(Number.isFinite(percent) ? percent / 100 : DEFAULT_PAINT_FUZZY);
@@ -9940,6 +10050,15 @@ export class GnumarusShell extends LitElement {
     this.engine?.setBrushSpacing(preset.brushSpacing);
     this.brushFlow = preset.brushFlow;
     this.engine?.setBrushFlow(preset.brushFlow);
+    this.pixelSprayDensity = preset.pixelSprayDensity ?? 1;
+    this.engine?.setPixelSprayDensity(preset.pixelSprayDensity ?? 1);
+    this.brushDither = preset.brushDither ?? false;
+    this.engine?.setBrushDither(preset.brushDither ?? false);
+    this.brushColorMode = preset.brushColorMode ?? "solid";
+    this.engine?.setBrushColorMode(preset.brushColorMode ?? "solid");
+    if (this.brushColorMode === "palette") {
+      this.refreshShadingPalette();
+    }
     this.pressureResponse = preset.pressureResponse;
     this.engine?.setPressureResponse(preset.pressureResponse);
     this.pressureSizeCurve = preset.pressureSizeCurve;

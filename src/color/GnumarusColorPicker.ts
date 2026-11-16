@@ -968,6 +968,22 @@ export class GnumarusColorPicker extends LitElement {
     return sortPaletteEntries(source, key, dir === "desc");
   }
 
+  /** Displayed palette hexes in order (brush shading follows this sequence). */
+  getPaletteHexes(): string[] {
+    return this.paletteEntriesSorted().map((entry) => entry.hex);
+  }
+
+  /** Announce a palette order/content change so brush shading can follow it. */
+  private emitPaletteChange(): void {
+    this.dispatchEvent(
+      new CustomEvent("gnumarus-palette-change", {
+        detail: { hexes: this.getPaletteHexes() },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+
   /** Choose a palette color (discrete pick: live change plus commit). */
   private pickPaletteColor(hex: string): void {
     const parsed = parseHexToRgbaBytes(hex);
@@ -1009,6 +1025,7 @@ export class GnumarusColorPicker extends LitElement {
         this.paletteColors =
           entries.length > GNUMARUS_PALETTE_MAX_COLORS ? reducePaletteMedianCut(entries) : entries;
         this.requestUpdate();
+        this.emitPaletteChange();
       } finally {
         bitmap.close();
       }
@@ -1294,6 +1311,7 @@ export class GnumarusColorPicker extends LitElement {
                               ? next
                               : "hue-asc";
                           this.requestUpdate();
+                          this.emitPaletteChange();
                         }}
                       >
                         <option value="hue-asc">${tr("color.sortHueAsc")}</option>

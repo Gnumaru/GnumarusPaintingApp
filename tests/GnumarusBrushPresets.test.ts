@@ -48,9 +48,49 @@ describe("GnumarusBrushPresets", () => {
       "Chisel Marker",
       "Velocity Ink",
       "Tilt Pencil",
+      "Pixel Spray",
+      "Pixel Dither",
+      "Palette Shade",
     ]) {
       expect(names).toContain(expected);
     }
+  });
+
+  it("fills pixel-art defaults for older preset files", () => {
+    const legacy = JSON.stringify({
+      version: 1,
+      name: "Legacy",
+      brushSize: 4,
+      brushShape: "circle",
+      brushTipKind: "pixel",
+      brushHardness: 0.5,
+      brushSpacing: 0.15,
+      brushFlow: 1,
+      pressureResponse: "none",
+      pressureSizeCurve: "linear",
+      pressureAlphaCurve: "linear",
+      paintFuzzy: 0,
+      paintGrainStrength: 0,
+      paintGrainScale: 8,
+      tiltSizeAmount: 0,
+      speedFadeAmount: 0,
+      tipAngleMode: "none",
+      airbrushRate: 0,
+      smudgeRate: 0,
+      smudgeWet: 0,
+      paintDualScale: 1,
+      paintDualStrength: 1,
+      blendMode: "normal",
+      accumulate: true,
+    });
+    expect(parseBrushPreset(legacy)).toMatchObject({
+      pixelSprayDensity: 1,
+      brushDither: false,
+      brushColorMode: "solid",
+    });
+    expect(() => parseBrushPreset(JSON.stringify({ ...JSON.parse(legacy), pixelSprayDensity: 5 }))).toThrow(
+      GnumarusBrushPresetError,
+    );
   });
 
   it("round-trips custom preset lists", () => {

@@ -26,6 +26,7 @@ import {
   type GnumarusManagedUsageCell,
 } from "../content/GnumarusContentManager";
 import {
+  bayerThreshold,
   paintCurveStroke,
   paintEllipseFilled,
   paintEllipseOutline,
@@ -79,6 +80,7 @@ import {
   type GnumarusChannelLock,
   type GnumarusDabDirtyRect,
   type GnumarusLayerBlendMode,
+  type GnumarusPixelWriteGate,
   type GnumarusPressureResponse,
   type GnumarusRgba,
 } from "./GnumarusPixelBuffer";
@@ -126,6 +128,7 @@ import {
   parseSymmetryMode,
   parseTipAngleMode,
   mirrorSegmentEndsOnAxis,
+  pixelSprayAllow,
   smoothStrokeVelocity,
   stampPaintDabCoverage,
   strokeDabPositions,
@@ -139,6 +142,7 @@ import {
   type GnumarusSymmetryMode,
   type GnumarusTipAngleMode,
 } from "./GnumarusPaintBrush";
+import type { GnumarusBrushColorMode } from "./GnumarusBrushPresets";
 import {
   combineMasksForParent,
   indentLayerIntoAbove,
@@ -995,6 +999,19 @@ export class GnumarusCanvasEngine {
   private paintGrainStrength = DEFAULT_PAINT_GRAIN_STRENGTH;
   private paintGrainScale = DEFAULT_PAINT_GRAIN_SCALE;
   private paintSeed = 1;
+  /**
+   * Pixel-art brush dynamics: spray density (1 = solid, lower keeps a
+   * deterministic subset of pixels), ordered-dither toggle (Bayer-4x4 gate
+   * on the effective alpha, painted pixels stay fully opaque), and palette
+   * shading (each painted pixel steps through `shadingPalette` in order).
+   */
+  private pixelSprayDensity = 1;
+  private brushDither = false;
+  private brushColorMode: GnumarusBrushColorMode = "solid";
+  private shadingPalette: GnumarusRgba[] = [];
+  private shadingIndex = 0;
+  /** Per-stroke salt so spray patterns vary between strokes, deterministically. */
+  private strokeSalt = 0;
   private strokeTiltMag = 0;
   private strokeVelocity = 0;
   private velocityOverride: number | null = null;
@@ -9004,6 +9021,110 @@ export class GnumarusCanvasEngine {
     this.updatePreviews();
   }
 
+  getPixelSprayDensity(): number {
+    return this.pixelSprayDensity;
+  }
+
+  setPixelSprayDensity(value: number): boolean {
+    const clamped = Number.isFinite(value) ? Math.min(1, Math.max(0.01, value)) : 1;
+    if (clamped === this.pixelSprayDensity) {
+      return false;
+    }
+    this.pixelSprayDensity = clamped;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  getBrushDither(): boolean {
+    return this.brushDither;
+  }
+
+  setBrushDither(enabled: boolean): boolean {
+    const next = enabled === true;
+    if (next === this.brushDither) {
+      return false;
+    }
+    this.brushDither = next;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  getBrushColorMode(): GnumarusBrushColorMode {
+    return this.brushColorMode;
+  }
+
+  setBrushColorMode(mode: GnumarusBrushColorMode): boolean {
+    const next: GnumarusBrushColorMode = mode === "palette" ? "palette" : "solid";
+    if (next === this.brushColorMode) {
+      return false;
+    }
+    this.brushColorMode = next;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  getShadingPalette(): GnumarusRgba[] {
+    return this.shadingPalette.map((entry) => ({ ...entry }));
+  }
+
+  setShadingPalette(colors: GnumarusRgba[]): void {
+    const clampByte = (value: number): number =>
+      Number.isFinite(value) ? Math.min(255, Math.max(0, Math.round(value))) : 0;
+    this.shadingPalette = colors.slice(0, 256).map((entry) => ({
+      r: clampByte(entry.r),
+      g: clampByte(entry.g),
+      b: clampByte(entry.b),
+      a: clampByte(entry.a),
+    }));
+    this.emitStats();
+    this.updatePreviews();
+  }
+
+  /**
+   * Per-pixel write gate for pixel-art brushes, or undefined when the
+   * brush paints solid (zero overhead on the default path). Spray skips a
+   * deterministic subset of pixels, dither keeps pixels whose Bayer-4x4
+   * threshold passes the effective alpha, and palette mode steps through
+   * the shading palette in order for every painted pixel.
+   */
+  private pixelArtGate(color: GnumarusRgba): GnumarusPixelWriteGate | undefined {
+    const spray = this.pixelSprayDensity < 1;
+    const dither = this.brushDither;
+    const shade = this.brushColorMode === "palette" && this.shadingPalette.length > 0;
+    if (!spray && !dither && !shade) {
+      return undefined;
+    }
+    const alpha01 = Math.min(1, Math.max(0, (color.a / 255) * this.brushFlow));
+    const seed = this.paintSeed;
+    const salt = this.strokeSalt;
+    const density = this.pixelSprayDensity;
+    return {
+      allow: (x: number, y: number): boolean => {
+        if (spray && !pixelSprayAllow(seed, salt, x, y, density)) {
+          return false;
+        }
+        if (dither && !(bayerThreshold(x, y) < alpha01)) {
+          return false;
+        }
+        return true;
+      },
+      colorFor: (_x: number, _y: number, base: GnumarusRgba): GnumarusRgba => {
+        if (!shade) {
+          return base;
+        }
+        const entry = this.shadingPalette[this.shadingIndex % this.shadingPalette.length];
+        this.shadingIndex += 1;
+        if (entry === undefined) {
+          return base;
+        }
+        return { r: entry.r, g: entry.g, b: entry.b, a: base.a };
+      },
+    };
+  }
+
   getPressureSizeCurve(): GnumarusPressureCurve {
     return this.pressureSizeCurve;
   }
@@ -9482,6 +9603,8 @@ export class GnumarusCanvasEngine {
     this.strokeTiltMag = 0;
     this.strokeVelocity = 0;
     this.strokeDabAngle = 0;
+    this.strokeSalt += 1;
+    this.shadingIndex = 0;
     this.strokeLastMovePos = null;
     this.strokeLastMoveT = 0;
   }
@@ -10320,6 +10443,12 @@ export class GnumarusCanvasEngine {
     const offset = paintDabFuzzyOffset(jitter, size);
     const dabSize = paintDabFuzzySize(jitter, size);
     const dabAlpha = this.brushFlow * paintDabFuzzyAlpha(jitter) * flowGain;
+    if (!pixelSprayAllow(this.paintSeed, this.strokeSalt + this.strokeDabIndex, 0, 0, this.pixelSprayDensity)) {
+      // Pixel-spray skips whole soft dabs (per-dab decision); the dab index
+      // still advances so the pattern stays deterministic per stroke.
+      this.strokeDabIndex += 1;
+      return;
+    }
     const dual: GnumarusPaintDualTip | null =
       this.paintDualTip === null
         ? null
@@ -10456,6 +10585,7 @@ export class GnumarusCanvasEngine {
   ): void {
     const size = this.pressureBrushSize();
     const color = this.pressureBrushColor();
+    const gate = this.pixelArtGate(color);
     if (this.pencilPixelPerfectActive()) {
       const stroke = this.pencilPixelPerfectStroke;
       const base = this.strokeBase;
@@ -10473,7 +10603,9 @@ export class GnumarusCanvasEngine {
           if (x < 0 || y < 0 || x >= tex.width || y >= tex.height) {
             return;
           }
-          mask[y * tex.width + x] = 255;
+          if (gate === undefined || gate.allow(x, y)) {
+            mask[y * tex.width + x] = 255;
+          }
         });
         const dirty: GnumarusDabDirtyRect = {
           left: Math.min(x0, x1) - 1,
@@ -10498,7 +10630,7 @@ export class GnumarusCanvasEngine {
               tex.buffer[at + 3] = base[at + 3]!;
             }
           }
-          setPixel(tex.buffer, tex.width, tex.height, x, y, color, locked, this.blendMode);
+          setPixel(tex.buffer, tex.width, tex.height, x, y, color, locked, this.blendMode, undefined, gate);
         });
         return;
       }
@@ -10521,6 +10653,7 @@ export class GnumarusCanvasEngine {
         this.pencilAntialias,
         this.wrapMode,
         this.maxBrushSize,
+        gate,
       );
       const reach = (this.pencilAntialias ? size : Math.round(size)) / 2 + 1;
       const dirty: GnumarusDabDirtyRect = {
@@ -10548,6 +10681,7 @@ export class GnumarusCanvasEngine {
       this.blendMode,
       this.wrapMode,
       this.maxBrushSize,
+      gate,
     );
   }
 
@@ -12865,6 +12999,7 @@ export class GnumarusCanvasEngine {
     const qy1 = this.pencilAntialias ? to.y : Math.floor(to.y);
     const size = this.pressureBrushSize();
     const color = this.pressureBrushColor();
+    const gate = this.pixelArtGate(color);
     if (this.pencilPixelPerfectActive()) {
       this.paintPencilLine(tex, locked, qx0, qy0, qx1, qy1);
       return;
@@ -12896,6 +13031,7 @@ export class GnumarusCanvasEngine {
           this.pencilAntialias,
           this.wrapMode,
           this.maxBrushSize,
+          gate,
         );
         dirty = this.unionDabDirty(
           this.unionDabDirty(dirty, end.x0, end.y0, reach),
@@ -12933,6 +13069,7 @@ export class GnumarusCanvasEngine {
         this.blendMode,
         this.wrapMode,
         this.maxBrushSize,
+        gate,
       );
     }
   }

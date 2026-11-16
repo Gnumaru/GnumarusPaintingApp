@@ -27,6 +27,7 @@ import {
   evalPressureCurve,
   hashDabRandom,
   normalizePointerTilt,
+  pixelSprayAllow,
   mirrorSegmentEnds,
   mirrorSegmentEndsOnAxis,
   paintDabFuzzyAlpha,  paintDabFuzzyOffset,
@@ -170,6 +171,44 @@ describe("GnumarusPaintBrush", () => {
       expect(v).toBeGreaterThanOrEqual(0);
       expect(v).toBeLessThan(1);
     }
+  });
+
+  it("pixelSprayAllow keeps everything at density 1 and nothing at 0", () => {
+    for (let x = 0; x < 8; x += 1) {
+      for (let y = 0; y < 8; y += 1) {
+        expect(pixelSprayAllow(7, 3, x, y, 1)).toBe(true);
+        expect(pixelSprayAllow(7, 3, x, y, 0)).toBe(false);
+        expect(pixelSprayAllow(7, 3, x, y, -1)).toBe(false);
+      }
+    }
+  });
+
+  it("pixelSprayAllow is deterministic per pixel and varies across pixels and strokes", () => {
+    expect(pixelSprayAllow(7, 3, 2, 5, 0.5)).toBe(pixelSprayAllow(7, 3, 2, 5, 0.5));
+    const kept = new Set<string>();
+    const total = 16 * 16;
+    let hits = 0;
+    for (let x = 0; x < 16; x += 1) {
+      for (let y = 0; y < 16; y += 1) {
+        if (pixelSprayAllow(7, 3, x, y, 0.5)) {
+          hits += 1;
+          kept.add(`${x},${y}`);
+        }
+      }
+    }
+    // Roughly half kept, and a different salt gives a different pattern.
+    expect(hits).toBeGreaterThan(total * 0.25);
+    expect(hits).toBeLessThan(total * 0.75);
+    expect(kept.size).toBe(hits);
+    let sameSaltHits = 0;
+    for (let x = 0; x < 16; x += 1) {
+      for (let y = 0; y < 16; y += 1) {
+        if (pixelSprayAllow(7, 99, x, y, 0.5) && kept.has(`${x},${y}`)) {
+          sameSaltHits += 1;
+        }
+      }
+    }
+    expect(sameSaltHits).toBeLessThan(hits);
   });
 
   it("fuzzy jitter stays bounded and off means identity", () => {

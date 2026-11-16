@@ -577,6 +577,33 @@ export function hashDabRandom(seed: number, index: number): number {
   return (h >>> 0) / 4294967296;
 }
 
+/**
+ * Pixel-spray gate: deterministically keep or skip one pixel. The 2D
+ * position is folded into the seed so every pixel of a stroke decides
+ * independently, while the per-stroke salt varies the pattern between
+ * strokes. Density 1 keeps everything, 0 keeps nothing.
+ */
+export function pixelSprayAllow(
+  seed: number,
+  salt: number,
+  x: number,
+  y: number,
+  density: number,
+): boolean {
+  if (!(density > 0)) {
+    return false;
+  }
+  if (density >= 1) {
+    return true;
+  }
+  const mixed =
+    (Math.floor(seed) | 0) ^
+    Math.imul(Math.floor(x) | 0, 374761393) ^
+    Math.imul(Math.floor(y) | 0, 668265263) ^
+    Math.imul(Math.floor(salt) | 0, 2246822519);
+  return hashDabRandom(mixed, 0) < density;
+}
+
 /** Per-dab dynamics bundle: fuzzy jitter plus anchored paper grain. */
 export interface GnumarusPaintDabJitter {
   fuzzy: number;
