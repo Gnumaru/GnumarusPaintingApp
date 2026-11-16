@@ -563,3 +563,36 @@ test("palette swatches reorder by drag and drop, switching sort to custom @recen
   expect(engineOrder).toEqual(after.slice(0, 3));
   await page.keyboard.press("Escape");
 });
+
+test("brush settings side panel collapses and expands with the top-left arrow @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const canvas = page.locator("gnumarus-shell canvas[data-engine]");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "right" });
+  const picker = page.locator("gnumarus-shell #pencilColor");
+  await expect(picker.getByRole("dialog", { name: "Color picker" })).toBeVisible();
+  const panel = picker.locator("[data-testid='brush-side-panel']");
+  await expect(panel).toBeVisible();
+  const toggle = picker.getByTestId("brush-toggle");
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await toggle.click();
+  await expect(panel).toBeHidden();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await toggle.click();
+  await expect(panel).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  // Brush settings still apply after re-expanding.
+  await panel.locator("select#brushColorModePanel").selectOption("palette");
+  const colorMode = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getBrushColorMode(): string } };
+    };
+    return root.__gnumarus?.engine?.getBrushColorMode() ?? "";
+  });
+  expect(colorMode).toBe("palette");
+  await page.keyboard.press("Escape");
+});

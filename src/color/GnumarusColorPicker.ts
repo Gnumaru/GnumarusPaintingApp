@@ -230,10 +230,10 @@ export class GnumarusColorPicker extends LitElement {
     .palette-swatch:hover {
       border-color: #0e639c;
     }
-    .palette-toggle {
+    .palette-toggle,
+    .brush-toggle {
       position: absolute;
       top: 6px;
-      right: 6px;
       width: 22px;
       height: 22px;
       padding: 0;
@@ -245,7 +245,14 @@ export class GnumarusColorPicker extends LitElement {
       border-radius: 4px;
       cursor: pointer;
     }
-    .palette-toggle:hover {
+    .palette-toggle {
+      right: 6px;
+    }
+    .brush-toggle {
+      left: 6px;
+    }
+    .palette-toggle:hover,
+    .brush-toggle:hover {
       background: #3a3a3a;
     }
     .popup.palette-open {
@@ -422,6 +429,8 @@ export class GnumarusColorPicker extends LitElement {
   private popupPos: { left: number; top: number } | null = null;
   /** Image palette panel open (arrow top-right of the popup). */
   private paletteOpen = false;
+  /** Brush settings side panel open (arrow top-left of the popup). */
+  private brushPanelOpen = true;
   /** Image palette entries (null = default procedural palette). */
   private paletteColors: GnumarusPaletteEntry[] | null = null;
   /** Image palette sort: criterion plus direction, or manual drag order. */
@@ -894,7 +903,8 @@ export class GnumarusColorPicker extends LitElement {
   /** Open the popup at a viewport position (e.g. canvas right-click). */
   openAt(clientX: number, clientY: number): void {
     this.open = true;
-    const reserve = this.hasSidePanel ? 660 : this.paletteOpen ? 556 : 380;
+    const sideOpen = this.hasSidePanel && this.brushPanelOpen;
+    const reserve = sideOpen ? 660 : this.paletteOpen ? 556 : 380;
     this.popupPos = {
       left: Math.min(clientX + 8, Math.max(8, window.innerWidth - reserve)),
       top: Math.min(clientY, Math.max(8, window.innerHeight - 420)),
@@ -962,6 +972,12 @@ export class GnumarusColorPicker extends LitElement {
     this.ignoreNextDocPointerDown = false;
     window.removeEventListener("pointerdown", this.onDocumentPointerDown);
     window.removeEventListener("keydown", this.onDocumentKeyDown);
+  }
+
+  /** Toggle the brush settings side panel. */
+  private toggleBrushPanel(): void {
+    this.brushPanelOpen = !this.brushPanelOpen;
+    this.requestUpdate();
   }
 
   /** Toggle the image palette side panel. */
@@ -1213,17 +1229,27 @@ export class GnumarusColorPicker extends LitElement {
       ${this.open
         ? html`
             <div
-              class="popup${this.paletteOpen ? " palette-open" : ""}${this.hasSidePanel ? " side-open" : ""}"
+              class="popup${this.paletteOpen ? " palette-open" : ""}${this.hasSidePanel && this.brushPanelOpen ? " side-open" : ""}"
               role="dialog"
               aria-label=${tr("color.dialog")}
               style=${this.popupPos === null
                 ? ""
                 : `left: ${this.popupPos.left}px; top: ${this.popupPos.top}px;`}
             >
-              ${this.hasSidePanel
+              ${this.hasSidePanel && this.brushPanelOpen
                 ? html`<div class="brush-side-panel">
                     <slot name="side-panel" @slotchange=${(): void => this.requestUpdate()}></slot>
                   </div>`
+                : html``}
+              ${this.hasSidePanel
+                ? html`<button
+                class="brush-toggle"
+                data-testid="brush-toggle"
+                aria-label=${tr("color.brushToggle")}
+                title=${tr("color.brushToggle")}
+                aria-expanded=${this.brushPanelOpen ? "true" : "false"}
+                @click=${(): void => this.toggleBrushPanel()}
+              >${this.brushPanelOpen ? "▼" : "◀"}</button>`
                 : html``}
               <button
                 class="palette-toggle"
