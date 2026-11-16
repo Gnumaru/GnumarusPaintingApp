@@ -27,6 +27,8 @@ import {
   evalPressureCurve,
   hashDabRandom,
   normalizePointerTilt,
+  findPaletteShadeIndex,
+  nextPaletteShadeIndex,
   pixelSprayAllow,
   mirrorSegmentEnds,
   mirrorSegmentEndsOnAxis,
@@ -209,6 +211,34 @@ describe("GnumarusPaintBrush", () => {
       }
     }
     expect(sameSaltHits).toBeLessThan(hits);
+  });
+
+  it("findPaletteShadeIndex matches exactly or snaps to nearest", () => {
+    const palette = [
+      { r: 255, g: 0, b: 0 },
+      { r: 0, g: 255, b: 0 },
+      { r: 0, g: 0, b: 255 },
+    ];
+    expect(findPaletteShadeIndex([], 1, 2, 3)).toBe(-1);
+    expect(findPaletteShadeIndex(palette, 0, 255, 0)).toBe(1);
+    expect(findPaletteShadeIndex(palette, 128, 0, 0)).toBe(0);
+    expect(findPaletteShadeIndex(palette, 10, 250, 10)).toBe(1);
+  });
+
+  it("nextPaletteShadeIndex steps exact matches and snaps off-palette colors", () => {
+    const palette = [
+      { r: 255, g: 0, b: 0 },
+      { r: 0, g: 255, b: 0 },
+      { r: 0, g: 0, b: 255 },
+    ];
+    expect(nextPaletteShadeIndex([], 255, 0, 0)).toBe(-1);
+    // Exact foreground match advances one step, wrapping around.
+    expect(nextPaletteShadeIndex(palette, 255, 0, 0)).toBe(1);
+    expect(nextPaletteShadeIndex(palette, 0, 0, 255)).toBe(0);
+    // Off-palette foreground snaps to nearest (dark red -> red) then advances.
+    expect(nextPaletteShadeIndex(palette, 128, 0, 0)).toBe(1);
+    // Near-green snaps to green, then advances to blue.
+    expect(nextPaletteShadeIndex(palette, 10, 250, 10)).toBe(2);
   });
 
   it("fuzzy jitter stays bounded and off means identity", () => {

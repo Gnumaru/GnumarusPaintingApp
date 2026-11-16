@@ -128,6 +128,7 @@ import {
   parseSymmetryMode,
   parseTipAngleMode,
   mirrorSegmentEndsOnAxis,
+  nextPaletteShadeIndex,
   pixelSprayAllow,
   smoothStrokeVelocity,
   stampPaintDabCoverage,
@@ -1009,7 +1010,10 @@ export class GnumarusCanvasEngine {
   private brushDither = false;
   private brushColorMode: GnumarusBrushColorMode = "solid";
   private shadingPalette: GnumarusRgba[] = [];
-  private shadingIndex = 0;
+  /** Palette-shading color resolved once per stroke (null = paint solid). */
+  private strokeShadeColor: GnumarusRgba | null = null;
+  /** Palette-shading cursor: each stroke paints one entry, then advances. */
+  private shadingCursor = 0;
   /** Per-stroke salt so spray patterns vary between strokes, deterministically. */
   private strokeSalt = 0;
   private strokeTiltMag = 0;
@@ -9061,6 +9065,17 @@ export class GnumarusCanvasEngine {
       return false;
     }
     this.brushColorMode = next;
+    if (next === "palette" && this.shadingPalette.length > 0) {
+      // Anchor the walk at the foreground color (exact match, else nearest),
+      // so the first stroke advances one step from a sensible entry.
+      const anchor = nextPaletteShadeIndex(
+        this.shadingPalette,
+        this.color.r,
+        this.color.g,
+        this.color.b,
+      );
+      this.shadingCursor = anchor >= 0 ? anchor : 0;
+    }
     this.emitStats();
     this.updatePreviews();
     return true;
@@ -9093,8 +9108,7 @@ export class GnumarusCanvasEngine {
   private pixelArtGate(color: GnumarusRgba): GnumarusPixelWriteGate | undefined {
     const spray = this.pixelSprayDensity < 1;
     const dither = this.brushDither;
-    const shade = this.brushColorMode === "palette" && this.shadingPalette.length > 0;
-    if (!spray && !dither && !shade) {
+    if (!spray && !dither) {
       return undefined;
     }
     const alpha01 = Math.min(1, Math.max(0, (color.a / 255) * this.brushFlow));
@@ -9111,17 +9125,7 @@ export class GnumarusCanvasEngine {
         }
         return true;
       },
-      colorFor: (_x: number, _y: number, base: GnumarusRgba): GnumarusRgba => {
-        if (!shade) {
-          return base;
-        }
-        const entry = this.shadingPalette[this.shadingIndex % this.shadingPalette.length];
-        this.shadingIndex += 1;
-        if (entry === undefined) {
-          return base;
-        }
-        return { r: entry.r, g: entry.g, b: entry.b, a: base.a };
-      },
+      colorFor: (_x: number, _y: number, base: GnumarusRgba): GnumarusRgba => base,
     };
   }
 
@@ -9604,7 +9608,14 @@ export class GnumarusCanvasEngine {
     this.strokeVelocity = 0;
     this.strokeDabAngle = 0;
     this.strokeSalt += 1;
-    this.shadingIndex = 0;
+    this.strokeShadeColor = null;
+    if (this.brushColorMode === "palette" && this.shadingPalette.length > 0) {
+      const entry = this.shadingPalette[this.shadingCursor % this.shadingPalette.length];
+      this.shadingCursor += 1;
+      if (entry !== undefined) {
+        this.strokeShadeColor = { r: entry.r, g: entry.g, b: entry.b, a: this.color.a };
+      }
+    }
     this.strokeLastMovePos = null;
     this.strokeLastMoveT = 0;
   }
@@ -9659,9 +9670,10 @@ export class GnumarusCanvasEngine {
   private pressureBrushColor(): GnumarusRgba {
     const active = this.pressureResponse === "opacity" || this.pressureResponse === "size+opacity";
     const gain = active ? evalPressureCurve(this.pressureAlphaCurve, this.strokePressure) : 1;
+    const base = this.strokeShadeColor ?? this.color;
     return {
-      ...this.color,
-      a: Math.round(this.color.a * gain),
+      ...base,
+      a: Math.round(base.a * gain),
     };
   }
 
