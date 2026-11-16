@@ -519,3 +519,47 @@ test("palette panel keeps the central picker width @recent", async ({ page }) =>
   expect(closed.width).toBeCloseTo(before.width, 0);
   await page.keyboard.press("Escape");
 });
+
+test("palette swatches reorder by drag and drop, switching sort to custom @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  // Shading follows the displayed order, so the engine echoes the new order.
+  const bar = page.locator('gnumarus-shell [data-testid="tool-options"]');
+  await bar.locator("select#brushColorMode").selectOption("palette");
+  const picker = await openPicker(page, "pencilColor");
+  await picker.getByTestId("palette-toggle").click();
+  const panel = picker.getByTestId("palette-panel");
+  await expect(panel).toBeVisible();
+  const swatches = panel.getByTestId("palette-swatch");
+  const orderOf = (): Promise<string[]> =>
+    swatches.evaluateAll((elements) => elements.map((element) => element.getAttribute("data-hex") ?? ""));
+  const before = await orderOf();
+  expect(before.length).toBeGreaterThan(3);
+  const firstBox = await swatches.nth(0).boundingBox();
+  const thirdBox = await swatches.nth(2).boundingBox();
+  if (firstBox === null || thirdBox === null) {
+    throw new Error("palette swatch has no bounding box");
+  }
+  await page.mouse.move(firstBox.x + firstBox.width / 2, firstBox.y + firstBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(thirdBox.x + thirdBox.width / 2, thirdBox.y + thirdBox.height / 2, { steps: 12 });
+  await page.mouse.up();
+  await expect(panel.getByTestId("palette-sort")).toHaveValue("custom");
+  const after = await orderOf();
+  expect(after[2]).toBe(before[0]);
+  expect(after[0]).toBe(before[1]);
+  expect(after[1]).toBe(before[2]);
+  // A plain click still picks a color (the drag did not swallow it permanently).
+  await swatches.nth(0).click();
+  // The engine shading sequence tracks the displayed order.
+  const engineOrder = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getShadingPalette(): Array<{ r: number; g: number; b: number }> } };
+    };
+    const toHex = (entry: { r: number; g: number; b: number }): string =>
+      `#${entry.r.toString(16).padStart(2, "0")}${entry.g.toString(16).padStart(2, "0")}${entry.b.toString(16).padStart(2, "0")}`;
+    return (root.__gnumarus?.engine?.getShadingPalette() ?? []).slice(0, 3).map(toHex);
+  });
+  expect(engineOrder).toEqual(after.slice(0, 3));
+  await page.keyboard.press("Escape");
+});

@@ -220,7 +220,12 @@ export class GnumarusColorPicker extends LitElement {
       border: 1px solid #555;
       border-radius: 3px;
       padding: 0;
-      cursor: pointer;
+      cursor: grab;
+      touch-action: none;
+    }
+    .palette-swatch.drop-target {
+      outline: 2px solid #0e639c;
+      outline-offset: 1px;
     }
     .palette-swatch:hover {
       border-color: #0e639c;
@@ -419,7 +424,7 @@ export class GnumarusColorPicker extends LitElement {
   private paletteOpen = false;
   /** Image palette entries (null = default procedural palette). */
   private paletteColors: GnumarusPaletteEntry[] | null = null;
-  /** Image palette sort: criterion plus direction. */
+  /** Image palette sort: criterion plus direction, or manual drag order. */
   private paletteSort:
     | "hue-asc"
     | "hue-desc"
@@ -428,7 +433,14 @@ export class GnumarusColorPicker extends LitElement {
     | "brightness-asc"
     | "brightness-desc"
     | "lightness-asc"
-    | "lightness-desc" = "hue-asc";
+    | "lightness-desc"
+    | "custom" = "hue-asc";
+  /** Manual palette order from drag-and-drop (shown when sort is "custom"). */
+  private customPaletteOrder: GnumarusPaletteEntry[] | null = null;
+  /** Active palette drag (indices into the displayed list), or null. */
+  private paletteDrag: { from: number; over: number; moved: boolean; startX: number; startY: number } | null = null;
+  /** Suppress the click that follows a palette drag-and-drop. */
+  private suppressPaletteClick = false;
   /** Swallow the document pointerdown that opened the popup programmatically. */
   private ignoreNextDocPointerDown = false;
 
@@ -967,6 +979,9 @@ export class GnumarusColorPicker extends LitElement {
   /** Palette entries to show: image palette or the default, sorted. */
   private paletteEntriesSorted(): GnumarusPaletteEntry[] {
     const source = this.paletteColors ?? defaultHslPalette();
+    if (this.paletteSort === "custom") {
+      return this.customPaletteOrder ?? [...source];
+    }
     const [key, dir] = this.paletteSort.split("-") as [GnumarusPaletteSortKey, "asc" | "desc"];
     return sortPaletteEntries(source, key, dir === "desc");
   }
@@ -985,6 +1000,106 @@ export class GnumarusColorPicker extends LitElement {
         composed: true,
       }),
     );
+  }
+
+  /**
+   * Deepest element at viewport coordinates, descending through open shadow
+   * roots (document-level hit testing stops at custom-element hosts).
+   */
+  private paletteHitAt(clientX: number, clientY: number): Element | null {
+    let scope: Document | ShadowRoot = document;
+    let hit: Element | null = null;
+    for (;;) {
+      const found: Element | null = scope.elementFromPoint(clientX, clientY);
+      if (found === null) {
+        return hit;
+      }
+      hit = found;
+      const nested: ShadowRoot | null | undefined = (found as unknown as { shadowRoot?: ShadowRoot | null })
+        .shadowRoot;
+      if (nested === undefined || nested === null) {
+        return hit;
+      }
+      scope = nested;
+    }
+  }
+
+  /** Begin a potential palette drag (reorder on release past the threshold). */
+  private onPaletteSwatchPointerDown(event: PointerEvent, index: number): void {
+    if (event.pointerType === "mouse" && event.button !== 0) {
+      return;
+    }
+    this.paletteDrag = { from: index, over: index, moved: false, startX: event.clientX, startY: event.clientY };
+    window.addEventListener("pointermove", this.onPaletteDragMove);
+    window.addEventListener("pointerup", this.onPaletteDragUp);
+    window.addEventListener("pointercancel", this.onPaletteDragCancel);
+  }
+
+  private readonly onPaletteDragMove = (event: PointerEvent): void => {
+    const drag = this.paletteDrag;
+    if (drag === null) {
+      return;
+    }
+    if (!drag.moved) {
+      if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 5) {
+        return;
+      }
+      drag.moved = true;
+    }
+    const swatch = this.paletteHitAt(event.clientX, event.clientY)?.closest("[data-palette-index]") ?? null;
+    const raw = swatch?.getAttribute("data-palette-index") ?? null;
+    const over = raw === null ? -1 : Number(raw);
+    if (over !== drag.over) {
+      drag.over = over;
+      this.requestUpdate();
+    }
+  };
+
+  private readonly onPaletteDragUp = (): void => {
+    window.removeEventListener("pointermove", this.onPaletteDragMove);
+    window.removeEventListener("pointerup", this.onPaletteDragUp);
+    window.removeEventListener("pointercancel", this.onPaletteDragCancel);
+    const drag = this.paletteDrag;
+    this.paletteDrag = null;
+    if (drag === null || !drag.moved) {
+      return;
+    }
+    // A release (even a no-op one) is followed by a click: swallow it so a
+    // drag never also picks a color.
+    this.suppressPaletteClick = true;
+    const displayed = this.paletteEntriesSorted();
+    const to = drag.over;
+    if (to < 0 || to >= displayed.length || to === drag.from) {
+      this.requestUpdate();
+      return;
+    }
+    const next = [...displayed];
+    const [moved] = next.splice(drag.from, 1);
+    if (moved === undefined) {
+      this.requestUpdate();
+      return;
+    }
+    next.splice(to, 0, moved);
+    this.customPaletteOrder = next;
+    this.paletteSort = "custom";
+    this.requestUpdate();
+    this.emitPaletteChange();
+  };
+
+  private readonly onPaletteDragCancel = (): void => {
+    window.removeEventListener("pointermove", this.onPaletteDragMove);
+    window.removeEventListener("pointerup", this.onPaletteDragUp);
+    this.paletteDrag = null;
+    this.requestUpdate();
+  };
+
+  /** Choose a palette color, unless the click closed a drag-and-drop. */
+  private pickPaletteSwatch(hex: string): void {
+    if (this.suppressPaletteClick) {
+      this.suppressPaletteClick = false;
+      return;
+    }
+    this.pickPaletteColor(hex);
   }
 
   /** Choose a palette color (discrete pick: live change plus commit). */
@@ -1027,6 +1142,7 @@ export class GnumarusColorPicker extends LitElement {
         const entries = imagePixelsToPaletteEntries(data);
         this.paletteColors =
           entries.length > GNUMARUS_PALETTE_MAX_COLORS ? reducePaletteMedianCut(entries) : entries;
+        this.customPaletteOrder = null;
         this.requestUpdate();
         this.emitPaletteChange();
       } finally {
@@ -1304,6 +1420,7 @@ export class GnumarusColorPicker extends LitElement {
                           const select = event.target as HTMLSelectElement | null;
                           const next = select?.value ?? "hue-asc";
                           this.paletteSort =
+                            next === "custom" ||
                             next === "hue-desc" ||
                             next === "saturation-asc" ||
                             next === "saturation-desc" ||
@@ -1313,6 +1430,9 @@ export class GnumarusColorPicker extends LitElement {
                             next === "lightness-desc"
                               ? next
                               : "hue-asc";
+                          if (this.paletteSort === "custom" && this.customPaletteOrder === null) {
+                            this.customPaletteOrder = [...(this.paletteColors ?? defaultHslPalette())];
+                          }
                           this.requestUpdate();
                           this.emitPaletteChange();
                         }}
@@ -1325,20 +1445,23 @@ export class GnumarusColorPicker extends LitElement {
                         <option value="brightness-desc">${tr("color.sortBrightnessDesc")}</option>
                         <option value="lightness-asc">${tr("color.sortLightnessAsc")}</option>
                         <option value="lightness-desc">${tr("color.sortLightnessDesc")}</option>
+                        <option value="custom">${tr("color.sortCustom")}</option>
                       </select>
                       <button data-testid="palette-open" @click=${(): void => void this.openPaletteImage()}>
                         ${tr("color.paletteOpen")}
                       </button>
                       <div class="palette-grid" data-testid="palette-grid">
                         ${this.paletteEntriesSorted().map(
-                          (entry) => html`<button
-                            class="palette-swatch"
+                          (entry, index) => html`<button
+                            class="palette-swatch${this.paletteDrag !== null && this.paletteDrag.moved && this.paletteDrag.over === index ? " drop-target" : ""}"
                             data-testid="palette-swatch"
                             data-hex=${entry.hex}
+                            data-palette-index=${index}
                             title=${entry.hex}
                             aria-label=${tr("color.applySwatch", { hex: entry.hex })}
                             style="background-color: ${entry.hex};"
-                            @click=${(): void => this.pickPaletteColor(entry.hex)}
+                            @pointerdown=${(event: PointerEvent): void => this.onPaletteSwatchPointerDown(event, index)}
+                            @click=${(): void => this.pickPaletteSwatch(entry.hex)}
                           ></button>`,
                         )}
                       </div>
