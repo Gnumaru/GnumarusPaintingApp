@@ -76,7 +76,6 @@ import {
   setPixel,
   stampSegmentCoverage,
   applyShadeMask,
-  buildShadeRemap,
   type GnumarusBlendMode,
   type GnumarusBrushShape,
   type GnumarusChannelLock,
@@ -85,6 +84,7 @@ import {
   type GnumarusPixelWriteGate,
   type GnumarusPressureResponse,
   type GnumarusRgba,
+  type GnumarusShadeDirection,
 } from "./GnumarusPixelBuffer";
 import {
   GnumarusPixelPerfectStroke,
@@ -1011,8 +1011,8 @@ export class GnumarusCanvasEngine {
   private brushDither = false;
   private brushColorMode: GnumarusBrushColorMode = "solid";
   private shadingPalette: GnumarusRgba[] = [];
-  /** Per-stroke palette remap (source RGB -> stepped entry), built at stroke start. */
-  private shadeRemap: Map<number, GnumarusRgba> | null = null;
+  /** Palette-shading step direction (forward toward the end, backward toward the start). */
+  private shadeDirection: GnumarusShadeDirection = "forward";
   /** Per-stroke salt so spray patterns vary between strokes, deterministically. */
   private strokeSalt = 0;
   private strokeTiltMag = 0;
@@ -9069,6 +9069,21 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
+  getShadeDirection(): GnumarusShadeDirection {
+    return this.shadeDirection;
+  }
+
+  setShadeDirection(direction: GnumarusShadeDirection): boolean {
+    const next: GnumarusShadeDirection = direction === "backward" ? "backward" : "forward";
+    if (next === this.shadeDirection) {
+      return false;
+    }
+    this.shadeDirection = next;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
   getShadingPalette(): GnumarusRgba[] {
     return this.shadingPalette.map((entry) => ({ ...entry }));
   }
@@ -9596,7 +9611,6 @@ export class GnumarusCanvasEngine {
     this.strokeVelocity = 0;
     this.strokeDabAngle = 0;
     this.strokeSalt += 1;
-    this.shadeRemap = this.shadeModeActive() ? buildShadeRemap(this.shadingPalette) : null;
     this.strokeLastMovePos = null;
     this.strokeLastMoveT = 0;
   }
@@ -10403,12 +10417,9 @@ export class GnumarusCanvasEngine {
     locked: GnumarusChannelLock,
     dirty?: GnumarusDabDirtyRect | null,
   ): void {
-    if (this.shadeRemap === null) {
-      return;
-    }
     if (dirty === undefined || dirty === null || this.wrapMode !== "off") {
       tex.buffer.set(base);
-      applyShadeMask(tex.buffer, base, mask, tex.width, tex.height, this.shadingPalette, locked, this.blendMode);
+      applyShadeMask(tex.buffer, base, mask, tex.width, tex.height, this.shadingPalette, locked, this.blendMode, undefined, this.shadeDirection);
       return;
     }
     const x0 = Math.max(0, dirty.left);
@@ -10428,7 +10439,7 @@ export class GnumarusCanvasEngine {
       top: y0,
       width: x1 - x0 + 1,
       height: y1 - y0 + 1,
-    });
+    }, this.shadeDirection);
   }
 
   /** Merge one dab bbox into a dirty union (null starts the box). */

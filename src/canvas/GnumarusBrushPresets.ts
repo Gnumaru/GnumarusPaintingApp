@@ -12,7 +12,7 @@ import type { GnumarusPressureResponse } from "./GnumarusPixelBuffer";
 import type { GnumarusSymmetryMode } from "./GnumarusPaintBrush";
 import type { GnumarusTipAngleMode } from "./GnumarusPaintBrush";
 import type { GnumarusWrapMode } from "./GnumarusViewportMath";
-import type { GnumarusBrushShape } from "./GnumarusPixelBuffer";
+import type { GnumarusBrushShape, GnumarusShadeDirection } from "./GnumarusPixelBuffer";
 import { GNUMARUS_MAX_MAX_BRUSH_SIZE } from "../settings/GnumarusBrushSettings";
 
 /** Pencil color source: solid foreground or stepping through a palette. */
@@ -49,6 +49,8 @@ export interface GnumarusBrushPreset {
   brushDither?: boolean;
   /** Solid foreground vs palette stepping; absent in older files means solid. */
   brushColorMode?: GnumarusBrushColorMode;
+  /** Palette-shading step direction; absent in older files means forward. */
+  shadeDirection?: GnumarusShadeDirection;
   blendMode: GnumarusBlendMode;
   accumulate: boolean;
   /** Symmetry mode; absent in older files means off. */
@@ -198,6 +200,10 @@ export function parseBrushPreset(jsonText: string): GnumarusBrushPreset {
       "solid",
       "palette",
     ]) as GnumarusBrushColorMode,
+    shadeDirection: checkString(parsed["shadeDirection"] ?? "forward", "shadeDirection", [
+      "forward",
+      "backward",
+    ]) as GnumarusShadeDirection,
     blendMode: checkString(parsed["blendMode"], "blendMode", ["normal", "copy", "eraser"]) as GnumarusBlendMode,
     accumulate,
     symmetryMode: checkSymmetry(parsed["symmetryMode"]),
@@ -257,6 +263,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     pixelSprayDensity: 1,
     brushDither: false,
     brushColorMode: "solid",
+    shadeDirection: "forward",
     blendMode: "normal",
     accumulate: true,
     symmetryMode: "off",
@@ -289,6 +296,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     pixelSprayDensity: 0.35,
     brushDither: false,
     brushColorMode: "solid",
+    shadeDirection: "forward",
     blendMode: "normal",
     accumulate: true,
     symmetryMode: "off",
@@ -321,6 +329,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     pixelSprayDensity: 1,
     brushDither: true,
     brushColorMode: "solid",
+    shadeDirection: "forward",
     blendMode: "normal",
     accumulate: true,
     symmetryMode: "off",
@@ -353,6 +362,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     pixelSprayDensity: 1,
     brushDither: false,
     brushColorMode: "palette",
+    shadeDirection: "forward",
     blendMode: "normal",
     accumulate: true,
     symmetryMode: "off",
@@ -385,6 +395,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     pixelSprayDensity: 1,
     brushDither: false,
     brushColorMode: "solid",
+    shadeDirection: "forward",
     blendMode: "normal",
     accumulate: true,
     symmetryMode: "off",
@@ -417,6 +428,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     pixelSprayDensity: 1,
     brushDither: false,
     brushColorMode: "solid",
+    shadeDirection: "forward",
     blendMode: "normal",
     accumulate: true,
     symmetryMode: "off",
@@ -449,6 +461,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     pixelSprayDensity: 1,
     brushDither: false,
     brushColorMode: "solid",
+    shadeDirection: "forward",
     blendMode: "normal",
     accumulate: true,
     symmetryMode: "off",
@@ -481,6 +494,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     pixelSprayDensity: 1,
     brushDither: false,
     brushColorMode: "solid",
+    shadeDirection: "forward",
     blendMode: "normal",
     accumulate: true,
     symmetryMode: "off",
@@ -513,6 +527,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     pixelSprayDensity: 1,
     brushDither: false,
     brushColorMode: "solid",
+    shadeDirection: "forward",
     blendMode: "normal",
     accumulate: true,
     symmetryMode: "off",
@@ -545,6 +560,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     pixelSprayDensity: 1,
     brushDither: false,
     brushColorMode: "solid",
+    shadeDirection: "forward",
     blendMode: "eraser",
     accumulate: true,
     symmetryMode: "off",
@@ -577,6 +593,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     pixelSprayDensity: 1,
     brushDither: false,
     brushColorMode: "solid",
+    shadeDirection: "forward",
     blendMode: "eraser",
     accumulate: true,
     symmetryMode: "off",
@@ -609,6 +626,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     pixelSprayDensity: 1,
     brushDither: false,
     brushColorMode: "solid",
+    shadeDirection: "forward",
     blendMode: "normal",
     accumulate: false,
     symmetryMode: "off",
@@ -641,6 +659,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     pixelSprayDensity: 1,
     brushDither: false,
     brushColorMode: "solid",
+    shadeDirection: "forward",
     blendMode: "normal",
     accumulate: true,
     symmetryMode: "off",
@@ -673,6 +692,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     pixelSprayDensity: 1,
     brushDither: false,
     brushColorMode: "solid",
+    shadeDirection: "forward",
     blendMode: "normal",
     accumulate: true,
     symmetryMode: "off",
@@ -705,6 +725,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     pixelSprayDensity: 1,
     brushDither: false,
     brushColorMode: "solid",
+    shadeDirection: "forward",
     blendMode: "normal",
     accumulate: true,
     symmetryMode: "off",
@@ -737,6 +758,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     pixelSprayDensity: 1,
     brushDither: false,
     brushColorMode: "solid",
+    shadeDirection: "forward",
     blendMode: "normal",
     accumulate: true,
     symmetryMode: "off",
@@ -769,6 +791,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     pixelSprayDensity: 1,
     brushDither: false,
     brushColorMode: "solid",
+    shadeDirection: "forward",
     blendMode: "normal",
     accumulate: true,
     symmetryMode: "off",
@@ -801,6 +824,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     pixelSprayDensity: 1,
     brushDither: false,
     brushColorMode: "solid",
+    shadeDirection: "forward",
     blendMode: "normal",
     accumulate: true,
     symmetryMode: "off",
@@ -833,6 +857,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
     pixelSprayDensity: 1,
     brushDither: false,
     brushColorMode: "solid",
+    shadeDirection: "forward",
     blendMode: "normal",
     accumulate: true,
     symmetryMode: "off",

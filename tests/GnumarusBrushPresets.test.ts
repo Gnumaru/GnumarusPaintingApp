@@ -98,6 +98,42 @@ describe("GnumarusBrushPresets", () => {
     );
   });
 
+  it("defaults shade direction to forward and rejects bad values", () => {
+    const base = {
+      version: 1,
+      name: "Legacy",
+      brushSize: 4,
+      brushShape: "circle",
+      brushTipKind: "pixel",
+      brushHardness: 0.5,
+      brushSpacing: 0.15,
+      brushFlow: 1,
+      pressureResponse: "none",
+      pressureSizeCurve: "linear",
+      pressureAlphaCurve: "linear",
+      paintFuzzy: 0,
+      paintGrainStrength: 0,
+      paintGrainScale: 8,
+      tiltSizeAmount: 0,
+      speedFadeAmount: 0,
+      tipAngleMode: "none",
+      airbrushRate: 0,
+      smudgeRate: 0,
+      smudgeWet: 0,
+      paintDualScale: 1,
+      paintDualStrength: 1,
+      blendMode: "normal",
+      accumulate: true,
+    };
+    expect(parseBrushPreset(JSON.stringify(base))).toMatchObject({ shadeDirection: "forward" });
+    expect(
+      parseBrushPreset(JSON.stringify({ ...base, shadeDirection: "backward" })).shadeDirection,
+    ).toBe("backward");
+    expect(() => parseBrushPreset(JSON.stringify({ ...base, shadeDirection: "sideways" }))).toThrow(
+      GnumarusBrushPresetError,
+    );
+  });
+
   it("round-trips custom preset lists", () => {
     const first = BUILT_IN_BRUSH_PRESETS[0];
     if (first === undefined) {

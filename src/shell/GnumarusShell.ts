@@ -299,6 +299,7 @@ import {
   type GnumarusBlendMode,
   type GnumarusBrushShape,
   type GnumarusPressureResponse,
+  type GnumarusShadeDirection,
 } from "../canvas/GnumarusPixelBuffer";
 import {
   GNUMARUS_DEFAULT_FOLLOW_STRENGTH,
@@ -2292,6 +2293,7 @@ export class GnumarusShell extends LitElement {
   declare pixelSprayDensity: number;
   declare brushDither: boolean;
   declare brushColorMode: GnumarusBrushColorMode;
+  declare shadeDirection: GnumarusShadeDirection;
   declare paintFuzzy: number;
   declare paintGrainStrength: number;
   declare paintGrainScale: number;
@@ -2546,6 +2548,7 @@ export class GnumarusShell extends LitElement {
     this.pixelSprayDensity = 1;
     this.brushDither = false;
     this.brushColorMode = "solid";
+    this.shadeDirection = "forward";
     this.paintFuzzy = DEFAULT_PAINT_FUZZY;
     this.paintGrainStrength = DEFAULT_PAINT_GRAIN_STRENGTH;
     this.paintGrainScale = DEFAULT_PAINT_GRAIN_SCALE;
@@ -5850,6 +5853,13 @@ export class GnumarusShell extends LitElement {
                   <option value="palette">${tr("val.palette")}</option>
                 </select>
               </label>
+              <label title=${tr("opt.shadeDirectionHint")}
+                >${tr("opt.shadeDirection")}
+                <select id="brushShadeDirection${sfx}" .value=${this.shadeDirection} @change=${(): void => this.applyShadeDirectionFromDialog(sfx)}>
+                  <option value="forward">${tr("val.forward")}</option>
+                  <option value="backward">${tr("val.backward")}</option>
+                </select>
+              </label>
               <label title=${tr("opt.ditherHint")}
                 ><input
                   type="checkbox"
@@ -6955,6 +6965,7 @@ export class GnumarusShell extends LitElement {
       this.engine.setPixelSprayDensity(this.pixelSprayDensity);
       this.engine.setBrushDither(this.brushDither);
       this.engine.setBrushColorMode(this.brushColorMode);
+      this.engine.setShadeDirection(this.shadeDirection);
       this.refreshShadingPalette();
       this.engine.setEmptyCellHold(this.emptyCellMode === "hold");
       this.refreshLayers();
@@ -9747,6 +9758,16 @@ export class GnumarusShell extends LitElement {
     this.engine?.setBrushDither(enabled);
   }
 
+  private applyShadeDirectionFromDialog(scope = ""): void {
+    const select = this.shadowRoot?.getElementById("brushShadeDirection" + scope) as HTMLSelectElement | null;
+    const next: GnumarusShadeDirection = select?.value === "backward" ? "backward" : "forward";
+    this.shadeDirection = next;
+    this.engine?.setShadeDirection(next);
+    this.statusMessage = tr("status.shadeDirection", {
+      value: next === "backward" ? tr("val.backward") : tr("val.forward"),
+    });
+  }
+
   private applyBrushColorModeFromDialog(scope = ""): void {
     const select = this.shadowRoot?.getElementById("brushColorMode" + scope) as HTMLSelectElement | null;
     const next: GnumarusBrushColorMode = select?.value === "palette" ? "palette" : "solid";
@@ -10056,6 +10077,8 @@ export class GnumarusShell extends LitElement {
     this.engine?.setBrushDither(preset.brushDither ?? false);
     this.brushColorMode = preset.brushColorMode ?? "solid";
     this.engine?.setBrushColorMode(preset.brushColorMode ?? "solid");
+    this.shadeDirection = preset.shadeDirection ?? "forward";
+    this.engine?.setShadeDirection(preset.shadeDirection ?? "forward");
     if (this.brushColorMode === "palette") {
       this.refreshShadingPalette();
     }

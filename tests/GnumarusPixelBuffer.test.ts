@@ -672,6 +672,9 @@ describe("GnumarusPixelBuffer", () => {
     expect(remap.get((255 << 16) | (0 << 8) | 0)).toEqual({ r: 0, g: 255, b: 0, a: 255 });
     expect(remap.get((0 << 16) | (255 << 8) | 0)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
     expect(remap.has((0 << 16) | (0 << 8) | 255)).toBe(false);
+    const back = buildShadeRemap([red, green, blue], "backward");
+    expect(back.get((0 << 16) | (255 << 8) | 0)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+    expect(back.has((255 << 16) | (0 << 8) | 0)).toBe(false);
   });
 
   it("applyShadeMask steps base pixels and leaves misses alone", () => {

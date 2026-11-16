@@ -1673,15 +1673,22 @@ export function applyCoverageMask(
   }
 }
 
+export type GnumarusShadeDirection = "forward" | "backward";
+
 /**
- * Palette-shading lookup: source RGB key to the next palette entry.
+ * Palette-shading lookup: source RGB key to the next palette entry in the
+ * given direction (forward steps toward the end, backward toward the start).
  * Needs at least two entries (a single color has nowhere to step).
  */
-export function buildShadeRemap(palette: GnumarusRgba[]): Map<number, GnumarusRgba> {
+export function buildShadeRemap(
+  palette: GnumarusRgba[],
+  direction: GnumarusShadeDirection = "forward",
+): Map<number, GnumarusRgba> {
   const stepped = new Map<number, GnumarusRgba>();
-  for (let index = 0; index + 1 < palette.length; index += 1) {
+  const step = direction === "backward" ? -1 : 1;
+  for (let index = 0; index < palette.length; index += 1) {
     const from = palette[index];
-    const to = palette[index + 1];
+    const to = palette[index + step];
     if (from === undefined || to === undefined) {
       continue;
     }
@@ -1713,6 +1720,7 @@ export function applyShadeMask(
   locked: GnumarusChannelLock | undefined = undefined,
   blend: GnumarusBlendMode = "normal",
   rect?: { left: number; top: number; width: number; height: number },
+  direction: GnumarusShadeDirection = "forward",
 ): void {
   if (mask.length !== width * height || buffer.length !== width * height * 4 || base.length !== buffer.length) {
     return;
@@ -1720,7 +1728,7 @@ export function applyShadeMask(
   if (palette.length < 2) {
     return;
   }
-  const stepped = buildShadeRemap(palette);
+  const stepped = buildShadeRemap(palette, direction);
   const effective: GnumarusBlendMode = blend === "eraser" ? "normal" : blend;
   const shadeAt = (x: number, y: number): void => {
     const m = mask[y * width + x];

@@ -374,6 +374,17 @@ test("pixel-art spray dither and palette shade @recent", async ({ page }) => {
   // The second stroke reads the first stroke's result and steps again.
   await paintCenter(page);
   expect(await readPixel(page, 32, 32)).toEqual({ ...second, a: 255 });
+  // Backward direction walks toward the start of the palette instead.
+  await bar.locator("select#brushShadeDirection").selectOption("backward");
+  const direction = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getShadeDirection(): string } };
+    };
+    return root.__gnumarus?.engine?.getShadeDirection() ?? "";
+  });
+  expect(direction).toBe("backward");
+  await paintCenter(page);
+  expect(await readPixel(page, 32, 32)).toEqual({ ...first, a: 255 });
   // Transparent pixels and off-palette colors are left alone.
   await loadBlankProject(page, 64);
   await bar.locator("select#brushPreset").selectOption("Palette Shade");
