@@ -133,9 +133,13 @@ test("brush presets apply, save and persist", async ({ page }) => {
   await expect(page.locator("gnumarus-shell")).toContainText("Preset: Chalk");
   await expect(options.locator("select#brushTipKind")).toHaveValue("soft");
   await expect(options.locator("input#paintGrainStrength")).toHaveValue("60");
-  await options.locator("input#presetName").fill("E2E Custom");
-  await options.getByRole("button", { name: "Save", exact: true }).click();
+  await options.getByRole("button", { name: "Presets", exact: true }).click();
+  const presetDialog = page.locator('gnumarus-shell dialog#brushPresetDialog');
+  await expect(presetDialog).toBeVisible();
+  await presetDialog.locator("input#presetNameDialog").fill("E2E Custom");
+  await presetDialog.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Preset saved: E2E Custom");
+  await presetDialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(options.locator("select#brushPreset")).toContainText("E2E Custom");
   await page.reload();
   await page.waitForSelector("gnumarus-shell canvas");

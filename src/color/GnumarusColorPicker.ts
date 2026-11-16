@@ -268,10 +268,32 @@ export class GnumarusColorPicker extends LitElement {
       border-radius: 4px;
       padding: 4px 6px;
     }
+    .palette-panel > button {
+      background: #0e639c;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 6px 12px;
+      cursor: pointer;
+    }
+    .palette-panel > button:hover {
+      background: #1177b3;
+    }
     .palette-grid {
       display: flex;
       flex-wrap: wrap;
       gap: 4px;
+      overflow-y: auto;
+      min-height: 0;
+    }
+    .popup.side-open {
+      display: flex;
+      gap: 12px;
+      max-width: min(660px, 96vw);
+    }
+    .brush-side-panel {
+      width: 250px;
+      flex: 0 0 auto;
       overflow-y: auto;
       min-height: 0;
     }
@@ -646,6 +668,25 @@ export class GnumarusColorPicker extends LitElement {
     this.emitCommit();
   }
 
+  protected updated(changed: Map<string, unknown>): void {
+    // Opening on black with a switchable model applies the same
+    // switch-out adjustment as changing models (opt-out via setting).
+    if (changed.get("open") === false && this.open) {
+      this.maybeSwitchOutOfBlack();
+    }
+  }
+
+  /** Apply the black switch-out for the current model, if applicable. */
+  private maybeSwitchOutOfBlack(): void {
+    if (!this.switchOutOfBlack) {
+      return;
+    }
+    const switched = blackSwitchModelValues(this.model, this.rgba, this.hsvHue);
+    if (switched !== null) {
+      this.applyModelValues(switched);
+    }
+  }
+
   private onModelSelect(event: Event): void {
     const target = event.target as HTMLSelectElement | null;
     const next = target?.value ?? "hsv";
@@ -830,10 +871,15 @@ export class GnumarusColorPicker extends LitElement {
     this.emitCommit();
   }
 
+  /** Whether the host provides side-panel content (paint brush settings). */
+  private get hasSidePanel(): boolean {
+    return this.querySelector('[slot="side-panel"]') !== null;
+  }
+
   /** Open the popup at a viewport position (e.g. canvas right-click). */
   openAt(clientX: number, clientY: number): void {
     this.open = true;
-    const reserve = this.paletteOpen ? 580 : 380;
+    const reserve = this.hasSidePanel ? 660 : this.paletteOpen ? 580 : 380;
     this.popupPos = {
       left: Math.min(clientX + 8, Math.max(8, window.innerWidth - reserve)),
       top: Math.min(clientY, Math.max(8, window.innerHeight - 420)),
@@ -1031,13 +1077,18 @@ export class GnumarusColorPicker extends LitElement {
       ${this.open
         ? html`
             <div
-              class=${this.paletteOpen ? "popup palette-open" : "popup"}
+              class="popup${this.paletteOpen ? " palette-open" : ""}${this.hasSidePanel ? " side-open" : ""}"
               role="dialog"
               aria-label=${tr("color.dialog")}
               style=${this.popupPos === null
                 ? ""
                 : `left: ${this.popupPos.left}px; top: ${this.popupPos.top}px;`}
             >
+              ${this.hasSidePanel
+                ? html`<div class="brush-side-panel">
+                    <slot name="side-panel" @slotchange=${(): void => this.requestUpdate()}></slot>
+                  </div>`
+                : html``}
               <button
                 class="palette-toggle"
                 data-testid="palette-toggle"

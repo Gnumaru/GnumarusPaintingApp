@@ -434,3 +434,54 @@ test("back well opens the picker editing the background @recent", async ({ page 
   await page.mouse.click(center.x, center.y);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
 });
+
+test("right-click with pencil shows the brush settings side panel @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const canvas = page.locator("gnumarus-shell canvas[data-engine]");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "right" });
+  const picker = page.locator("gnumarus-shell #pencilColor");
+  await expect(picker.getByRole("dialog", { name: "Color picker" })).toBeVisible();
+  const panel = picker.locator("[data-testid='brush-side-panel']");
+  await expect(panel).toBeVisible();
+  // Full brush settings, minus the preset manager fields.
+  await expect(panel.locator("select#brushPresetPanel")).toBeVisible();
+  await expect(panel.locator("input#brushSizePanel")).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Presets", exact: true })).toBeVisible();
+  await expect(panel.locator("input#presetNameDialog")).toHaveCount(0);
+  await expect(panel.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
+  await expect(panel.getByRole("button", { name: "Delete", exact: true })).toHaveCount(0);
+  await expect(panel.getByRole("button", { name: "Export", exact: true })).toHaveCount(0);
+  await expect(panel.getByRole("button", { name: "Import", exact: true })).toHaveCount(0);
+  // Panel edits apply to the brush like the toolbar does.
+  await panel.locator("input#brushSizePanel").fill("7");
+  await expect(page.locator("gnumarus-shell")).toContainText("Brush size: 1 – 7");
+  await expect(panel.locator("select#brushPresetPanel")).toContainText("Soft Round");
+  await panel.locator("select#brushPresetPanel").selectOption("Soft Round");
+  await expect(page.locator("gnumarus-shell")).toContainText("Preset: Soft Round");
+  await expect(panel.locator("input#brushSizePanel")).toHaveValue("16");
+  // The presets button opens the manager dialog.
+  await panel.getByRole("button", { name: "Presets", exact: true }).click();
+  await expect(page.locator("gnumarus-shell dialog#brushPresetDialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+});
+
+test("right-click without pencil shows no brush side panel @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  const canvas = page.locator("gnumarus-shell canvas[data-engine]");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "right" });
+  const picker = page.locator("gnumarus-shell #pencilColor");
+  await expect(picker.getByRole("dialog", { name: "Color picker" })).toBeVisible();
+  await expect(picker.locator("[data-testid='brush-side-panel']")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+});

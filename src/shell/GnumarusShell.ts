@@ -1530,6 +1530,16 @@ export class GnumarusShell extends LitElement {
       opacity: 0.4;
       cursor: default;
     }
+    /* Brush settings side panel inside the paint color picker popup. */
+    .tool-options.brush-side-panel {
+      flex-direction: column;
+      align-items: stretch;
+      white-space: normal;
+      border-bottom: none;
+      background: transparent;
+      padding: 0;
+      overflow: visible;
+    }
     /* Native number spinners clash with the dark theme; the floating
        slider plus PageUp/PageDown cover stepping instead. */
     input[type="number"]::-webkit-outer-spin-button,
@@ -2826,7 +2836,16 @@ export class GnumarusShell extends LitElement {
                 this.removeSwatch(detail.hex);
               }
             }}
-          ></gnumarus-color-picker>
+          >
+            ${this.tool === "pencil"
+              ? html`<div slot="side-panel">
+                  <div class="tool-options brush-side-panel" data-testid="brush-side-panel">
+                    ${this.renderBrushPresetRow("Panel")}
+                    ${this.renderPencilBrushOptions("Panel")}
+                  </div>
+                </div>`
+              : html``}
+          </gnumarus-color-picker>
           <div class="paint-wells" title=${tr("color.wellsHint")}>
             <button
               class="paint-well paint-well-back"
@@ -4599,6 +4618,37 @@ export class GnumarusShell extends LitElement {
           <button @click=${(): void => this.confirmFrameDuration()}>${tr("btn.set")}</button>
         </div>
       </dialog>
+      <dialog id="brushPresetDialog" data-testid="brush-preset-dialog">
+        <h3>${tr("dialog.presetsTitle")}</h3>
+        <label title=${tr("opt.presetHint")}
+          >${tr("opt.preset")}
+          <select id="brushPresetDialog" @change=${(): void => this.applyBrushPresetFromDialog("Dialog")}>
+            ${[...BUILT_IN_BRUSH_PRESETS, ...this.brushPresets].map(
+              (preset) => html`<option value=${preset.name}>${preset.name}</option>`,
+            )}
+          </select>
+        </label>
+        <label title=${tr("opt.presetNameHint")}
+          >${tr("opt.presetName")}
+          <input
+            type="text"
+            id="presetNameDialog"
+            maxlength="64"
+            .value=${this.presetName}
+            @input=${(event: Event): void => {
+              this.presetName = (event.target as HTMLInputElement | null)?.value ?? "";
+            }}
+          />
+          <button @click=${(): void => this.saveBrushPresetFromDialog("Dialog")}>${tr("btn.save")}</button>
+          <button @click=${(): void => this.deleteBrushPresetFromDialog("Dialog")}>${tr("btn.delete")}</button>
+          <button @click=${(): void => this.downloadBrushPreset("Dialog")}>${tr("btn.export")}</button>
+          <button @click=${(): void => this.openBrushPresetPicker("Dialog")}>${tr("btn.import")}</button>
+          <input type="file" id="brushPresetImportDialog" accept="application/json,.json" hidden @change=${(): void => void this.importBrushPresetFromDialog("Dialog")} />
+        </label>
+        <div class="dialog-actions">
+          <button @click=${(): void => this.closeBrushPresetDialog()}>${tr("btn.close")}</button>
+        </div>
+      </dialog>
       <dialog id="animationDialog">
         <h3>${tr("dialog.animations")}</h3>
         <p>
@@ -5591,11 +5641,11 @@ export class GnumarusShell extends LitElement {
     this.refreshLayers();
   }
 
-  private renderBlendModeOption() {
+  private renderBlendModeOption(sfx: "" | "Panel" = "") {
     return html`
       <label title=${tr("opt.blendHint")}
         >${tr("opt.blend")}
-        <select id="blendMode" .value=${this.blendMode} @change=${(): void => this.applyBlendModeFromDialog()}>
+        <select id="blendMode${sfx}" .value=${this.blendMode} @change=${(): void => this.applyBlendModeFromDialog(sfx)}>
           <option value="normal">${tr("val.normal")}</option>
           <option value="copy">${tr("val.copy")}</option>
           <option value="eraser">${tr("val.eraser")}</option>
@@ -5604,28 +5654,28 @@ export class GnumarusShell extends LitElement {
     `;
   }
 
-  private renderAccumulateOption() {
+  private renderAccumulateOption(sfx: "" | "Panel" = "") {
     return html`
       <label title=${tr("opt.accumulateHint")}
         ><input
           type="checkbox"
-          id="accumulate"
+          id="accumulate${sfx}"
           .checked=${this.accumulate}
-          @change=${(): void => this.applyAccumulateFromDialog()}
+          @change=${(): void => this.applyAccumulateFromDialog(sfx)}
         />
         ${tr("opt.accumulate")}
       </label>
     `;
   }
 
-  private renderStabilizerOption() {
+  private renderStabilizerOption(sfx: "" | "Panel" = "") {
     return html`
       <label title=${tr("opt.stabilizerHint")}
         >${tr("opt.stabilizer")}
         <select
-          id="stabilizerMode"
+          id="stabilizerMode${sfx}"
           .value=${this.stabilizerMode}
-          @change=${(): void => this.applyStabilizerModeFromDialog()}
+          @change=${(): void => this.applyStabilizerModeFromDialog(sfx)}
         >
           <option value="none">${tr("val.none")}</option>
           <option value="rope">${tr("val.rope")}</option>
@@ -5638,12 +5688,12 @@ export class GnumarusShell extends LitElement {
               >${tr("opt.ropeLength")}
               <input
                 type="number"
-                id="ropeLength"
+                id="ropeLength${sfx}"
                 min="1"
                 max="200"
                 step="1"
                 .value=${String(this.ropeLength)}
-                @input=${(): void => this.applyRopeLengthFromDialog()}
+                @input=${(): void => this.applyRopeLengthFromDialog(sfx)}
               />
             </label>
           `
@@ -5654,12 +5704,12 @@ export class GnumarusShell extends LitElement {
               >${tr("opt.followStrength")}
               <input
                 type="number"
-                id="followStrength"
+                id="followStrength${sfx}"
                 min="1"
                 max="100"
                 step="1"
                 .value=${String(this.followStrength)}
-                @input=${(): void => this.applyFollowStrengthFromDialog()}
+                @input=${(): void => this.applyFollowStrengthFromDialog(sfx)}
               />
             </label>
           `
@@ -5704,316 +5754,314 @@ export class GnumarusShell extends LitElement {
     `;
   }
 
-  private renderToolOptions() {
-    if (this.tool === "pencil") {      return html`
-        <div class="tool-options" data-testid="tool-options" aria-label=${tr("opt.pencilAria")} ?hidden=${this.uiHidden}>
-          <label title=${tr("opt.presetHint")}
-            >${tr("opt.preset")}
-            <select id="brushPreset" @change=${(): void => this.applyBrushPresetFromDialog()}>
-              ${[...BUILT_IN_BRUSH_PRESETS, ...this.brushPresets].map(
-                (preset) => html`<option value=${preset.name}>${preset.name}</option>`,
-              )}
-            </select>
-          </label>
-          <label title=${tr("opt.presetNameHint")}
-            >${tr("opt.presetName")}
-            <input
-              type="text"
-              id="presetName"
-              maxlength="64"
-              .value=${this.presetName}
-              @input=${(event: Event): void => {
-                this.presetName = (event.target as HTMLInputElement | null)?.value ?? "";
-              }}
-            />
-            <button @click=${(): void => this.saveBrushPresetFromDialog()}>${tr("btn.save")}</button>
-            <button @click=${(): void => this.deleteBrushPresetFromDialog()}>${tr("btn.delete")}</button>
-            <button @click=${(): void => this.downloadBrushPreset()}>${tr("btn.export")}</button>
-            <button @click=${(): void => this.openBrushPresetPicker()}>${tr("btn.import")}</button>
-            <input type="file" id="brushPresetImport" accept="application/json,.json" hidden @change=${(): void => void this.importBrushPresetFromDialog()} />
-          </label>
-          <label title=${tr("opt.brushSizeHint")}
-            >${tr("opt.brushSize")}
-            <input
-              type="number"
-              id="brushSize"
-              min="0.1"
-              max=${String(this.maxBrushSize)}
-              step="0.1"
-              .value=${String(this.brushSize)}
-              @input=${(): void => this.applyBrushSizeFromDialog()}
-            />
-          </label>
-          <label title=${tr("opt.brushSizeMinHint")}
-            >${tr("opt.brushSizeMin")}
-            <input
-              type="number"
-              id="brushSizeMin"
-              min="0.1"
-              max=${String(this.maxBrushSize)}
-              step="0.1"
-              .value=${String(this.brushSizeMin)}
-              @input=${(): void => this.applyBrushSizeMinFromDialog()}
-            />
-          </label>
-          <label title=${tr("opt.brushShapeHint")}
-            >${tr("opt.brushShape")}
-            <select id="brushShape" .value=${this.brushShape} @change=${(): void => this.applyBrushShapeFromDialog()}>
-              <option value="square">${tr("val.square")}</option>
-              <option value="circle">${tr("val.circle")}</option>
-            </select>
-          </label>
-          <label title=${tr("opt.brushTipHint")}
-            >${tr("opt.brushTip")}
-            <select id="brushTipKind" .value=${this.brushTipKind} @change=${(): void => this.applyBrushTipKindFromDialog()}>
-              <option value="pixel">${tr("val.pixelHard")}</option>
-              <option value="soft">${tr("val.softRound")}</option>
-              <option value="image">${tr("val.image")}</option>
-            </select>
-          </label>
-          ${this.brushTipKind === "pixel"
-            ? html``
-            : html`<label title=${tr("opt.softnessHint")}
-                >${tr("opt.softness")}
+  /** Shared pencil settings (toolbar bar, picker side panel, preset dialog uses its own). */
+  private renderBrushPresetRow(sfx: "" | "Panel" | "Dialog") {
+    return html`
+              <label title=${tr("opt.presetHint")}
+                >${tr("opt.preset")}
+                <select id="brushPreset${sfx}" @change=${(): void => this.applyBrushPresetFromDialog(sfx)}>
+                  ${[...BUILT_IN_BRUSH_PRESETS, ...this.brushPresets].map(
+                    (preset) => html`<option value=${preset.name}>${preset.name}</option>`,
+                  )}
+                </select>
+                <button data-testid="brush-presets" title=${tr("opt.presetsHint")} @click=${(): void => this.openBrushPresetDialog()}>${tr("opt.presets")}</button>
+              </label>
+    `;
+  }
+
+  /** Brush size, tip, dynamics, pressure, AA, pixel-perfect, stabilizer, blend, accumulate. */
+  private renderPencilBrushOptions(sfx: "" | "Panel") {
+    return html`
+              <label title=${tr("opt.brushSizeHint")}
+                >${tr("opt.brushSize")}
                 <input
                   type="number"
-                  id="brushHardness"
-                  min="0"
-                  max="100"
-                  step="1"
-                  .value=${String(Math.round(this.brushHardness * 100))}
-                  @input=${(): void => this.applyBrushHardnessFromDialog()}
+                  id="brushSize${sfx}"
+                  min="0.1"
+                  max=${String(this.maxBrushSize)}
+                  step="0.1"
+                  .value=${String(this.brushSize)}
+                  @input=${(): void => this.applyBrushSizeFromDialog(sfx)}
                 />
               </label>
-              <label title=${tr("opt.spacingHint")}
-                >${tr("opt.spacing")}
+              <label title=${tr("opt.brushSizeMinHint")}
+                >${tr("opt.brushSizeMin")}
                 <input
                   type="number"
-                  id="brushSpacing"
-                  min="5"
-                  max="400"
-                  step="1"
-                  .value=${String(Math.round(this.brushSpacing * 100))}
-                  @input=${(): void => this.applyBrushSpacingFromDialog()}
+                  id="brushSizeMin${sfx}"
+                  min="0.1"
+                  max=${String(this.maxBrushSize)}
+                  step="0.1"
+                  .value=${String(this.brushSizeMin)}
+                  @input=${(): void => this.applyBrushSizeMinFromDialog(sfx)}
                 />
               </label>
-              <label title=${tr("opt.flowHint")}
-                >${tr("opt.flow")}
-                <input
-                  type="number"
-                  id="brushFlow"
-                  min="1"
-                  max="100"
-                  step="1"
-                  .value=${String(Math.round(this.brushFlow * 100))}
-                  @input=${(): void => this.applyBrushFlowFromDialog()}
-                />
-              </label>
-              <label title=${tr("opt.fuzzyHint")}
-                >${tr("opt.fuzzy")}
-                <input
-                  type="number"
-                  id="paintFuzzy"
-                  min="0"
-                  max="100"
-                  step="1"
-                  .value=${String(Math.round(this.paintFuzzy * 100))}
-                  @input=${(): void => this.applyPaintFuzzyFromDialog()}
-                />
-              </label>
-              <label title=${tr("opt.grainHint")}
-                >${tr("opt.grain")}
-                <input
-                  type="number"
-                  id="paintGrainStrength"
-                  min="0"
-                  max="100"
-                  step="1"
-                  .value=${String(Math.round(this.paintGrainStrength * 100))}
-                  @input=${(): void => this.applyPaintGrainFromDialog()}
-                />
-              </label>
-              <label title=${tr("opt.grainSizeHint")}
-                >${tr("opt.grainSize")}
-                <input
-                  type="number"
-                  id="paintGrainScale"
-                  min="2"
-                  max="64"
-                  step="1"
-                  .value=${String(this.paintGrainScale)}
-                  @input=${(): void => this.applyPaintGrainFromDialog()}
-                />
-              </label>
-              <label title=${tr("opt.tiltSizeHint")}
-                >${tr("opt.tiltSize")}
-                <input
-                  type="number"
-                  id="tiltSizeAmount"
-                  min="0"
-                  max="100"
-                  step="1"
-                  .value=${String(Math.round(this.tiltSizeAmount * 100))}
-                  @input=${(): void => this.applyTiltSizeFromDialog()}
-                />
-              </label>
-              <label title=${tr("opt.speedFadeHint")}
-                >${tr("opt.speedFade")}
-                <input
-                  type="number"
-                  id="speedFadeAmount"
-                  min="0"
-                  max="100"
-                  step="1"
-                  .value=${String(Math.round(this.speedFadeAmount * 100))}
-                  @input=${(): void => this.applySpeedFadeFromDialog()}
-                />
-              </label>
-              <label title=${tr("opt.tipRotationHint")}
-                >${tr("opt.tipRotation")}
-                <select id="tipAngleMode" .value=${this.tipAngleMode} @change=${(): void => this.applyTipAngleModeFromDialog()}>
-                  <option value="none">${tr("val.none")}</option>
-                  <option value="direction">${tr("val.followDirection")}</option>
+              <label title=${tr("opt.brushShapeHint")}
+                >${tr("opt.brushShape")}
+                <select id="brushShape${sfx}" .value=${this.brushShape} @change=${(): void => this.applyBrushShapeFromDialog(sfx)}>
+                  <option value="square">${tr("val.square")}</option>
+                  <option value="circle">${tr("val.circle")}</option>
                 </select>
               </label>
-              <label title=${tr("opt.airbrushHint")}
-                >${tr("opt.airbrush")}
-                <input
-                  type="number"
-                  id="airbrushRate"
-                  min="0"
-                  max="20"
-                  step="1"
-                  .value=${String(this.airbrushRate)}
-                  @input=${(): void => this.applyAirbrushRateFromDialog()}
-                />
+              <label title=${tr("opt.brushTipHint")}
+                >${tr("opt.brushTip")}
+                <select id="brushTipKind${sfx}" .value=${this.brushTipKind} @change=${(): void => this.applyBrushTipKindFromDialog(sfx)}>
+                  <option value="pixel">${tr("val.pixelHard")}</option>
+                  <option value="soft">${tr("val.softRound")}</option>
+                  <option value="image">${tr("val.image")}</option>
+                </select>
               </label>
-              <label title=${tr("opt.smudgeHint")}
-                >${tr("opt.smudge")}
-                <input
-                  type="number"
-                  id="smudgeRate"
-                  min="0"
-                  max="100"
-                  step="1"
-                  .value=${String(Math.round(this.smudgeRate * 100))}
-                  @input=${(): void => this.applySmudgeFromDialog()}
-                />
-              </label>
-              <label title=${tr("opt.wetnessHint")}
-                >${tr("opt.wetness")}
-                <input
-                  type="number"
-                  id="smudgeWet"
-                  min="0"
-                  max="100"
-                  step="1"
-                  .value=${String(Math.round(this.smudgeWet * 100))}
-                  @input=${(): void => this.applySmudgeFromDialog()}
-                />
-              </label>
-              <label title=${tr("opt.dualTipHint")}
-                >${tr("opt.dualTip")} ${this.paintDualName === "" ? tr("val.noneOption") : `(${this.paintDualName})`}
-                <input type="file" id="paintDualImport" accept="image/*" hidden @change=${(): void => void this.importPaintDualFromDialog()} />
-                <button @click=${(): void => this.openPaintDualPicker()}>${tr("opt.importDual")}</button>
-                ${this.paintDualName === ""
-                  ? html``
-                  : html`<button @click=${(): void => this.clearPaintDual()}>${tr("btn.clear")}</button>`}
-              </label>
-              ${this.paintDualName === ""
+              ${this.brushTipKind === "pixel"
                 ? html``
-                : html`<label title=${tr("opt.dualStrengthHint")}
-                    >${tr("opt.dualStrength")}
+                : html`<label title=${tr("opt.softnessHint")}
+                    >${tr("opt.softness")}
                     <input
                       type="number"
-                      id="paintDualStrength"
+                      id="brushHardness${sfx}"
                       min="0"
                       max="100"
                       step="1"
-                      .value=${String(Math.round(this.paintDualStrength * 100))}
-                      @input=${(): void => this.applyPaintDualTuningFromDialog()}
+                      .value=${String(Math.round(this.brushHardness * 100))}
+                      @input=${(): void => this.applyBrushHardnessFromDialog(sfx)}
                     />
                   </label>
-                  <label title=${tr("opt.dualSizeHint")}
-                    >${tr("opt.dualSize")}
+                  <label title=${tr("opt.spacingHint")}
+                    >${tr("opt.spacing")}
                     <input
                       type="number"
-                      id="paintDualScale"
-                      min="25"
+                      id="brushSpacing${sfx}"
+                      min="5"
                       max="400"
                       step="1"
-                      .value=${String(Math.round(this.paintDualScale * 100))}
-                      @input=${(): void => this.applyPaintDualTuningFromDialog()}
+                      .value=${String(Math.round(this.brushSpacing * 100))}
+                      @input=${(): void => this.applyBrushSpacingFromDialog(sfx)}
                     />
-                  </label>`}`}
-          ${this.brushTipKind === "image"
-            ? html`<label title=${tr("opt.imageTipHint")}
-                >${tr("opt.imageTip")} ${this.paintTipName === "" ? tr("val.noneOption") : `(${this.paintTipName})`}
-                <input type="file" id="paintTipImport" accept="image/*" hidden @change=${(): void => void this.importPaintTipFromDialog()} />
-                <button @click=${(): void => this.openPaintTipPicker()}>${tr("opt.importTip")}</button>
-                ${this.paintTipName === ""
-                  ? html``
-                  : html`<button @click=${(): void => this.clearPaintTip()}>${tr("btn.clear")}</button>`}
-              </label>`
-            : html``}
-          <label title=${tr("opt.pressureHint")}
-            >${tr("opt.pressure")}
-            <select
-              id="pressureResponse"
-              .value=${this.pressureResponse}
-              @change=${(): void => this.applyPressureResponseFromDialog()}
-            >
-              <option value="none">${tr("val.none")}</option>
-              <option value="size">${tr("val.size")}</option>
-              <option value="opacity">${tr("val.opacity")}</option>
-              <option value="size+opacity">${tr("val.sizeOpacity")}</option>
-            </select>
-          </label>
-          ${this.pressureResponse === "none"
-            ? html``
-            : html`<label title=${tr("opt.sizeCurveHint")}
-                >${tr("opt.sizeCurve")}
+                  </label>
+                  <label title=${tr("opt.flowHint")}
+                    >${tr("opt.flow")}
+                    <input
+                      type="number"
+                      id="brushFlow${sfx}"
+                      min="1"
+                      max="100"
+                      step="1"
+                      .value=${String(Math.round(this.brushFlow * 100))}
+                      @input=${(): void => this.applyBrushFlowFromDialog(sfx)}
+                    />
+                  </label>
+                  <label title=${tr("opt.fuzzyHint")}
+                    >${tr("opt.fuzzy")}
+                    <input
+                      type="number"
+                      id="paintFuzzy${sfx}"
+                      min="0"
+                      max="100"
+                      step="1"
+                      .value=${String(Math.round(this.paintFuzzy * 100))}
+                      @input=${(): void => this.applyPaintFuzzyFromDialog(sfx)}
+                    />
+                  </label>
+                  <label title=${tr("opt.grainHint")}
+                    >${tr("opt.grain")}
+                    <input
+                      type="number"
+                      id="paintGrainStrength${sfx}"
+                      min="0"
+                      max="100"
+                      step="1"
+                      .value=${String(Math.round(this.paintGrainStrength * 100))}
+                      @input=${(): void => this.applyPaintGrainFromDialog(sfx)}
+                    />
+                  </label>
+                  <label title=${tr("opt.grainSizeHint")}
+                    >${tr("opt.grainSize")}
+                    <input
+                      type="number"
+                      id="paintGrainScale${sfx}"
+                      min="2"
+                      max="64"
+                      step="1"
+                      .value=${String(this.paintGrainScale)}
+                      @input=${(): void => this.applyPaintGrainFromDialog(sfx)}
+                    />
+                  </label>
+                  <label title=${tr("opt.tiltSizeHint")}
+                    >${tr("opt.tiltSize")}
+                    <input
+                      type="number"
+                      id="tiltSizeAmount${sfx}"
+                      min="0"
+                      max="100"
+                      step="1"
+                      .value=${String(Math.round(this.tiltSizeAmount * 100))}
+                      @input=${(): void => this.applyTiltSizeFromDialog(sfx)}
+                    />
+                  </label>
+                  <label title=${tr("opt.speedFadeHint")}
+                    >${tr("opt.speedFade")}
+                    <input
+                      type="number"
+                      id="speedFadeAmount${sfx}"
+                      min="0"
+                      max="100"
+                      step="1"
+                      .value=${String(Math.round(this.speedFadeAmount * 100))}
+                      @input=${(): void => this.applySpeedFadeFromDialog(sfx)}
+                    />
+                  </label>
+                  <label title=${tr("opt.tipRotationHint")}
+                    >${tr("opt.tipRotation")}
+                    <select id="tipAngleMode${sfx}" .value=${this.tipAngleMode} @change=${(): void => this.applyTipAngleModeFromDialog(sfx)}>
+                      <option value="none">${tr("val.none")}</option>
+                      <option value="direction">${tr("val.followDirection")}</option>
+                    </select>
+                  </label>
+                  <label title=${tr("opt.airbrushHint")}
+                    >${tr("opt.airbrush")}
+                    <input
+                      type="number"
+                      id="airbrushRate${sfx}"
+                      min="0"
+                      max="20"
+                      step="1"
+                      .value=${String(this.airbrushRate)}
+                      @input=${(): void => this.applyAirbrushRateFromDialog(sfx)}
+                    />
+                  </label>
+                  <label title=${tr("opt.smudgeHint")}
+                    >${tr("opt.smudge")}
+                    <input
+                      type="number"
+                      id="smudgeRate${sfx}"
+                      min="0"
+                      max="100"
+                      step="1"
+                      .value=${String(Math.round(this.smudgeRate * 100))}
+                      @input=${(): void => this.applySmudgeFromDialog(sfx)}
+                    />
+                  </label>
+                  <label title=${tr("opt.wetnessHint")}
+                    >${tr("opt.wetness")}
+                    <input
+                      type="number"
+                      id="smudgeWet${sfx}"
+                      min="0"
+                      max="100"
+                      step="1"
+                      .value=${String(Math.round(this.smudgeWet * 100))}
+                      @input=${(): void => this.applySmudgeFromDialog(sfx)}
+                    />
+                  </label>
+                  <label title=${tr("opt.dualTipHint")}
+                    >${tr("opt.dualTip")} ${this.paintDualName === "" ? tr("val.noneOption") : `(${this.paintDualName})`}
+                    <input type="file" id="paintDualImport${sfx}" accept="image/*" hidden @change=${(): void => void this.importPaintDualFromDialog(sfx)} />
+                    <button @click=${(): void => this.openPaintDualPicker(sfx)}>${tr("opt.importDual")}</button>
+                    ${this.paintDualName === ""
+                      ? html``
+                      : html`<button @click=${(): void => this.clearPaintDual()}>${tr("btn.clear")}</button>`}
+                  </label>
+                  ${this.paintDualName === ""
+                    ? html``
+                    : html`<label title=${tr("opt.dualStrengthHint")}
+                        >${tr("opt.dualStrength")}
+                        <input
+                          type="number"
+                          id="paintDualStrength${sfx}"
+                          min="0"
+                          max="100"
+                          step="1"
+                          .value=${String(Math.round(this.paintDualStrength * 100))}
+                          @input=${(): void => this.applyPaintDualTuningFromDialog(sfx)}
+                        />
+                      </label>
+                      <label title=${tr("opt.dualSizeHint")}
+                        >${tr("opt.dualSize")}
+                        <input
+                          type="number"
+                          id="paintDualScale${sfx}"
+                          min="25"
+                          max="400"
+                          step="1"
+                          .value=${String(Math.round(this.paintDualScale * 100))}
+                          @input=${(): void => this.applyPaintDualTuningFromDialog(sfx)}
+                        />
+                      </label>`}`}
+              ${this.brushTipKind === "image"
+                ? html`<label title=${tr("opt.imageTipHint")}
+                    >${tr("opt.imageTip")} ${this.paintTipName === "" ? tr("val.noneOption") : `(${this.paintTipName})`}
+                    <input type="file" id="paintTipImport${sfx}" accept="image/*" hidden @change=${(): void => void this.importPaintTipFromDialog(sfx)} />
+                    <button @click=${(): void => this.openPaintTipPicker(sfx)}>${tr("opt.importTip")}</button>
+                    ${this.paintTipName === ""
+                      ? html``
+                      : html`<button @click=${(): void => this.clearPaintTip()}>${tr("btn.clear")}</button>`}
+                  </label>`
+                : html``}
+              <label title=${tr("opt.pressureHint")}
+                >${tr("opt.pressure")}
                 <select
-                  id="pressureSizeCurve"
-                  .value=${this.pressureSizeCurve}
-                  @change=${(): void => this.applyPressureSizeCurveFromDialog()}
+                  id="pressureResponse${sfx}"
+                  .value=${this.pressureResponse}
+                  @change=${(): void => this.applyPressureResponseFromDialog(sfx)}
                 >
-                  <option value="linear">${tr("val.linear")}</option>
-                  <option value="soft">${tr("val.soft")}</option>
-                  <option value="firm">${tr("val.firm")}</option>
+                  <option value="none">${tr("val.none")}</option>
+                  <option value="size">${tr("val.size")}</option>
+                  <option value="opacity">${tr("val.opacity")}</option>
+                  <option value="size+opacity">${tr("val.sizeOpacity")}</option>
                 </select>
               </label>
-              <label title=${tr("opt.alphaCurveHint")}
-                >${tr("opt.alphaCurve")}
-                <select
-                  id="pressureAlphaCurve"
-                  .value=${this.pressureAlphaCurve}
-                  @change=${(): void => this.applyPressureAlphaCurveFromDialog()}
-                >
-                  <option value="linear">${tr("val.linear")}</option>
-                  <option value="soft">${tr("val.soft")}</option>
-                  <option value="firm">${tr("val.firm")}</option>
-                </select>
-              </label>`}
-          <label title=${tr("opt.pencilAntialiasHint")}
-            ><input
-              type="checkbox"
-              id="pencilAntialias"
-              .checked=${this.pencilAntialias}
-              @change=${(): void => this.applyPencilAntialiasFromDialog()}
-            />
-            ${tr("opt.antialias")}
-          </label>
-          <label title=${tr("opt.pencilPixelPerfectHint")}
-            ><input
-              type="checkbox"
-              id="pencilPixelPerfect"
-              .checked=${this.pencilPixelPerfect}
-              @change=${(): void => this.applyPencilPixelPerfectFromDialog()}
-            />
-            ${tr("opt.pixelPerfect")}
-          </label>
-          ${this.renderStabilizerOption()} ${this.renderBlendModeOption()} ${this.renderAccumulateOption()}
+              ${this.pressureResponse === "none"
+                ? html``
+                : html`<label title=${tr("opt.sizeCurveHint")}
+                    >${tr("opt.sizeCurve")}
+                    <select
+                      id="pressureSizeCurve${sfx}"
+                      .value=${this.pressureSizeCurve}
+                      @change=${(): void => this.applyPressureSizeCurveFromDialog(sfx)}
+                    >
+                      <option value="linear">${tr("val.linear")}</option>
+                      <option value="soft">${tr("val.soft")}</option>
+                      <option value="firm">${tr("val.firm")}</option>
+                    </select>
+                  </label>
+                  <label title=${tr("opt.alphaCurveHint")}
+                    >${tr("opt.alphaCurve")}
+                    <select
+                      id="pressureAlphaCurve${sfx}"
+                      .value=${this.pressureAlphaCurve}
+                      @change=${(): void => this.applyPressureAlphaCurveFromDialog(sfx)}
+                    >
+                      <option value="linear">${tr("val.linear")}</option>
+                      <option value="soft">${tr("val.soft")}</option>
+                      <option value="firm">${tr("val.firm")}</option>
+                    </select>
+                  </label>`}
+              <label title=${tr("opt.pencilAntialiasHint")}
+                ><input
+                  type="checkbox"
+                  id="pencilAntialias${sfx}"
+                  .checked=${this.pencilAntialias}
+                  @change=${(): void => this.applyPencilAntialiasFromDialog(sfx)}
+                />
+                ${tr("opt.antialias")}
+              </label>
+              <label title=${tr("opt.pencilPixelPerfectHint")}
+                ><input
+                  type="checkbox"
+                  id="pencilPixelPerfect${sfx}"
+                  .checked=${this.pencilPixelPerfect}
+                  @change=${(): void => this.applyPencilPixelPerfectFromDialog(sfx)}
+                />
+                ${tr("opt.pixelPerfect")}
+              </label>
+              ${this.renderStabilizerOption(sfx)} ${this.renderBlendModeOption(sfx)} ${this.renderAccumulateOption(sfx)}
+    `;
+  }
+
+  private renderToolOptions() {
+    if (this.tool === "pencil") {      return html`
+        <div class="tool-options" data-testid="tool-options" aria-label=${tr("opt.pencilAria")} ?hidden=${this.uiHidden}>
+          ${this.renderBrushPresetRow("")}
+          ${this.renderPencilBrushOptions("")}
         </div>
       `;
     }
@@ -9353,13 +9401,13 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.imageTipCleared");
   }
 
-  private openPaintTipPicker(): void {
-    const input = this.shadowRoot?.getElementById("paintTipImport") as HTMLInputElement | null;
+  private openPaintTipPicker(scope = ""): void {
+    const input = this.shadowRoot?.getElementById("paintTipImport" + scope) as HTMLInputElement | null;
     input?.click();
   }
 
-  private async importPaintTipFromDialog(): Promise<void> {
-    const input = this.shadowRoot?.getElementById("paintTipImport") as HTMLInputElement | null;
+  private async importPaintTipFromDialog(scope = ""): Promise<void> {
+    const input = this.shadowRoot?.getElementById("paintTipImport" + scope) as HTMLInputElement | null;
     const file = input?.files?.[0];
     input?.removeAttribute("value");
     if (input !== null) {
@@ -9501,14 +9549,14 @@ export class GnumarusShell extends LitElement {
     }
   }
 
-  private currentDialogBrushSize(): number {
-    const input = this.shadowRoot?.getElementById("brushSize") as HTMLInputElement | null;
+  private currentDialogBrushSize(scope = ""): number {
+    const input = this.shadowRoot?.getElementById("brushSize" + scope) as HTMLInputElement | null;
     const parsed = Number(input?.value ?? "1");
     return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1, this.maxBrushSize);
   }
 
-  private currentDialogBrushShape(): GnumarusBrushShape {
-    const select = this.shadowRoot?.getElementById("brushShape") as HTMLSelectElement | null;
+  private currentDialogBrushShape(scope = ""): GnumarusBrushShape {
+    const select = this.shadowRoot?.getElementById("brushShape" + scope) as HTMLSelectElement | null;
     return parseBrushShape(select?.value ?? "square");
   }
 
@@ -9530,8 +9578,8 @@ export class GnumarusShell extends LitElement {
       : tr("status.curveWidthRange", { min: this.curveWidthMin, max: this.curveWidth });
   }
 
-  private applyBrushSizeFromDialog(): void {
-    const size = this.currentDialogBrushSize();
+  private applyBrushSizeFromDialog(scope = ""): void {
+    const size = this.currentDialogBrushSize(scope);
     this.brushSize = size;
     if (this.brushSizeMin > size) {
       this.brushSizeMin = size;
@@ -9541,14 +9589,14 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = this.brushSizeStatus();
   }
 
-  private currentDialogBrushSizeMin(): number {
-    const input = this.shadowRoot?.getElementById("brushSizeMin") as HTMLInputElement | null;
+  private currentDialogBrushSizeMin(scope = ""): number {
+    const input = this.shadowRoot?.getElementById("brushSizeMin" + scope) as HTMLInputElement | null;
     const parsed = Number(input?.value ?? "1");
     return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1, this.maxBrushSize);
   }
 
-  private applyBrushSizeMinFromDialog(): void {
-    const size = Math.min(this.currentDialogBrushSizeMin(), this.brushSize);
+  private applyBrushSizeMinFromDialog(scope = ""): void {
+    const size = Math.min(this.currentDialogBrushSizeMin(scope), this.brushSize);
     this.brushSizeMin = size;
     this.engine?.setBrushSizeMin(size);
     this.statusMessage = this.brushSizeStatus();
@@ -9569,27 +9617,27 @@ export class GnumarusShell extends LitElement {
     this.engine?.setColorContiguous(value);
   }
 
-  private applyBrushShapeFromDialog(): void {
-    const shape = this.currentDialogBrushShape();
+  private applyBrushShapeFromDialog(scope = ""): void {
+    const shape = this.currentDialogBrushShape(scope);
     this.brushShape = shape;
     this.engine?.setBrushShape(shape);
     this.statusMessage = tr("status.brushShape", { value: this.shapeLabel(shape) });
   }
 
-  private currentDialogBrushTipKind(): GnumarusBrushTipKind {
-    const select = this.shadowRoot?.getElementById("brushTipKind") as HTMLSelectElement | null;
+  private currentDialogBrushTipKind(scope = ""): GnumarusBrushTipKind {
+    const select = this.shadowRoot?.getElementById("brushTipKind" + scope) as HTMLSelectElement | null;
     return parseBrushTipKind(select?.value ?? "pixel");
   }
 
-  private applyBrushTipKindFromDialog(): void {
-    const kind = this.currentDialogBrushTipKind();
+  private applyBrushTipKindFromDialog(scope = ""): void {
+    const kind = this.currentDialogBrushTipKind(scope);
     this.brushTipKind = kind;
     this.engine?.setBrushTipKind(kind);
     this.statusMessage = tr("status.brushTip", { value: this.tipKindLabel(kind) });
   }
 
-  private applyBrushHardnessFromDialog(): void {
-    const input = this.shadowRoot?.getElementById("brushHardness") as HTMLInputElement | null;
+  private applyBrushHardnessFromDialog(scope = ""): void {
+    const input = this.shadowRoot?.getElementById("brushHardness" + scope) as HTMLInputElement | null;
     const raw = Number(input?.value ?? String(DEFAULT_BRUSH_HARDNESS * 100));
     const clamped = clampBrushHardness(Number.isFinite(raw) ? raw / 100 : DEFAULT_BRUSH_HARDNESS);
     this.brushHardness = clamped;
@@ -9597,8 +9645,8 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.softness", { value: Math.round(clamped * 100) });
   }
 
-  private applyBrushSpacingFromDialog(): void {
-    const input = this.shadowRoot?.getElementById("brushSpacing") as HTMLInputElement | null;
+  private applyBrushSpacingFromDialog(scope = ""): void {
+    const input = this.shadowRoot?.getElementById("brushSpacing" + scope) as HTMLInputElement | null;
     const raw = Number(input?.value ?? String(DEFAULT_BRUSH_SPACING * 100));
     const clamped = clampBrushSpacing(Number.isFinite(raw) ? raw / 100 : DEFAULT_BRUSH_SPACING);
     this.brushSpacing = clamped;
@@ -9614,8 +9662,8 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.flow", { value: Math.round(clamped * 100) });
   }
 
-  private applyBrushFlowFromDialog(): void {
-    const input = this.shadowRoot?.getElementById("brushFlow") as HTMLInputElement | null;
+  private applyBrushFlowFromDialog(scope = ""): void {
+    const input = this.shadowRoot?.getElementById("brushFlow" + scope) as HTMLInputElement | null;
     const raw = Number(input?.value ?? String(DEFAULT_BRUSH_FLOW * 100));
     const clamped = clampBrushFlow(Number.isFinite(raw) ? raw / 100 : DEFAULT_BRUSH_FLOW);
     this.brushFlow = clamped;
@@ -9631,8 +9679,8 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.fuzzy", { value: Math.round(clamped * 100) });
   }
 
-  private applyPaintFuzzyFromDialog(): void {
-    const input = this.shadowRoot?.getElementById("paintFuzzy") as HTMLInputElement | null;
+  private applyPaintFuzzyFromDialog(scope = ""): void {
+    const input = this.shadowRoot?.getElementById("paintFuzzy" + scope) as HTMLInputElement | null;
     const raw = Number(input?.value ?? String(DEFAULT_PAINT_FUZZY * 100));
     const clamped = clampPaintFuzzy(Number.isFinite(raw) ? raw / 100 : DEFAULT_PAINT_FUZZY);
     this.paintFuzzy = clamped;
@@ -9652,9 +9700,9 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.grain", { value: Math.round(strength * 100), scale });
   }
 
-  private applyPaintGrainFromDialog(): void {
-    const strengthInput = this.shadowRoot?.getElementById("paintGrainStrength") as HTMLInputElement | null;
-    const scaleInput = this.shadowRoot?.getElementById("paintGrainScale") as HTMLInputElement | null;
+  private applyPaintGrainFromDialog(scope = ""): void {
+    const strengthInput = this.shadowRoot?.getElementById("paintGrainStrength" + scope) as HTMLInputElement | null;
+    const scaleInput = this.shadowRoot?.getElementById("paintGrainScale" + scope) as HTMLInputElement | null;
     const rawStrength = Number(strengthInput?.value ?? String(DEFAULT_PAINT_GRAIN_STRENGTH * 100));
     const rawScale = Number(scaleInput?.value ?? String(DEFAULT_PAINT_GRAIN_SCALE));
     const strength = clampPaintGrainStrength(Number.isFinite(rawStrength) ? rawStrength / 100 : DEFAULT_PAINT_GRAIN_STRENGTH);
@@ -9679,8 +9727,8 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.tiltSize", { value: Math.round(clamped * 100) });
   }
 
-  private applyTiltSizeFromDialog(): void {
-    const input = this.shadowRoot?.getElementById("tiltSizeAmount") as HTMLInputElement | null;
+  private applyTiltSizeFromDialog(scope = ""): void {
+    const input = this.shadowRoot?.getElementById("tiltSizeAmount" + scope) as HTMLInputElement | null;
     const raw = Number(input?.value ?? String(DEFAULT_PAINT_DYNAMICS_AMOUNT * 100));
     const clamped = clampPaintDynamicsAmount(Number.isFinite(raw) ? raw / 100 : DEFAULT_PAINT_DYNAMICS_AMOUNT);
     this.tiltSizeAmount = clamped;
@@ -9696,8 +9744,8 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.speedFade", { value: Math.round(clamped * 100) });
   }
 
-  private applySpeedFadeFromDialog(): void {
-    const input = this.shadowRoot?.getElementById("speedFadeAmount") as HTMLInputElement | null;
+  private applySpeedFadeFromDialog(scope = ""): void {
+    const input = this.shadowRoot?.getElementById("speedFadeAmount" + scope) as HTMLInputElement | null;
     const raw = Number(input?.value ?? String(DEFAULT_PAINT_DYNAMICS_AMOUNT * 100));
     const clamped = clampPaintDynamicsAmount(Number.isFinite(raw) ? raw / 100 : DEFAULT_PAINT_DYNAMICS_AMOUNT);
     this.speedFadeAmount = clamped;
@@ -9713,8 +9761,8 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.tipRotation", { value: this.tipAngleLabel(parsed) });
   }
 
-  private applyTipAngleModeFromDialog(): void {
-    const select = this.shadowRoot?.getElementById("tipAngleMode") as HTMLSelectElement | null;
+  private applyTipAngleModeFromDialog(scope = ""): void {
+    const select = this.shadowRoot?.getElementById("tipAngleMode" + scope) as HTMLSelectElement | null;
     const mode = parseTipAngleMode(select?.value ?? "none");
     this.tipAngleMode = mode;
     this.engine?.setTipAngleMode(mode);
@@ -9782,8 +9830,8 @@ export class GnumarusShell extends LitElement {
     });
   }
 
-  private applyAirbrushRateFromDialog(): void {
-    const input = this.shadowRoot?.getElementById("airbrushRate") as HTMLInputElement | null;
+  private applyAirbrushRateFromDialog(scope = ""): void {
+    const input = this.shadowRoot?.getElementById("airbrushRate" + scope) as HTMLInputElement | null;
     const raw = Number(input?.value ?? String(DEFAULT_AIRBRUSH_RATE));
     const clamped = clampAirbrushRate(Number.isFinite(raw) ? raw : DEFAULT_AIRBRUSH_RATE);
     this.airbrushRate = clamped;
@@ -9803,9 +9851,9 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.smudge", { value: Math.round(rate * 100), wet: Math.round(wet * 100) });
   }
 
-  private applySmudgeFromDialog(): void {
-    const rateInput = this.shadowRoot?.getElementById("smudgeRate") as HTMLInputElement | null;
-    const wetInput = this.shadowRoot?.getElementById("smudgeWet") as HTMLInputElement | null;
+  private applySmudgeFromDialog(scope = ""): void {
+    const rateInput = this.shadowRoot?.getElementById("smudgeRate" + scope) as HTMLInputElement | null;
+    const wetInput = this.shadowRoot?.getElementById("smudgeWet" + scope) as HTMLInputElement | null;
     const rawRate = Number(rateInput?.value ?? String(DEFAULT_PAINT_SMUDGE_RATE * 100));
     const rawWet = Number(wetInput?.value ?? String(DEFAULT_PAINT_SMUDGE_WET * 100));
     const rate = clampPaintSmudgeRate(Number.isFinite(rawRate) ? rawRate / 100 : DEFAULT_PAINT_SMUDGE_RATE);
@@ -9932,8 +9980,8 @@ export class GnumarusShell extends LitElement {
     return [...BUILT_IN_BRUSH_PRESETS, ...this.brushPresets];
   }
 
-  private applyBrushPresetFromDialog(): void {
-    const select = this.shadowRoot?.getElementById("brushPreset") as HTMLSelectElement | null;
+  private applyBrushPresetFromDialog(scope = ""): void {
+    const select = this.shadowRoot?.getElementById("brushPreset" + scope) as HTMLSelectElement | null;
     const preset = this.allBrushPresets().find((entry) => entry.name === (select?.value ?? ""));
     if (preset !== undefined) {
       this.applyBrushPreset(preset);
@@ -10019,29 +10067,29 @@ export class GnumarusShell extends LitElement {
     return preset === undefined ? null : serializeBrushPreset(preset);
   }
 
-  private saveBrushPresetFromDialog(): void {
-    const input = this.shadowRoot?.getElementById("presetName") as HTMLInputElement | null;
+  private saveBrushPresetFromDialog(scope = ""): void {
+    const input = this.shadowRoot?.getElementById("presetName" + scope) as HTMLInputElement | null;
     const name = input?.value ?? "";
     if (!this.saveBrushPresetAs(name)) {
       this.statusMessage = tr("status.presetEmpty");
       return;
     }
-    const select = this.shadowRoot?.getElementById("brushPreset") as HTMLSelectElement | null;
+    const select = this.shadowRoot?.getElementById("brushPreset" + scope) as HTMLSelectElement | null;
     if (select !== null) {
       select.value = name.trim().slice(0, 64);
     }
   }
 
-  private deleteBrushPresetFromDialog(): void {
-    const select = this.shadowRoot?.getElementById("brushPreset") as HTMLSelectElement | null;
+  private deleteBrushPresetFromDialog(scope = ""): void {
+    const select = this.shadowRoot?.getElementById("brushPreset" + scope) as HTMLSelectElement | null;
     const name = select?.value ?? "";
     if (name === "" || !this.deleteBrushPreset(name)) {
       this.statusMessage = tr("status.presetCustomOnly");
     }
   }
 
-  private downloadBrushPreset(): void {
-    const select = this.shadowRoot?.getElementById("brushPreset") as HTMLSelectElement | null;
+  private downloadBrushPreset(scope = ""): void {
+    const select = this.shadowRoot?.getElementById("brushPreset" + scope) as HTMLSelectElement | null;
     const json = this.exportBrushPresetJson(select?.value ?? "");
     if (json === null) {
       this.statusMessage = tr("status.presetNone");
@@ -10057,13 +10105,13 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.presetExported");
   }
 
-  private openBrushPresetPicker(): void {
-    const input = this.shadowRoot?.getElementById("brushPresetImport") as HTMLInputElement | null;
+  private openBrushPresetPicker(scope = ""): void {
+    const input = this.shadowRoot?.getElementById("brushPresetImport" + scope) as HTMLInputElement | null;
     input?.click();
   }
 
-  private async importBrushPresetFromDialog(): Promise<void> {
-    const input = this.shadowRoot?.getElementById("brushPresetImport") as HTMLInputElement | null;
+  private async importBrushPresetFromDialog(scope = ""): Promise<void> {
+    const input = this.shadowRoot?.getElementById("brushPresetImport" + scope) as HTMLInputElement | null;
     const file = input?.files?.[0];
     if (input !== null) {
       input.value = "";
@@ -10082,9 +10130,20 @@ export class GnumarusShell extends LitElement {
     }
   }
 
-  private applyPaintDualTuningFromDialog(): void {
-    const strengthInput = this.shadowRoot?.getElementById("paintDualStrength") as HTMLInputElement | null;
-    const scaleInput = this.shadowRoot?.getElementById("paintDualScale") as HTMLInputElement | null;
+  /** Open the brush preset manager dialog. */
+  private openBrushPresetDialog(): void {
+    const dialog = this.shadowRoot?.getElementById("brushPresetDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+  }
+
+  private closeBrushPresetDialog(): void {
+    const dialog = this.shadowRoot?.getElementById("brushPresetDialog") as HTMLDialogElement | null;
+    dialog?.close();
+  }
+
+  private applyPaintDualTuningFromDialog(scope = ""): void {
+    const strengthInput = this.shadowRoot?.getElementById("paintDualStrength" + scope) as HTMLInputElement | null;
+    const scaleInput = this.shadowRoot?.getElementById("paintDualScale" + scope) as HTMLInputElement | null;
     const rawStrength = Number(strengthInput?.value ?? String(DEFAULT_PAINT_DUAL_STRENGTH * 100));
     const rawScale = Number(scaleInput?.value ?? String(DEFAULT_PAINT_DUAL_SCALE * 100));
     const scale = clampPaintDualScale(Number.isFinite(rawScale) ? rawScale / 100 : DEFAULT_PAINT_DUAL_SCALE);
@@ -10097,13 +10156,13 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.dualTip", { value: Math.round(strength * 100), scale: Math.round(scale * 100) });
   }
 
-  private openPaintDualPicker(): void {
-    const input = this.shadowRoot?.getElementById("paintDualImport") as HTMLInputElement | null;
+  private openPaintDualPicker(scope = ""): void {
+    const input = this.shadowRoot?.getElementById("paintDualImport" + scope) as HTMLInputElement | null;
     input?.click();
   }
 
-  private async importPaintDualFromDialog(): Promise<void> {
-    const input = this.shadowRoot?.getElementById("paintDualImport") as HTMLInputElement | null;
+  private async importPaintDualFromDialog(scope = ""): Promise<void> {
+    const input = this.shadowRoot?.getElementById("paintDualImport" + scope) as HTMLInputElement | null;
     const file = input?.files?.[0];
     if (input !== null) {
       input.value = "";
@@ -10153,8 +10212,8 @@ export class GnumarusShell extends LitElement {
     }
   }
 
-  private applyPressureResponseFromDialog(): void {
-    const select = this.shadowRoot?.getElementById("pressureResponse") as HTMLSelectElement | null;
+  private applyPressureResponseFromDialog(scope = ""): void {
+    const select = this.shadowRoot?.getElementById("pressureResponse" + scope) as HTMLSelectElement | null;
     const response = parsePressureResponse(select?.value ?? "none");
     this.pressureResponse = response;
     this.engine?.setPressureResponse(response);
@@ -10169,8 +10228,8 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.sizeCurve", { value: this.curveLabel(parsed) });
   }
 
-  private applyPressureSizeCurveFromDialog(): void {
-    const select = this.shadowRoot?.getElementById("pressureSizeCurve") as HTMLSelectElement | null;
+  private applyPressureSizeCurveFromDialog(scope = ""): void {
+    const select = this.shadowRoot?.getElementById("pressureSizeCurve" + scope) as HTMLSelectElement | null;
     const curve = parsePressureCurve(select?.value ?? "linear");
     this.pressureSizeCurve = curve;
     this.engine?.setPressureSizeCurve(curve);
@@ -10185,8 +10244,8 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.alphaCurve", { value: this.curveLabel(parsed) });
   }
 
-  private applyPressureAlphaCurveFromDialog(): void {
-    const select = this.shadowRoot?.getElementById("pressureAlphaCurve") as HTMLSelectElement | null;
+  private applyPressureAlphaCurveFromDialog(scope = ""): void {
+    const select = this.shadowRoot?.getElementById("pressureAlphaCurve" + scope) as HTMLSelectElement | null;
     const curve = parsePressureCurve(select?.value ?? "linear");
     this.pressureAlphaCurve = curve;
     this.engine?.setPressureAlphaCurve(curve);
@@ -10201,13 +10260,13 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.pencilAntialias", { value: this.onOffLabel(next) });
   }
 
-  private currentDialogPencilAntialias(): boolean {
-    const input = this.shadowRoot?.getElementById("pencilAntialias") as HTMLInputElement | null;
+  private currentDialogPencilAntialias(scope = ""): boolean {
+    const input = this.shadowRoot?.getElementById("pencilAntialias" + scope) as HTMLInputElement | null;
     return input?.checked === true;
   }
 
-  private applyPencilAntialiasFromDialog(): void {
-    const enabled = this.currentDialogPencilAntialias();
+  private applyPencilAntialiasFromDialog(scope = ""): void {
+    const enabled = this.currentDialogPencilAntialias(scope);
     this.pencilAntialias = enabled;
     this.engine?.setPencilAntialias(enabled);
     this.statusMessage = tr("status.pencilAntialias", { value: this.onOffLabel(enabled) });
@@ -10241,8 +10300,8 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.curvePixelPerfect", { value: this.onOffLabel(next) });
   }
 
-  private currentDialogPencilPixelPerfect(): boolean {
-    const input = this.shadowRoot?.getElementById("pencilPixelPerfect") as HTMLInputElement | null;
+  private currentDialogPencilPixelPerfect(scope = ""): boolean {
+    const input = this.shadowRoot?.getElementById("pencilPixelPerfect" + scope) as HTMLInputElement | null;
     return input?.checked === true;
   }
 
@@ -10251,8 +10310,8 @@ export class GnumarusShell extends LitElement {
     return input?.checked === true;
   }
 
-  private applyPencilPixelPerfectFromDialog(): void {
-    const enabled = this.currentDialogPencilPixelPerfect();
+  private applyPencilPixelPerfectFromDialog(scope = ""): void {
+    const enabled = this.currentDialogPencilPixelPerfect(scope);
     if (enabled) {
       this.brushSize = 1;
       this.brushSizeMin = 1;
@@ -10301,39 +10360,39 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.followStrength", { value: clamped });
   }
 
-  private currentDialogStabilizerMode(): GnumarusStabilizerMode {
-    const select = this.shadowRoot?.getElementById("stabilizerMode") as HTMLSelectElement | null;
+  private currentDialogStabilizerMode(scope = ""): GnumarusStabilizerMode {
+    const select = this.shadowRoot?.getElementById("stabilizerMode" + scope) as HTMLSelectElement | null;
     return parseStabilizerMode(select?.value ?? "none");
   }
 
-  private currentDialogRopeLength(): number {
-    const input = this.shadowRoot?.getElementById("ropeLength") as HTMLInputElement | null;
+  private currentDialogRopeLength(scope = ""): number {
+    const input = this.shadowRoot?.getElementById("ropeLength" + scope) as HTMLInputElement | null;
     const parsed = Number(input?.value ?? String(GNUMARUS_DEFAULT_ROPE_LENGTH));
     return clampRopeLength(Number.isFinite(parsed) ? parsed : GNUMARUS_DEFAULT_ROPE_LENGTH);
   }
 
-  private currentDialogFollowStrength(): number {
-    const input = this.shadowRoot?.getElementById("followStrength") as HTMLInputElement | null;
+  private currentDialogFollowStrength(scope = ""): number {
+    const input = this.shadowRoot?.getElementById("followStrength" + scope) as HTMLInputElement | null;
     const parsed = Number(input?.value ?? String(GNUMARUS_DEFAULT_FOLLOW_STRENGTH));
     return clampFollowStrength(Number.isFinite(parsed) ? parsed : GNUMARUS_DEFAULT_FOLLOW_STRENGTH);
   }
 
-  private applyStabilizerModeFromDialog(): void {
-    const mode = this.currentDialogStabilizerMode();
+  private applyStabilizerModeFromDialog(scope = ""): void {
+    const mode = this.currentDialogStabilizerMode(scope);
     this.stabilizerMode = mode;
     this.engine?.setStabilizerMode(mode);
     this.statusMessage = tr("status.stabilizer", { value: this.stabilizerLabel(mode) });
   }
 
-  private applyRopeLengthFromDialog(): void {
-    const length = this.currentDialogRopeLength();
+  private applyRopeLengthFromDialog(scope = ""): void {
+    const length = this.currentDialogRopeLength(scope);
     this.ropeLength = length;
     this.engine?.setRopeLength(length);
     this.statusMessage = tr("status.ropeLength", { value: length });
   }
 
-  private applyFollowStrengthFromDialog(): void {
-    const strength = this.currentDialogFollowStrength();
+  private applyFollowStrengthFromDialog(scope = ""): void {
+    const strength = this.currentDialogFollowStrength(scope);
     this.followStrength = strength;
     this.engine?.setFollowStrength(strength);
     this.statusMessage = tr("status.followStrength", { value: strength });
@@ -10347,13 +10406,13 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.blend", { value: this.blendLabel(parsed) });
   }
 
-  private currentDialogBlendMode(): GnumarusBlendMode {
-    const select = this.shadowRoot?.getElementById("blendMode") as HTMLSelectElement | null;
+  private currentDialogBlendMode(scope = ""): GnumarusBlendMode {
+    const select = this.shadowRoot?.getElementById("blendMode" + scope) as HTMLSelectElement | null;
     return parseBlendMode(select?.value ?? "normal");
   }
 
-  private applyBlendModeFromDialog(): void {
-    const mode = this.currentDialogBlendMode();
+  private applyBlendModeFromDialog(scope = ""): void {
+    const mode = this.currentDialogBlendMode(scope);
     this.blendMode = mode;
     this.engine?.setBlendMode(mode);
     this.statusMessage = tr("status.blend", { value: this.blendLabel(mode) });
@@ -10367,13 +10426,13 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.accumulate", { value: this.onOffLabel(next) });
   }
 
-  private currentDialogAccumulate(): boolean {
-    const input = this.shadowRoot?.getElementById("accumulate") as HTMLInputElement | null;
+  private currentDialogAccumulate(scope = ""): boolean {
+    const input = this.shadowRoot?.getElementById("accumulate" + scope) as HTMLInputElement | null;
     return input?.checked === true;
   }
 
-  private applyAccumulateFromDialog(): void {
-    const enabled = this.currentDialogAccumulate();
+  private applyAccumulateFromDialog(scope = ""): void {
+    const enabled = this.currentDialogAccumulate(scope);
     this.accumulate = enabled;
     this.engine?.setAccumulate(enabled);
     this.statusMessage = tr("status.accumulate", { value: this.onOffLabel(enabled) });

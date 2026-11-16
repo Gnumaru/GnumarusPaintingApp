@@ -254,6 +254,27 @@ test("playback advances frames by duration and stops on demand", async ({ page }
   await expect(matrix.getByRole("button", { name: "Play animation", exact: true })).toBeVisible();
 });
 
+test("opening the picker on black switches out immediately @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const picker = await openPicker(page, "pencilColor");
+  const hexInput = picker.locator("#hexInput");
+  await expect(hexInput).toHaveValue("#ff0000");
+  await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("100.0");
+  await expect(picker.getByLabel("Lightness", { exact: true })).toHaveValue("50.0");
+});
+
+test("image palette open button matches dialog button styling @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const picker = await openPicker(page, "pencilColor");
+  await picker.getByTestId("palette-toggle").click();
+  const openButton = picker.getByTestId("palette-open");
+  await expect(openButton).toBeVisible();
+  await expect(openButton).toHaveCSS("background-color", "rgb(14, 99, 156)");
+  await expect(openButton).toHaveCSS("color", "rgb(255, 255, 255)");
+});
+
 test("black switches out to vivid colors when changing color models @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
@@ -319,6 +340,7 @@ test("black switch can be disabled in settings @recent", async ({ page }) => {
   const picker = await openPicker(page, "pencilColor");
   const modelSelect = picker.locator("select#modelSelect");
   const hexInput = picker.locator("#hexInput");
+  await expect(hexInput).toHaveValue("#000000");
   await hexInput.fill("#000000");
   await modelSelect.selectOption("hsl");
   await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("0.0");
