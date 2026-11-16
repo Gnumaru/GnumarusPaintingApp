@@ -348,6 +348,7 @@ export class GnumarusColorPicker extends LitElement {
     value: { type: String },
     model: { type: String },
     open: { type: Boolean },
+    hideSwatch: { type: Boolean },
     swatches: { attribute: false },
     recents: { attribute: false },
   };
@@ -355,6 +356,8 @@ export class GnumarusColorPicker extends LitElement {
   declare value: string;
   declare model: GnumarusColorModelId;
   declare open: boolean;
+  /** Hide the inline swatch toggle button (the popup still opens programmatically). */
+  declare hideSwatch: boolean;
   /** Saved swatch palette (hex colors), owned by the host shell. */
   declare swatches: string[];
   /** Recently used colors (hex), owned by the host shell. */
@@ -387,6 +390,7 @@ export class GnumarusColorPicker extends LitElement {
     this.value = "#000000";
     this.model = "hsl";
     this.open = false;
+    this.hideSwatch = false;
     this.swatches = [];
     this.recents = [];
     this.syncFromValue(this.value, "hsl");
@@ -973,16 +977,20 @@ export class GnumarusColorPicker extends LitElement {
     const triThumbLeft = 32 + triPoint.x;
     const triThumbTop = 32 + triPoint.y;
     return html`
-      <button
-        class="swatch"
-        aria-label=${tr("color.pick")}
-        aria-haspopup="dialog"
-        aria-expanded=${this.open ? "true" : "false"}
-        title=${tr("color.pickCurrent", { hex })}
-        @click=${(): void => this.toggleOpen()}
-      >
-        <span class="swatch-inner" style=${swatchStyle}></span>
-      </button>
+      ${this.hideSwatch
+        ? html``
+        : html`
+            <button
+              class="swatch"
+              aria-label=${tr("color.pick")}
+              aria-haspopup="dialog"
+              aria-expanded=${this.open ? "true" : "false"}
+              title=${tr("color.pickCurrent", { hex })}
+              @click=${(): void => this.toggleOpen()}
+            >
+              <span class="swatch-inner" style=${swatchStyle}></span>
+            </button>
+          `}
       ${this.open
         ? html`
             <div

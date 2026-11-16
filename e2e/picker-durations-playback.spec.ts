@@ -87,7 +87,7 @@ test("custom picker supports alpha and clamps manual input", async ({ page }) =>
   await page.keyboard.press("Escape");
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 10, g: 20, b: 30, a: 128 });
-  await picker.getByRole("button", { name: "Pick color" }).click();
+  await page.locator("gnumarus-shell [data-testid='fg-well']").click();
   await picker.locator("select#modelSelect").selectOption("hsv");
   await picker.getByLabel("Saturation", { exact: true }).fill("999");
   await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("100.0");

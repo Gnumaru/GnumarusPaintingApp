@@ -416,3 +416,27 @@ test("File > Export spritesheet without sources fails loudly", async ({ page }) 
   await dialog.locator("#exportSheetOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("select an animation");
 });
+
+test("sheet all frames hides extra frames and ignores its value @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await addFrames(page, 2);
+  await paintCenter(page);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.locator("gnumarus-shell .menubar .dropdown").getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator('[data-testid="export-tab-sheet"]').click();
+  const extraLabel = dialog.locator("#exportSheetFrames").locator("xpath=ancestor::label[1]");
+  await expect(extraLabel).toBeVisible();
+  await dialog.locator("#exportSheetFrames").fill("1");
+  await dialog.getByRole("checkbox", { name: "All frames" }).check();
+  await expect(extraLabel).toBeHidden();
+  await dialog.locator("#exportSheetOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported");
+  // All three frames made the line sheet (192px), so the "1" was ignored.
+  const file = await exportedFile(page);
+  expect(file?.width).toBe(192);
+});

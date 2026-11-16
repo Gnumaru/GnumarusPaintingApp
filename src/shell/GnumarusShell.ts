@@ -677,7 +677,7 @@ export class GnumarusShell extends LitElement {
     .paint-well-front {
       left: 0;
       top: 0;
-      cursor: default;
+      cursor: pointer;
     }
     .toolbar .paint-swap {
       position: absolute;
@@ -1820,6 +1820,7 @@ export class GnumarusShell extends LitElement {
     tool: { type: String },
     colorValue: { type: String },
     secondaryColorValue: { type: String },
+    pickerTarget: { type: String },
     zoomText: { type: String },
     rotText: { type: String },
     flipText: { type: String },
@@ -1930,6 +1931,7 @@ export class GnumarusShell extends LitElement {
     exportSheetLayout: { type: String },
     exportSheetFormat: { type: String },
     exportSheetCount: { type: Number },
+    exportSheetAll: { type: Boolean },
     exportSheetQuality: { type: Number },
     exportSheetLossless: { type: Boolean },
     playing: { type: Boolean },
@@ -2047,6 +2049,7 @@ export class GnumarusShell extends LitElement {
   declare flipText: string;
   declare colorValue: string;
   declare secondaryColorValue: string;
+  declare pickerTarget: string;
   declare zoomText: string;
   declare cursorText: string;
   declare canvasText: string;
@@ -2166,6 +2169,7 @@ export class GnumarusShell extends LitElement {
   declare exportSheetLayout: string;
   declare exportSheetFormat: string;
   declare exportSheetCount: number;
+  declare exportSheetAll: boolean;
   declare exportSheetQuality: number;
   declare exportSheetLossless: boolean;
   declare playing: boolean;
@@ -2316,6 +2320,7 @@ export class GnumarusShell extends LitElement {
     this.registerActions();
     this.colorValue = "#000000";
     this.secondaryColorValue = "#ffffff";
+    this.pickerTarget = "foreground";
     this.zoomText = "800%";
     this.rotText = "0°";
     this.flipText = "";
@@ -2424,6 +2429,7 @@ export class GnumarusShell extends LitElement {
     this.exportSheetLayout = "line";
     this.exportSheetFormat = "image/png";
     this.exportSheetCount = 2;
+    this.exportSheetAll = false;
     this.exportSheetQuality = GNUMARUS_DEFAULT_STILL_QUALITY;
     this.exportSheetLossless = true;
     this.playing = false;
@@ -2745,15 +2751,26 @@ export class GnumarusShell extends LitElement {
               data-testid="bg-well"
               style="background-color: ${this.secondaryColorValue};"
               aria-label=${tr("color.background")}
-              title=${tr("color.background")}
-              @click=${(): void => this.swapPaintColors()}
+              title=${tr("color.editBackground")}
+              @click=${(event: Event): void => {
+                const anchor = event.currentTarget as HTMLElement | null;
+                if (anchor !== null) {
+                  this.openWellPicker("background", anchor);
+                }
+              }}
             ></button>
             <button
               class="paint-well paint-well-front"
               data-testid="fg-well"
               style="background-color: ${this.colorValue};"
               aria-label=${tr("color.foreground")}
-              title=${tr("color.foreground")}
+              title=${tr("color.editForeground")}
+              @click=${(event: Event): void => {
+                const anchor = event.currentTarget as HTMLElement | null;
+                if (anchor !== null) {
+                  this.openWellPicker("foreground", anchor);
+                }
+              }}
             ></button>
             <button
               class="paint-swap"
@@ -2768,20 +2785,26 @@ export class GnumarusShell extends LitElement {
           ${this.renderToolDrawer("transform")}
           <gnumarus-color-picker
             id="pencilColor"
-            .value=${this.colorValue}
+            hideSwatch
+            .value=${this.pickerTarget === "background" ? this.secondaryColorValue : this.colorValue}
             .swatches=${this.swatches}
             .recents=${this.recentColors}
             model="hsl"
             @gnumarus-color-change=${(event: Event): void => {
               const detail = (event as CustomEvent<{ value?: unknown }>).detail;
-              if (typeof detail?.value === "string") {
-                const parsed = parseHexToRgbaBytes(detail.value);
-                if (parsed === null) {
-                  return;
-                }
-                this.colorValue = rgbaBytesToHex(parsed);
-                this.engine?.setColor(this.colorValue);
+              if (typeof detail?.value !== "string") {
+                return;
               }
+              const parsed = parseHexToRgbaBytes(detail.value);
+              if (parsed === null) {
+                return;
+              }
+              if (this.pickerTarget === "background") {
+                this.secondaryColorValue = rgbaBytesToHex(parsed);
+                return;
+              }
+              this.colorValue = rgbaBytesToHex(parsed);
+              this.engine?.setColor(this.colorValue);
             }}
             @gnumarus-color-commit=${(event: Event): void => {
               const detail = (event as CustomEvent<{ value?: unknown }>).detail;
@@ -2792,7 +2815,9 @@ export class GnumarusShell extends LitElement {
             @gnumarus-swatches-edit=${(event: Event): void => {
               const detail = (event as CustomEvent<{ kind?: unknown; hex?: unknown }>).detail;
               if (detail?.kind === "add") {
-                this.addSwatch(this.colorValue);
+                this.addSwatch(
+                  this.pickerTarget === "background" ? this.secondaryColorValue : this.colorValue,
+                );
               } else if (detail?.kind === "remove" && typeof detail.hex === "string") {
                 this.removeSwatch(detail.hex);
               }
@@ -4810,7 +4835,14 @@ export class GnumarusShell extends LitElement {
         <section ?hidden=${this.exportTab !== "sheet"}>
         <div class="export-sheet-animations" title=${tr("dialog.sheetAnimationsTitle")}>
           <label title=${tr("dialog.sheetAllFramesTitle")}
-            ><input type="checkbox" id="exportSheetAll" />${tr("matrix.allFrames")}</label
+            ><input
+              type="checkbox"
+              id="exportSheetAll"
+              ?checked=${this.exportSheetAll}
+              @change=${(event: Event): void => {
+                this.exportSheetAll = (event.target as HTMLInputElement).checked;
+              }}
+            />${tr("matrix.allFrames")}</label
           >
           ${this.engine?.getNamedAnimations().map(
             (animation) =>
@@ -4819,7 +4851,9 @@ export class GnumarusShell extends LitElement {
               >`,
           ) ?? html``}
         </div>
-        <label title=${tr("dialog.extraFramesTitle")}
+        <label
+          title=${tr("dialog.extraFramesTitle")}
+          ?hidden=${this.exportSheetAll}
           >${tr("dialog.extraFrames")}
           <input type="text" id="exportSheetFrames" placeholder=${tr("dialog.extraFrames")} />
         </label>
@@ -9076,8 +9110,24 @@ export class GnumarusShell extends LitElement {
 
   /** Open the paint color picker popup at a viewport position (canvas right-click). */
   private openColorPickerAt(clientX: number, clientY: number): void {
+    this.pickerTarget = "foreground";
     const picker = this.shadowRoot?.getElementById("pencilColor") as GnumarusColorPicker | null;
-    picker?.openAt(clientX, clientY);
+    if (picker !== null) {
+      picker.value = this.colorValue;
+      picker.openAt(clientX, clientY);
+    }
+  }
+
+  /** Open the paint color picker popup for one well, anchored under it. */
+  private openWellPicker(target: "foreground" | "background", anchor: HTMLElement): void {
+    this.pickerTarget = target;
+    const picker = this.shadowRoot?.getElementById("pencilColor") as GnumarusColorPicker | null;
+    if (picker === null) {
+      return;
+    }
+    picker.value = target === "background" ? this.secondaryColorValue : this.colorValue;
+    const rect = anchor.getBoundingClientRect();
+    picker.openAt(rect.left, rect.bottom);
   }
 
   /** Add the current paint color to the saved swatches (dedupe, capped). */
@@ -13762,6 +13812,7 @@ export class GnumarusShell extends LitElement {
     if (findStillFormat(this.exportFormats, this.exportSheetFormat) === null) {
       this.exportSheetFormat = this.exportFormats[0]?.mime ?? "image/png";
     }
+    this.exportSheetAll = false;
     this.exportTab = "frame";
     await this.updateComplete;
     const dialog = this.shadowRoot?.getElementById("exportDialog") as HTMLDialogElement | null;
@@ -14238,8 +14289,7 @@ export class GnumarusShell extends LitElement {
         strips.push({ frames: resolveExportSequence(animation).map((entry) => entry.frame) });
       }
     }
-    const allBox = this.shadowRoot?.getElementById("exportSheetAll") as HTMLInputElement | null;
-    if (allBox?.checked === true) {
+    if (this.exportSheetAll) {
       const frames: number[] = [];
       for (let frame = 0; frame < this.engine.getFrameCount(); frame += 1) {
         frames.push(frame);
@@ -14247,7 +14297,7 @@ export class GnumarusShell extends LitElement {
       strips.push({ frames });
     }
     const listInput = this.shadowRoot?.getElementById("exportSheetFrames") as HTMLInputElement | null;
-    const listText = listInput?.value.trim() ?? "";
+    const listText = this.exportSheetAll ? "" : (listInput?.value.trim() ?? "");
     if (listText !== "") {
       strips.push({ frames: parseFrameList(listText, this.engine.getFrameCount()) });
     }

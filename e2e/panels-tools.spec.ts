@@ -272,8 +272,14 @@ test("X swaps the foreground and background paint colors @recent", async ({ page
   const center = await layerToScreen(page, 32, 32);
   await page.mouse.click(center.x, center.y);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
-  // The back well also swaps.
+  // The back well edits the background instead of swapping.
   await page.locator("gnumarus-shell [data-testid='bg-well']").click();
+  const paintPicker = page.locator("gnumarus-shell #pencilColor");
+  await expect(paintPicker.getByRole("dialog", { name: "Color picker" })).toBeVisible();
+  expect(await colorsOf()).toMatchObject({ fg: "#000000", bg: "#ff0000" });
+  await page.keyboard.press("Escape");
+  // Only the corner arrows swap now.
+  await page.locator("gnumarus-shell [data-testid='swap-colors']").click();
   expect(await colorsOf()).toMatchObject({ fg: "#ff0000", bg: "#000000" });
   // The text tool lost its letter key but still opens from the toolbar.
   await page.locator("gnumarus-shell [data-testid='tool-text']").click();
@@ -375,4 +381,56 @@ test("large hard brush keeps V shape instead of collapsing to endpoints @recent"
   expect(await readPixel(page, 32, 50)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 10, 10)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 54, 10)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+});
+
+test("front well opens the picker editing the foreground @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  const colorsOf = (): Promise<{ fg: string; bg: string }> =>
+    page.evaluate(() => {
+      const root = window as unknown as {
+        __gnumarus?: { shell?: { colorValue: string; secondaryColorValue: string } };
+      };
+      return {
+        fg: root.__gnumarus?.shell?.colorValue ?? "",
+        bg: root.__gnumarus?.shell?.secondaryColorValue ?? "",
+      };
+    });
+  await page.locator("gnumarus-shell [data-testid='fg-well']").click();
+  const picker = page.locator("gnumarus-shell #pencilColor");
+  await expect(picker.getByRole("dialog", { name: "Color picker" })).toBeVisible();
+  await picker.locator("#hexInput").fill("#00ff00");
+  expect(await colorsOf()).toMatchObject({ fg: "#00ff00", bg: "#ffffff" });
+  await page.keyboard.press("Escape");
+  // Painting uses the edited foreground.
+  const center = await layerToScreen(page, 32, 32);
+  await page.mouse.click(center.x, center.y);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 255, b: 0, a: 255 });
+});
+
+test("back well opens the picker editing the background @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  const colorsOf = (): Promise<{ fg: string; bg: string }> =>
+    page.evaluate(() => {
+      const root = window as unknown as {
+        __gnumarus?: { shell?: { colorValue: string; secondaryColorValue: string } };
+      };
+      return {
+        fg: root.__gnumarus?.shell?.colorValue ?? "",
+        bg: root.__gnumarus?.shell?.secondaryColorValue ?? "",
+      };
+    });
+  await page.locator("gnumarus-shell [data-testid='bg-well']").click();
+  const picker = page.locator("gnumarus-shell #pencilColor");
+  await expect(picker.getByRole("dialog", { name: "Color picker" })).toBeVisible();
+  await picker.locator("#hexInput").fill("#0000ff");
+  expect(await colorsOf()).toMatchObject({ fg: "#000000", bg: "#0000ff" });
+  await page.keyboard.press("Escape");
+  // Painting still uses the untouched foreground.
+  const center = await layerToScreen(page, 32, 32);
+  await page.mouse.click(center.x, center.y);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
 });

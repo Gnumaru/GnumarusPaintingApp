@@ -66,7 +66,12 @@ export async function setChecker(page: import("@playwright/test").Page, which: "
 
 export async function openPicker(page: import("@playwright/test").Page, pickerId: string): Promise<import("@playwright/test").Locator> {
   const picker = page.locator(`gnumarus-shell #${pickerId}`);
-  await picker.getByRole("button", { name: "Pick color" }).click();
+  if (pickerId === "pencilColor") {
+    // The paint picker lost its own swatch button; the wells open it instead.
+    await page.locator("gnumarus-shell [data-testid='fg-well']").click();
+  } else {
+    await picker.getByRole("button", { name: "Pick color" }).click();
+  }
   await expect(picker.getByRole("dialog", { name: "Color picker" })).toBeVisible();
   return picker;
 }
