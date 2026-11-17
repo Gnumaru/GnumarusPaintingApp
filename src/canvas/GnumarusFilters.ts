@@ -1971,6 +1971,110 @@ function kernelImageGradient(src: Uint8ClampedArray, width: number, height: numb
   return dst;
 }
 
+function kernelPropagateColors(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  // Multi-source BFS: every transparent pixel within `distance` of opaque
+  // content takes the nearest opaque RGB (alpha is preserved).
+  const distance = Math.max(1, Math.round(clampFloat(v["distance"], 1, 64, 8)));
+  const dist = new Int32Array(width * height).fill(-1);
+  const queue = new Int32Array(width * height);
+  let head = 0;
+  let tail = 0;
+  const dst = new Uint8ClampedArray(src);
+  for (let p = 0; p < width * height; p += 1) {
+    if ((src[p * 4 + 3] ?? 0) > 0) {
+      dist[p] = 0;
+      queue[tail] = p;
+      tail += 1;
+    }
+  }
+  while (head < tail) {
+    const current = queue[head] ?? 0;
+    head += 1;
+    const currentDist = dist[current] ?? 0;
+    if (currentDist >= distance) {
+      continue;
+    }
+    const cx = current % width;
+    const cy = Math.floor(current / width);
+    const from = current * 4;
+    const neighbors = [
+      cx > 0 ? current - 1 : -1,
+      cx + 1 < width ? current + 1 : -1,
+      cy > 0 ? current - width : -1,
+      cy + 1 < height ? current + width : -1,
+    ];
+    for (const next of neighbors) {
+      if (next < 0 || (dist[next] ?? 0) !== -1) {
+        continue;
+      }
+      dist[next] = currentDist + 1;
+      const at = next * 4;
+      dst[at] = dst[from] ?? 0;
+      dst[at + 1] = dst[from + 1] ?? 0;
+      dst[at + 2] = dst[from + 2] ?? 0;
+      queue[tail] = next;
+      tail += 1;
+    }
+  }
+  return dst;
+}
+
+function srgbToLinear01(c: number): number {
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+function linearToSrgb01(c: number): number {
+  const clamped = Math.min(1, Math.max(0, c));
+  return clamped <= 0.0031308 ? clamped * 12.92 : 1.055 * Math.pow(clamped, 1 / 2.4) - 0.055;
+}
+
+function rgbToLab(r: number, g: number, b: number): [number, number, number] {
+  const x = (0.4124 * srgbToLinear01(r) + 0.3576 * srgbToLinear01(g) + 0.1805 * srgbToLinear01(b)) / 0.95047;
+  const y = 0.2126 * srgbToLinear01(r) + 0.7152 * srgbToLinear01(g) + 0.0722 * srgbToLinear01(b);
+  const z = (0.0193 * srgbToLinear01(r) + 0.1192 * srgbToLinear01(g) + 0.9505 * srgbToLinear01(b)) / 1.08883;
+  const f = (t: number): number => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+  return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))];
+}
+
+function labToRgb(l: number, a: number, b: number): [number, number, number] {
+  const fy = (l + 16) / 116;
+  const fx = fy + a / 500;
+  const fz = fy - b / 200;
+  const inv = (t: number): number => {
+    const t3 = t * t * t;
+    return t3 > 0.008856 ? t3 : (t - 16 / 116) / 7.787;
+  };
+  const x = inv(fx) * 0.95047;
+  const y = inv(fy);
+  const z = inv(fz) * 1.08883;
+  return [
+    clampByte(linearToSrgb01(3.2406 * x - 1.5372 * y - 0.4986 * z) * 255),
+    clampByte(linearToSrgb01(-0.9689 * x + 1.8758 * y + 0.0415 * z) * 255),
+    clampByte(linearToSrgb01(0.0557 * x - 0.204 * y + 1.057 * z) * 255),
+  ];
+}
+
+function kernelLchNoise(src: Uint8ClampedArray, _width: number, _height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const amount = clampFloat(v["amount"], 0, 100, 10) / 100;
+  const seed = clampInt(v["seed"], 1, 9999, 1);
+  const rand = filterRandom(seed * 131 + 11);
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    const [l, a, b] = rgbToLab((src[i] ?? 0) / 255, (src[i + 1] ?? 0) / 255, (src[i + 2] ?? 0) / 255);
+    const chroma = Math.sqrt(a * a + b * b);
+    const hue = Math.atan2(b, a);
+    const jitteredL = Math.min(100, Math.max(0, l + (rand() * 2 - 1) * amount * 100));
+    const jitteredC = Math.max(0, chroma + (rand() * 2 - 1) * amount * 50);
+    const jitteredH = hue + (rand() * 2 - 1) * amount * Math.PI;
+    const [r, g, bl] = labToRgb(jitteredL, jitteredC * Math.cos(jitteredH), jitteredC * Math.sin(jitteredH));
+    dst[i] = r;
+    dst[i + 1] = g;
+    dst[i + 2] = bl;
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
 /** Filter registry: id, theme, title, hint, and dialog params. */
 export const GNUMARUS_FILTERS: GnumarusFilterDef[] = [
   {
@@ -2688,6 +2792,23 @@ export const GNUMARUS_FILTERS: GnumarusFilterDef[] = [
     ],
   },
   { id: "image-gradient", title: "Image Gradient", hint: "Per-channel Sobel magnitude in full color.", theme: "edge", params: [] },
+  {
+    id: "propagate-colors",
+    title: "Propagate Colors",
+    hint: "Bleeds opaque colors into nearby transparent pixels (alpha untouched).",
+    theme: "colors",
+    params: [{ key: "distance", kind: "number", label: "Distance", hint: "Max bleed in pixels.", min: 1, max: 64, step: 1, def: 8 }],
+  },
+  {
+    id: "lch-noise",
+    title: "LCh Noise",
+    hint: "Adds deterministic grain in Lab/LCh space (same seed replays).",
+    theme: "noise",
+    params: [
+      { key: "amount", kind: "number", label: "Amount (%)", hint: "Noise strength.", min: 0, max: 100, step: 1, def: 10 },
+      { key: "seed", kind: "number", label: "Seed", hint: "Random seed.", min: 1, max: 9999, step: 1, def: 1 },
+    ],
+  },
 ];
 
 export function getFilterDef(id: string): GnumarusFilterDef | undefined {
@@ -2834,6 +2955,10 @@ export function runFilterKernel(
       return kernelShift(src, width, height, v);
     case "image-gradient":
       return kernelImageGradient(src, width, height);
+    case "propagate-colors":
+      return kernelPropagateColors(src, width, height, v);
+    case "lch-noise":
+      return kernelLchNoise(src, width, height, v);
     default:
       return null;
   }

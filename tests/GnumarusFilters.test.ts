@@ -35,8 +35,8 @@ function gradient(width: number, height: number): Uint8ClampedArray {
 }
 
 describe("GnumarusFilters", () => {
-  it("registers 63 filters across 8 themes with unique ids", () => {
-    expect(GNUMARUS_FILTERS.length).toBe(63);
+  it("registers 65 filters across 8 themes with unique ids", () => {
+    expect(GNUMARUS_FILTERS.length).toBe(65);
     const ids = GNUMARUS_FILTERS.map((def) => def.id);
     expect(new Set(ids).size).toBe(ids.length);
     const themes = new Set(GNUMARUS_FILTERS.map((def) => def.theme));
@@ -704,5 +704,34 @@ describe("GnumarusFilters", () => {
     const edges = runFilterKernel("image-gradient", split, 8, 4, {}) as Uint8ClampedArray;
     expect(edges[(2 * 8 + 3) * 4]).toBeGreaterThan(0);
     expect(edges[(2 * 8 + 6) * 4]).toBe(0);
+  });
+
+  it("bleeds opaque colors into transparency", () => {
+    const buffer = solid(5, 5, 0, 0, 0, 0);
+    buffer[(2 * 5 + 2) * 4] = 255;
+    buffer[(2 * 5 + 2) * 4 + 1] = 255;
+    buffer[(2 * 5 + 2) * 4 + 2] = 255;
+    buffer[(2 * 5 + 2) * 4 + 3] = 255;
+    const out = runFilterKernel("propagate-colors", buffer, 5, 5, { distance: 1 }) as Uint8ClampedArray;
+    // Orthogonal neighbors take the white RGB but keep alpha 0.
+    expect([out[(1 * 5 + 2) * 4], out[(1 * 5 + 2) * 4 + 3]]).toEqual([255, 0]);
+    expect([out[(2 * 5 + 1) * 4], out[(2 * 5 + 1) * 4 + 3]]).toEqual([255, 0]);
+    // Diagonals are distance 2 away: untouched.
+    expect([out[(1 * 5 + 1) * 4], out[(1 * 5 + 1) * 4 + 3]]).toEqual([0, 0]);
+    expect([out[(0 * 5 + 2) * 4], out[(0 * 5 + 2) * 4 + 3]]).toEqual([0, 0]);
+    // The opaque source pixel is untouched.
+    expect(Array.from(out.slice((2 * 5 + 2) * 4, (2 * 5 + 2) * 4 + 4))).toEqual([255, 255, 255, 255]);
+  });
+
+  it("adds deterministic lch noise", () => {
+    const flat = solid(4, 4, 128, 128, 128, 255);
+    const none = runFilterKernel("lch-noise", flat, 4, 4, { amount: 0 });
+    expect(none).not.toBeNull();
+    expect(Array.from(none as Uint8ClampedArray)).toEqual(Array.from(flat));
+    const a = runFilterKernel("lch-noise", flat, 4, 4, { amount: 50, seed: 3 });
+    const b = runFilterKernel("lch-noise", flat, 4, 4, { amount: 50, seed: 3 });
+    const c = runFilterKernel("lch-noise", flat, 4, 4, { amount: 50, seed: 4 });
+    expect(Array.from(a as Uint8ClampedArray)).toEqual(Array.from(b as Uint8ClampedArray));
+    expect(Array.from(a as Uint8ClampedArray)).not.toEqual(Array.from(c as Uint8ClampedArray));
   });
 });
