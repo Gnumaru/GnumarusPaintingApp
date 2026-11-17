@@ -223,3 +223,18 @@ test("Ctrl+Shift+Arrows create layers and frames @recent", async ({ page }) => {
   expect(matrix.frameCount).toBe(3);
   expect(matrix.currentFrame).toBe(1);
 });
+
+test("first painted cell content is named C1 @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "Content manager" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#contentManagerDialog");
+  await expect(dialog).toBeVisible();
+  const contentItem = dialog.locator('[data-testid="content-manager-item"][data-kind="content"]');
+  await expect(contentItem).toHaveCount(1);
+  await expect(contentItem.locator(".picker-name")).toHaveText("C1");
+});

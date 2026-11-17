@@ -1854,7 +1854,7 @@ export class GnumarusCanvasEngine {
     this.currentFrame = 0;
     this.frameNames = [defaultFrameName(0)];
     this.frameNameCounter = 2;
-    this.contentCounter = 2;
+    this.contentCounter = 1;
     this.textureCounter = 1;
     this.textCounter = 1;
     this.textNameCounter = 1;
@@ -8761,7 +8761,7 @@ export class GnumarusCanvasEngine {
     this.layers.push(first);
     this.activeLayerId = first.id;
     this.layerCounter = 1;
-    this.contentCounter = 2;
+    this.contentCounter = 1;
     this.textureCounter = 1;
     this.textCounter = 1;
     this.textNameCounter = 1;
@@ -10875,6 +10875,19 @@ export class GnumarusCanvasEngine {
       return false;
     }
     const flat = compositeFinalImage(this.imageWidth, this.imageHeight, inputs);
+    if (floating !== null && this.floatingHomeVisible()) {
+      // The floating selection is visualized on top: merge it into the
+      // composite with the same placement mapping as a real merge.
+      this.mergeFloatingIntoTexture(
+        { buffer: flat, width: this.imageWidth, height: this.imageHeight },
+        floating,
+        this.floatingPlacement(floating),
+        minX,
+        minY,
+        minX + width,
+        minY + height,
+      );
+    }
     const buffer = new Uint8ClampedArray(width * height * 4);
     for (let row = 0; row < height; row += 1) {
       const from = ((minY + row) * this.imageWidth + minX) * 4;

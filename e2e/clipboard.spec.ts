@@ -42,7 +42,22 @@ test("copy selection and paste round-trips pixels at the same origin @recent", a
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
-test("copy merged flattens visible layers and keeps holes transparent @recent", async ({ page }) => {
+test("copy merged flattens visible layers @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await paintDot(page, "#ff0000", 32, 32);
+  await page.keyboard.press("Control+Shift+ArrowUp");
+  await paintDot(page, "#0000ff", 40, 32);
+  // No selection: the whole canvas composite lands in memory.
+  expect(await runAction(page, "copy-merged")).toBe(true);
+  await loadBlankProject(page, 64);
+  await expect(runAction(page, "paste")).resolves.toBe(true);
+  expect(await readFloatingPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readFloatingPixel(page, 40, 32)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+});
+
+test("copy merged includes the visible floating selection @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
@@ -51,16 +66,16 @@ test("copy merged flattens visible layers and keeps holes transparent @recent", 
   await paintDot(page, "#0000ff", 40, 32);
   await selectTool(page, "Rectangular selection");
   await dragRect(page, 28, 28, 44, 36);
-  // The floating selection holds the blue dot; layer 1 has a hole there now.
+  // The cut moved blue into the floating selection; the merged copy still
+  // shows it because the floating is visualized on top.
   expect(await runAction(page, "copy-merged")).toBe(true);
   await loadBlankProject(page, 64);
-  expect(await runAction(page, "paste")).toBe(true);
-  // Merged red shows through, the cut blue area stays transparent.
+  await expect(runAction(page, "paste")).resolves.toBe(true);
   expect(await readFloatingPixel(page, 4, 4)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
-  expect(await readFloatingPixel(page, 12, 4)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readFloatingPixel(page, 12, 4)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
   await page.keyboard.press("Enter");
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
-  expect(await readPixel(page, 40, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 40, 32)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
 });
 
 test("copy without floating and paste without memory show error toasts @recent", async ({ page }) => {
