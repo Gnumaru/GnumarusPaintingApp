@@ -89,3 +89,55 @@ test("shortcuts and Edit menu invoke copy and paste @recent", async ({ page }) =
   await page.keyboard.press("Control+v");
   expect(await readFloatingPixel(page, 4, 4)).toEqual({ r: 0, g: 255, b: 0, a: 255 });
 });
+
+test("persisting a paste keeps what transparent pixels cover @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  await selectTool(page, "Rectangular selection");
+  // Box larger than the dot: floating holds red plus transparent surroundings.
+  await dragRect(page, 24, 24, 40, 40);
+  expect(await runAction(page, "copy-selection")).toBe(true);
+  await loadBlankProject(page, 64);
+  await selectTool(page, "Pencil");
+  await paintDot(page, "#0000ff", 36, 32);
+  expect(await runAction(page, "paste")).toBe(true);
+  await page.keyboard.press("Enter");
+  // Opaque red covers; transparent surroundings leave the blue alone.
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 36, 32)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+  expect(await readPixel(page, 24, 24)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+});
+
+test("persisting a paste blends partial alpha over the layer @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  await selectTool(page, "Rectangular selection");
+  await dragRect(page, 28, 28, 36, 36);
+  // Halve the floating alpha in place, then copy the faded pixels.
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { floating?: { buffer: Uint8ClampedArray } | null } };
+    };
+    const buffer = root.__gnumarus?.engine?.floating?.buffer;
+    if (buffer === undefined) {
+      throw new Error("no floating selection");
+    }
+    for (let i = 3; i < buffer.length; i += 4) {
+      buffer[i] = 128;
+    }
+  });
+  expect(await runAction(page, "copy-selection")).toBe(true);
+  await loadBlankProject(page, 64);
+  await selectTool(page, "Pencil");
+  await paintDot(page, "#0000ff", 32, 32);
+  expect(await runAction(page, "paste")).toBe(true);
+  await page.keyboard.press("Enter");
+  // Straight-alpha source-over of half red over opaque blue.
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 128, g: 0, b: 127, a: 255 });
+});

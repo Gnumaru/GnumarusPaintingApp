@@ -76,6 +76,7 @@ import {
   setPixel,
   stampSegmentCoverage,
   applyShadeMask,
+  blendPixelCoverage,
   type GnumarusBlendMode,
   type GnumarusBrushShape,
   type GnumarusChannelLock,
@@ -12399,20 +12400,24 @@ export class GnumarusCanvasEngine {
         }
         painted = true;
         const source = (sy * floating.width + sx) * 4;
-        const dest = (dy * tex.width + dx) * 4;
-        if (maskValue >= 255) {
-          tex.buffer[dest] = floating.buffer[source]!;
-          tex.buffer[dest + 1] = floating.buffer[source + 1]!;
-          tex.buffer[dest + 2] = floating.buffer[source + 2]!;
-          tex.buffer[dest + 3] = floating.buffer[source + 3]!;
-          continue;
-        }
-        const alpha = maskValue / 255;
-        const inv = 1 - alpha;
-        tex.buffer[dest] = Math.round((floating.buffer[source] as number) * alpha + (tex.buffer[dest] as number) * inv);
-        tex.buffer[dest + 1] = Math.round((floating.buffer[source + 1] as number) * alpha + (tex.buffer[dest + 1] as number) * inv);
-        tex.buffer[dest + 2] = Math.round((floating.buffer[source + 2] as number) * alpha + (tex.buffer[dest + 2] as number) * inv);
-        tex.buffer[dest + 3] = Math.round((floating.buffer[source + 3] as number) * alpha + (tex.buffer[dest + 3] as number) * inv);
+        // Straight-alpha source-over: fully transparent source pixels keep
+        // the destination, partial ones blend by source alpha x coverage.
+        blendPixelCoverage(
+          tex.buffer,
+          tex.width,
+          tex.height,
+          dx,
+          dy,
+          {
+            r: floating.buffer[source] ?? 0,
+            g: floating.buffer[source + 1] ?? 0,
+            b: floating.buffer[source + 2] ?? 0,
+            a: floating.buffer[source + 3] ?? 0,
+          },
+          maskValue / 255,
+          undefined,
+          "normal",
+        );
       }
     }
     return painted;
