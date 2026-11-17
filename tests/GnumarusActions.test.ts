@@ -3,6 +3,7 @@ import {
   actionBlockedMessage,
   GnumarusActionError,
   GnumarusActionRegistry,
+  requireClipboard,
   requireFloatingSelection,
   requireTool,
   searchActions,
@@ -73,6 +74,28 @@ describe("GnumarusActions", () => {
     expect(partial).toEqual({ ok: false, reasons: ["an active floating selection"] });
     expect(registry.execute("gated", { tool: "pencil", hasFloatingSelection: true })).toEqual({ ok: true });
     expect(ran).toBe(101);
+  });
+
+  it("gates clipboard actions on copy memory", () => {
+    const registry = new GnumarusActionRegistry();
+    let ran = 0;
+    registry.register(
+      makeAction({
+        id: "paste",
+        name: "Paste",
+        requirements: [requireClipboard()],
+        run: (): void => {
+          ran += 1;
+        },
+      }),
+    );
+    const blocked = registry.execute("paste", { tool: "pencil", hasFloatingSelection: false });
+    expect(blocked.ok).toBe(false);
+    expect(blocked.ok === false ? blocked.reasons : []).toEqual(["content in memory"]);
+    expect(
+      registry.execute("paste", { tool: "pencil", hasFloatingSelection: false, hasClipboard: true }),
+    ).toEqual({ ok: true });
+    expect(ran).toBe(1);
   });
 
   it("formats the blocked message", () => {

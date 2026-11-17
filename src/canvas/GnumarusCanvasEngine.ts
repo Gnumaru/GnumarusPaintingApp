@@ -10809,6 +10809,175 @@ export class GnumarusCanvasEngine {
     return this.floating !== null && this.floating.active;
   }
 
+  /** Copy memory for copy-selection / copy-merged (app-local, not the OS clipboard). */
+  private clipboard: {
+    buffer: Uint8ClampedArray;
+    width: number;
+    height: number;
+    mask: Uint8Array;
+    maskFull: boolean;
+    originX: number;
+    originY: number;
+  } | null = null;
+
+  /** Whether copy memory holds something pasteable. */
+  hasClipboard(): boolean {
+    const clip = this.clipboard;
+    return clip !== null && clip.width > 0 && clip.height > 0;
+  }
+
+  /**
+   * Copy the active floating selection (pixels + mask + origin) into
+   * memory for a later paste. Read-only: no history entry. False without
+   * an active floating selection.
+   */
+  copyFloatingSelection(): boolean {
+    const floating = this.floating;
+    if (floating === null || !floating.active) {
+      return false;
+    }
+    this.clipboard = {
+      buffer: floating.buffer.slice(),
+      width: floating.width,
+      height: floating.height,
+      mask: floating.mask.slice(),
+      maskFull: floating.maskFull,
+      originX: Math.round(floating.cx - floating.width / 2),
+      originY: Math.round(floating.cy - floating.height / 2),
+    };
+    return true;
+  }
+
+  /**
+   * Copy everything visible in the current selection at the current frame
+   * into memory: all visible layers composited, cropped to the active
+   * floating box (or the full canvas without one). Read-only. False when
+   * the frame cannot be flattened or the region is empty.
+   */
+  copyMergedSelection(): boolean {
+    const inputs = this.getFrameFlattenInputs(this.currentFrame);
+    if (inputs === null) {
+      return false;
+    }
+    let minX = 0;
+    let minY = 0;
+    let width = this.imageWidth;
+    let height = this.imageHeight;
+    const floating = this.floating;
+    if (floating !== null && floating.active) {
+      minX = Math.max(0, Math.floor(floating.cx - floating.width / 2));
+      minY = Math.max(0, Math.floor(floating.cy - floating.height / 2));
+      width = Math.min(this.imageWidth - minX, Math.ceil(floating.width));
+      height = Math.min(this.imageHeight - minY, Math.ceil(floating.height));
+    }
+    if (width < 1 || height < 1) {
+      return false;
+    }
+    const flat = compositeFinalImage(this.imageWidth, this.imageHeight, inputs);
+    const buffer = new Uint8ClampedArray(width * height * 4);
+    for (let row = 0; row < height; row += 1) {
+      const from = ((minY + row) * this.imageWidth + minX) * 4;
+      buffer.set(flat.subarray(from, from + width * 4), row * width * 4);
+    }
+    this.clipboard = {
+      buffer,
+      width,
+      height,
+      mask: new Uint8Array(width * height).fill(255),
+      maskFull: true,
+      originX: minX,
+      originY: minY,
+    };
+    return true;
+  }
+
+  /**
+   * Paste copy memory as a floating selection in the current cell, at the
+   * stored origin (clipped to the layer). Commits any active floating
+   * first; materializes the cell when empty. False with empty memory or
+   * on cells without a paintable texture (text/vector/3D/tilemap). Merging
+   * stays a separate undoable step.
+   */
+  pasteClipboard(): boolean {
+    const clip = this.clipboard;
+    if (clip === null || clip.width < 1 || clip.height < 1) {
+      return false;
+    }
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return false;
+    }
+    const ensured = this.ensureCellContent(layer.id, this.currentFrame);
+    if (ensured === null) {
+      return false;
+    }
+    this.commitFloating();
+    const tex = ensured.texture;
+    const minX = Math.max(0, clip.originX);
+    const minY = Math.max(0, clip.originY);
+    const width = Math.max(0, Math.min(clip.width - (minX - clip.originX), tex.width - minX));
+    const height = Math.max(0, Math.min(clip.height - (minY - clip.originY), tex.height - minY));
+    if (width < 1 || height < 1) {
+      return false;
+    }
+    const shiftX = minX - clip.originX;
+    const shiftY = minY - clip.originY;
+    const buffer = new Uint8ClampedArray(width * height * 4);
+    const mask = new Uint8Array(width * height);
+    for (let row = 0; row < height; row += 1) {
+      const from = ((shiftY + row) * clip.width + shiftX) * 4;
+      buffer.set(clip.buffer.subarray(from, from + width * 4), row * width * 4);
+      const maskFrom = (shiftY + row) * clip.width + shiftX;
+      mask.set(clip.mask.subarray(maskFrom, maskFrom + width), row * width);
+    }
+    this.floating = {
+      buffer,
+      width,
+      height,
+      mask,
+      maskFull: countSelectionMask(mask) === width * height,
+      cx: minX + width / 2,
+      cy: minY + height / 2,
+      rotation: 0,
+      scaleX: 1,
+      scaleY: 1,
+      skewX: 0,
+      skewY: 0,
+      rotationX: 0,
+      rotationY: 0,
+      flipX: false,
+      flipY: false,
+      initial: {
+        cx: minX + width / 2,
+        cy: minY + height / 2,
+        rotation: 0,
+        scaleX: 1,
+        scaleY: 1,
+        skewX: 0,
+        skewY: 0,
+        rotationX: 0,
+        rotationY: 0,
+        flipX: false,
+        flipY: false,
+      },
+      layerId: layer.id,
+      frame: this.currentFrame,
+      textureId: tex.id,
+      cutDepth: this.history.undoDepth(),
+      active: true,
+    };
+    this.markTextureViewsDirty(tex.id);
+    this.syncAllLayerRenders();
+    this.syncFloatingPlane();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
   /** Floating placement as the pure affine module expects it. */
   private floatingPlacement(floating: GnumarusFloatingSelection): GnumarusSelectionPlacement {
     return {

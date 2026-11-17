@@ -383,6 +383,8 @@ import {
 import {
   actionBlockedMessage,
   GnumarusActionRegistry,
+  requireClipboard,
+  requireFloatingSelection,
   searchActions,
   type GnumarusAction,
   type GnumarusActionContext,
@@ -468,6 +470,14 @@ function gnumarusShortcuts(): GnumarusShortcutSection[] {
       entries: [
         { keys: "Ctrl+Z (Cmd+Z on macOS)", action: tr("sc.undo") },
         { keys: "Ctrl+Y or Shift+Ctrl+Z (Cmd+Y or Shift+Cmd+Z on macOS)", action: tr("sc.redo") },
+      ],
+    },
+    {
+      title: tr("sc.edit"),
+      entries: [
+        { keys: "Ctrl+C (Cmd+C on macOS)", action: tr("sc.copySelection") },
+        { keys: "Ctrl+Shift+C (Cmd+Shift+C on macOS)", action: tr("sc.copyMerged") },
+        { keys: "Ctrl+V (Cmd+V on macOS)", action: tr("sc.paste") },
       ],
     },
     {
@@ -2656,6 +2666,9 @@ export class GnumarusShell extends LitElement {
                 <div class="dropdown">
                   <button title=${tr("menu.undoTitle")} ?disabled=${!this.canUndo} @click=${(): void => void this.runAction("undo")}>${tr("menu.undo")}</button>
                   <button title=${tr("menu.redoTitle")} ?disabled=${!this.canRedo} @click=${(): void => void this.runAction("redo")}>${tr("menu.redo")}</button>
+                  <button title=${tr("menu.copySelectionTitle")} @click=${(): void => void this.runAction("copy-selection")}>${tr("menu.copySelection")}</button>
+                  <button title=${tr("menu.copyMergedTitle")} @click=${(): void => void this.runAction("copy-merged")}>${tr("menu.copyMerged")}</button>
+                  <button title=${tr("menu.pasteTitle")} @click=${(): void => void this.runAction("paste")}>${tr("menu.paste")}</button>
                   <button title=${tr("menu.settingsTitle")} @click=${(): void => void this.runAction("settings")}>${tr("menu.settings")}</button>
                   <button title=${tr("menu.adjustBrightnessContrastTitle")} @click=${(): void => void this.runAction("adjust-brightness-contrast")}>${tr("menu.adjustBrightnessContrast")}</button>
                   <button title=${tr("menu.adjustHueSaturationTitle")} @click=${(): void => void this.runAction("adjust-hue-saturation")}>${tr("menu.adjustHueSaturation")}</button>
@@ -7244,6 +7257,32 @@ export class GnumarusShell extends LitElement {
       this.mergeActiveLayerDown();
       return;
     }
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && (key === "c" || key === "v")) {
+      if (
+        this.eventInField(event) ||
+        this.eventInColorPicker(event) ||
+        this.shadowRoot?.querySelector("dialog[open]") !== null ||
+        this.isAdjustWindowOpen()
+      ) {
+        return;
+      }
+      event.preventDefault();
+      void this.runAction(key === "c" ? "copy-selection" : "paste");
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && event.shiftKey && key === "c") {
+      if (
+        this.eventInField(event) ||
+        this.eventInColorPicker(event) ||
+        this.shadowRoot?.querySelector("dialog[open]") !== null ||
+        this.isAdjustWindowOpen()
+      ) {
+        return;
+      }
+      event.preventDefault();
+      void this.runAction("copy-merged");
+      return;
+    }
     if ((event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey) {
       if (
         this.eventInField(event) ||
@@ -7899,6 +7938,30 @@ export class GnumarusShell extends LitElement {
       },
     });
     this.actionRegistry.register({
+      id: "copy-selection",
+      name: tr("menu.copySelection"),
+      requirements: [requireFloatingSelection()],
+      run: (): void => {
+        this.copySelectionToMemory();
+      },
+    });
+    this.actionRegistry.register({
+      id: "copy-merged",
+      name: tr("menu.copyMerged"),
+      requirements: [],
+      run: (): void => {
+        this.copyMergedToMemory();
+      },
+    });
+    this.actionRegistry.register({
+      id: "paste",
+      name: tr("menu.paste"),
+      requirements: [requireClipboard()],
+      run: (): void => {
+        this.pasteFromMemory();
+      },
+    });
+    this.actionRegistry.register({
       id: "settings",
       name: tr("menu.settings"),
       requirements: [],
@@ -8048,6 +8111,7 @@ export class GnumarusShell extends LitElement {
     return {
       tool: this.tool,
       hasFloatingSelection: this.engine?.hasFloatingSelection() ?? false,
+      hasClipboard: this.engine?.hasClipboard() ?? false,
     };
   }
 
@@ -8152,6 +8216,41 @@ export class GnumarusShell extends LitElement {
     this.editMenuOpen = false;
     this.fileMenuOpen = false;
     this.statusMessage = this.engine?.redo() === true ? tr("status.redo") : tr("status.nothingToRedo");
+  }
+
+  /** Copy the active floating selection into memory (error toast without one). */
+  private copySelectionToMemory(): boolean {
+    this.editMenuOpen = false;
+    this.fileMenuOpen = false;
+    if (this.engine?.copyFloatingSelection() !== true) {
+      this.showToast(tr("status.copySelectionEmpty"));
+      return false;
+    }
+    this.statusMessage = tr("status.copySelection");
+    return true;
+  }
+
+  /** Copy the visible composite (floating box or full canvas) into memory. */
+  private copyMergedToMemory(): boolean {
+    this.editMenuOpen = false;
+    this.fileMenuOpen = false;
+    if (this.engine?.copyMergedSelection() !== true) {
+      this.showToast(tr("status.copyFailed"));
+      return false;
+    }
+    this.statusMessage = tr("status.copyMerged");
+    return true;
+  }
+
+  /** Paste copy memory as a floating selection in the current cell. */
+  private pasteFromMemory(): boolean {
+    this.editMenuOpen = false;
+    this.fileMenuOpen = false;
+    if (this.engine?.pasteClipboard() !== true) {
+      this.showToast(tr("status.pasteBlocked"));
+      return false;
+    }
+    return true;
   }
 
   private openSettingsDialog(): void {

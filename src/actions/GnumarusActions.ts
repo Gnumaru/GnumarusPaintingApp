@@ -11,6 +11,8 @@ export interface GnumarusActionContext {
   tool: string;
   /** True while a floating selection cut is in progress. */
   hasFloatingSelection: boolean;
+  /** True while copy memory holds something pasteable. */
+  hasClipboard?: boolean;
 }
 
 /** One prerequisite; `describe` names it for the failure message. */
@@ -28,6 +30,14 @@ export function requireTool(
   return {
     satisfiedBy: (context): boolean => context.tool === toolId,
     describe: (): string => selectedLabel.split("{tool}").join(toolLabel),
+  };
+}
+
+/** Requires content in the copy memory. */
+export function requireClipboard(label = "content in memory"): GnumarusActionRequirement {
+  return {
+    satisfiedBy: (context): boolean => context.hasClipboard === true,
+    describe: (): string => label,
   };
 }
 
