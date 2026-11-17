@@ -6212,6 +6212,18 @@ export class GnumarusShell extends LitElement {
                 />
                 ${tr("opt.dither")}
               </label>
+              <label title=${tr("opt.flowHint")}
+                >${tr("opt.flow")}
+                <input
+                  type="number"
+                  id="brushFlow${sfx}"
+                  min="1"
+                  max="100"
+                  step="1"
+                  .value=${String(Math.round(this.brushFlow * 100))}
+                  @input=${(): void => this.applyBrushFlowFromDialog(sfx)}
+                />
+              </label>
               ${this.brushTipKind === "pixel"
                 ? html``
                 : html`<label title=${tr("opt.softnessHint")}
@@ -6236,18 +6248,6 @@ export class GnumarusShell extends LitElement {
                       step="1"
                       .value=${String(Math.round(this.brushSpacing * 100))}
                       @input=${(): void => this.applyBrushSpacingFromDialog(sfx)}
-                    />
-                  </label>
-                  <label title=${tr("opt.flowHint")}
-                    >${tr("opt.flow")}
-                    <input
-                      type="number"
-                      id="brushFlow${sfx}"
-                      min="1"
-                      max="100"
-                      step="1"
-                      .value=${String(Math.round(this.brushFlow * 100))}
-                      @input=${(): void => this.applyBrushFlowFromDialog(sfx)}
                     />
                   </label>
                   <label title=${tr("opt.fuzzyHint")}
