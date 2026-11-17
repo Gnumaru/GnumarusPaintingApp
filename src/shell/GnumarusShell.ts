@@ -274,14 +274,10 @@ import {
   type GnumarusHslAdjustModel,
 } from "../color/GnumarusAdjustments";
 import {
-  commitsApiUrl,
-  GNUMARUS_UPDATE_BRANCH,
-  GNUMARUS_UPDATE_CHECK_MS,
-  GNUMARUS_UPDATE_COOLDOWN_MS,
-  GNUMARUS_UPDATE_REPO,
   buildCacheBustedReloadUrl,
-  isOutdatedBuild,
-  parseLatestCommitSha,
+  extractEntryScriptUrl,
+  GNUMARUS_UPDATE_CHECK_MS,
+  resolveEntryScriptUrl,
   shouldCheckForUpdates,
   stripReloadCacheBuster,
   type GnumarusUpdateStatus,
@@ -7421,14 +7417,8 @@ export class GnumarusShell extends LitElement {
     window.addEventListener("pointerup", up);
   }
 
-  /** Last commits-API ETag for conditional (rate-limit-free) update polls. */
-  private updateEtag: string | null = null;
-  /** Newest master SHA seen by the poller (reload target once outdated). */
-  private updateLatestSha: string | null = null;
   /** Polling timer id for the update checker, or null when stopped. */
   private updateTimer: number | null = null;
-  /** Epoch ms before which update polls are skipped (rate-limit cooldown). */
-  private updateCooldownUntil = 0;
   /** In-flight guard so slow polls never overlap. */
   private updateCheckInFlight = false;
   /** Test hook: force the check even on localhost (e2e with a mocked API). */
@@ -7481,17 +7471,12 @@ export class GnumarusShell extends LitElement {
    * keep serving a fresh-within-max-age cached `index.html` (GitHub Pages
    * sends long cache headers and the file name is stable), booting the old
    * app again with the banner still on. Navigating to the same document
-   * with a per-deploy `?v=<sha>` busts both browser and CDN caches; the
-   * param is stripped on boot. Falls back to a plain reload without a
-   * known target SHA.
+   * with a unique per-click `?v=` tag defeats both browser and CDN caches;
+   * the tag is stripped on boot. Content-hashed asset names keep everything
+   * else fresh from there on.
    */
   private reloadForUpdate(): void {
-    const sha = this.updateLatestSha;
-    if (sha === null) {
-      window.location.reload();
-      return;
-    }
-    window.location.href = buildCacheBustedReloadUrl(window.location.href, sha);
+    window.location.href = buildCacheBustedReloadUrl(window.location.href, `t${Date.now().toString(36)}`);
   }
 
   /**
@@ -7506,42 +7491,28 @@ export class GnumarusShell extends LitElement {
     if (!this.updateCheckForced && !shouldCheckForUpdates(window.location.hostname, this.buildSha())) {
       return;
     }
-    if (Date.now() < this.updateCooldownUntil) {
-      return;
-    }
     this.updateCheckInFlight = true;
     try {
-      const headers: Record<string, string> = { Accept: "application/vnd.github+json" };
-      if (this.updateEtag !== null) {
-        headers["If-None-Match"] = this.updateEtag;
-      }
-      const response = await fetch(commitsApiUrl(GNUMARUS_UPDATE_REPO, GNUMARUS_UPDATE_BRANCH), {
-        headers,
-        cache: "no-store",
-      });
-      if (response.status === 304) {
-        return;
-      }
-      if (response.status === 403 || response.status === 429) {
-        this.updateCooldownUntil = Date.now() + GNUMARUS_UPDATE_COOLDOWN_MS;
-        return;
-      }
+      // Re-fetch our own document bypassing every cache: its entry-script
+      // URL is content-hashed per deploy, so it differs from the running
+      // app exactly when a newer build is deployed. No GitHub API involved,
+      // hence no rate limits (the old commits-API poll 403'd on busy
+      // networks and the banner silently never appeared).
+      const documentUrl = new URL("./", window.location.href).toString();
+      const response = await fetch(documentUrl, { headers: { Accept: "text/html" }, cache: "no-store" });
       if (!response.ok) {
         return;
       }
-      const etag = response.headers.get("etag");
-      if (etag !== null) {
-        this.updateEtag = etag;
-      }
-      const payload: unknown = await response.json();
-      const remoteSha = parseLatestCommitSha(payload);
-      if (remoteSha === null) {
+      const html = await response.text();
+      const latest = extractEntryScriptUrl(html, documentUrl);
+      const running = resolveEntryScriptUrl(
+        window.document.querySelector("script[type=module][src]")?.getAttribute("src"),
+        documentUrl,
+      );
+      if (latest === null || running === null) {
         return;
       }
-      const next: GnumarusUpdateStatus = isOutdatedBuild(this.buildSha(), remoteSha) ? "outdated" : "current";
-      if (next === "outdated") {
-        this.updateLatestSha = remoteSha;
-      }
+      const next: GnumarusUpdateStatus = latest === running ? "current" : "outdated";
       if (next !== this.updateStatus) {
         this.updateStatus = next;
       }

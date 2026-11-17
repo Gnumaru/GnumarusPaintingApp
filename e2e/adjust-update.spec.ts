@@ -516,14 +516,24 @@ test("hue/saturation spinner shows while computing @recent", async ({ page }) =>
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
-test("update banner appears in the menubar when master is newer @recent", async ({ page }) => {
-  await page.route("https://api.github.com/**", async (route) => {
-    await route.fulfill({
-      status: 200,
-      headers: { "content-type": "application/json", etag: '"update-test-new"' },
-      body: JSON.stringify({ sha: "f".repeat(40) }),
-    });
-  });
+test("update banner appears in the menubar when the deploy is newer @recent", async ({ page }) => {
+  // Mock the no-store index.html poll with a foreign entry script: the
+  // running dev bundle (/src/main.ts) no longer matches, so the app is
+  // outdated. Navigation requests still hit the real dev server.
+  await page.route(
+    (url) => url.pathname === "/",
+    async (route) => {
+      if (route.request().isNavigationRequest()) {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "text/html",
+        body: '<!doctype html><html><head><script type="module" src="/assets/index-outdatedtest.js"></script></head><body></body></html>',
+      });
+    },
+  );
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.evaluate(() => {
@@ -537,23 +547,28 @@ test("update banner appears in the menubar when master is newer @recent", async 
   await expect(banner).toContainText("Update available");
 });
 
-test("no update banner when the build matches master @recent", async ({ page }) => {
+test("no update banner when the deploy matches the running bundle @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  const localSha = await page.evaluate(() => {
-    const root = window as unknown as {
-      __gnumarus?: { shell?: { buildSha(): string } };
-    };
-    return root.__gnumarus?.shell?.buildSha() ?? "";
+  const runningSrc = await page.evaluate(() => {
+    const el = document.querySelector("script[type=module][src]");
+    return el?.getAttribute("src") ?? "";
   });
-  expect(localSha).toMatch(/^[0-9a-f]{40}$/);
-  await page.route("https://api.github.com/**", async (route) => {
-    await route.fulfill({
-      status: 200,
-      headers: { "content-type": "application/json", etag: '"update-test-same"' },
-      body: JSON.stringify({ sha: localSha }),
-    });
-  });
+  expect(runningSrc).not.toBe("");
+  await page.route(
+    (url) => url.pathname === "/",
+    async (route) => {
+      if (route.request().isNavigationRequest()) {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "text/html",
+        body: `<!doctype html><html><head><script type="module" src="${runningSrc}"></script></head><body></body></html>`,
+      });
+    },
+  );
   await page.evaluate(() => {
     const root = window as unknown as {
       __gnumarus?: { shell?: { forceUpdateCheck(): Promise<string> } };

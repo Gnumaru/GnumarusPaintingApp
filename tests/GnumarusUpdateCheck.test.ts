@@ -1,44 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCacheBustedReloadUrl,
-  commitsApiUrl,
-  GNUMARUS_UPDATE_BRANCH,
+  extractEntryScriptUrl,
   GNUMARUS_UPDATE_CHECK_MS,
-  GNUMARUS_UPDATE_COOLDOWN_MS,
-  GNUMARUS_UPDATE_REPO,
   isCommitSha,
   isLocalhostHostname,
-  isOutdatedBuild,
-  parseLatestCommitSha,
-  repoSlugFromSourceUrl,
+  resolveEntryScriptUrl,
   shouldCheckForUpdates,
   stripReloadCacheBuster,
 } from "../src/project/GnumarusUpdateCheck";
 
 describe("GnumarusUpdateCheck", () => {
-  it("targets the source repo master branch with a polite cadence", () => {
-    expect(GNUMARUS_UPDATE_REPO).toBe("Gnumaru/GnumarusPaintingApp");
-    expect(GNUMARUS_UPDATE_BRANCH).toBe("master");
-    expect(commitsApiUrl(GNUMARUS_UPDATE_REPO, GNUMARUS_UPDATE_BRANCH)).toBe(
-      "https://api.github.com/repos/Gnumaru/GnumarusPaintingApp/commits/master",
-    );
+  it("polls on a polite fixed cadence", () => {
     expect(GNUMARUS_UPDATE_CHECK_MS).toBe(10_000);
-    expect(GNUMARUS_UPDATE_COOLDOWN_MS).toBe(10 * 60 * 1000);
-  });
-
-  it("parses owner/name slugs out of GitHub URLs", () => {
-    expect(repoSlugFromSourceUrl("https://github.com/Gnumaru/GnumarusPaintingApp")).toBe(
-      "Gnumaru/GnumarusPaintingApp",
-    );
-    expect(repoSlugFromSourceUrl("https://github.com/Gnumaru/GnumarusPaintingApp/")).toBe(
-      "Gnumaru/GnumarusPaintingApp",
-    );
-    expect(repoSlugFromSourceUrl("https://github.com/Gnumaru/GnumarusPaintingApp.git")).toBe(
-      "Gnumaru/GnumarusPaintingApp",
-    );
-    expect(repoSlugFromSourceUrl("https://example.com/a/b")).toBeNull();
-    expect(repoSlugFromSourceUrl("not a url")).toBeNull();
-    expect(repoSlugFromSourceUrl("")).toBeNull();
   });
 
   it("detects localhost hostnames to skip the check", () => {
@@ -60,28 +34,6 @@ describe("GnumarusUpdateCheck", () => {
     expect(isCommitSha(42)).toBe(false);
   });
 
-  it("parses the newest commit SHA out of the API payload", () => {
-    const sha = "dc0b1315c709bafbbe0272f7124708443d2e30f9";
-    expect(parseLatestCommitSha({ sha })).toBe(sha);
-    expect(parseLatestCommitSha([{ sha }])).toBe(sha);
-    expect(parseLatestCommitSha({})).toBeNull();
-    expect(parseLatestCommitSha([])).toBeNull();
-    expect(parseLatestCommitSha(null)).toBeNull();
-    expect(parseLatestCommitSha("dc0b1315")).toBeNull();
-    expect(parseLatestCommitSha({ sha: "xyz" })).toBeNull();
-  });
-
-  it("flags outdated builds only for two valid differing SHAs", () => {
-    const a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-    const b = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-    expect(isOutdatedBuild(a, a)).toBe(false);
-    expect(isOutdatedBuild(a.toUpperCase(), a)).toBe(false);
-    expect(isOutdatedBuild(a, b)).toBe(true);
-    expect(isOutdatedBuild("dev", b)).toBe(false);
-    expect(isOutdatedBuild(a, "unknown")).toBe(false);
-    expect(isOutdatedBuild("", "")).toBe(false);
-  });
-
   it("runs only off localhost with a valid embedded SHA", () => {
     const sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     expect(shouldCheckForUpdates("gnumaru.github.io", sha)).toBe(true);
@@ -93,24 +45,48 @@ describe("GnumarusUpdateCheck", () => {
     expect(shouldCheckForUpdates("localhost", "dev")).toBe(false);
   });
 
-  it("version-tags the reload URL with the target SHA", () => {
-    const sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-    expect(buildCacheBustedReloadUrl("https://gnumaru.github.io/app/", sha)).toBe(
-      `https://gnumaru.github.io/app/?v=${sha}`,
+  it("resolves entry script URLs against the document URL", () => {
+    expect(resolveEntryScriptUrl("./assets/index-abc123.js", "https://gnumaru.github.io/app/")).toBe(
+      "https://gnumaru.github.io/app/assets/index-abc123.js",
+    );
+    expect(resolveEntryScriptUrl("/assets/index-abc123.js", "https://gnumaru.github.io/nested/path/")).toBe(
+      "https://gnumaru.github.io/assets/index-abc123.js",
+    );
+    expect(resolveEntryScriptUrl(null, "https://gnumaru.github.io/app/")).toBeNull();
+    expect(resolveEntryScriptUrl("", "https://gnumaru.github.io/app/")).toBeNull();
+    expect(resolveEntryScriptUrl("./assets/x.js", "not a base")).toBeNull();
+  });
+
+  it("extracts the entry script URL from deployed index.html", () => {
+    const html =
+      '<!doctype html><html><head><script type="module" src="./assets/index-abc123.js"></script></head><body></body></html>';
+    expect(extractEntryScriptUrl(html, "https://gnumaru.github.io/app/")).toBe(
+      "https://gnumaru.github.io/app/assets/index-abc123.js",
+    );
+    expect(extractEntryScriptUrl("<html><body>no scripts</body></html>", "https://gnumaru.github.io/app/")).toBeNull();
+    expect(extractEntryScriptUrl("", "https://gnumaru.github.io/app/")).toBeNull();
+  });
+
+  it("version-tags the reload URL with a unique tag", () => {
+    expect(buildCacheBustedReloadUrl("https://gnumaru.github.io/app/", "tm4xz")).toBe(
+      "https://gnumaru.github.io/app/?v=tm4xz",
     );
     // Replaces a previous tag and preserves the other params.
-    expect(buildCacheBustedReloadUrl(`https://gnumaru.github.io/app/?v=${"c".repeat(40)}&x=1`, sha)).toBe(
-      `https://gnumaru.github.io/app/?v=${sha}&x=1`,
+    expect(buildCacheBustedReloadUrl("https://gnumaru.github.io/app/?v=old&x=1", "tm4xz")).toBe(
+      "https://gnumaru.github.io/app/?v=tm4xz&x=1",
     );
-    // Invalid SHA or href: unchanged document URL.
-    expect(buildCacheBustedReloadUrl("https://gnumaru.github.io/app/", "nope")).toBe("https://gnumaru.github.io/app/");
-    expect(buildCacheBustedReloadUrl("not a url", sha)).toBe("not a url");
+    // Empty tag or href: unchanged document URL.
+    expect(buildCacheBustedReloadUrl("https://gnumaru.github.io/app/", "")).toBe("https://gnumaru.github.io/app/");
+    expect(buildCacheBustedReloadUrl("not a url", "tm4xz")).toBe("not a url");
   });
 
   it("strips only our own reload cache-buster", () => {
     const sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     expect(stripReloadCacheBuster(`https://gnumaru.github.io/app/?v=${sha}`)).toBe("https://gnumaru.github.io/app/");
-    expect(stripReloadCacheBuster(`https://gnumaru.github.io/app/?v=${sha}&x=1`)).toBe(
+    expect(stripReloadCacheBuster("https://gnumaru.github.io/app/?v=tm4xz")).toBe(
+      "https://gnumaru.github.io/app/",
+    );
+    expect(stripReloadCacheBuster("https://gnumaru.github.io/app/?v=tm4xz&x=1")).toBe(
       "https://gnumaru.github.io/app/?x=1",
     );
     expect(stripReloadCacheBuster("https://gnumaru.github.io/app/")).toBeNull();
