@@ -21,6 +21,7 @@ test("quick action palette filters and runs actions", async ({ page }) => {
     "Copy merged",
     "Copy selection",
     "Crop All Cells to Canvas",
+    "Cut",
     "Export project",
     "Fit All Textures to Size",
     "Import 3D Model as layer",

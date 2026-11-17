@@ -156,3 +156,40 @@ test("persisting a paste blends partial alpha over the layer @recent", async ({ 
   // Straight-alpha source-over of half red over opaque blue.
   expect(await readPixel(page, 32, 32)).toEqual({ r: 128, g: 0, b: 127, a: 255 });
 });
+
+test("cut copies to memory and removes the floating selection @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  await selectTool(page, "Rectangular selection");
+  await dragRect(page, 28, 28, 36, 36);
+  expect(await runAction(page, "cut")).toBe(true);
+  // Floating is gone but the pixels live in memory: the cell keeps the hole.
+  expect(await getFloatingSelection(page)).toBeNull();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await runAction(page, "paste")).toBe(true);
+  expect(await readFloatingPixel(page, 4, 4)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.keyboard.press("Enter");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("cut without floating and Ctrl+X invoke the action @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  expect(await runAction(page, "cut")).toBe(false);
+  await expect(toast(page)).toContainText("floating selection");
+  await setPencil(page, "#00ff00");
+  await paintCenter(page);
+  await selectTool(page, "Rectangular selection");
+  await dragRect(page, 28, 28, 36, 36);
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Cut" }).click();
+  expect(await getFloatingSelection(page)).toBeNull();
+  await page.keyboard.press("Control+x");
+  expect(await getFloatingSelection(page)).toBeNull();
+  await page.keyboard.press("Control+v");
+  expect(await readFloatingPixel(page, 4, 4)).toEqual({ r: 0, g: 255, b: 0, a: 255 });
+});

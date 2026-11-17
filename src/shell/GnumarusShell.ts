@@ -475,6 +475,7 @@ function gnumarusShortcuts(): GnumarusShortcutSection[] {
     {
       title: tr("sc.edit"),
       entries: [
+        { keys: "Ctrl+X (Cmd+X on macOS)", action: tr("sc.cut") },
         { keys: "Ctrl+C (Cmd+C on macOS)", action: tr("sc.copySelection") },
         { keys: "Ctrl+Shift+C (Cmd+Shift+C on macOS)", action: tr("sc.copyMerged") },
         { keys: "Ctrl+V (Cmd+V on macOS)", action: tr("sc.paste") },
@@ -2666,6 +2667,7 @@ export class GnumarusShell extends LitElement {
                 <div class="dropdown">
                   <button title=${tr("menu.undoTitle")} ?disabled=${!this.canUndo} @click=${(): void => void this.runAction("undo")}>${tr("menu.undo")}</button>
                   <button title=${tr("menu.redoTitle")} ?disabled=${!this.canRedo} @click=${(): void => void this.runAction("redo")}>${tr("menu.redo")}</button>
+                  <button title=${tr("menu.cutTitle")} @click=${(): void => void this.runAction("cut")}>${tr("menu.cut")}</button>
                   <button title=${tr("menu.copySelectionTitle")} @click=${(): void => void this.runAction("copy-selection")}>${tr("menu.copySelection")}</button>
                   <button title=${tr("menu.copyMergedTitle")} @click=${(): void => void this.runAction("copy-merged")}>${tr("menu.copyMerged")}</button>
                   <button title=${tr("menu.pasteTitle")} @click=${(): void => void this.runAction("paste")}>${tr("menu.paste")}</button>
@@ -7257,7 +7259,7 @@ export class GnumarusShell extends LitElement {
       this.mergeActiveLayerDown();
       return;
     }
-    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && (key === "c" || key === "v")) {
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && (key === "c" || key === "v" || key === "x")) {
       if (
         this.eventInField(event) ||
         this.eventInColorPicker(event) ||
@@ -7267,7 +7269,7 @@ export class GnumarusShell extends LitElement {
         return;
       }
       event.preventDefault();
-      void this.runAction(key === "c" ? "copy-selection" : "paste");
+      void this.runAction(key === "c" ? "copy-selection" : key === "v" ? "paste" : "cut");
       return;
     }
     if ((event.ctrlKey || event.metaKey) && !event.altKey && event.shiftKey && key === "c") {
@@ -7938,6 +7940,14 @@ export class GnumarusShell extends LitElement {
       },
     });
     this.actionRegistry.register({
+      id: "cut",
+      name: tr("menu.cut"),
+      requirements: [requireFloatingSelection()],
+      run: (): void => {
+        this.cutSelectionToMemory();
+      },
+    });
+    this.actionRegistry.register({
       id: "copy-selection",
       name: tr("menu.copySelection"),
       requirements: [requireFloatingSelection()],
@@ -8216,6 +8226,18 @@ export class GnumarusShell extends LitElement {
     this.editMenuOpen = false;
     this.fileMenuOpen = false;
     this.statusMessage = this.engine?.redo() === true ? tr("status.redo") : tr("status.nothingToRedo");
+  }
+
+  /** Cut the active floating selection into memory and discard it. */
+  private cutSelectionToMemory(): boolean {
+    this.editMenuOpen = false;
+    this.fileMenuOpen = false;
+    if (this.engine?.cutFloatingSelection() !== true) {
+      this.showToast(tr("status.copySelectionEmpty"));
+      return false;
+    }
+    this.statusMessage = tr("status.cut");
+    return true;
   }
 
   /** Copy the active floating selection into memory (error toast without one). */

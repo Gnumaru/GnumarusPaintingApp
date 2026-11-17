@@ -10906,6 +10906,25 @@ export class GnumarusCanvasEngine {
   }
 
   /**
+   * Cut the active floating selection into copy memory and discard it: the
+   * layer keeps whatever pixels it currently has (the cut-out hole, or the
+   * untouched layer for an uncommitted paste). Read-only on the layer, so no
+   * history entry. False without an active floating selection.
+   */
+  cutFloatingSelection(): boolean {
+    const floating = this.floating;
+    if (floating === null || !floating.active) {
+      return false;
+    }
+    if (!this.copyFloatingSelection()) {
+      return false;
+    }
+    this.dropFloating();
+    this.render();
+    return true;
+  }
+
+  /**
    * Paste copy memory as a floating selection in the current cell, at the
    * stored origin (clipped to the layer). Commits any active floating
    * first; materializes the cell when empty. False with empty memory or
