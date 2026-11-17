@@ -346,6 +346,14 @@ import {
 } from "../canvas/GnumarusPaintBrush";
 import { parseWrapMode, scrollIntoViewDelta, type GnumarusWrapMode } from "../canvas/GnumarusViewportMath";
 import {
+  getFilterDef,
+  GNUMARUS_FILTERS,
+  normalizeFilterValues,
+  type GnumarusFilterDef,
+  type GnumarusFilterParamDef,
+  type GnumarusFilterTheme,
+} from "../canvas/GnumarusFilters";
+import {
   BRUSH_PRESET_STORAGE_KEY,
   BUILT_IN_BRUSH_PRESETS,
   parseBrushPreset,
@@ -363,6 +371,7 @@ import {
   tr,
   type GnumarusLocale,
   type GnumarusLocaleSetting,
+  type GnumarusMessageKey,
 } from "../i18n/GnumarusI18n";
 import {
   DEFAULT_LOCALE_SETTINGS,
@@ -775,6 +784,39 @@ export class GnumarusShell extends LitElement {
     }
     .dropdown button:hover {
       background: #0e639c;
+    }
+    .submenu-row {
+      position: relative;
+    }
+    .submenu-row > button .submenu-arrow {
+      float: right;
+      margin-left: 12px;
+    }
+    .submenu-flyout {
+      position: absolute;
+      left: 100%;
+      top: -4px;
+      min-width: 180px;
+      background: #2b2b2b;
+      border: 1px solid #111;
+      border-radius: 4px;
+      padding: 4px;
+      z-index: 60;
+    }
+    .submenu-flyout button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: transparent;
+      color: #e6e6e6;
+      border: none;
+      border-radius: 4px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .submenu-flyout button:hover {
+      background: #3a3a3a;
     }
     .dropdown button:disabled {
       opacity: 0.4;
@@ -1455,6 +1497,15 @@ export class GnumarusShell extends LitElement {
       align-items: center;
       margin: 6px 0;
     }
+    .filter-param-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .filter-param-row > label {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
     .adjust-body label > .adjust-name {
       flex: 0 0 96px;
     }
@@ -1488,7 +1539,12 @@ export class GnumarusShell extends LitElement {
       color: #b0b0b0;
     }
     .adjust-spinner[hidden] {
-      display: none;
+      /* The generic [hidden] rule below uses !important, so this needs it
+         too: the spinner must keep its 18px box while hidden, otherwise
+         toggling it mid-gesture moves the param buttons and the pointerup
+         misses the reset arrow (real mouse click never fires). */
+      display: flex !important;
+      visibility: hidden;
     }
     .adjust-spinner-ring {
       width: 14px;
@@ -1893,6 +1949,14 @@ export class GnumarusShell extends LitElement {
     fileMenuOpen: { type: Boolean },
     editMenuOpen: { type: Boolean },
     helpMenuOpen: { type: Boolean },
+    filterMenuOpen: { type: Boolean },
+    filterSubmenu: { type: String },
+    filterOpen: { type: Boolean },
+    filterId: { type: String },
+    filterValues: { type: Object },
+    filterWorking: { type: Boolean },
+    filterWindowX: { type: Number },
+    filterWindowY: { type: Number },
     webglError: { type: String },
     fsSupported: { type: Boolean },
     newWidth: { type: Number },
@@ -2194,6 +2258,14 @@ export class GnumarusShell extends LitElement {
   declare bcOpen: boolean;
   declare bcWindowX: number;
   declare bcWindowY: number;
+  declare filterMenuOpen: boolean;
+  declare filterSubmenu: string | null;
+  declare filterOpen: boolean;
+  declare filterId: string | null;
+  declare filterValues: Record<string, number | boolean | string>;
+  declare filterWorking: boolean;
+  declare filterWindowX: number;
+  declare filterWindowY: number;
   declare hsHue: number;
   declare hsSaturation: number;
   declare hsLightness: number;
@@ -2460,6 +2532,14 @@ export class GnumarusShell extends LitElement {
     this.bcOpen = false;
     this.bcWindowX = 16;
     this.bcWindowY = 16;
+    this.filterMenuOpen = false;
+    this.filterSubmenu = null;
+    this.filterOpen = false;
+    this.filterId = null;
+    this.filterValues = {};
+    this.filterWorking = false;
+    this.filterWindowX = 64;
+    this.filterWindowY = 16;
     this.hsHue = 0;
     this.hsSaturation = 0;
     this.hsLightness = 0;
@@ -2682,6 +2762,58 @@ export class GnumarusShell extends LitElement {
                   >
                     ${tr("menu.resetCanvasTransform")}
                   </button>
+                </div>
+              `
+            : html``}
+        </div>
+        <div class="menu">
+          <button
+            class=${this.filterMenuOpen ? "active" : ""}
+            @click=${(): void => this.toggleMenu("filters")}
+            @mouseenter=${(): void => this.hoverMenu("filters")}
+          >
+            ${tr("menu.filters")}
+          </button>
+          ${this.filterMenuOpen
+            ? html`
+                <div class="dropdown">
+                  ${this.filterThemes().map(
+                    (theme) => html`
+                      <div
+                        class="submenu-row"
+                        @mouseenter=${(): void => {
+                          this.filterSubmenu = theme.id;
+                        }}
+                      >
+                        <button
+                          title=${theme.hint}
+                          @click=${(): void => {
+                            this.filterSubmenu = this.filterSubmenu === theme.id ? null : theme.id;
+                          }}
+                        >
+                          ${theme.label}<span class="submenu-arrow">▸</span>
+                        </button>
+                        ${this.filterSubmenu === theme.id
+                          ? html`
+                              <div class="submenu-flyout">
+                                ${theme.filters.map(
+                                  (filter) => html`
+                                    <button
+                                      title=${tr(("filter." + filter.id + "Hint") as GnumarusMessageKey)}
+                                      @click=${(): void => {
+                                        void this.openFilterDialog(filter.id);
+                                      }}
+                                    >
+                                      ${tr(("filter." + filter.id) as GnumarusMessageKey)}
+                                    </button>
+                                  `,
+                                )}
+                              </div>
+                            `
+                          : html``}
+                      </div>
+                    `,
+                  )}
                 </div>
               `
             : html``}
@@ -3295,6 +3427,49 @@ export class GnumarusShell extends LitElement {
                     }}>${tr("btn.apply")}</button>
                     <button id="hueSaturationOk" @click=${(): void => {
                       void this.confirmHslAdjust();
+                    }}>${tr("btn.ok")}</button>
+                  </div>
+                </div>
+              </div>
+            `
+            : html``}
+          ${this.filterOpen && this.filterDef() !== null
+            ? html`
+              <div
+                class="preview-window adjust-window"
+                style="left: ${this.filterWindowX}px; top: ${this.filterWindowY}px;"
+                data-testid="filter-window"
+                @keydown=${(event: KeyboardEvent): void => {
+                  if (event.key === "Escape") {
+                    event.stopPropagation();
+                    this.cancelFilterDialog();
+                  }
+                }}
+              >
+                <div class="preview-header" @pointerdown=${(event: PointerEvent): void => this.onAdjustWindowDragStart(event, "filter")}>
+                  <span>${tr(("filter." + (this.filterId ?? "")) as GnumarusMessageKey)}</span>
+                  <span class="spacer"></span>
+                  <button aria-label=${tr("btn.close")} title=${tr("btn.close")} @click=${(): void => {
+                    this.cancelFilterDialog();
+                  }}>
+                    ×
+                  </button>
+                </div>
+                <div class="adjust-body">
+                  <p>${tr(("filter." + (this.filterId ?? "") + "Hint") as GnumarusMessageKey)}</p>
+                  <div class="adjust-spinner" data-testid="filter-spinner" ?hidden=${!this.filterWorking}>
+                    <span class="adjust-spinner-ring" aria-hidden="true"></span>
+                  </div>
+                  ${this.filterDef()?.params.map((param) => this.renderFilterParam(param)) ?? html``}
+                  <div class="dialog-actions">
+                    <button @click=${(): void => {
+                      this.cancelFilterDialog();
+                    }}>${tr("btn.cancel")}</button>
+                    <button id="filterApply" @click=${(): void => {
+                      void this.applyFilter();
+                    }}>${tr("btn.apply")}</button>
+                    <button id="filterOk" @click=${(): void => {
+                      void this.confirmFilter();
                     }}>${tr("btn.ok")}</button>
                   </div>
                 </div>
@@ -7025,7 +7200,7 @@ export class GnumarusShell extends LitElement {
       const inAdjustWindow = path.some(
         (node) =>
           node instanceof HTMLElement &&
-          node.closest('[data-testid="bc-window"],[data-testid="hs-window"]') !== null,
+          node.closest('[data-testid="bc-window"],[data-testid="hs-window"],[data-testid="filter-window"]') !== null,
       );
       if (!inAdjustWindow) {
         const canvas = this.shadowRoot?.querySelector("#canvasHost > canvas") ?? null;
@@ -7034,6 +7209,7 @@ export class GnumarusShell extends LitElement {
           // letting the next preview wipe the new pixels.
           this.confirmBrightnessContrast();
           this.confirmHslAdjust();
+          void this.confirmFilter();
         }
       }
     }
@@ -7048,32 +7224,34 @@ export class GnumarusShell extends LitElement {
   };
 
   private anyMenuOpen(): boolean {
-    return this.fileMenuOpen || this.editMenuOpen || this.helpMenuOpen;
+    return this.fileMenuOpen || this.editMenuOpen || this.helpMenuOpen || this.filterMenuOpen;
   }
 
   private closeAllMenus(): void {
     this.fileMenuOpen = false;
     this.editMenuOpen = false;
     this.helpMenuOpen = false;
+    this.filterMenuOpen = false;
+    this.filterSubmenu = null;
     this.closeDrawerFlyout();
   }
 
   /** Whether a live adjust floating window is open (keyboard behaves as with a modal dialog). */
   private isAdjustWindowOpen(): boolean {
-    return this.bcOpen || this.hsOpen;
+    return this.bcOpen || this.hsOpen || this.filterOpen;
   }
 
   /** Drag state for the floating adjust windows (shared like the preview/tile drags). */
   private adjustWindowDragState: {
-    which: "bc" | "hs";
+    which: "bc" | "hs" | "filter";
     startX: number;
     startY: number;
     originX: number;
     originY: number;
   } | null = null;
 
-  /** Header drag moves the floating adjust window (clicks on buttons are ignored). */
-  private onAdjustWindowDragStart(event: PointerEvent, which: "bc" | "hs"): void {
+  /** Header drag moves the floating adjust/filter window (clicks on buttons are ignored). */
+  private onAdjustWindowDragStart(event: PointerEvent, which: "bc" | "hs" | "filter"): void {
     const target = event.target as HTMLElement | null;
     if (target !== null && target.closest("button") !== null) {
       return;
@@ -7095,9 +7273,12 @@ export class GnumarusShell extends LitElement {
       if (state.which === "bc") {
         this.bcWindowX = x;
         this.bcWindowY = y;
-      } else {
+      } else if (state.which === "hs") {
         this.hsWindowX = x;
         this.hsWindowY = y;
+      } else {
+        this.filterWindowX = x;
+        this.filterWindowY = y;
       }
     };
     const up = (): void => {
@@ -7218,9 +7399,15 @@ export class GnumarusShell extends LitElement {
   }
 
   /** Header click toggles one menu, closing the others. */
-  private toggleMenu(which: "file" | "edit" | "help"): void {
+  private toggleMenu(which: "file" | "edit" | "help" | "filters"): void {
     const open = !(
-      which === "file" ? this.fileMenuOpen : which === "edit" ? this.editMenuOpen : this.helpMenuOpen
+      which === "file"
+        ? this.fileMenuOpen
+        : which === "edit"
+          ? this.editMenuOpen
+          : which === "help"
+            ? this.helpMenuOpen
+            : this.filterMenuOpen
     );
     // A menubar menu takes over the screen: dismiss picker popups so they
     // never sit above menu items (their document-click guard may still be
@@ -7233,13 +7420,18 @@ export class GnumarusShell extends LitElement {
       this.fileMenuOpen = open;
     } else if (which === "edit") {
       this.editMenuOpen = open;
-    } else {
+    } else if (which === "help") {
       this.helpMenuOpen = open;
+    } else {
+      this.filterMenuOpen = open;
+      if (open) {
+        this.filterSubmenu = null;
+      }
     }
   }
 
   /** Hover switches menus, but only while one is already open. */
-  private hoverMenu(which: "file" | "edit" | "help"): void {
+  private hoverMenu(which: "file" | "edit" | "help" | "filters"): void {
     if (!this.anyMenuOpen()) {
       return;
     }
@@ -7248,8 +7440,11 @@ export class GnumarusShell extends LitElement {
       this.fileMenuOpen = true;
     } else if (which === "edit") {
       this.editMenuOpen = true;
-    } else {
+    } else if (which === "help") {
       this.helpMenuOpen = true;
+    } else {
+      this.filterMenuOpen = true;
+      this.filterSubmenu = null;
     }
   }
 
@@ -8049,6 +8244,16 @@ export class GnumarusShell extends LitElement {
         void this.openHslAdjustDialog();
       },
     });
+    for (const def of GNUMARUS_FILTERS) {
+      this.actionRegistry.register({
+        id: `filter-${def.id}`,
+        name: tr(("filter." + def.id) as GnumarusMessageKey),
+        requirements: [],
+        run: (): void => {
+          void this.openFilterDialog(def.id);
+        },
+      });
+    }
     this.actionRegistry.register({
       id: "crop-all-cells-to-canvas",
       name: tr("action.cropAll"),
@@ -15757,6 +15962,9 @@ export class GnumarusShell extends LitElement {
     if (this.engine === null) {
       return;
     }
+    if (this.filterOpen) {
+      this.cancelFilterDialog();
+    }
     if (!this.engine.startBrightnessContrast()) {
       this.statusMessage = tr("status.adjustEmpty");
       this.showToast(tr("status.adjustEmpty"));
@@ -15806,6 +16014,259 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.adjusted");
   }
 
+  /** Thematic groups of filters for the Filters menu, in display order. */
+  private filterThemes(): Array<{
+    id: GnumarusFilterTheme;
+    label: string;
+    hint: string;
+    filters: GnumarusFilterDef[];
+  }> {
+    const order: GnumarusFilterTheme[] = ["blur", "enhance", "artistic", "edge", "noise", "colors"];
+    return order.map((id) => ({
+      id,
+      label: tr(`filter.theme.${id}` as GnumarusMessageKey),
+      hint: tr("menu.filtersTitle"),
+      filters: GNUMARUS_FILTERS.filter((def) => def.theme === id),
+    }));
+  }
+
+  /** Active filter definition, or null when no filter dialog is open. */
+  private filterDef(): GnumarusFilterDef | null {
+    if (this.filterId === null) {
+      return null;
+    }
+    return getFilterDef(this.filterId) ?? null;
+  }
+
+  /** Open the generic filter dialog for one filter id (run actions route here). */
+  async openFilterDialog(id: string): Promise<void> {
+    const def = getFilterDef(id);
+    if (def === undefined || this.engine === null) {
+      return;
+    }
+    if (this.filterOpen) {
+      this.cancelFilterDialog();
+    }
+    if (!this.engine.startFilter(id)) {
+      this.statusMessage = tr("status.filterEmpty");
+      this.showToast(tr("status.filterEmpty"));
+      return;
+    }
+    this.closeAllMenus();
+    if (this.bcOpen) {
+      this.cancelBrightnessContrast();
+    }
+    if (this.hsOpen) {
+      void this.cancelHslAdjust();
+    }
+    this.filterId = id;
+    this.filterValues = normalizeFilterValues(def, null);
+    this.filterWorking = false;
+    this.filterRunQueued = false;
+    this.filterOpen = true;
+    window.addEventListener("keydown", this.onFilterKeyDown);
+    await this.updateComplete;
+    await this.previewFilter();
+  }
+
+  /** Close the filter dialog, reverting to the dialog-open (or last-apply) snapshot. */
+  private cancelFilterDialog(): void {
+    if (!this.filterOpen) {
+      return;
+    }
+    this.filterOpen = false;
+    this.filterId = null;
+    window.removeEventListener("keydown", this.onFilterKeyDown);
+    this.engine?.cancelFilter();
+  }
+
+  /** Escape closes the filter dialog even when focus sits outside it. */
+  private readonly onFilterKeyDown = (event: KeyboardEvent): void => {
+    if (event.key === "Escape") {
+      this.cancelFilterDialog();
+    }
+  };
+
+  /** One generic param row: label, typed control, reset-to-default arrow. */
+  private renderFilterParam(param: GnumarusFilterParamDef): unknown {
+    const key = `filter.${this.filterId ?? ""}.${param.key}` as GnumarusMessageKey;
+    return html`<div class="filter-param-row">${this.renderFilterParamControl(param, key)}</div>`;
+  }
+
+  private renderFilterParamControl(param: GnumarusFilterParamDef, key: GnumarusMessageKey): unknown {
+    const hintKey = `${key}Hint` as GnumarusMessageKey;
+    const value = this.filterValues[param.key] ?? param.def;
+    const dirty = value !== param.def;
+    const reset = dirty
+      ? html`<button
+          class="reset-btn"
+          data-testid="filter-param-${param.key}-reset"
+          aria-label=${tr("a11y.resetToDefault")}
+          title=${tr("a11y.resetToDefault")}
+          @click=${(): void => {
+            this.filterValues = { ...this.filterValues, [param.key]: param.def };
+            void this.previewFilter();
+          }}
+          >↻</button
+        >`
+      : html``;
+    if (param.kind === "boolean") {
+      return html`<label title=${tr(hintKey)}
+        ><input
+          type="checkbox"
+          data-testid="filter-param-${param.key}"
+          .checked=${value === true}
+          @change=${(event: Event): void => {
+            const input = event.target as HTMLInputElement | null;
+            this.filterValues = { ...this.filterValues, [param.key]: input?.checked === true };
+            void this.previewFilter();
+          }}
+        />
+        ${tr(key)}</label
+      >${reset}`;
+    }
+    if (param.kind === "enum") {
+      return html`<label title=${tr(hintKey)}
+        >${tr(key)}
+        <select
+          data-testid="filter-param-${param.key}"
+          .value=${typeof value === "string" ? value : String(param.def)}
+          @change=${(event: Event): void => {
+            const select = event.target as HTMLSelectElement | null;
+            this.filterValues = { ...this.filterValues, [param.key]: select?.value ?? param.def };
+            void this.previewFilter();
+          }}
+        >
+          ${(param.options ?? []).map(
+            (option) => html`<option value=${option.value}>${tr(("filter.opt." + option.value) as GnumarusMessageKey)}</option>`,
+          )}
+        </select>
+        </label
+      >${reset}`;
+    }
+    if (param.kind === "text") {
+      return html`<label title=${tr(hintKey)}
+        >${tr(key)}
+        <input
+          type="text"
+          data-testid="filter-param-${param.key}"
+          .value=${typeof value === "string" ? value : String(param.def)}
+          @change=${(event: Event): void => {
+            const input = event.target as HTMLInputElement | null;
+            this.filterValues = { ...this.filterValues, [param.key]: input?.value ?? param.def };
+            void this.previewFilter();
+          }}
+        />
+      </label
+    >${reset}`;
+    }
+    const min = param.min ?? 0;
+    const max = param.max ?? 100;
+    const step = param.step ?? 1;
+    const numeric = typeof value === "number" && Number.isFinite(value) ? value : Number(param.def);
+    return html`<label title=${tr(hintKey)}
+      ><span class="adjust-name">${tr(key)}</span>
+      <input
+        type="range"
+        data-testid="filter-param-${param.key}"
+        min=${String(min)}
+        max=${String(max)}
+        step=${String(step)}
+        .value=${String(numeric)}
+        @input=${(event: Event): void => {
+          const input = event.target as HTMLInputElement | null;
+          if (input !== null) {
+            const parsed = Number(input.value);
+            this.filterValues = { ...this.filterValues, [param.key]: Number.isFinite(parsed) ? parsed : numeric };
+          }
+        }}
+        @change=${(): void => {
+          void this.previewFilter();
+        }}
+      />
+      <input
+        type="number"
+        data-testid="filter-param-${param.key}-num"
+        min=${String(min)}
+        max=${String(max)}
+        step=${String(step)}
+        .value=${String(numeric)}
+        @input=${(event: Event): void => {
+          const input = event.target as HTMLInputElement | null;
+          if (input !== null && input.value.trim() !== "" && Number.isFinite(Number(input.value))) {
+            this.filterValues = { ...this.filterValues, [param.key]: Number(input.value) };
+          }
+        }}
+        @change=${(): void => {
+          void this.previewFilter();
+        }}
+      />
+      </label
+    >${reset}`;
+  }
+
+  /** Re-run the active filter over the session base (debounced while a run is in flight). */
+  private filterRunQueued = false;
+
+  private async previewFilter(): Promise<void> {
+    if (!this.filterOpen || this.filterId === null || this.engine === null) {
+      return;
+    }
+    if (this.filterWorking) {
+      this.filterRunQueued = true;
+      return;
+    }
+    this.filterWorking = true;
+    try {
+      do {
+        this.filterRunQueued = false;
+        await this.updateComplete;
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        if (!this.filterOpen || this.filterId === null) {
+          return;
+        }
+        this.engine.previewFilter(this.filterId, { ...this.filterValues });
+        this.requestUpdate();
+      } while (this.filterRunQueued);
+    } finally {
+      this.filterWorking = false;
+    }
+  }
+
+  /** Apply: bake the preview as the new base (undoable later as one entry on OK). */
+  private async applyFilter(): Promise<void> {
+    if (!this.filterOpen || this.engine === null) {
+      return;
+    }
+    await this.previewFilter();
+    this.engine.rebaseFilter();
+    this.statusMessage = tr("status.filterApplied");
+  }
+
+  /** OK: commit one undoable entry and close. */
+  private async confirmFilter(): Promise<void> {
+    if (!this.filterOpen) {
+      return;
+    }
+    this.filterOpen = false;
+    window.removeEventListener("keydown", this.onFilterKeyDown);
+    const id = this.filterId;
+    this.filterId = null;
+    if (this.engine === null || id === null) {
+      return;
+    }
+    await this.previewFilter();
+    const outcome = this.engine.commitFilter();
+    if (outcome === "adjusted") {
+      this.refreshLayers();
+      this.dirty = true;
+      this.statusMessage = tr("status.filterApplied");
+    } else if (outcome === "empty") {
+      this.statusMessage = tr("status.filterEmpty");
+      this.showToast(tr("status.filterEmpty"));
+    }
+  }
+
   /** OK: one undoable entry from the dialog-open snapshot to the current pixels. */
   private confirmBrightnessContrast(): void {
     if (!this.bcOpen) {
@@ -15833,6 +16294,9 @@ export class GnumarusShell extends LitElement {
     }
     if (this.engine === null) {
       return;
+    }
+    if (this.filterOpen) {
+      this.cancelFilterDialog();
     }
     if (!this.engine.startHslAdjust()) {
       this.statusMessage = tr("status.adjustEmpty");

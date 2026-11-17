@@ -145,6 +145,7 @@ import {
   type GnumarusSymmetryMode,
   type GnumarusTipAngleMode,
 } from "./GnumarusPaintBrush";
+import { getFilterDef, runFilterKernel, type GnumarusFilterValues } from "./GnumarusFilters";
 import type { GnumarusBrushColorMode } from "./GnumarusBrushPresets";
 import {
   combineMasksForParent,
@@ -518,6 +519,8 @@ interface GnumarusAdjustSession {
   textureId: string | null;
   original: Uint8ClampedArray;
   base: Uint8ClampedArray;
+  /** Snapshot before the last filter Apply (Cancel target once applied). */
+  preApply?: Uint8ClampedArray | null;
   /** Channel locks at session start; floating targets ignore locks (like cut/merge). */
   locked: GnumarusChannelLock;
 }
@@ -4336,6 +4339,10 @@ export class GnumarusCanvasEngine {
 
   /** Live hue/saturation dialog session: dialog-open snapshot plus rebase point. */
   private hsSession: GnumarusAdjustSession | null = null;
+  /** Generic image-filter dialog session (same snapshot/commit semantics). */
+  private filterSession: GnumarusAdjustSession | null = null;
+  /** Filter id owning `filterSession` (previews are id-checked). */
+  private filterSessionId: string | null = null;
 
   /**
    * Begin a live adjust session for the brightness/contrast dialog.
@@ -4642,6 +4649,177 @@ export class GnumarusCanvasEngine {
     this.updatePreviews();
     this.emitStats();
     return true;
+  }
+
+  /**
+   * Start a generic image-filter session: snapshots the current cell (or
+   * the floating selection's masked content, like adjust dialogs) so
+   * previews can re-apply from a stable base. False for unknown filters
+   * or when there is nothing to filter.
+   */
+  startFilter(id: string): boolean {
+    if (getFilterDef(id) === undefined) {
+      return false;
+    }
+    const floating = this.floating;
+    if (floating !== null && floating.active && this.floatingHomeVisible()) {
+      if (!this.materializeFloatingCut()) {
+        return false;
+      }
+      if (
+        floating.buffer.length !== floating.width * floating.height * 4 ||
+        floating.mask.length !== floating.width * floating.height
+      ) {
+        return false;
+      }
+      this.filterSession = {
+        floating: true,
+        textureId: null,
+        original: floating.buffer.slice(),
+        base: floating.buffer.slice(),
+        locked: { r: false, g: false, b: false, a: false },
+      };
+      this.filterSessionId = id;
+      return true;
+    }
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return false;
+    }
+    if (this.isCellContentEmpty(layer.id, this.currentFrame)) {
+      return false;
+    }
+    if (this.denyPaintOnDerived()) {
+      return false;
+    }
+    const ensured = this.ensureCellContent(layer.id, this.currentFrame);
+    if (ensured === null) {
+      return false;
+    }
+    const tex = ensured.texture;
+    this.filterSession = {
+      floating: false,
+      textureId: tex.id,
+      original: tex.buffer.slice(),
+      base: tex.buffer.slice(),
+      locked: { ...layer.lockedChannels },
+    };
+    this.filterSessionId = id;
+    return true;
+  }
+
+  /** Id of the active filter session, or null. */
+  getFilterSessionId(): string | null {
+    return this.filterSession === null ? null : this.filterSessionId;
+  }
+
+  /**
+   * Preview a filter run: kernel over the session base, masked like an
+   * adjust preview, no history. False without a matching session/target.
+   */
+  previewFilter(id: string, values: GnumarusFilterValues): boolean {
+    const session = this.filterSession;
+    if (session === null || this.filterSessionId !== id) {
+      return false;
+    }
+    const target = this.resolveAdjustTarget(session);
+    if (target === null) {
+      return false;
+    }
+    const out = runFilterKernel(id, session.base, target.width, target.height, values);
+    if (out === null) {
+      return false;
+    }
+    this.applyFilterResult(target.buffer, session.base, out, session.locked, target.mask);
+    this.refreshAdjustTarget(target);
+    return true;
+  }
+
+  /** Copy the kernel output over the base honoring mask and channel locks. */
+  private applyFilterResult(
+    dst: Uint8ClampedArray,
+    base: Uint8ClampedArray,
+    filtered: Uint8ClampedArray,
+    locked: GnumarusChannelLock,
+    mask: Uint8Array | null,
+  ): void {
+    if (mask !== null) {
+      dst.set(base);
+    }
+    for (let i = 0, at = 0; i < dst.length; i += 4, at += 1) {
+      if (mask !== null && (mask[at] ?? 0) === 0) {
+        continue;
+      }
+      dst[i] = filtered[i] ?? 0;
+      dst[i + 1] = filtered[i + 1] ?? 0;
+      dst[i + 2] = filtered[i + 2] ?? 0;
+      dst[i + 3] = filtered[i + 3] ?? 0;
+    }
+    if (locked.r || locked.g || locked.b || locked.a) {
+      for (let i = 0, at = 0; i < dst.length; i += 4, at += 1) {
+        if (mask !== null && (mask[at] ?? 0) === 0) {
+          continue;
+        }
+        if (locked.r) {
+          dst[i] = base[i] ?? 0;
+        }
+        if (locked.g) {
+          dst[i + 1] = base[i + 1] ?? 0;
+        }
+        if (locked.b) {
+          dst[i + 2] = base[i + 2] ?? 0;
+        }
+        if (locked.a) {
+          dst[i + 3] = base[i + 3] ?? 0;
+        }
+      }
+    }
+  }
+
+  /** Rebase the filter session: current pixels become the new preview base. */
+  rebaseFilter(): boolean {
+    const session = this.filterSession;
+    if (session === null) {
+      return false;
+    }
+    const target = this.resolveAdjustTarget(session);
+    if (target === null) {
+      return false;
+    }
+    session.preApply = session.base.slice();
+    session.base = target.buffer.slice();
+    return true;
+  }
+
+  /**
+   * Commit the filter session: one undoable history entry for cell targets;
+   * floating targets stay floating (merge bakes the undo entry).
+   */
+  commitFilter(): "adjusted" | "unchanged" | "empty" {
+    const session = this.filterSession;
+    this.filterSession = null;
+    this.filterSessionId = null;
+    if (session === null) {
+      return "empty";
+    }
+    return this.commitAdjustSession(session);
+  }
+
+  /**
+   * Revert and clear the filter session: back to the dialog-open pixels
+   * when never applied, otherwise back to the pre-last-Apply pixels.
+   */
+  cancelFilter(): boolean {
+    const session = this.filterSession;
+    this.filterSession = null;
+    this.filterSessionId = null;
+    if (session === null) {
+      return false;
+    }
+    if (session.preApply !== undefined && session.preApply !== null) {
+      session.original = session.preApply;
+    }
+    return this.cancelAdjustSession(session);
   }
 
   /**
