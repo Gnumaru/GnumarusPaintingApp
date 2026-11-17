@@ -35,8 +35,8 @@ function gradient(width: number, height: number): Uint8ClampedArray {
 }
 
 describe("GnumarusFilters", () => {
-  it("registers 16 filters across 6 themes with unique ids", () => {
-    expect(GNUMARUS_FILTERS.length).toBe(16);
+  it("registers 28 filters across 6 themes with unique ids", () => {
+    expect(GNUMARUS_FILTERS.length).toBe(28);
     const ids = GNUMARUS_FILTERS.map((def) => def.id);
     expect(new Set(ids).size).toBe(ids.length);
     const themes = new Set(GNUMARUS_FILTERS.map((def) => def.theme));
@@ -215,5 +215,132 @@ describe("GnumarusFilters", () => {
     const out = runFilterKernel("neon", flat, 6, 6, { radius: 3, amount: 50 });
     expect(out).not.toBeNull();
     expect(Array.from(out as Uint8ClampedArray)).toEqual(Array.from(flat));
+  });
+
+  it("balances colors in one range and optionally preserves luminosity", () => {
+    const gray = solid(2, 1, 128, 128, 128, 255);
+    const identity = runFilterKernel("color-balance", gray, 2, 1, {});
+    expect(identity).not.toBeNull();
+    expect(Array.from(identity as Uint8ClampedArray)).toEqual(Array.from(gray));
+    const shifted = runFilterKernel("color-balance", gray, 2, 1, { range: "midtones", cyanRed: 100, preserve: false });
+    expect(shifted).not.toBeNull();
+    const px = shifted as Uint8ClampedArray;
+    // Mid-gray has full midtone weight: red maxes out, others unchanged.
+    expect([px[0], px[1], px[2], px[3]]).toEqual([255, 128, 128, 255]);
+    const kept = runFilterKernel("color-balance", gray, 2, 1, { range: "midtones", cyanRed: 20, preserve: true });
+    const kp = kept as Uint8ClampedArray;
+    const lum = Math.round(0.2126 * kp[0]! + 0.7152 * kp[1]! + 0.0722 * kp[2]!);
+    expect(Math.abs(lum - 128)).toBeLessThanOrEqual(2);
+    // Shadows-only leaves mid-gray untouched (zero shadow weight there).
+    const shadows = runFilterKernel("color-balance", gray, 2, 1, { range: "shadows", cyanRed: 100, preserve: false });
+    expect(Array.from((shadows as Uint8ClampedArray).slice(0, 4))).toEqual([128, 128, 128, 255]);
+    // ...but moves a dark pixel strongly toward red.
+    const dark = runFilterKernel("color-balance", solid(1, 1, 40, 40, 40, 255), 1, 1, {
+      range: "shadows",
+      cyanRed: 100,
+      preserve: false,
+    });
+    const dp = dark as Uint8ClampedArray;
+    expect(dp[0]).toBeGreaterThan(200);
+    expect([dp[1], dp[2], dp[3]]).toEqual([40, 40, 255]);
+  });
+
+  it("mixes channels with identity by default", () => {
+    const px = solid(1, 1, 10, 20, 30, 40);
+    const identity = runFilterKernel("channel-mixer", px, 1, 1, {});
+    expect(identity).not.toBeNull();
+    expect(Array.from(identity as Uint8ClampedArray)).toEqual([10, 20, 30, 40]);
+    // Swap red and blue.
+    const swapped = runFilterKernel("channel-mixer", px, 1, 1, { rr: 0, bb: 0, rb: 100, br: 100, preserve: false });
+    expect(Array.from(swapped as Uint8ClampedArray)).toEqual([30, 20, 10, 40]);
+  });
+
+  it("colorizes gray to the chosen hue", () => {
+    const out = runFilterKernel("colorize", solid(1, 1, 128, 128, 128, 200), 1, 1, {
+      hue: 0,
+      saturation: 100,
+      lightness: 0,
+    });
+    expect(out).not.toBeNull();
+    expect(Array.from(out as Uint8ClampedArray)).toEqual([255, 1, 1, 200]);
+  });
+
+  it("applies sepia by scale", () => {
+    const white = solid(1, 1, 255, 255, 255, 255);
+    const none = runFilterKernel("sepia", white, 1, 1, { scale: 0 });
+    expect(Array.from(none as Uint8ClampedArray)).toEqual([255, 255, 255, 255]);
+    const full = runFilterKernel("sepia", white, 1, 1, { scale: 100 });
+    expect(Array.from(full as Uint8ClampedArray)).toEqual([255, 255, 239, 255]);
+  });
+
+  it("exposes with black point and stops", () => {
+    const gray = solid(1, 1, 128, 128, 128, 255);
+    const identity = runFilterKernel("exposure", gray, 1, 1, {});
+    expect(Array.from(identity as Uint8ClampedArray)).toEqual([128, 128, 128, 255]);
+    const pushed = runFilterKernel("exposure", gray, 1, 1, { exposure: 1 });
+    expect(Array.from(pushed as Uint8ClampedArray)).toEqual([255, 255, 255, 255]);
+    const black = runFilterKernel("exposure", gray, 1, 1, { black: 100 });
+    expect(Array.from(black as Uint8ClampedArray)).toEqual([0, 0, 0, 255]);
+  });
+
+  it("scales saturation around gray", () => {
+    const px = solid(1, 1, 100, 150, 200, 77);
+    const flat = runFilterKernel("saturation", px, 1, 1, { scale: 0 });
+    const expected = Math.round(0.2126 * 100 + 0.7152 * 150 + 0.0722 * 200);
+    expect(Array.from(flat as Uint8ClampedArray)).toEqual([expected, expected, expected, 77]);
+    const same = runFilterKernel("saturation", px, 1, 1, { scale: 100 });
+    expect(Array.from(same as Uint8ClampedArray)).toEqual([100, 150, 200, 77]);
+  });
+
+  it("dodges lighter and burns darker", () => {
+    const gray = solid(1, 1, 128, 128, 128, 255);
+    const dodge = runFilterKernel("dodge-burn", gray, 1, 1, { mode: "dodge", type: "midtones", exposure: 100 });
+    expect((dodge as Uint8ClampedArray)[0]).toBeGreaterThan(128);
+    const burn = runFilterKernel("dodge-burn", gray, 1, 1, { mode: "burn", type: "midtones", exposure: 100 });
+    expect((burn as Uint8ClampedArray)[0]).toBeLessThan(128);
+  });
+
+  it("stretches contrast to the full range", () => {
+    const buffer = new Uint8ClampedArray([50, 50, 50, 255, 200, 200, 200, 255]);
+    const out = runFilterKernel("auto-contrast", buffer, 2, 1, {});
+    expect(out).not.toBeNull();
+    expect(Array.from(out as Uint8ClampedArray)).toEqual([0, 0, 0, 255, 255, 255, 255, 255]);
+    const flat = solid(2, 2, 42, 42, 42, 9);
+    const same = runFilterKernel("auto-contrast", flat, 2, 2, {});
+    expect(Array.from(same as Uint8ClampedArray)).toEqual(Array.from(flat));
+  });
+
+  it("leaves flat areas alone in cartoon", () => {
+    const flat = solid(6, 6, 10, 20, 30, 40);
+    const out = runFilterKernel("cartoon", flat, 6, 6, {});
+    expect(out).not.toBeNull();
+    expect(Array.from(out as Uint8ClampedArray)).toEqual(Array.from(flat));
+  });
+
+  it("finds nothing on flat laplace input", () => {
+    const flat = solid(4, 4, 90, 90, 90, 255);
+    const out = runFilterKernel("laplace", flat, 4, 4, {});
+    expect(out).not.toBeNull();
+    expect(Array.from(out as Uint8ClampedArray)).toEqual(Array.from(solid(4, 4, 0, 0, 0, 255)));
+  });
+
+  it("centers flat difference-of-gaussians on mid-gray", () => {
+    const flat = solid(8, 8, 90, 90, 90, 255);
+    const out = runFilterKernel("difference-of-gaussians", flat, 8, 8, {});
+    expect(out).not.toBeNull();
+    expect(Array.from((out as Uint8ClampedArray).slice(0, 4))).toEqual([128, 128, 128, 255]);
+  });
+
+  it("hurls deterministically and spares untouched pixels", () => {
+    const flat = solid(4, 4, 100, 100, 100, 255);
+    const none = runFilterKernel("hurl", flat, 4, 4, { amount: 0 });
+    expect(Array.from(none as Uint8ClampedArray)).toEqual(Array.from(flat));
+    const a = runFilterKernel("hurl", flat, 4, 4, { amount: 50, seed: 7 });
+    const b = runFilterKernel("hurl", flat, 4, 4, { amount: 50, seed: 7 });
+    const c = runFilterKernel("hurl", flat, 4, 4, { amount: 50, seed: 8 });
+    expect(Array.from(a as Uint8ClampedArray)).toEqual(Array.from(b as Uint8ClampedArray));
+    expect(Array.from(a as Uint8ClampedArray)).not.toEqual(Array.from(c as Uint8ClampedArray));
+    const near = runFilterKernel("hurl", flat, 4, 4, { amount: 50, mode: "neighbor", seed: 7 });
+    expect(near).not.toBeNull();
   });
 });

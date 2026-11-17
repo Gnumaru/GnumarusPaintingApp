@@ -671,6 +671,328 @@ function kernelColorToAlpha(src: Uint8ClampedArray, _width: number, _height: num
   return dst;
 }
 
+function rangeToneWeight(lum01: number, range: unknown): number {
+  if (range === "shadows") {
+    return Math.min(1, Math.max(0, (0.5 - lum01) * 2));
+  }
+  if (range === "highlights") {
+    return Math.min(1, Math.max(0, (lum01 - 0.5) * 2));
+  }
+  return Math.min(1, Math.max(0, 1 - Math.abs(lum01 - 0.5) * 2));
+}
+
+/** Restore the original luminance after a per-pixel RGB shift (optional). */
+function restoreLuminance(r: number, g: number, b: number, targetLum: number): [number, number, number] {
+  const lum = luminance709(r, g, b) / 255;
+  if (lum < 0.001) {
+    return [clampByte(r), clampByte(g), clampByte(b)];
+  }
+  const scale = targetLum / lum;
+  return [clampByte(r * scale), clampByte(g * scale), clampByte(b * scale)];
+}
+
+function kernelColorBalance(src: Uint8ClampedArray, _width: number, _height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const shift = (key: string): number => (clampFloat(v[key], -100, 100, 0) / 100) * 255;
+  const cr = shift("cyanRed");
+  const mg = shift("magentaGreen");
+  const yb = shift("yellowBlue");
+  const range = v["range"];
+  const preserve = v["preserve"] === true;
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    const r = src[i] ?? 0;
+    const g = src[i + 1] ?? 0;
+    const b = src[i + 2] ?? 0;
+    const lum = luminance709(r, g, b) / 255;
+    const w = rangeToneWeight(lum, range);
+    let out: [number, number, number] = [r + cr * w, g + mg * w, b + yb * w];
+    if (preserve) {
+      out = restoreLuminance(out[0], out[1], out[2], lum);
+    } else {
+      out = [clampByte(out[0]), clampByte(out[1]), clampByte(out[2])];
+    }
+    dst[i] = out[0];
+    dst[i + 1] = out[1];
+    dst[i + 2] = out[2];
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+function kernelChannelMixer(src: Uint8ClampedArray, _width: number, _height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const gain = (key: string, fallback: number): number => clampFloat(v[key], -200, 200, fallback) / 100;
+  const m: number[] = [
+    gain("rr", 100), gain("rg", 0), gain("rb", 0),
+    gain("gr", 0), gain("gg", 100), gain("gb", 0),
+    gain("br", 0), gain("bg", 0), gain("bb", 100),
+  ];
+  const preserve = v["preserve"] === true;
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    const r = src[i] ?? 0;
+    const g = src[i + 1] ?? 0;
+    const b = src[i + 2] ?? 0;
+    const lum = luminance709(r, g, b) / 255;
+    let out: [number, number, number] = [
+      (m[0] ?? 0) * r + (m[1] ?? 0) * g + (m[2] ?? 0) * b,
+      (m[3] ?? 0) * r + (m[4] ?? 0) * g + (m[5] ?? 0) * b,
+      (m[6] ?? 0) * r + (m[7] ?? 0) * g + (m[8] ?? 0) * b,
+    ];
+    if (preserve) {
+      out = restoreLuminance(out[0], out[1], out[2], lum);
+    } else {
+      out = [clampByte(out[0]), clampByte(out[1]), clampByte(out[2])];
+    }
+    dst[i] = out[0];
+    dst[i + 1] = out[1];
+    dst[i + 2] = out[2];
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+function rgbToHsl01(r: number, g: number, b: number): [number, number, number] {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) {
+    return [0, 0, l];
+  }
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h = 0;
+  if (max === r) {
+    h = (g - b) / d + (g < b ? 6 : 0);
+  } else if (max === g) {
+    h = (b - r) / d + 2;
+  } else {
+    h = (r - g) / d + 4;
+  }
+  return [h / 6, s, l];
+}
+
+function hslToRgb255(h: number, s: number, l: number): [number, number, number] {
+  const hue = ((h % 1) + 1) % 1;
+  const sat = Math.min(1, Math.max(0, s));
+  const lit = Math.min(1, Math.max(0, l));
+  if (sat === 0) {
+    const gray = clampByte(lit * 255);
+    return [gray, gray, gray];
+  }
+  const q = lit < 0.5 ? lit * (1 + sat) : lit + sat - lit * sat;
+  const p = 2 * lit - q;
+  const channel = (t: number): number => {
+    const tt = ((t % 1) + 1) % 1;
+    if (tt < 1 / 6) {
+      return p + (q - p) * 6 * tt;
+    }
+    if (tt < 1 / 2) {
+      return q;
+    }
+    if (tt < 2 / 3) {
+      return p + (q - p) * (2 / 3 - tt) * 6;
+    }
+    return p;
+  };
+  return [clampByte(channel(hue + 1 / 3) * 255), clampByte(channel(hue) * 255), clampByte(channel(hue - 1 / 3) * 255)];
+}
+
+function kernelColorize(src: Uint8ClampedArray, _width: number, _height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const hue = clampFloat(v["hue"], 0, 360, 220) / 360;
+  const sat = clampFloat(v["saturation"], 0, 100, 50) / 100;
+  const light = clampFloat(v["lightness"], -100, 100, 0) / 100;
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    const [, , l] = rgbToHsl01((src[i] ?? 0) / 255, (src[i + 1] ?? 0) / 255, (src[i + 2] ?? 0) / 255);
+    const [r, g, b] = hslToRgb255(hue, sat, l + light);
+    dst[i] = r;
+    dst[i + 1] = g;
+    dst[i + 2] = b;
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+function kernelSepia(src: Uint8ClampedArray, _width: number, _height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const t = clampFloat(v["scale"], 0, 100, 100) / 100;
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    const r = src[i] ?? 0;
+    const g = src[i + 1] ?? 0;
+    const b = src[i + 2] ?? 0;
+    const sr = 0.393 * r + 0.769 * g + 0.189 * b;
+    const sg = 0.349 * r + 0.686 * g + 0.168 * b;
+    const sb = 0.272 * r + 0.534 * g + 0.131 * b;
+    dst[i] = clampByte(r * (1 - t) + sr * t);
+    dst[i + 1] = clampByte(g * (1 - t) + sg * t);
+    dst[i + 2] = clampByte(b * (1 - t) + sb * t);
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+function kernelExposure(src: Uint8ClampedArray, _width: number, _height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const black = clampFloat(v["black"], 0, 100, 0) / 100;
+  const stops = clampFloat(v["exposure"], -5, 5, 0);
+  const gain = Math.pow(2, stops);
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    for (let c = 0; c < 3; c += 1) {
+      dst[i + c] = clampByte((((src[i + c] ?? 0) / 255 - black) * gain) * 255);
+    }
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+function kernelSaturation(src: Uint8ClampedArray, _width: number, _height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const t = clampFloat(v["scale"], 0, 200, 100) / 100;
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    const r = src[i] ?? 0;
+    const g = src[i + 1] ?? 0;
+    const b = src[i + 2] ?? 0;
+    const lum = luminance709(r, g, b);
+    dst[i] = clampByte(lum + (r - lum) * t);
+    dst[i + 1] = clampByte(lum + (g - lum) * t);
+    dst[i + 2] = clampByte(lum + (b - lum) * t);
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+function kernelDodgeBurn(src: Uint8ClampedArray, _width: number, _height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const dodge = v["mode"] !== "burn";
+  const e = clampFloat(v["exposure"], 0, 100, 50) / 100;
+  const range = v["type"];
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    const lum = luminance709(src[i] ?? 0, src[i + 1] ?? 0, src[i + 2] ?? 0) / 255;
+    const w = rangeToneWeight(lum, range);
+    for (let c = 0; c < 3; c += 1) {
+      const orig = src[i + c] ?? 0;
+      dst[i + c] = dodge ? clampByte(orig + (255 - orig) * e * w) : clampByte(orig * (1 - e * w));
+    }
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+function kernelAutoContrast(src: Uint8ClampedArray, _width: number, _height: number): Uint8ClampedArray {
+  const lo = [255, 255, 255];
+  const hi = [0, 0, 0];
+  for (let i = 0; i < src.length; i += 4) {
+    for (let c = 0; c < 3; c += 1) {
+      const value = src[i + c] ?? 0;
+      if (value < (lo[c] ?? 255)) {
+        lo[c] = value;
+      }
+      if (value > (hi[c] ?? 0)) {
+        hi[c] = value;
+      }
+    }
+  }
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    for (let c = 0; c < 3; c += 1) {
+      const span = (hi[c] ?? 0) - (lo[c] ?? 0);
+      dst[i + c] = span < 1 ? (src[i + c] ?? 0) : clampByte((((src[i + c] ?? 0) - (lo[c] ?? 0)) / span) * 255);
+    }
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+function kernelCartoon(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const strength = clampFloat(v["amount"], 0, 100, 50) / 100;
+  const edges = sobelMagnitude(src, width, height, true, true);
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0, p = 0; i < src.length; i += 4, p += 1) {
+    const darken = strength * Math.min(1, (edges[p] ?? 0) / 255);
+    dst[i] = clampByte((src[i] ?? 0) * (1 - darken));
+    dst[i + 1] = clampByte((src[i + 1] ?? 0) * (1 - darken));
+    dst[i + 2] = clampByte((src[i + 2] ?? 0) * (1 - darken));
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+function kernelLaplace(src: Uint8ClampedArray, width: number, height: number): Uint8ClampedArray {
+  // Fixed 3x3 Laplacian: center 8, direct and diagonal neighbors -1.
+  const dst = new Uint8ClampedArray(src.length);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const at = (y * width + x) * 4;
+      for (let c = 0; c < 3; c += 1) {
+        const center = (src[at + c] ?? 0) * 8;
+        let sides = 0;
+        for (let ky = -1; ky <= 1; ky += 1) {
+          for (let kx = -1; kx <= 1; kx += 1) {
+            if (kx === 0 && ky === 0) {
+              continue;
+            }
+            sides += sampleClamped(src, width, height, x + kx, y + ky, c) as number;
+          }
+        }
+        dst[at + c] = clampByte(Math.abs(center - sides));
+      }
+      dst[at + 3] = src[at + 3] ?? 0;
+    }
+  }
+  return dst;
+}
+
+function kernelDifferenceOfGaussians(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const r1 = clampFloat(v["radius1"], 0.5, 20, 1);
+  const r2 = clampFloat(v["radius2"], 0.5, 20, 3);
+  const soft1 = gaussianBlur(src, width, height, r1);
+  const soft2 = gaussianBlur(src, width, height, r2);
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    for (let c = 0; c < 3; c += 1) {
+      dst[i + c] = clampByte(128 + ((soft1[i + c] ?? 0) - (soft2[i + c] ?? 0)));
+    }
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+function kernelHurl(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const amount = clampFloat(v["amount"], 0, 100, 10) / 100;
+  const neighbor = v["mode"] === "neighbor";
+  const seed = clampInt(v["seed"], 1, 9999, 1);
+  const rand = filterRandom(seed * 131 + 7);
+  const dst = new Uint8ClampedArray(src);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (rand() >= amount) {
+        // Keep the RNG stream aligned whether or not this pixel is hit.
+        rand();
+        rand();
+        rand();
+        continue;
+      }
+      const at = (y * width + x) * 4;
+      if (neighbor) {
+        const ox = Math.floor(rand() * 5) - 2;
+        const oy = Math.floor(rand() * 5) - 2;
+        const cx = Math.min(width - 1, Math.max(0, x + ox));
+        const cy = Math.min(height - 1, Math.max(0, y + oy));
+        const from = (cy * width + cx) * 4;
+        dst[at] = src[from] ?? 0;
+        dst[at + 1] = src[from + 1] ?? 0;
+        dst[at + 2] = src[from + 2] ?? 0;
+      } else {
+        dst[at] = Math.floor(rand() * 256);
+        dst[at + 1] = Math.floor(rand() * 256);
+        dst[at + 2] = Math.floor(rand() * 256);
+      }
+      rand();
+    }
+  }
+  return dst;
+}
+
 /** Filter registry: id, theme, title, hint, and dialog params. */
 export const GNUMARUS_FILTERS: GnumarusFilterDef[] = [
   {
@@ -837,6 +1159,155 @@ export const GNUMARUS_FILTERS: GnumarusFilterDef[] = [
       { key: "threshold", kind: "number", label: "Threshold", hint: "Fully transparent below this distance.", min: 0, max: 255, step: 1, def: 0 },
     ],
   },
+  {
+    id: "color-balance",
+    title: "Color Balance",
+    hint: "Shifts cyan/red, magenta/green and yellow/blue in one tonal range.",
+    theme: "colors",
+    params: [
+      {
+        key: "range",
+        kind: "enum",
+        label: "Range",
+        hint: "Which tones to adjust.",
+        def: "midtones",
+        options: [
+          { value: "shadows", label: "Shadows" },
+          { value: "midtones", label: "Midtones" },
+          { value: "highlights", label: "Highlights" },
+        ],
+      },
+      { key: "cyanRed", kind: "number", label: "Cyan-Red", hint: "Negative is cyan, positive is red.", min: -100, max: 100, step: 1, def: 0 },
+      { key: "magentaGreen", kind: "number", label: "Magenta-Green", hint: "Negative is magenta, positive is green.", min: -100, max: 100, step: 1, def: 0 },
+      { key: "yellowBlue", kind: "number", label: "Yellow-Blue", hint: "Negative is yellow, positive is blue.", min: -100, max: 100, step: 1, def: 0 },
+      { key: "preserve", kind: "boolean", label: "Preserve luminosity", hint: "Keep the original brightness.", def: true },
+    ],
+  },
+  {
+    id: "channel-mixer",
+    title: "Channel Mixer",
+    hint: "Rebuilds each channel as a weighted mix of the three channels.",
+    theme: "colors",
+    params: [
+      { key: "rr", kind: "number", label: "Red from red (%)", hint: "Red channel weight in the red output.", min: -200, max: 200, step: 1, def: 100 },
+      { key: "rg", kind: "number", label: "Red from green (%)", hint: "Green channel weight in the red output.", min: -200, max: 200, step: 1, def: 0 },
+      { key: "rb", kind: "number", label: "Red from blue (%)", hint: "Blue channel weight in the red output.", min: -200, max: 200, step: 1, def: 0 },
+      { key: "gr", kind: "number", label: "Green from red (%)", hint: "Red channel weight in the green output.", min: -200, max: 200, step: 1, def: 0 },
+      { key: "gg", kind: "number", label: "Green from green (%)", hint: "Green channel weight in the green output.", min: -200, max: 200, step: 1, def: 100 },
+      { key: "gb", kind: "number", label: "Green from blue (%)", hint: "Blue channel weight in the green output.", min: -200, max: 200, step: 1, def: 0 },
+      { key: "br", kind: "number", label: "Blue from red (%)", hint: "Red channel weight in the blue output.", min: -200, max: 200, step: 1, def: 0 },
+      { key: "bg", kind: "number", label: "Blue from green (%)", hint: "Green channel weight in the blue output.", min: -200, max: 200, step: 1, def: 0 },
+      { key: "bb", kind: "number", label: "Blue from blue (%)", hint: "Blue channel weight in the blue output.", min: -200, max: 200, step: 1, def: 100 },
+      { key: "preserve", kind: "boolean", label: "Preserve luminosity", hint: "Keep the original brightness.", def: true },
+    ],
+  },
+  {
+    id: "colorize",
+    title: "Colorize",
+    hint: "Paints the image with one hue at a chosen saturation.",
+    theme: "colors",
+    params: [
+      { key: "hue", kind: "number", label: "Hue", hint: "Color hue in degrees.", min: 0, max: 360, step: 1, def: 220 },
+      { key: "saturation", kind: "number", label: "Saturation (%)", hint: "Color intensity.", min: 0, max: 100, step: 1, def: 50 },
+      { key: "lightness", kind: "number", label: "Lightness shift", hint: "Brightness offset.", min: -100, max: 100, step: 1, def: 0 },
+    ],
+  },
+  {
+    id: "sepia",
+    title: "Sepia",
+    hint: "Aged-photo brown tone, blendable with the original.",
+    theme: "colors",
+    params: [{ key: "scale", kind: "number", label: "Amount (%)", hint: "How much sepia to apply.", min: 0, max: 100, step: 1, def: 100 }],
+  },
+  {
+    id: "exposure",
+    title: "Exposure",
+    hint: "Lifts the black point and applies an exposure gain in stops.",
+    theme: "colors",
+    params: [
+      { key: "black", kind: "number", label: "Black point (%)", hint: "Input level mapped to black.", min: 0, max: 100, step: 1, def: 0 },
+      { key: "exposure", kind: "number", label: "Exposure (stops)", hint: "Gain in f-stops.", min: -5, max: 5, step: 0.1, def: 0 },
+    ],
+  },
+  {
+    id: "saturation",
+    title: "Saturation",
+    hint: "Scales color intensity around gray (0 is grayscale).",
+    theme: "colors",
+    params: [{ key: "scale", kind: "number", label: "Scale (%)", hint: "100 keeps the image unchanged.", min: 0, max: 200, step: 1, def: 100 }],
+  },
+  {
+    id: "dodge-burn",
+    title: "Dodge and Burn",
+    hint: "Lightens (dodge) or darkens (burn) one tonal range.",
+    theme: "colors",
+    params: [
+      {
+        key: "mode",
+        kind: "enum",
+        label: "Mode",
+        hint: "Lighten or darken.",
+        def: "dodge",
+        options: [
+          { value: "dodge", label: "Dodge" },
+          { value: "burn", label: "Burn" },
+        ],
+      },
+      {
+        key: "type",
+        kind: "enum",
+        label: "Range",
+        hint: "Which tones to adjust.",
+        def: "midtones",
+        options: [
+          { value: "shadows", label: "Shadows" },
+          { value: "midtones", label: "Midtones" },
+          { value: "highlights", label: "Highlights" },
+        ],
+      },
+      { key: "exposure", kind: "number", label: "Exposure (%)", hint: "Effect strength.", min: 0, max: 100, step: 1, def: 50 },
+    ],
+  },
+  { id: "auto-contrast", title: "Auto Contrast", hint: "Stretches each channel to use the full 0-255 range.", theme: "colors", params: [] },
+  {
+    id: "cartoon",
+    title: "Cartoon",
+    hint: "Darkens edges so the image looks hand-inked.",
+    theme: "artistic",
+    params: [{ key: "amount", kind: "number", label: "Amount (%)", hint: "How dark the edges get.", min: 0, max: 100, step: 1, def: 50 }],
+  },
+  { id: "laplace", title: "Laplace Edges", hint: "Fixed 3x3 second-derivative edge detection.", theme: "edge", params: [] },
+  {
+    id: "difference-of-gaussians",
+    title: "Difference of Gaussians",
+    hint: "Subtracts two blurs: fine detail on mid-gray.",
+    theme: "edge",
+    params: [
+      { key: "radius1", kind: "number", label: "Radius 1", hint: "Detail blur in pixels.", min: 0.5, max: 20, step: 0.5, def: 1 },
+      { key: "radius2", kind: "number", label: "Radius 2", hint: "Background blur in pixels.", min: 0.5, max: 20, step: 0.5, def: 3 },
+    ],
+  },
+  {
+    id: "hurl",
+    title: "Hurl",
+    hint: "Scatters random pixels (same seed replays).",
+    theme: "noise",
+    params: [
+      {
+        key: "mode",
+        kind: "enum",
+        label: "Mode",
+        hint: "Random colors or random neighbors.",
+        def: "random",
+        options: [
+          { value: "random", label: "Random colors" },
+          { value: "neighbor", label: "Random neighbors" },
+        ],
+      },
+      { key: "amount", kind: "number", label: "Amount (%)", hint: "How many pixels to replace.", min: 0, max: 100, step: 1, def: 10 },
+      { key: "seed", kind: "number", label: "Seed", hint: "Random seed.", min: 1, max: 9999, step: 1, def: 1 },
+    ],
+  },
 ];
 
 export function getFilterDef(id: string): GnumarusFilterDef | undefined {
@@ -889,6 +1360,30 @@ export function runFilterKernel(
       return kernelDesaturate(src, width, height, v);
     case "color-to-alpha":
       return kernelColorToAlpha(src, width, height, v);
+    case "color-balance":
+      return kernelColorBalance(src, width, height, v);
+    case "channel-mixer":
+      return kernelChannelMixer(src, width, height, v);
+    case "colorize":
+      return kernelColorize(src, width, height, v);
+    case "sepia":
+      return kernelSepia(src, width, height, v);
+    case "exposure":
+      return kernelExposure(src, width, height, v);
+    case "saturation":
+      return kernelSaturation(src, width, height, v);
+    case "dodge-burn":
+      return kernelDodgeBurn(src, width, height, v);
+    case "auto-contrast":
+      return kernelAutoContrast(src, width, height);
+    case "cartoon":
+      return kernelCartoon(src, width, height, v);
+    case "laplace":
+      return kernelLaplace(src, width, height);
+    case "difference-of-gaussians":
+      return kernelDifferenceOfGaussians(src, width, height, v);
+    case "hurl":
+      return kernelHurl(src, width, height, v);
     default:
       return null;
   }
