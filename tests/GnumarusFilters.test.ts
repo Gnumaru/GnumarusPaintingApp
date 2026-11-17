@@ -35,12 +35,12 @@ function gradient(width: number, height: number): Uint8ClampedArray {
 }
 
 describe("GnumarusFilters", () => {
-  it("registers 28 filters across 6 themes with unique ids", () => {
-    expect(GNUMARUS_FILTERS.length).toBe(28);
+  it("registers 40 filters across 7 themes with unique ids", () => {
+    expect(GNUMARUS_FILTERS.length).toBe(40);
     const ids = GNUMARUS_FILTERS.map((def) => def.id);
     expect(new Set(ids).size).toBe(ids.length);
     const themes = new Set(GNUMARUS_FILTERS.map((def) => def.theme));
-    expect([...themes].sort()).toEqual(["artistic", "blur", "colors", "edge", "enhance", "noise"]);
+    expect([...themes].sort()).toEqual(["artistic", "blur", "colors", "decor", "edge", "enhance", "noise"]);
     for (const def of GNUMARUS_FILTERS) {
       expect(getFilterDef(def.id)).toEqual(def);
       for (const param of def.params) {
@@ -342,5 +342,112 @@ describe("GnumarusFilters", () => {
     expect(Array.from(a as Uint8ClampedArray)).not.toEqual(Array.from(c as Uint8ClampedArray));
     const near = runFilterKernel("hurl", flat, 4, 4, { amount: 50, mode: "neighbor", seed: 7 });
     expect(near).not.toBeNull();
+  });
+
+  it("grades with slope, offset and power", () => {
+    const px = solid(1, 1, 128, 128, 128, 200);
+    const identity = runFilterKernel("slope-offset-power", px, 1, 1, {});
+    expect(identity).not.toBeNull();
+    expect(Array.from(identity as Uint8ClampedArray)).toEqual([128, 128, 128, 200]);
+    const lifted = runFilterKernel("slope-offset-power", solid(1, 1, 0, 0, 0, 255), 1, 1, {
+      offsetR: 1,
+      offsetG: 1,
+      offsetB: 1,
+    });
+    expect(Array.from(lifted as Uint8ClampedArray)).toEqual([255, 255, 255, 255]);
+    const halved = runFilterKernel("slope-offset-power", px, 1, 1, { slopeR: 0.5, slopeG: 0.5, slopeB: 0.5 });
+    expect(Array.from(halved as Uint8ClampedArray)).toEqual([64, 64, 64, 200]);
+  });
+
+  it("mixes mono with identity-preserving defaults", () => {
+    const gray = solid(1, 1, 128, 128, 128, 77);
+    const identity = runFilterKernel("mono-mixer", gray, 1, 1, {});
+    expect(identity).not.toBeNull();
+    expect(Array.from(identity as Uint8ClampedArray)).toEqual([128, 128, 128, 77]);
+    const redOnly = runFilterKernel("mono-mixer", solid(1, 1, 100, 150, 200, 255), 1, 1, {
+      red: 100,
+      green: 0,
+      blue: 0,
+      preserve: false,
+    });
+    expect(Array.from(redOnly as Uint8ClampedArray)).toEqual([100, 100, 100, 255]);
+  });
+
+  it("maximizes and minimizes channels", () => {
+    const px = solid(2, 1, 100, 150, 200, 40);
+    const top = runFilterKernel("maximize-channel", px, 2, 1, {});
+    expect(Array.from(top as Uint8ClampedArray)).toEqual([200, 200, 200, 40, 200, 200, 200, 40]);
+    const low = runFilterKernel("minimize-channel", px, 2, 1, {});
+    expect(Array.from(low as Uint8ClampedArray)).toEqual([100, 100, 100, 40, 100, 100, 100, 40]);
+  });
+
+  it("normalizes all channels together", () => {
+    const buffer = new Uint8ClampedArray([200, 100, 50, 255, 100, 200, 150, 255]);
+    const out = runFilterKernel("normalize", buffer, 2, 1, {});
+    expect(out).not.toBeNull();
+    // Global min 50, max 200: (200,100,50) -> (255,85,0).
+    expect(Array.from((out as Uint8ClampedArray).slice(0, 4))).toEqual([255, 85, 0, 255]);
+    const flat = solid(2, 2, 42, 42, 42, 9);
+    const same = runFilterKernel("normalize", flat, 2, 2, {});
+    expect(Array.from(same as Uint8ClampedArray)).toEqual(Array.from(flat));
+  });
+
+  it("leaves flat areas alone in box blur, snn-mean and antialias", () => {
+    const flat = solid(8, 8, 10, 20, 30, 40);
+    for (const id of ["box-blur", "snn-mean", "antialias"]) {
+      const out = runFilterKernel(id, flat, 8, 8, {});
+      expect(out, id).not.toBeNull();
+      expect(Array.from(out as Uint8ClampedArray)).toEqual(Array.from(flat));
+    }
+  });
+
+  it("removes an impulse with snn-mean", () => {
+    const buffer = solid(5, 5, 0, 0, 0, 255);
+    buffer[(2 * 5 + 2) * 4] = 255;
+    buffer[(2 * 5 + 2) * 4 + 1] = 255;
+    buffer[(2 * 5 + 2) * 4 + 2] = 255;
+    const out = runFilterKernel("snn-mean", buffer, 5, 5, { radius: 1 });
+    expect(out).not.toBeNull();
+    expect((out as Uint8ClampedArray)[(2 * 5 + 2) * 4]).toBe(0);
+  });
+
+  it("centers flat high-pass on mid-gray", () => {
+    const flat = solid(8, 8, 90, 90, 90, 255);
+    const out = runFilterKernel("high-pass", flat, 8, 8, {});
+    expect(out).not.toBeNull();
+    expect(Array.from((out as Uint8ClampedArray).slice(0, 4))).toEqual([128, 128, 128, 255]);
+  });
+
+  it("embosses flat input to mid-gray with fixed kernels", () => {
+    const flat = solid(6, 6, 200, 100, 50, 255);
+    for (const direction of ["horizontal", "vertical", "all"]) {
+      const out = runFilterKernel("emboss-fixed", flat, 6, 6, { direction });
+      expect(out, direction).not.toBeNull();
+      expect(Array.from((out as Uint8ClampedArray).slice(0, 4))).toEqual([128, 128, 128, 255]);
+    }
+  });
+
+  it("rounds only the corners", () => {
+    const white = solid(8, 8, 255, 255, 255, 255);
+    const out = runFilterKernel("round-corners", white, 8, 8, { radius: 4 });
+    expect(out).not.toBeNull();
+    const buf = out as Uint8ClampedArray;
+    expect(buf[3]).toBe(0);
+    expect(buf[(7 * 8 + 7) * 4 + 3]).toBe(0);
+    expect(buf[(4 * 8 + 4) * 4 + 3]).toBe(255);
+    const kept = runFilterKernel("round-corners", white, 8, 8, { radius: 1 });
+    expect((kept as Uint8ClampedArray)[(4 * 8 + 4) * 4 + 3]).toBe(255);
+  });
+
+  it("degrades video rows by pattern", () => {
+    const white = solid(4, 4, 255, 255, 255, 255);
+    const lines = runFilterKernel("video-degradation", white, 4, 4, { pattern: "scanlines", strength: 100 });
+    const lb = lines as Uint8ClampedArray;
+    expect([lb[0], lb[1], lb[2], lb[3]]).toEqual([255, 255, 255, 255]);
+    expect([lb[16], lb[17], lb[18], lb[19]]).toEqual([0, 0, 0, 255]);
+    const none = runFilterKernel("video-degradation", white, 4, 4, { pattern: "scanlines", strength: 0 });
+    expect(Array.from(none as Uint8ClampedArray)).toEqual(Array.from(white));
+    const shifted = runFilterKernel("video-degradation", white, 4, 4, { pattern: "shift", strength: 50 });
+    expect(shifted).not.toBeNull();
   });
 });

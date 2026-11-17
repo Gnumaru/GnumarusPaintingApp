@@ -29,7 +29,7 @@ export interface GnumarusFilterParamDef {
   options?: GnumarusFilterParamOption[];
 }
 
-export type GnumarusFilterTheme = "blur" | "enhance" | "artistic" | "edge" | "noise" | "colors";
+export type GnumarusFilterTheme = "blur" | "enhance" | "artistic" | "edge" | "noise" | "colors" | "decor";
 
 export interface GnumarusFilterDef {
   id: string;
@@ -993,6 +993,264 @@ function kernelHurl(src: Uint8ClampedArray, width: number, height: number, v: Gn
   return dst;
 }
 
+function kernelSlopeOffsetPower(src: Uint8ClampedArray, _width: number, _height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  // ASC-CDL style: out = (in * slope + offset) ^ power, per channel.
+  const slope = (key: string): number => clampFloat(v[key], 0, 2, 1);
+  const offset = (key: string): number => clampFloat(v[key], -1, 1, 0);
+  const power = (key: string): number => clampFloat(v[key], 0, 4, 1);
+  const s = [slope("slopeR"), slope("slopeG"), slope("slopeB")];
+  const o = [offset("offsetR"), offset("offsetG"), offset("offsetB")];
+  const p = [power("powerR"), power("powerG"), power("powerB")];
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    for (let c = 0; c < 3; c += 1) {
+      const x = Math.max(0, ((src[i + c] ?? 0) / 255) * (s[c] ?? 1) + (o[c] ?? 0));
+      dst[i + c] = clampByte(Math.pow(x, p[c] ?? 1) * 255);
+    }
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+function kernelMonoMixer(src: Uint8ClampedArray, _width: number, _height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const gr = clampFloat(v["red"], 0, 100, 34) / 100;
+  const gg = clampFloat(v["green"], 0, 100, 33) / 100;
+  const gb = clampFloat(v["blue"], 0, 100, 33) / 100;
+  const preserve = v["preserve"] === true;
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    const r = src[i] ?? 0;
+    const g = src[i + 1] ?? 0;
+    const b = src[i + 2] ?? 0;
+    const gray = r * gr + g * gg + b * gb;
+    if (preserve) {
+      const [nr, ng, nb] = restoreLuminance(gray, gray, gray, luminance709(r, g, b) / 255);
+      dst[i] = nr;
+      dst[i + 1] = ng;
+      dst[i + 2] = nb;
+    } else {
+      const rounded = clampByte(gray);
+      dst[i] = rounded;
+      dst[i + 1] = rounded;
+      dst[i + 2] = rounded;
+    }
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+function kernelMaximizeChannel(src: Uint8ClampedArray, _width: number, _height: number): Uint8ClampedArray {
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    const top = Math.max(src[i] ?? 0, src[i + 1] ?? 0, src[i + 2] ?? 0);
+    dst[i] = top;
+    dst[i + 1] = top;
+    dst[i + 2] = top;
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+function kernelMinimizeChannel(src: Uint8ClampedArray, _width: number, _height: number): Uint8ClampedArray {
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    const low = Math.min(src[i] ?? 0, src[i + 1] ?? 0, src[i + 2] ?? 0);
+    dst[i] = low;
+    dst[i + 1] = low;
+    dst[i + 2] = low;
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+function kernelNormalize(src: Uint8ClampedArray, _width: number, _height: number): Uint8ClampedArray {
+  // Global stretch across all channels at once (unlike per-channel auto-contrast).
+  let lo = 255;
+  let hi = 0;
+  for (let i = 0; i < src.length; i += 4) {
+    for (let c = 0; c < 3; c += 1) {
+      const value = src[i + c] ?? 0;
+      if (value < lo) {
+        lo = value;
+      }
+      if (value > hi) {
+        hi = value;
+      }
+    }
+  }
+  const dst = new Uint8ClampedArray(src.length);
+  const span = hi - lo;
+  for (let i = 0; i < src.length; i += 4) {
+    for (let c = 0; c < 3; c += 1) {
+      dst[i + c] = span < 1 ? (src[i + c] ?? 0) : clampByte((((src[i + c] ?? 0) - lo) / span) * 255);
+    }
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+function kernelBoxBlur(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const radius = Math.max(1, Math.round(clampFloat(v["radius"], 1, 50, 3)));
+  const tmp = new Float32Array(width * height * 4);
+  boxBlurPass(src, tmp, width, height, radius, true);
+  const soft = new Float32Array(width * height * 4);
+  boxBlurPass(tmp, soft, width, height, radius, false);
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    dst[i] = clampByte(soft[i] ?? 0);
+    dst[i + 1] = clampByte(soft[i + 1] ?? 0);
+    dst[i + 2] = clampByte(soft[i + 2] ?? 0);
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+function kernelSnnMean(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  // Symmetric nearest neighbor: average the pair pixel closest to the center.
+  const r = clampInt(v["radius"], 1, 5, 1);
+  const pairs = [
+    [-r, 0, r, 0],
+    [0, -r, 0, r],
+    [-r, -r, r, r],
+    [-r, r, r, -r],
+  ];
+  const dst = new Uint8ClampedArray(src.length);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const at = (y * width + x) * 4;
+      for (let c = 0; c < 3; c += 1) {
+        const center = src[at + c] ?? 0;
+        let acc = 0;
+        for (const [ax, ay, bx, by] of pairs) {
+          const a = sampleClamped(src, width, height, x + (ax ?? 0), y + (ay ?? 0), c) as number;
+          const b = sampleClamped(src, width, height, x + (bx ?? 0), y + (by ?? 0), c) as number;
+          acc += Math.abs(a - center) <= Math.abs(b - center) ? a : b;
+        }
+        dst[at + c] = Math.round(acc / pairs.length);
+      }
+      dst[at + 3] = src[at + 3] ?? 0;
+    }
+  }
+  return dst;
+}
+
+function kernelHighPass(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const radius = clampFloat(v["radius"], 0.5, 20, 5);
+  const contrast = clampFloat(v["contrast"], 1, 10, 5);
+  const soft = gaussianBlur(src, width, height, radius);
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    for (let c = 0; c < 3; c += 1) {
+      dst[i + c] = clampByte(128 + (((src[i + c] ?? 0) - (soft[i + c] ?? 0)) * contrast));
+    }
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+function kernelEmbossFixed(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const direction = v["direction"];
+  const kernel =
+    direction === "horizontal"
+      ? [0, 0, 0, 1, 0, -1, 0, 0, 0]
+      : direction === "vertical"
+        ? [0, 1, 0, 0, 0, 0, 0, -1, 0]
+        : [-1, -1, 0, -1, 0, 1, 0, 1, 1];
+  const lum = (x: number, y: number): number => {
+    const cx = Math.min(width - 1, Math.max(0, x));
+    const cy = Math.min(height - 1, Math.max(0, y));
+    const at = (cy * width + cx) * 4;
+    return luminance709(src[at] ?? 0, src[at + 1] ?? 0, src[at + 2] ?? 0);
+  };
+  const dst = new Uint8ClampedArray(src.length);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let acc = 0;
+      for (let ky = -1; ky <= 1; ky += 1) {
+        for (let kx = -1; kx <= 1; kx += 1) {
+          acc += lum(x + kx, y + ky) * (kernel[(ky + 1) * 3 + (kx + 1)] ?? 0);
+        }
+      }
+      const at = (y * width + x) * 4;
+      const gray = clampByte(128 + acc);
+      dst[at] = gray;
+      dst[at + 1] = gray;
+      dst[at + 2] = gray;
+      dst[at + 3] = src[at + 3] ?? 0;
+    }
+  }
+  return dst;
+}
+
+function kernelAntialias(src: Uint8ClampedArray, width: number, height: number): Uint8ClampedArray {
+  // Selective smoothing: blend toward a soft blur only where pixels differ
+  // from their neighborhood (flat areas pass through untouched).
+  const soft = gaussianBlur(src, width, height, 1);
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0, p = 0; i < src.length; i += 4, p += 1) {
+    const lum = luminance709(src[i] ?? 0, src[i + 1] ?? 0, src[i + 2] ?? 0);
+    const softLum = luminance709(soft[i] ?? 0, soft[i + 1] ?? 0, soft[i + 2] ?? 0);
+    const mask = Math.min(1, Math.abs(lum - softLum) / 32);
+    for (let c = 0; c < 3; c += 1) {
+      dst[i + c] = clampByte((src[i + c] ?? 0) * (1 - mask) + (soft[i + c] ?? 0) * mask);
+    }
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+function kernelRoundCorners(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const requested = Math.max(1, Math.round(clampFloat(v["radius"], 1, 128, 16)));
+  const r = Math.min(requested, Math.floor(Math.min(width, height) / 2));
+  const dst = new Uint8ClampedArray(src);
+  const cut = (x: number, y: number, cx: number, cy: number): boolean => {
+    const dx = x - cx;
+    const dy = y - cy;
+    return dx * dx + dy * dy > r * r;
+  };
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const at = (y * width + x) * 4;
+      const outside =
+        (x < r && y < r && cut(x, y, r, r)) ||
+        (x >= width - r && y < r && cut(x, y, width - 1 - r, r)) ||
+        (x < r && y >= height - r && cut(x, y, r, height - 1 - r)) ||
+        (x >= width - r && y >= height - r && cut(x, y, width - 1 - r, height - 1 - r));
+      if (outside) {
+        dst[at + 3] = 0;
+      }
+    }
+  }
+  return dst;
+}
+
+function kernelVideoDegradation(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const pattern = v["pattern"];
+  const strength = clampFloat(v["strength"], 0, 100, 50) / 100;
+  const shift = Math.round(strength * 4);
+  const dst = new Uint8ClampedArray(src.length);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const at = (y * width + x) * 4;
+      if (pattern === "shift") {
+        const from = (y * width + Math.min(width - 1, Math.max(0, x - shift))) * 4;
+        dst[at] = src[from] ?? 0;
+        dst[at + 1] = src[from + 1] ?? 0;
+        dst[at + 2] = src[from + 2] ?? 0;
+        dst[at + 3] = src[from + 3] ?? 0;
+      } else {
+        const hit = pattern === "checker" ? (x + y) % 2 === 1 : y % 2 === 1;
+        const t = hit ? strength : 0;
+        dst[at] = clampByte((src[at] ?? 0) * (1 - t));
+        dst[at + 1] = clampByte((src[at + 1] ?? 0) * (1 - t));
+        dst[at + 2] = clampByte((src[at + 2] ?? 0) * (1 - t));
+        dst[at + 3] = src[at + 3] ?? 0;
+      }
+    }
+  }
+  return dst;
+}
+
 /** Filter registry: id, theme, title, hint, and dialog params. */
 export const GNUMARUS_FILTERS: GnumarusFilterDef[] = [
   {
@@ -1308,6 +1566,111 @@ export const GNUMARUS_FILTERS: GnumarusFilterDef[] = [
       { key: "seed", kind: "number", label: "Seed", hint: "Random seed.", min: 1, max: 9999, step: 1, def: 1 },
     ],
   },
+  {
+    id: "slope-offset-power",
+    title: "Slope, Offset, Power",
+    hint: "ASC-CDL grading: out = (in * slope + offset) ^ power, per channel.",
+    theme: "colors",
+    params: [
+      { key: "slopeR", kind: "number", label: "Slope red", hint: "Red multiplier.", min: 0, max: 2, step: 0.01, def: 1 },
+      { key: "slopeG", kind: "number", label: "Slope green", hint: "Green multiplier.", min: 0, max: 2, step: 0.01, def: 1 },
+      { key: "slopeB", kind: "number", label: "Slope blue", hint: "Blue multiplier.", min: 0, max: 2, step: 0.01, def: 1 },
+      { key: "offsetR", kind: "number", label: "Offset red", hint: "Red lift.", min: -1, max: 1, step: 0.01, def: 0 },
+      { key: "offsetG", kind: "number", label: "Offset green", hint: "Green lift.", min: -1, max: 1, step: 0.01, def: 0 },
+      { key: "offsetB", kind: "number", label: "Offset blue", hint: "Blue lift.", min: -1, max: 1, step: 0.01, def: 0 },
+      { key: "powerR", kind: "number", label: "Power red", hint: "Red gamma.", min: 0, max: 4, step: 0.01, def: 1 },
+      { key: "powerG", kind: "number", label: "Power green", hint: "Green gamma.", min: 0, max: 4, step: 0.01, def: 1 },
+      { key: "powerB", kind: "number", label: "Power blue", hint: "Blue gamma.", min: 0, max: 4, step: 0.01, def: 1 },
+    ],
+  },
+  {
+    id: "mono-mixer",
+    title: "Mono Mixer",
+    hint: "Mixes the three channels into one gray value.",
+    theme: "colors",
+    params: [
+      { key: "red", kind: "number", label: "Red (%)", hint: "Red channel weight.", min: 0, max: 100, step: 1, def: 34 },
+      { key: "green", kind: "number", label: "Green (%)", hint: "Green channel weight.", min: 0, max: 100, step: 1, def: 33 },
+      { key: "blue", kind: "number", label: "Blue (%)", hint: "Blue channel weight.", min: 0, max: 100, step: 1, def: 33 },
+      { key: "preserve", kind: "boolean", label: "Preserve luminosity", hint: "Keep the original brightness.", def: true },
+    ],
+  },
+  { id: "maximize-channel", title: "Maximize Channel", hint: "Sets every channel to the brightest of the three.", theme: "colors", params: [] },
+  { id: "minimize-channel", title: "Minimize Channel", hint: "Sets every channel to the darkest of the three.", theme: "colors", params: [] },
+  { id: "normalize", title: "Normalize", hint: "Stretches all channels together to use the full 0-255 range.", theme: "colors", params: [] },
+  {
+    id: "box-blur",
+    title: "Box Blur",
+    hint: "Single-pass mean blur (harsher than gaussian).",
+    theme: "blur",
+    params: [{ key: "radius", kind: "number", label: "Radius", hint: "Blur radius in pixels.", min: 1, max: 50, step: 1, def: 3 }],
+  },
+  {
+    id: "snn-mean",
+    title: "SNN Mean",
+    hint: "Symmetric nearest-neighbor smoothing that keeps edges.",
+    theme: "enhance",
+    params: [{ key: "radius", kind: "number", label: "Radius", hint: "Neighborhood radius in pixels.", min: 1, max: 5, step: 1, def: 1 }],
+  },
+  {
+    id: "high-pass",
+    title: "High Pass",
+    hint: "Keeps only fine detail on mid-gray.",
+    theme: "enhance",
+    params: [
+      { key: "radius", kind: "number", label: "Radius", hint: "Detail cutoff in pixels.", min: 0.5, max: 20, step: 0.5, def: 5 },
+      { key: "contrast", kind: "number", label: "Contrast", hint: "Detail boost.", min: 1, max: 10, step: 1, def: 5 },
+    ],
+  },
+  {
+    id: "emboss-fixed",
+    title: "Fixed Emboss",
+    hint: "Classic fixed 3x3 relief kernels.",
+    theme: "edge",
+    params: [
+      {
+        key: "direction",
+        kind: "enum",
+        label: "Direction",
+        hint: "Relief orientation.",
+        def: "all",
+        options: [
+          { value: "horizontal", label: "Horizontal" },
+          { value: "vertical", label: "Vertical" },
+          { value: "all", label: "All directions" },
+        ],
+      },
+    ],
+  },
+  { id: "antialias", title: "Antialias", hint: "Smooths only pixels that differ from their neighborhood.", theme: "enhance", params: [] },
+  {
+    id: "round-corners",
+    title: "Round Corners",
+    hint: "Cuts transparent rounded corners.",
+    theme: "decor",
+    params: [{ key: "radius", kind: "number", label: "Radius", hint: "Corner radius in pixels.", min: 1, max: 128, step: 1, def: 16 }],
+  },
+  {
+    id: "video-degradation",
+    title: "Video Degradation",
+    hint: "Retro video artifacts: scanlines, checker or shifted rows.",
+    theme: "decor",
+    params: [
+      {
+        key: "pattern",
+        kind: "enum",
+        label: "Pattern",
+        hint: "Artifact style.",
+        def: "scanlines",
+        options: [
+          { value: "scanlines", label: "Scanlines" },
+          { value: "checker", label: "Checkerboard" },
+          { value: "shift", label: "Shifted lines" },
+        ],
+      },
+      { key: "strength", kind: "number", label: "Strength (%)", hint: "Artifact intensity.", min: 0, max: 100, step: 1, def: 50 },
+    ],
+  },
 ];
 
 export function getFilterDef(id: string): GnumarusFilterDef | undefined {
@@ -1384,6 +1747,30 @@ export function runFilterKernel(
       return kernelDifferenceOfGaussians(src, width, height, v);
     case "hurl":
       return kernelHurl(src, width, height, v);
+    case "slope-offset-power":
+      return kernelSlopeOffsetPower(src, width, height, v);
+    case "mono-mixer":
+      return kernelMonoMixer(src, width, height, v);
+    case "maximize-channel":
+      return kernelMaximizeChannel(src, width, height);
+    case "minimize-channel":
+      return kernelMinimizeChannel(src, width, height);
+    case "normalize":
+      return kernelNormalize(src, width, height);
+    case "box-blur":
+      return kernelBoxBlur(src, width, height, v);
+    case "snn-mean":
+      return kernelSnnMean(src, width, height, v);
+    case "high-pass":
+      return kernelHighPass(src, width, height, v);
+    case "emboss-fixed":
+      return kernelEmbossFixed(src, width, height, v);
+    case "antialias":
+      return kernelAntialias(src, width, height);
+    case "round-corners":
+      return kernelRoundCorners(src, width, height, v);
+    case "video-degradation":
+      return kernelVideoDegradation(src, width, height, v);
     default:
       return null;
   }
