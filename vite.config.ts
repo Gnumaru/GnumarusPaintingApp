@@ -28,14 +28,16 @@ export default defineConfig({
     outDir: "dist",
     sourcemap: false,
     target: "es2022",
-    // Deterministic file names (no content hash): the app is served in
-    // controlled environments where cache invalidation is not a concern,
-    // and stable names keep deploys byte-comparable.
+    // Content-hashed file names: every deploy gets unique asset URLs, so a
+    // browser or CDN cached copy can never shadow the new code. The update
+    // banner pairs this with a `?v=<sha>` document reload (see
+    // GnumarusUpdateCheck), because hashes alone cannot refresh a stale
+    // cached `index.html` that still points at the old assets.
     rollupOptions: {
       output: {
-        entryFileNames: "assets/[name].js",
-        chunkFileNames: "assets/[name].js",
-        assetFileNames: "assets/[name][extname]",
+        entryFileNames: "assets/[name]-[hash].js",
+        chunkFileNames: "assets/[name]-[hash].js",
+        assetFileNames: "assets/[name]-[hash][extname]",
       },
     },
   },

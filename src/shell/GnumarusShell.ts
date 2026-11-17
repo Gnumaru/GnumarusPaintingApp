@@ -279,9 +279,11 @@ import {
   GNUMARUS_UPDATE_CHECK_MS,
   GNUMARUS_UPDATE_COOLDOWN_MS,
   GNUMARUS_UPDATE_REPO,
+  buildCacheBustedReloadUrl,
   isOutdatedBuild,
   parseLatestCommitSha,
   shouldCheckForUpdates,
+  stripReloadCacheBuster,
   type GnumarusUpdateStatus,
 } from "../project/GnumarusUpdateCheck";
 import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
@@ -2840,7 +2842,7 @@ export class GnumarusShell extends LitElement {
               class="update-banner"
               data-testid="update-banner"
               title=${tr("update.availableTitle")}
-              @click=${(): void => window.location.reload()}
+              @click=${(): void => this.reloadForUpdate()}
             >
               ${tr("update.available")}
             </button>`
@@ -6952,6 +6954,18 @@ export class GnumarusShell extends LitElement {
   }
 
   firstUpdated(): void {
+    // Drop our own reload cache-buster (?v=<sha>) after booting the fresh
+    // build so copied/shared URLs stay clean. The versioned URL already did
+    // its job (defeated the HTTP/CDN cache for the document); hashed asset
+    // names keep everything else fresh from here on.
+    try {
+      const cleaned = stripReloadCacheBuster(window.location.href);
+      if (cleaned !== null) {
+        window.history.replaceState(null, "", cleaned);
+      }
+    } catch {
+      // Sandboxed iframes may block history access: the param is harmless.
+    }
     this.fsSupported = isFileSystemAccessSupported();
     if (this.shadowRoot !== null) {
       installNumberInputHelpers(this.shadowRoot);
@@ -7292,6 +7306,8 @@ export class GnumarusShell extends LitElement {
 
   /** Last commits-API ETag for conditional (rate-limit-free) update polls. */
   private updateEtag: string | null = null;
+  /** Newest master SHA seen by the poller (reload target once outdated). */
+  private updateLatestSha: string | null = null;
   /** Polling timer id for the update checker, or null when stopped. */
   private updateTimer: number | null = null;
   /** Epoch ms before which update polls are skipped (rate-limit cooldown). */
@@ -7344,6 +7360,24 @@ export class GnumarusShell extends LitElement {
   }
 
   /**
+   * Reload into the newest deployed build. A plain `location.reload()` can
+   * keep serving a fresh-within-max-age cached `index.html` (GitHub Pages
+   * sends long cache headers and the file name is stable), booting the old
+   * app again with the banner still on. Navigating to the same document
+   * with a per-deploy `?v=<sha>` busts both browser and CDN caches; the
+   * param is stripped on boot. Falls back to a plain reload without a
+   * known target SHA.
+   */
+  private reloadForUpdate(): void {
+    const sha = this.updateLatestSha;
+    if (sha === null) {
+      window.location.reload();
+      return;
+    }
+    window.location.href = buildCacheBustedReloadUrl(window.location.href, sha);
+  }
+
+  /**
    * Poll the newest master commit and update the banner status. Silent on
    * every failure mode (offline, rate limit, bad payload): the last known
    * status stands until a newer master is actually observed.
@@ -7388,6 +7422,9 @@ export class GnumarusShell extends LitElement {
         return;
       }
       const next: GnumarusUpdateStatus = isOutdatedBuild(this.buildSha(), remoteSha) ? "outdated" : "current";
+      if (next === "outdated") {
+        this.updateLatestSha = remoteSha;
+      }
       if (next !== this.updateStatus) {
         this.updateStatus = next;
       }

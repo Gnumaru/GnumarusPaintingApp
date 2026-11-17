@@ -85,3 +85,51 @@ export function isOutdatedBuild(localSha: string, remoteSha: string): boolean {
 export function shouldCheckForUpdates(hostname: string, localSha: string): boolean {
   return !isLocalhostHostname(hostname) && isCommitSha(localSha);
 }
+
+/**
+ * Query parameter carrying the target build SHA on a cache-busting reload
+ * (see `buildCacheBustedReloadUrl`).
+ */
+export const UPDATE_RELOAD_VERSION_PARAM = "v";
+
+/**
+ * Build the URL the update banner navigates to: the same document with a
+ * `?v=<sha>` parameter. The value is unique per deploy, so neither the
+ * browser HTTP cache nor the CDN edge can answer with a stale cached
+ * `index.html` (a plain `location.reload()` cannot force that bypass).
+ * Falls back to the unchanged href when the SHA is not a valid commit.
+ * Pure (no DOM) so it stays unit-testable.
+ */
+export function buildCacheBustedReloadUrl(href: string, sha: string): string {
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    return href;
+  }
+  if (!isCommitSha(sha)) {
+    return url.toString();
+  }
+  url.searchParams.set(UPDATE_RELOAD_VERSION_PARAM, sha.toLowerCase());
+  return url.toString();
+}
+
+/**
+ * Strip our own reload cache-buster after a successful boot so shared URLs
+ * stay clean. Returns the cleaned URL, or null when there is nothing to
+ * strip (missing param or foreign value). Pure (no DOM).
+ */
+export function stripReloadCacheBuster(href: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    return null;
+  }
+  const value = url.searchParams.get(UPDATE_RELOAD_VERSION_PARAM);
+  if (value === null || !isCommitSha(value)) {
+    return null;
+  }
+  url.searchParams.delete(UPDATE_RELOAD_VERSION_PARAM);
+  return url.toString();
+}

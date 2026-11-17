@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildCacheBustedReloadUrl,
   commitsApiUrl,
   GNUMARUS_UPDATE_BRANCH,
   GNUMARUS_UPDATE_CHECK_MS,
@@ -11,6 +12,7 @@ import {
   parseLatestCommitSha,
   repoSlugFromSourceUrl,
   shouldCheckForUpdates,
+  stripReloadCacheBuster,
 } from "../src/project/GnumarusUpdateCheck";
 
 describe("GnumarusUpdateCheck", () => {
@@ -89,5 +91,31 @@ describe("GnumarusUpdateCheck", () => {
     expect(shouldCheckForUpdates("gnumaru.github.io", "dev")).toBe(false);
     expect(shouldCheckForUpdates("gnumaru.github.io", "")).toBe(false);
     expect(shouldCheckForUpdates("localhost", "dev")).toBe(false);
+  });
+
+  it("version-tags the reload URL with the target SHA", () => {
+    const sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    expect(buildCacheBustedReloadUrl("https://gnumaru.github.io/app/", sha)).toBe(
+      `https://gnumaru.github.io/app/?v=${sha}`,
+    );
+    // Replaces a previous tag and preserves the other params.
+    expect(buildCacheBustedReloadUrl(`https://gnumaru.github.io/app/?v=${"c".repeat(40)}&x=1`, sha)).toBe(
+      `https://gnumaru.github.io/app/?v=${sha}&x=1`,
+    );
+    // Invalid SHA or href: unchanged document URL.
+    expect(buildCacheBustedReloadUrl("https://gnumaru.github.io/app/", "nope")).toBe("https://gnumaru.github.io/app/");
+    expect(buildCacheBustedReloadUrl("not a url", sha)).toBe("not a url");
+  });
+
+  it("strips only our own reload cache-buster", () => {
+    const sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    expect(stripReloadCacheBuster(`https://gnumaru.github.io/app/?v=${sha}`)).toBe("https://gnumaru.github.io/app/");
+    expect(stripReloadCacheBuster(`https://gnumaru.github.io/app/?v=${sha}&x=1`)).toBe(
+      "https://gnumaru.github.io/app/?x=1",
+    );
+    expect(stripReloadCacheBuster("https://gnumaru.github.io/app/")).toBeNull();
+    expect(stripReloadCacheBuster("https://gnumaru.github.io/app/?v=nope")).toBeNull();
+    expect(stripReloadCacheBuster("https://gnumaru.github.io/app/?x=1")).toBeNull();
+    expect(stripReloadCacheBuster("not a url")).toBeNull();
   });
 });
