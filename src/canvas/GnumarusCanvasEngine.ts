@@ -17126,8 +17126,15 @@ export class GnumarusCanvasEngine {
         if (this.denyPaintOnDerived()) {
           return;
         }
-        const pixel = this.toImagePixel(event.clientX, event.clientY);
-        if (pixel === null) {
+        // Float mapping (no rendered-texture requirement): selecting an
+        // empty or textureless cell must work; the texture materializes
+        // on release if needed.
+        const cursor = this.clientToLayerImageFloat(event.clientX, event.clientY);
+        if (cursor === null) {
+          return;
+        }
+        const pixel = { x: Math.floor(cursor.x), y: Math.floor(cursor.y) };
+        if (pixel.x < 0 || pixel.y < 0 || pixel.x >= layer.width || pixel.y >= layer.height) {
           return;
         }
         this.rectDrag = { x0: pixel.x, y0: pixel.y, x1: pixel.x, y1: pixel.y };
@@ -17155,8 +17162,13 @@ export class GnumarusCanvasEngine {
         if (this.denyPaintOnDerived()) {
           return;
         }
-        const pixel = this.toImagePixel(event.clientX, event.clientY);
-        if (pixel === null) {
+        // Same float mapping as rectselect: empty/textureless cells select.
+        const cursor = this.clientToLayerImageFloat(event.clientX, event.clientY);
+        if (cursor === null) {
+          return;
+        }
+        const pixel = { x: Math.floor(cursor.x), y: Math.floor(cursor.y) };
+        if (pixel.x < 0 || pixel.y < 0 || pixel.x >= layer.width || pixel.y >= layer.height) {
           return;
         }
         this.ellipseDrag = { x0: pixel.x, y0: pixel.y, x1: pixel.x, y1: pixel.y };

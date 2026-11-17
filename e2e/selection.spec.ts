@@ -768,3 +768,31 @@ test("dragged pending selection shows its pixels while moving @recent", async ({
   await page.keyboard.press("Enter");
   expect(await readPixel(page, 42, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
+
+test("rect and ellipse select on empty and textureless cells @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  // No paint at all: the cell has no texture yet.
+  await selectTool(page, "Rectangular selection");
+  await dragRect(page, 10, 10, 20, 20);
+  expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 11, height: 11, selected: 121 });
+  await page.keyboard.press("Escape");
+  const drawer = page.locator('gnumarus-shell [data-testid="selection-drawer"]');
+  await drawer.getByRole("button", { name: "Rectangular selection" }).click({ button: "right" });
+  await page.locator('gnumarus-shell [data-testid="selection-flyout"]').getByRole("button", { name: "Elliptical selection" }).click();
+  await dragRect(page, 10, 10, 20, 20);
+  const ellipse = await getFloatingSelection(page);
+  expect(ellipse).not.toBeNull();
+  expect(ellipse?.selected ?? 0).toBeGreaterThan(0);
+  await page.keyboard.press("Escape");
+  // Textureless content (New content > No texture) selects too.
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.locator('[data-testid="anim-cell"][data-matrix-frame="0"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Select content" }).click();
+  await page.locator('gnumarus-shell [data-testid="content-picker-new"]').click();
+  await page.locator('gnumarus-shell [data-testid="texture-picker-none"]').click();
+  await selectTool(page, "Rectangular selection");
+  await dragRect(page, 12, 12, 22, 22);
+  expect(await getFloatingSelection(page)).toEqual({ x: 12, y: 12, width: 11, height: 11, selected: 121 });
+});
