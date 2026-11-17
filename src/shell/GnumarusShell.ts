@@ -3699,6 +3699,7 @@ export class GnumarusShell extends LitElement {
                   </div>
                   <div class="layer-blend">
                     <select
+                      name="layerBlendMode"
                       aria-label=${tr("layer.blendMode")}
                       title=${tr("layer.blendModeHint")}
                       .value=${layer.blend}
@@ -4032,26 +4033,6 @@ export class GnumarusShell extends LitElement {
         <div class="dialog-actions">
           <button @click=${(): void => this.closeFitTextureDialog()}>${tr("btn.cancel")}</button>
           <button id="fitTextureOk" @click=${(): void => this.confirmFitTexture()}>${tr("btn.ok")}</button>
-        </div>
-      </dialog>
-      <dialog id="adjustColorsDialog">
-        <h3>${tr("dialog.adjustTitle")}</h3>
-        <p>${tr("dialog.adjustHint")}</p>
-        <label
-          >${tr("dialog.brightness")}
-          <input type="number" id="adjustBrightness" min="-100" max="100" step="1" .value=${String(this.adjustBrightness)} />
-        </label>
-        <label
-          >${tr("dialog.contrast")}
-          <input type="number" id="adjustContrast" min="-100" max="100" step="1" .value=${String(this.adjustContrast)} />
-        </label>
-        <label
-          >${tr("dialog.posterize")}
-          <input type="number" id="adjustPosterize" min="0" max="255" step="1" .value=${String(this.adjustPosterize)} />
-        </label>
-        <div class="dialog-actions">
-          <button @click=${(): void => this.closeAdjustColorsDialog()}>${tr("btn.cancel")}</button>
-          <button id="adjustColorsOk" @click=${(): void => this.confirmAdjustColors()}>${tr("btn.ok")}</button>
         </div>
       </dialog>
       <dialog id="adjustColorsDialog">
@@ -6766,6 +6747,7 @@ export class GnumarusShell extends LitElement {
               >
               <select
                 data-testid="animation-select"
+                name="animationSelect"
                 aria-label=${tr("matrix.activeAnimation")}
                 title=${tr("matrix.activeAnimationHint")}
                 @change=${(event: Event): void => this.onSelectAnimation(event)}
