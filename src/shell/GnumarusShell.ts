@@ -282,6 +282,10 @@ import {
   stripReloadCacheBuster,
   type GnumarusUpdateStatus,
 } from "../project/GnumarusUpdateCheck";
+import {
+  GNUMARUS_PAGES_URL,
+  isGitHubPagesDeploy,
+} from "./GnumarusDeploy";
 import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
 import {
   applyAlphaPlane,
@@ -2892,6 +2896,12 @@ export class GnumarusShell extends LitElement {
                 <div class="dropdown">
                   <button title=${tr("menu.shortcutsTitle")} @click=${(): void => void this.runAction("shortcuts")}>${tr("menu.shortcuts")}</button>
                   <button title=${tr("menu.sourceCodeTitle")} @click=${(): void => void this.runAction("source-code")}>${tr("menu.sourceCode")}</button>
+                  ${!this.isGitHubPagesDeploy()
+                    ? html`<button
+                        title=${tr("menu.githubPagesDeployTitle")}
+                        @click=${(): void => void this.runAction("github-pages-deploy")}
+                      >${tr("menu.githubPagesDeploy")}</button>`
+                    : html``}
                 </div>
               `
             : html``}
@@ -8331,6 +8341,17 @@ export class GnumarusShell extends LitElement {
         this.openSourceCode();
       },
     });
+    // No point offering a ride to where we already are.
+    if (!isGitHubPagesDeploy(window.location.hostname, window.location.pathname)) {
+      this.actionRegistry.register({
+        id: "github-pages-deploy",
+        name: tr("menu.githubPagesDeploy"),
+        requirements: [],
+        run: (): void => {
+          this.openGitHubPagesDeploy();
+        },
+      });
+    }
     this.actionRegistry.register({
       id: "export",
       name: tr("menu.export"),
@@ -16994,6 +17015,17 @@ export class GnumarusShell extends LitElement {
   private openSourceCode(): void {
     this.helpMenuOpen = false;
     window.open(GNUMARUS_SOURCE_URL, "_blank", "noopener");
+  }
+
+  /** True on the production Pages deploy (hides the Pages shortcut there). */
+  private isGitHubPagesDeploy(): boolean {
+    return isGitHubPagesDeploy(window.location.hostname, window.location.pathname);
+  }
+
+  /** Leave the local/dev build for the public GitHub Pages deploy (same tab). */
+  private openGitHubPagesDeploy(): void {
+    this.closeAllMenus();
+    window.location.href = GNUMARUS_PAGES_URL;
   }
 
   private onRenameCommit(id: string): void {
