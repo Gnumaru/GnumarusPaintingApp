@@ -16021,7 +16021,7 @@ export class GnumarusShell extends LitElement {
     hint: string;
     filters: GnumarusFilterDef[];
   }> {
-    const order: GnumarusFilterTheme[] = ["blur", "enhance", "artistic", "edge", "noise", "colors", "decor"];
+    const order: GnumarusFilterTheme[] = ["blur", "enhance", "artistic", "edge", "noise", "colors", "decor", "distort"];
     return order.map((id) => ({
       id,
       label: tr(`filter.theme.${id}` as GnumarusMessageKey),

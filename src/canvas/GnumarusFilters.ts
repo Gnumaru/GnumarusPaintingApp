@@ -29,7 +29,7 @@ export interface GnumarusFilterParamDef {
   options?: GnumarusFilterParamOption[];
 }
 
-export type GnumarusFilterTheme = "blur" | "enhance" | "artistic" | "edge" | "noise" | "colors" | "decor";
+export type GnumarusFilterTheme = "blur" | "enhance" | "artistic" | "edge" | "noise" | "colors" | "decor" | "distort";
 
 export interface GnumarusFilterDef {
   id: string;
@@ -1251,6 +1251,403 @@ function kernelVideoDegradation(src: Uint8ClampedArray, width: number, height: n
   return dst;
 }
 
+function rgbToHsv01(r: number, g: number, b: number): [number, number, number] {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  const v = max;
+  const s = max === 0 ? 0 : d / max;
+  let h = 0;
+  if (d !== 0) {
+    if (max === r) {
+      h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+    } else if (max === g) {
+      h = ((b - r) / d + 2) / 6;
+    } else {
+      h = ((r - g) / d + 4) / 6;
+    }
+  }
+  return [h, s, v];
+}
+
+function hsvToRgb255(h: number, s: number, v: number): [number, number, number] {
+  const hue = ((h % 1) + 1) % 1;
+  const sat = Math.min(1, Math.max(0, s));
+  const val = Math.min(1, Math.max(0, v));
+  const c = val * sat;
+  const sector = hue * 6;
+  const x = c * (1 - Math.abs((sector % 2) - 1));
+  const m = val - c;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  if (sector < 1) {
+    r = c;
+    g = x;
+  } else if (sector < 2) {
+    r = x;
+    g = c;
+  } else if (sector < 3) {
+    g = c;
+    b = x;
+  } else if (sector < 4) {
+    g = x;
+    b = c;
+  } else if (sector < 5) {
+    r = x;
+    b = c;
+  } else {
+    r = c;
+    b = x;
+  }
+  return [clampByte((r + m) * 255), clampByte((g + m) * 255), clampByte((b + m) * 255)];
+}
+
+function kernelLevels(src: Uint8ClampedArray, _width: number, _height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const channel = v["channel"];
+  const lo = clampInt(v["low"], 0, 255, 0);
+  const hi = clampInt(v["high"], 0, 255, 255);
+  const gamma = clampFloat(v["gamma"], 0.1, 5, 1);
+  const span = hi - lo;
+  const map = (value: number): number => {
+    if (span < 1) {
+      return value;
+    }
+    const t = (Math.min(hi, Math.max(lo, value)) - lo) / span;
+    return clampByte(Math.pow(t, gamma) * 255);
+  };
+  const useR = channel === "all-channels" || channel === "red";
+  const useG = channel === "all-channels" || channel === "green";
+  const useB = channel === "all-channels" || channel === "blue";
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    dst[i] = useR ? map(src[i] ?? 0) : (src[i] ?? 0);
+    dst[i + 1] = useG ? map(src[i + 1] ?? 0) : (src[i + 1] ?? 0);
+    dst[i + 2] = useB ? map(src[i + 2] ?? 0) : (src[i + 2] ?? 0);
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+function kernelHsvAdjust(src: Uint8ClampedArray, _width: number, _height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const shiftH = clampFloat(v["hue"], -180, 180, 0) / 360;
+  const shiftS = clampFloat(v["saturation"], -100, 100, 0) / 100;
+  const shiftV = clampFloat(v["value"], -100, 100, 0) / 100;
+  const colorize = v["colorize"] === true;
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    const [h, s, l] = rgbToHsv01((src[i] ?? 0) / 255, (src[i + 1] ?? 0) / 255, (src[i + 2] ?? 0) / 255);
+    const [r, g, b] = hsvToRgb255(h + shiftH, colorize ? 1 : s + shiftS, l + shiftV);
+    dst[i] = r;
+    dst[i + 1] = g;
+    dst[i + 2] = b;
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+/** Split a text field into hex colors, dropping invalid entries. */
+function parseFilterHexList(value: unknown): Array<{ r: number; g: number; b: number }> {
+  if (typeof value !== "string") {
+    return [];
+  }
+  const out: Array<{ r: number; g: number; b: number }> = [];
+  for (const part of value.split(/[\s,;]+/)) {
+    const trimmed = part.trim();
+    if (trimmed === "") {
+      continue;
+    }
+    const parsed = parseFilterHexColor(trimmed);
+    if (parsed !== null) {
+      out.push(parsed);
+    }
+  }
+  return out;
+}
+
+const BAYER_4X4 = [
+  [0, 8, 2, 10],
+  [12, 4, 14, 6],
+  [3, 11, 1, 9],
+  [15, 7, 13, 5],
+];
+
+function kernelPalettize(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const palette = parseFilterHexList(v["colors"]);
+  const dither = v["dither"] !== false;
+  const dst = new Uint8ClampedArray(src.length);
+  if (palette.length === 0) {
+    dst.set(src);
+    return dst;
+  }
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const at = (y * width + x) * 4;
+      // Ordered dither perturbs the pixel before the nearest-color lookup.
+      const jitter = dither ? (((BAYER_4X4[y % 4]?.[x % 4] ?? 8) + 0.5) / 16 - 0.5) * 48 : 0;
+      const r = (src[at] ?? 0) + jitter;
+      const g = (src[at + 1] ?? 0) + jitter;
+      const b = (src[at + 2] ?? 0) + jitter;
+      let best = palette[0] ?? { r: 0, g: 0, b: 0 };
+      let bestDist = Number.POSITIVE_INFINITY;
+      for (const entry of palette) {
+        const dist = (r - entry.r) * (r - entry.r) + (g - entry.g) * (g - entry.g) + (b - entry.b) * (b - entry.b);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = entry;
+        }
+      }
+      dst[at] = best.r;
+      dst[at + 1] = best.g;
+      dst[at + 2] = best.b;
+      dst[at + 3] = src[at + 3] ?? 0;
+    }
+  }
+  return dst;
+}
+
+function kernelGradientMap(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const stops = parseFilterHexList(v["colors"]);
+  const dither = v["dither"] !== false;
+  const dst = new Uint8ClampedArray(src.length);
+  if (stops.length === 0) {
+    dst.set(src);
+    return dst;
+  }
+  if (stops.length === 1) {
+    const only = stops[0] ?? { r: 0, g: 0, b: 0 };
+    for (let i = 0; i < src.length; i += 4) {
+      dst[i] = only.r;
+      dst[i + 1] = only.g;
+      dst[i + 2] = only.b;
+      dst[i + 3] = src[i + 3] ?? 0;
+    }
+    return dst;
+  }
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const at = (y * width + x) * 4;
+      const jitter = dither ? (((BAYER_4X4[y % 4]?.[x % 4] ?? 8) + 0.5) / 16 - 0.5) * 8 : 0;
+      const lum = Math.min(255, Math.max(0, luminance709(src[at] ?? 0, src[at + 1] ?? 0, src[at + 2] ?? 0) + jitter));
+      const pos = (lum / 255) * (stops.length - 1);
+      const lo = Math.min(stops.length - 2, Math.floor(pos));
+      const frac = pos - lo;
+      const a = stops[lo] ?? { r: 0, g: 0, b: 0 };
+      const bStop = stops[lo + 1] ?? a;
+      dst[at] = Math.round(a.r + (bStop.r - a.r) * frac);
+      dst[at + 1] = Math.round(a.g + (bStop.g - a.g) * frac);
+      dst[at + 2] = Math.round(a.b + (bStop.b - a.b) * frac);
+      dst[at + 3] = src[at + 3] ?? 0;
+    }
+  }
+  return dst;
+}
+
+function kernelPhotocopy(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const radius = clampFloat(v["radius"], 1, 10, 3);
+  const bias = clampFloat(v["bias"], -100, 100, 0) / 100;
+  const soft = gaussianBlur(src, width, height, radius);
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    const lum = luminance709(src[i] ?? 0, src[i + 1] ?? 0, src[i + 2] ?? 0) / 255;
+    const local = luminance709(soft[i] ?? 0, soft[i + 1] ?? 0, soft[i + 2] ?? 0) / 255;
+    const ink = lum >= local - bias ? 255 : 0;
+    dst[i] = ink;
+    dst[i + 1] = ink;
+    dst[i + 2] = ink;
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+function kernelSoftglow(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const radius = clampFloat(v["radius"], 1, 20, 5);
+  const brightness = clampFloat(v["brightness"], 0, 100, 50) / 100;
+  const sharpness = clampFloat(v["sharpness"], 1, 10, 5);
+  const soft = gaussianBlur(src, width, height, radius);
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    for (let c = 0; c < 3; c += 1) {
+      const glow = Math.pow((soft[i + c] ?? 0) / 255, sharpness) * brightness;
+      const orig = (src[i + c] ?? 0) / 255;
+      dst[i + c] = clampByte((1 - (1 - orig) * (1 - glow)) * 255);
+    }
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+function kernelHalftone(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const size = Math.max(2, Math.round(clampFloat(v["size"], 2, 16, 4)));
+  const norm = size * Math.SQRT2;
+  const dst = new Uint8ClampedArray(src.length);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const at = (y * width + x) * 4;
+      const lx = (x % size) - (size - 1) / 2;
+      const ly = (y % size) - (size - 1) / 2;
+      const d = Math.sqrt(lx * lx + ly * ly) / norm;
+      const lum = luminance709(src[at] ?? 0, src[at + 1] ?? 0, src[at + 2] ?? 0) / 255;
+      const ink = lum > d ? 255 : 0;
+      dst[at] = ink;
+      dst[at + 1] = ink;
+      dst[at + 2] = ink;
+      dst[at + 3] = src[at + 3] ?? 0;
+    }
+  }
+  return dst;
+}
+
+function kernelTileMosaic(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const tw = Math.max(2, Math.round(clampFloat(v["tileWidth"], 2, 128, 16)));
+  const th = Math.max(2, Math.round(clampFloat(v["tileHeight"], 2, 128, 16)));
+  const dst = new Uint8ClampedArray(src.length);
+  for (let by = 0; by < height; by += th) {
+    for (let bx = 0; bx < width; bx += tw) {
+      let accR = 0;
+      let accG = 0;
+      let accB = 0;
+      let accA = 0;
+      let count = 0;
+      for (let y = by; y < Math.min(height, by + th); y += 1) {
+        for (let x = bx; x < Math.min(width, bx + tw); x += 1) {
+          const at = (y * width + x) * 4;
+          accR += src[at] ?? 0;
+          accG += src[at + 1] ?? 0;
+          accB += src[at + 2] ?? 0;
+          accA += src[at + 3] ?? 0;
+          count += 1;
+        }
+      }
+      const n = Math.max(1, count);
+      for (let y = by; y < Math.min(height, by + th); y += 1) {
+        for (let x = bx; x < Math.min(width, bx + tw); x += 1) {
+          const at = (y * width + x) * 4;
+          dst[at] = Math.round(accR / n);
+          dst[at + 1] = Math.round(accG / n);
+          dst[at + 2] = Math.round(accB / n);
+          dst[at + 3] = Math.round(accA / n);
+        }
+      }
+    }
+  }
+  return dst;
+}
+
+function kernelSpread(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const amount = Math.max(0, Math.round(clampFloat(v["amount"], 0, 16, 3)));
+  const seed = clampInt(v["seed"], 1, 9999, 1);
+  const rand = filterRandom(seed * 131 + 7);
+  const dst = new Uint8ClampedArray(src.length);
+  const span = amount * 2 + 1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const dx = amount === 0 ? 0 : Math.floor(rand() * span) - amount;
+      const dy = amount === 0 ? 0 : Math.floor(rand() * span) - amount;
+      const cx = Math.min(width - 1, Math.max(0, x + dx));
+      const cy = Math.min(height - 1, Math.max(0, y + dy));
+      const from = (cy * width + cx) * 4;
+      const at = (y * width + x) * 4;
+      dst[at] = src[from] ?? 0;
+      dst[at + 1] = src[from + 1] ?? 0;
+      dst[at + 2] = src[from + 2] ?? 0;
+      dst[at + 3] = src[from + 3] ?? 0;
+    }
+  }
+  return dst;
+}
+
+function kernelValuePropagate(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const dilate = v["mode"] !== "erode";
+  const radius = Math.max(1, Math.round(clampFloat(v["radius"], 1, 5, 1)));
+  const dst = new Uint8ClampedArray(src.length);
+  const limit = dilate ? 0 : 255;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const at = (y * width + x) * 4;
+      for (let c = 0; c < 3; c += 1) {
+        let extreme = limit;
+        for (let oy = -radius; oy <= radius; oy += 1) {
+          for (let ox = -radius; ox <= radius; ox += 1) {
+            const value = sampleClamped(src, width, height, x + ox, y + oy, c) as number;
+            extreme = dilate ? Math.max(extreme, value) : Math.min(extreme, value);
+          }
+        }
+        dst[at + c] = extreme;
+      }
+      dst[at + 3] = src[at + 3] ?? 0;
+    }
+  }
+  return dst;
+}
+
+function sampleBilinear(src: Uint8ClampedArray, width: number, height: number, fx: number, fy: number, channel: number): number {
+  const x0 = Math.floor(fx);
+  const y0 = Math.floor(fy);
+  const tx = Math.min(1, Math.max(0, fx - x0));
+  const ty = Math.min(1, Math.max(0, fy - y0));
+  const top = (sampleClamped(src, width, height, x0, y0, channel) as number) * (1 - tx) + (sampleClamped(src, width, height, x0 + 1, y0, channel) as number) * tx;
+  const bottom = (sampleClamped(src, width, height, x0, y0 + 1, channel) as number) * (1 - tx) + (sampleClamped(src, width, height, x0 + 1, y0 + 1, channel) as number) * tx;
+  return top * (1 - ty) + bottom * ty;
+}
+
+function kernelWaves(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const amplitude = clampFloat(v["amplitude"], 0, 50, 5);
+  const period = Math.max(2, clampFloat(v["period"], 2, 200, 20));
+  const direction = v["direction"];
+  const wave = (coord: number): number => amplitude * Math.sin((2 * Math.PI * coord) / period);
+  const dst = new Uint8ClampedArray(src.length);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const ox = direction === "vertical" ? 0 : wave(y);
+      const oy = direction === "horizontal" ? 0 : wave(x);
+      const at = (y * width + x) * 4;
+      for (let c = 0; c < 4; c += 1) {
+        dst[at + c] = clampByte(sampleBilinear(src, width, height, x + ox, y + oy, c));
+      }
+    }
+  }
+  return dst;
+}
+
+function kernelWind(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const leftward = v["direction"] === "left";
+  const strength = clampFloat(v["strength"], 0, 100, 30) / 100;
+  const seed = clampInt(v["seed"], 1, 9999, 1);
+  const rand = filterRandom(seed * 17 + 5);
+  const dst = new Uint8ClampedArray(src);
+  for (let y = 0; y < height; y += 1) {
+    if (leftward) {
+      for (let x = width - 1; x >= 0; x -= 1) {
+        if (rand() >= strength) {
+          continue;
+        }
+        const jump = 1 + Math.floor(rand() * 20);
+        const from = (y * width + Math.min(width - 1, x + jump)) * 4;
+        const at = (y * width + x) * 4;
+        dst[at] = dst[from] ?? 0;
+        dst[at + 1] = dst[from + 1] ?? 0;
+        dst[at + 2] = dst[from + 2] ?? 0;
+        dst[at + 3] = dst[from + 3] ?? 0;
+      }
+    } else {
+      for (let x = 0; x < width; x += 1) {
+        if (rand() >= strength) {
+          continue;
+        }
+        const jump = 1 + Math.floor(rand() * 20);
+        const from = (y * width + Math.max(0, x - jump)) * 4;
+        const at = (y * width + x) * 4;
+        dst[at] = dst[from] ?? 0;
+        dst[at + 1] = dst[from + 1] ?? 0;
+        dst[at + 2] = dst[from + 2] ?? 0;
+        dst[at + 3] = dst[from + 3] ?? 0;
+      }
+    }
+  }
+  return dst;
+}
+
 /** Filter registry: id, theme, title, hint, and dialog params. */
 export const GNUMARUS_FILTERS: GnumarusFilterDef[] = [
   {
@@ -1671,6 +2068,173 @@ export const GNUMARUS_FILTERS: GnumarusFilterDef[] = [
       { key: "strength", kind: "number", label: "Strength (%)", hint: "Artifact intensity.", min: 0, max: 100, step: 1, def: 50 },
     ],
   },
+  {
+    id: "levels",
+    title: "Levels",
+    hint: "Remaps one channel from an input range with gamma.",
+    theme: "colors",
+    params: [
+      {
+        key: "channel",
+        kind: "enum",
+        label: "Channel",
+        hint: "Channel to remap.",
+        def: "all-channels",
+        options: [
+          { value: "all-channels", label: "All channels" },
+          { value: "red", label: "Red" },
+          { value: "green", label: "Green" },
+          { value: "blue", label: "Blue" },
+        ],
+      },
+      { key: "low", kind: "number", label: "Low", hint: "Input mapped to black.", min: 0, max: 255, step: 1, def: 0 },
+      { key: "high", kind: "number", label: "High", hint: "Input mapped to white.", min: 0, max: 255, step: 1, def: 255 },
+      { key: "gamma", kind: "number", label: "Gamma", hint: "Midtone response.", min: 0.1, max: 5, step: 0.1, def: 1 },
+    ],
+  },
+  {
+    id: "hsv-adjust",
+    title: "HSV Adjust",
+    hint: "Shifts hue, saturation and value, with an optional colorize.",
+    theme: "colors",
+    params: [
+      { key: "hue", kind: "number", label: "Hue shift", hint: "Hue rotation in degrees.", min: -180, max: 180, step: 1, def: 0 },
+      { key: "saturation", kind: "number", label: "Saturation shift", hint: "Saturation offset.", min: -100, max: 100, step: 1, def: 0 },
+      { key: "value", kind: "number", label: "Value shift", hint: "Brightness offset.", min: -100, max: 100, step: 1, def: 0 },
+      { key: "colorize", kind: "boolean", label: "Colorize", hint: "Force full saturation.", def: false },
+    ],
+  },
+  {
+    id: "palettize",
+    title: "Palettize",
+    hint: "Reduces the image to a custom color list, with optional dithering.",
+    theme: "colors",
+    params: [
+      { key: "colors", kind: "text", label: "Colors", hint: "Comma-separated hex colors.", def: "#000000,#7f7f7f,#ffffff,#ff0000,#00ff00,#0000ff,#ffff00,#ff00ff" },
+      { key: "dither", kind: "boolean", label: "Dither", hint: "Ordered Bayer dithering.", def: true },
+    ],
+  },
+  {
+    id: "gradient-map",
+    title: "Gradient Map",
+    hint: "Maps luminance along a custom color gradient.",
+    theme: "colors",
+    params: [
+      { key: "colors", kind: "text", label: "Colors", hint: "Comma-separated hex stops, dark to light.", def: "#000000,#ffffff" },
+      { key: "dither", kind: "boolean", label: "Dither", hint: "Ordered Bayer dithering.", def: true },
+    ],
+  },
+  {
+    id: "photocopy",
+    title: "Photocopy",
+    hint: "Adaptive black-and-white copy around the local mean.",
+    theme: "artistic",
+    params: [
+      { key: "radius", kind: "number", label: "Radius", hint: "Local window in pixels.", min: 1, max: 10, step: 1, def: 3 },
+      { key: "bias", kind: "number", label: "Bias", hint: "Positive keeps more white.", min: -100, max: 100, step: 1, def: 0 },
+    ],
+  },
+  {
+    id: "softglow",
+    title: "Soft Glow",
+    hint: "Screens blurred highlights back over the image.",
+    theme: "artistic",
+    params: [
+      { key: "radius", kind: "number", label: "Radius", hint: "Glow spread in pixels.", min: 1, max: 20, step: 1, def: 5 },
+      { key: "brightness", kind: "number", label: "Brightness (%)", hint: "Glow intensity.", min: 0, max: 100, step: 1, def: 50 },
+      { key: "sharpness", kind: "number", label: "Sharpness", hint: "Glow falloff.", min: 1, max: 10, step: 1, def: 5 },
+    ],
+  },
+  {
+    id: "halftone",
+    title: "Halftone",
+    hint: "Newspaper-style dot screen in black and white.",
+    theme: "artistic",
+    params: [{ key: "size", kind: "number", label: "Cell size", hint: "Dot cell in pixels.", min: 2, max: 16, step: 1, def: 4 }],
+  },
+  {
+    id: "tile-mosaic",
+    title: "Tile Mosaic",
+    hint: "Averages the image into rectangular tiles.",
+    theme: "artistic",
+    params: [
+      { key: "tileWidth", kind: "number", label: "Tile width", hint: "Tile width in pixels.", min: 2, max: 128, step: 1, def: 16 },
+      { key: "tileHeight", kind: "number", label: "Tile height", hint: "Tile height in pixels.", min: 2, max: 128, step: 1, def: 16 },
+    ],
+  },
+  {
+    id: "spread",
+    title: "Spread",
+    hint: "Swaps each pixel with a random neighbor (same seed replays).",
+    theme: "noise",
+    params: [
+      { key: "amount", kind: "number", label: "Amount", hint: "Max displacement in pixels.", min: 0, max: 16, step: 1, def: 3 },
+      { key: "seed", kind: "number", label: "Seed", hint: "Random seed.", min: 1, max: 9999, step: 1, def: 1 },
+    ],
+  },
+  {
+    id: "value-propagate",
+    title: "Value Propagate",
+    hint: "Spreads the brightest (dilate) or darkest (erode) pixels.",
+    theme: "enhance",
+    params: [
+      {
+        key: "mode",
+        kind: "enum",
+        label: "Mode",
+        hint: "Grow light areas or dark areas.",
+        def: "dilate",
+        options: [
+          { value: "dilate", label: "Dilate" },
+          { value: "erode", label: "Erode" },
+        ],
+      },
+      { key: "radius", kind: "number", label: "Radius", hint: "Neighborhood radius in pixels.", min: 1, max: 5, step: 1, def: 1 },
+    ],
+  },
+  {
+    id: "waves",
+    title: "Waves",
+    hint: "Sine-displaces the image with bilinear sampling.",
+    theme: "distort",
+    params: [
+      { key: "amplitude", kind: "number", label: "Amplitude", hint: "Wave height in pixels.", min: 0, max: 50, step: 1, def: 5 },
+      { key: "period", kind: "number", label: "Period", hint: "Wave length in pixels.", min: 2, max: 200, step: 1, def: 20 },
+      {
+        key: "direction",
+        kind: "enum",
+        label: "Direction",
+        hint: "Which axis waves.",
+        def: "both",
+        options: [
+          { value: "horizontal", label: "Horizontal" },
+          { value: "vertical", label: "Vertical" },
+          { value: "both", label: "Both" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "wind",
+    title: "Wind",
+    hint: "Streaks pixels horizontally with random gusts (same seed replays).",
+    theme: "distort",
+    params: [
+      {
+        key: "direction",
+        kind: "enum",
+        label: "Direction",
+        hint: "Which way the wind blows.",
+        def: "right",
+        options: [
+          { value: "left", label: "Left" },
+          { value: "right", label: "Right" },
+        ],
+      },
+      { key: "strength", kind: "number", label: "Strength (%)", hint: "How many pixels gust.", min: 0, max: 100, step: 1, def: 30 },
+      { key: "seed", kind: "number", label: "Seed", hint: "Random seed.", min: 1, max: 9999, step: 1, def: 1 },
+    ],
+  },
 ];
 
 export function getFilterDef(id: string): GnumarusFilterDef | undefined {
@@ -1771,6 +2335,30 @@ export function runFilterKernel(
       return kernelRoundCorners(src, width, height, v);
     case "video-degradation":
       return kernelVideoDegradation(src, width, height, v);
+    case "levels":
+      return kernelLevels(src, width, height, v);
+    case "hsv-adjust":
+      return kernelHsvAdjust(src, width, height, v);
+    case "palettize":
+      return kernelPalettize(src, width, height, v);
+    case "gradient-map":
+      return kernelGradientMap(src, width, height, v);
+    case "photocopy":
+      return kernelPhotocopy(src, width, height, v);
+    case "softglow":
+      return kernelSoftglow(src, width, height, v);
+    case "halftone":
+      return kernelHalftone(src, width, height, v);
+    case "tile-mosaic":
+      return kernelTileMosaic(src, width, height, v);
+    case "spread":
+      return kernelSpread(src, width, height, v);
+    case "value-propagate":
+      return kernelValuePropagate(src, width, height, v);
+    case "waves":
+      return kernelWaves(src, width, height, v);
+    case "wind":
+      return kernelWind(src, width, height, v);
     default:
       return null;
   }

@@ -35,12 +35,12 @@ function gradient(width: number, height: number): Uint8ClampedArray {
 }
 
 describe("GnumarusFilters", () => {
-  it("registers 40 filters across 7 themes with unique ids", () => {
-    expect(GNUMARUS_FILTERS.length).toBe(40);
+  it("registers 52 filters across 8 themes with unique ids", () => {
+    expect(GNUMARUS_FILTERS.length).toBe(52);
     const ids = GNUMARUS_FILTERS.map((def) => def.id);
     expect(new Set(ids).size).toBe(ids.length);
     const themes = new Set(GNUMARUS_FILTERS.map((def) => def.theme));
-    expect([...themes].sort()).toEqual(["artistic", "blur", "colors", "decor", "edge", "enhance", "noise"]);
+    expect([...themes].sort()).toEqual(["artistic", "blur", "colors", "decor", "distort", "edge", "enhance", "noise"]);
     for (const def of GNUMARUS_FILTERS) {
       expect(getFilterDef(def.id)).toEqual(def);
       for (const param of def.params) {
@@ -449,5 +449,151 @@ describe("GnumarusFilters", () => {
     expect(Array.from(none as Uint8ClampedArray)).toEqual(Array.from(white));
     const shifted = runFilterKernel("video-degradation", white, 4, 4, { pattern: "shift", strength: 50 });
     expect(shifted).not.toBeNull();
+  });
+
+  it("remaps levels per channel", () => {
+    const gray = solid(1, 1, 150, 150, 150, 200);
+    const identity = runFilterKernel("levels", gray, 1, 1, {});
+    expect(identity).not.toBeNull();
+    expect(Array.from(identity as Uint8ClampedArray)).toEqual([150, 150, 150, 200]);
+    const stretched = runFilterKernel("levels", gray, 1, 1, { low: 100, high: 200, gamma: 1 });
+    expect(Array.from(stretched as Uint8ClampedArray)).toEqual([128, 128, 128, 200]);
+    // Red-only remap leaves the other channels alone.
+    const redOnly = runFilterKernel("levels", solid(1, 1, 150, 90, 90, 255), 1, 1, {
+      channel: "red",
+      low: 100,
+      high: 200,
+    });
+    expect(Array.from(redOnly as Uint8ClampedArray)).toEqual([128, 90, 90, 255]);
+    const degenerate = runFilterKernel("levels", gray, 1, 1, { low: 200, high: 100 });
+    expect(Array.from(degenerate as Uint8ClampedArray)).toEqual([150, 150, 150, 200]);
+  });
+
+  it("rotates hue by 120 degrees onto green", () => {
+    const out = runFilterKernel("hsv-adjust", solid(1, 1, 255, 0, 0, 77), 1, 1, { hue: 120 });
+    expect(out).not.toBeNull();
+    expect(Array.from(out as Uint8ClampedArray)).toEqual([0, 255, 0, 77]);
+    const same = runFilterKernel("hsv-adjust", solid(1, 1, 10, 20, 30, 40), 1, 1, {});
+    expect(Array.from(same as Uint8ClampedArray)).toEqual([10, 20, 30, 40]);
+    const painted = runFilterKernel("hsv-adjust", solid(1, 1, 128, 128, 128, 255), 1, 1, { colorize: true });
+    expect(Array.from(painted as Uint8ClampedArray)).toEqual([128, 0, 0, 255]);
+  });
+
+  it("palettizes to the listed colors", () => {
+    const red = solid(2, 1, 255, 0, 0, 255);
+    const out = runFilterKernel("palettize", red, 2, 1, { colors: "#ff0000,#0000ff", dither: false });
+    expect(out).not.toBeNull();
+    expect(Array.from(out as Uint8ClampedArray)).toEqual([255, 0, 0, 255, 255, 0, 0, 255]);
+    const invalid = runFilterKernel("palettize", red, 2, 1, { colors: "nope" });
+    expect(Array.from(invalid as Uint8ClampedArray)).toEqual(Array.from(red));
+  });
+
+  it("maps luminance along the gradient", () => {
+    const gray = solid(1, 1, 128, 128, 128, 200);
+    const out = runFilterKernel("gradient-map", gray, 1, 1, { colors: "#000000,#ffffff", dither: false });
+    expect(out).not.toBeNull();
+    expect(Array.from(out as Uint8ClampedArray)).toEqual([128, 128, 128, 200]);
+    const solidStop = runFilterKernel("gradient-map", gray, 1, 1, { colors: "#123456", dither: false });
+    expect(Array.from(solidStop as Uint8ClampedArray)).toEqual([0x12, 0x34, 0x56, 200]);
+  });
+
+  it("copies white paper and inks dark areas", () => {
+    const white = solid(4, 4, 255, 255, 255, 255);
+    const out = runFilterKernel("photocopy", white, 4, 4, {});
+    expect(out).not.toBeNull();
+    expect(Array.from(out as Uint8ClampedArray)).toEqual(Array.from(white));
+    const split = new Uint8ClampedArray(8 * 4 * 4);
+    for (let y = 0; y < 4; y += 1) {
+      for (let x = 0; x < 8; x += 1) {
+        const at = (y * 8 + x) * 4;
+        const v = x < 4 ? 0 : 255;
+        split[at] = v;
+        split[at + 1] = v;
+        split[at + 2] = v;
+        split[at + 3] = 255;
+      }
+    }
+    const copied = runFilterKernel("photocopy", split, 8, 4, { radius: 1 }) as Uint8ClampedArray;
+    expect([copied[3 * 4], copied[4 * 4]]).toEqual([0, 255]);
+  });
+
+  it("leaves black and white alone in softglow", () => {
+    for (const v of [0, 255]) {
+      const flat = solid(6, 6, v, v, v, 255);
+      const out = runFilterKernel("softglow", flat, 6, 6, {});
+      expect(out, String(v)).not.toBeNull();
+      expect(Array.from(out as Uint8ClampedArray)).toEqual(Array.from(flat));
+    }
+  });
+
+  it("screens halftone dots on mid-gray", () => {
+    const white = solid(8, 8, 255, 255, 255, 255);
+    const kept = runFilterKernel("halftone", white, 8, 8, {});
+    expect(Array.from(kept as Uint8ClampedArray)).toEqual(Array.from(white));
+    const black = solid(8, 8, 0, 0, 0, 255);
+    const inked = runFilterKernel("halftone", black, 8, 8, {});
+    expect(Array.from(inked as Uint8ClampedArray)).toEqual(Array.from(black));
+    const red = solid(8, 8, 255, 0, 0, 255);
+    const dots = runFilterKernel("halftone", red, 8, 8, {}) as Uint8ClampedArray;
+    // Cell (0,0) is far from its dot center: black. Cell center is white.
+    expect([dots[0], dots[(2 * 8 + 2) * 4]]).toEqual([0, 255]);
+  });
+
+  it("averages rectangular mosaic tiles", () => {
+    const out = runFilterKernel("tile-mosaic", gradient(8, 8), 8, 8, { tileWidth: 4, tileHeight: 2 });
+    expect(out).not.toBeNull();
+    const buf = out as Uint8ClampedArray;
+    const first = [buf[0], buf[1], buf[2], buf[3]];
+    for (let y = 0; y < 2; y += 1) {
+      for (let x = 0; x < 4; x += 1) {
+        const at = (y * 8 + x) * 4;
+        expect([buf[at], buf[at + 1], buf[at + 2], buf[at + 3]]).toEqual(first);
+      }
+    }
+  });
+
+  it("spreads pixels deterministically", () => {
+    const flat = solid(4, 4, 100, 100, 100, 255);
+    const none = runFilterKernel("spread", flat, 4, 4, { amount: 0 });
+    expect(Array.from(none as Uint8ClampedArray)).toEqual(Array.from(flat));
+    const a = runFilterKernel("spread", flat, 4, 4, { amount: 4, seed: 3 });
+    const b = runFilterKernel("spread", flat, 4, 4, { amount: 4, seed: 3 });
+    expect(Array.from(a as Uint8ClampedArray)).toEqual(Array.from(b as Uint8ClampedArray));
+  });
+
+  it("propagates bright and dark values", () => {
+    const buffer = solid(3, 3, 0, 0, 0, 255);
+    buffer[(1 * 3 + 1) * 4] = 255;
+    buffer[(1 * 3 + 1) * 4 + 1] = 255;
+    buffer[(1 * 3 + 1) * 4 + 2] = 255;
+    const grown = runFilterKernel("value-propagate", buffer, 3, 3, { mode: "dilate", radius: 1 });
+    expect(grown).not.toBeNull();
+    expect(Array.from(grown as Uint8ClampedArray).every((v, i) => (i % 4 === 3 ? v === 255 : v === 255))).toBe(true);
+    const white = solid(3, 3, 255, 255, 255, 255);
+    white[(1 * 3 + 1) * 4] = 0;
+    white[(1 * 3 + 1) * 4 + 1] = 0;
+    white[(1 * 3 + 1) * 4 + 2] = 0;
+    const shrunk = runFilterKernel("value-propagate", white, 3, 3, { mode: "erode", radius: 1 });
+    expect(Array.from(shrunk as Uint8ClampedArray).every((v, i) => (i % 4 === 3 ? v === 255 : v === 0))).toBe(true);
+  });
+
+  it("leaves still water with zero amplitude", () => {
+    const g = gradient(8, 8);
+    const none = runFilterKernel("waves", g, 8, 8, { amplitude: 0 });
+    expect(none).not.toBeNull();
+    expect(Array.from(none as Uint8ClampedArray)).toEqual(Array.from(g));
+    const moved = runFilterKernel("waves", g, 8, 8, { amplitude: 2, period: 8 });
+    expect(moved).not.toBeNull();
+    expect(Array.from(moved as Uint8ClampedArray)).not.toEqual(Array.from(g));
+  });
+
+  it("leaves calm air with zero wind strength", () => {
+    const g = gradient(8, 8);
+    const none = runFilterKernel("wind", g, 8, 8, { strength: 0 });
+    expect(none).not.toBeNull();
+    expect(Array.from(none as Uint8ClampedArray)).toEqual(Array.from(g));
+    const gusty = runFilterKernel("wind", g, 8, 8, { strength: 100, seed: 1 });
+    expect(gusty).not.toBeNull();
+    expect(Array.from(gusty as Uint8ClampedArray)).not.toEqual(Array.from(g));
   });
 });
