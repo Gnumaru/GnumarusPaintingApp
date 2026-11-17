@@ -1953,6 +1953,8 @@ export class GnumarusShell extends LitElement {
     helpMenuOpen: { type: Boolean },
     filterMenuOpen: { type: Boolean },
     filterSubmenu: { type: String },
+    toolsMenuOpen: { type: Boolean },
+    toolsSubmenu: { type: String },
     filterOpen: { type: Boolean },
     filterId: { type: String },
     filterValues: { type: Object },
@@ -2262,6 +2264,8 @@ export class GnumarusShell extends LitElement {
   declare bcWindowY: number;
   declare filterMenuOpen: boolean;
   declare filterSubmenu: string | null;
+  declare toolsMenuOpen: boolean;
+  declare toolsSubmenu: string | null;
   declare filterOpen: boolean;
   declare filterId: string | null;
   declare filterValues: Record<string, number | boolean | string>;
@@ -2536,6 +2540,8 @@ export class GnumarusShell extends LitElement {
     this.bcWindowY = 16;
     this.filterMenuOpen = false;
     this.filterSubmenu = null;
+    this.toolsMenuOpen = false;
+    this.toolsSubmenu = null;
     this.filterOpen = false;
     this.filterId = null;
     this.filterValues = {};
@@ -2764,6 +2770,63 @@ export class GnumarusShell extends LitElement {
                   >
                     ${tr("menu.resetCanvasTransform")}
                   </button>
+                </div>
+              `
+            : html``}
+        </div>
+        <div class="menu">
+          <button
+            class=${this.toolsMenuOpen ? "active" : ""}
+            @click=${(): void => this.toggleMenu("tools")}
+            @mouseenter=${(): void => this.hoverMenu("tools")}
+          >
+            ${tr("menu.tools")}
+          </button>
+          ${this.toolsMenuOpen
+            ? html`
+                <div class="dropdown">
+                  ${this.standaloneTools().map(
+                    (tool) => html`
+                      <button title=${this.toolMenuHint(tool)} @click=${(): void => this.activateToolFromMenu(tool)}>
+                        ${this.toolMenuLabel(tool)}
+                      </button>
+                    `,
+                  )}
+                  ${GNUMARUS_TOOL_DRAWERS.map(
+                    (drawer) => html`
+                      <div
+                        class="submenu-row"
+                        @mouseenter=${(): void => {
+                          this.toolsSubmenu = drawer.id;
+                        }}
+                      >
+                        <button
+                          title=${tr(`tool.drawer.${drawer.id}Hint` as GnumarusMessageKey)}
+                          @click=${(): void => {
+                            this.toolsSubmenu = this.toolsSubmenu === drawer.id ? null : drawer.id;
+                          }}
+                        >
+                          ${tr(`tool.drawer.${drawer.id}` as GnumarusMessageKey)}<span class="submenu-arrow">▸</span>
+                        </button>
+                        ${this.toolsSubmenu === drawer.id
+                          ? html`
+                              <div class="submenu-flyout">
+                                ${drawer.tools.map(
+                                  (tool) => html`
+                                    <button
+                                      title=${this.drawerToolHint(tool)}
+                                      @click=${(): void => this.activateToolFromMenu(tool)}
+                                    >
+                                      ${this.drawerToolLabel(tool)}
+                                    </button>
+                                  `,
+                                )}
+                              </div>
+                            `
+                          : html``}
+                      </div>
+                    `,
+                  )}
                 </div>
               `
             : html``}
@@ -5421,6 +5484,58 @@ export class GnumarusShell extends LitElement {
   }
 
   /** Drawer helpers: the front tool doubles as the drawer button. */
+  /** Tools without a drawer, in toolbar order (menu items before the drawer submenus). */
+  private standaloneTools(): GnumarusCanvasTool[] {
+    return ["loupe", "bucket", "eyedropper", "text", "tilebrush"];
+  }
+
+  /** Every tool reachable from the Tools menu, standalone first, then drawer order. */
+  private allMenuTools(): GnumarusCanvasTool[] {
+    const tools: GnumarusCanvasTool[] = [...this.standaloneTools()];
+    for (const drawer of GNUMARUS_TOOL_DRAWERS) {
+      tools.push(...drawer.tools);
+    }
+    return tools;
+  }
+
+  /** Drawer owning a tool, or null for drawer-less tools. */
+  private toolDrawerId(tool: GnumarusCanvasTool): string | null {
+    for (const drawer of GNUMARUS_TOOL_DRAWERS) {
+      if ((drawer.tools as GnumarusCanvasTool[]).includes(tool)) {
+        return drawer.id;
+      }
+    }
+    return null;
+  }
+
+  /** Menu/action label for any tool (drawer labels or the standalone tool name). */
+  private toolMenuLabel(tool: GnumarusCanvasTool): string {
+    if (this.toolDrawerId(tool) !== null) {
+      return this.drawerToolLabel(tool);
+    }
+    return tr(`tool.${tool}` as GnumarusMessageKey);
+  }
+
+  /** Menu/action tooltip for any tool (drawer hints or the standalone tool hint). */
+  private toolMenuHint(tool: GnumarusCanvasTool): string {
+    if (this.toolDrawerId(tool) !== null) {
+      return this.drawerToolHint(tool);
+    }
+    return tr(`tool.${tool}Hint` as GnumarusMessageKey);
+  }
+
+  /** Activate a tool from the Tools menu or its run action (closes menus first). */
+  private activateToolFromMenu(tool: GnumarusCanvasTool): void {
+    this.closeAllMenus();
+    const drawerId = this.toolDrawerId(tool);
+    if (drawerId !== null) {
+      this.selectDrawerTool(drawerId, tool, true);
+      return;
+    }
+    this.tool = tool;
+    this.engine?.setTool(tool);
+  }
+
   /** Close the open drawer flyout, if any. */
   private closeDrawerFlyout(): void {
     this.drawerOpen = null;
@@ -7238,7 +7353,7 @@ export class GnumarusShell extends LitElement {
   };
 
   private anyMenuOpen(): boolean {
-    return this.fileMenuOpen || this.editMenuOpen || this.helpMenuOpen || this.filterMenuOpen;
+    return this.fileMenuOpen || this.editMenuOpen || this.toolsMenuOpen || this.helpMenuOpen || this.filterMenuOpen;
   }
 
   private closeAllMenus(): void {
@@ -7247,6 +7362,8 @@ export class GnumarusShell extends LitElement {
     this.helpMenuOpen = false;
     this.filterMenuOpen = false;
     this.filterSubmenu = null;
+    this.toolsMenuOpen = false;
+    this.toolsSubmenu = null;
     this.closeDrawerFlyout();
   }
 
@@ -7436,15 +7553,17 @@ export class GnumarusShell extends LitElement {
   }
 
   /** Header click toggles one menu, closing the others. */
-  private toggleMenu(which: "file" | "edit" | "help" | "filters"): void {
+  private toggleMenu(which: "file" | "edit" | "tools" | "help" | "filters"): void {
     const open = !(
       which === "file"
         ? this.fileMenuOpen
         : which === "edit"
           ? this.editMenuOpen
-          : which === "help"
-            ? this.helpMenuOpen
-            : this.filterMenuOpen
+          : which === "tools"
+            ? this.toolsMenuOpen
+            : which === "help"
+              ? this.helpMenuOpen
+              : this.filterMenuOpen
     );
     // A menubar menu takes over the screen: dismiss picker popups so they
     // never sit above menu items (their document-click guard may still be
@@ -7457,6 +7576,11 @@ export class GnumarusShell extends LitElement {
       this.fileMenuOpen = open;
     } else if (which === "edit") {
       this.editMenuOpen = open;
+    } else if (which === "tools") {
+      this.toolsMenuOpen = open;
+      if (open) {
+        this.toolsSubmenu = null;
+      }
     } else if (which === "help") {
       this.helpMenuOpen = open;
     } else {
@@ -7468,7 +7592,7 @@ export class GnumarusShell extends LitElement {
   }
 
   /** Hover switches menus, but only while one is already open. */
-  private hoverMenu(which: "file" | "edit" | "help" | "filters"): void {
+  private hoverMenu(which: "file" | "edit" | "tools" | "help" | "filters"): void {
     if (!this.anyMenuOpen()) {
       return;
     }
@@ -7477,6 +7601,9 @@ export class GnumarusShell extends LitElement {
       this.fileMenuOpen = true;
     } else if (which === "edit") {
       this.editMenuOpen = true;
+    } else if (which === "tools") {
+      this.toolsMenuOpen = true;
+      this.toolsSubmenu = null;
     } else if (which === "help") {
       this.helpMenuOpen = true;
     } else {
@@ -8288,6 +8415,16 @@ export class GnumarusShell extends LitElement {
         requirements: [],
         run: (): void => {
           void this.openFilterDialog(def.id);
+        },
+      });
+    }
+    for (const tool of this.allMenuTools()) {
+      this.actionRegistry.register({
+        id: `tool-${tool}`,
+        name: this.toolMenuLabel(tool),
+        requirements: [],
+        run: (): void => {
+          this.activateToolFromMenu(tool);
         },
       });
     }
