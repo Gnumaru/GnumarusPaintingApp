@@ -2115,6 +2115,7 @@ export class GnumarusShell extends LitElement {
     brushSource: { type: String },
     selectionBrushMode: { type: String },
     presetName: { type: String },
+    brushPresetName: { type: String },
     brushTipKind: { type: String },
     drawerFront: { type: Object },
     drawerOpen: { type: String },
@@ -2386,6 +2387,7 @@ export class GnumarusShell extends LitElement {
   declare selectionBrushMode: GnumarusSelectionBrushMode;
   declare presetName: string;
   declare brushPresets: GnumarusBrushPreset[];
+  declare brushPresetName: string;
   declare brushTipKind: GnumarusBrushTipKind;
   declare brushHardness: number;
   declare brushSpacing: number;
@@ -2653,6 +2655,7 @@ export class GnumarusShell extends LitElement {
     this.brushSource = "tip";
     this.selectionBrushMode = "stamp";
     this.presetName = "";
+    this.brushPresetName = BUILT_IN_BRUSH_PRESETS[0]?.name ?? "Pixel Hard";
     this.brushPresets = [];
     this.brushTipKind = "pixel";
     this.brushHardness = DEFAULT_BRUSH_HARDNESS;
@@ -6091,7 +6094,8 @@ export class GnumarusShell extends LitElement {
     return html`
               <label title=${tr("opt.presetHint")}
                 >${tr("opt.preset")}
-                <select id="brushPreset${sfx}" @change=${(): void => this.applyBrushPresetFromDialog(sfx)}>
+                <button data-testid="brush-reset${sfx}" aria-label=${tr("opt.resetPreset")} title=${tr("opt.resetPresetHint")} @click=${(): void => this.resetBrushPresetFromDialog(sfx)}>${tr("opt.resetPreset")}</button>
+                <select id="brushPreset${sfx}" .value=${this.brushPresetName} @change=${(): void => this.applyBrushPresetFromDialog(sfx)}>
                   ${[...BUILT_IN_BRUSH_PRESETS, ...this.brushPresets].map(
                     (preset) => html`<option value=${preset.name}>${preset.name}</option>`,
                   )}
@@ -10735,7 +10739,19 @@ export class GnumarusShell extends LitElement {
     this.engine?.setSymmetryMode(this.symmetryMode);
     this.wrapMode = preset.wrapMode ?? "off";
     this.engine?.setWrapMode(this.wrapMode);
+    this.brushPresetName = preset.name;
+    this.syncBrushPresetSelects();
     this.statusMessage = tr("status.preset", { value: preset.name });
+  }
+
+  /** Keep the bar/panel/dialog preset dropdowns on the last applied preset. */
+  private syncBrushPresetSelects(): void {
+    for (const scope of ["", "Panel", "Dialog"] as const) {
+      const select = this.shadowRoot?.getElementById("brushPreset" + scope) as HTMLSelectElement | null;
+      if (select !== null && select.value !== this.brushPresetName) {
+        select.value = this.brushPresetName;
+      }
+    }
   }
 
   private allBrushPresets(): GnumarusBrushPreset[] {
@@ -10748,6 +10764,34 @@ export class GnumarusShell extends LitElement {
     if (preset !== undefined) {
       this.applyBrushPreset(preset);
     }
+  }
+
+  /** Re-apply the selected preset, discarding later brush tweaks. */
+  private resetBrushPresetFromDialog(scope = ""): void {
+    const select = this.shadowRoot?.getElementById("brushPreset" + scope) as HTMLSelectElement | null;
+    const wanted = select?.value ?? this.brushPresetName;
+    const preset = this.allBrushPresets().find((entry) => entry.name === wanted)
+      ?? this.allBrushPresets().find((entry) => entry.name === this.brushPresetName);
+    if (preset === undefined) {
+      this.statusMessage = tr("status.presetNone");
+      return;
+    }
+    this.applyBrushPreset(preset);
+  }
+
+  /** Test hook: reset brush settings to the selected preset defaults. */
+  resetBrushPreset(): boolean {
+    const preset = this.allBrushPresets().find((entry) => entry.name === this.brushPresetName);
+    if (preset === undefined) {
+      return false;
+    }
+    this.applyBrushPreset(preset);
+    return true;
+  }
+
+  /** Test hook: name of the currently selected brush preset. */
+  brushPresetSelected(): string {
+    return this.brushPresetName;
   }
 
   private loadBrushPresets(): GnumarusBrushPreset[] {
@@ -10789,6 +10833,8 @@ export class GnumarusShell extends LitElement {
       this.brushPresets = [...this.brushPresets, preset];
     }
     this.persistBrushPresets();
+    this.brushPresetName = trimmed;
+    this.syncBrushPresetSelects();
     this.statusMessage = tr("status.presetSaved", { value: trimmed });
     return true;
   }
@@ -10801,6 +10847,10 @@ export class GnumarusShell extends LitElement {
     }
     this.brushPresets = this.brushPresets.filter((entry) => entry.name !== name);
     this.persistBrushPresets();
+    if (this.brushPresetName === name) {
+      this.brushPresetName = BUILT_IN_BRUSH_PRESETS[0]?.name ?? "Pixel Hard";
+      this.syncBrushPresetSelects();
+    }
     this.statusMessage = tr("status.presetDeleted", { value: name });
     return true;
   }
