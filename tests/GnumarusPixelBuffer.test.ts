@@ -19,6 +19,8 @@ import {
   drawBrushStamp,
   drawCubicBezier,
   drawCubicBezierCoverage,
+  drawImagePatternStamp,
+  drawImageStamp,
   drawLineSegment,
   drawPixelLine,
   findAlphaBoundingBox,
@@ -27,9 +29,11 @@ import {
   parseBlendMode,
   normalizePointerPressure,
   parseBrushShape,
+  parseBrushSource,
   parseHexColor,
   parseLayerBlendMode,
   parsePressureResponse,
+  parseSelectionBrushMode,
   pressureAlphaMultiplier,
   pressureSizeInRange,
   pressureSizeMultiplier,
@@ -365,6 +369,75 @@ describe("GnumarusPixelBuffer", () => {
     expect(getPixel(straight, 9, 9, 0, 0)).toEqual(red);
     expect(getPixel(rotated, 9, 9, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
     expect(getPixel(rotated, 9, 9, 4, 4)).toEqual(red);
+  });
+
+  it("parses brush source and selection-brush modes", () => {
+    expect(parseBrushSource("selection")).toBe("selection");
+    expect(parseBrushSource("tip")).toBe("tip");
+    expect(parseBrushSource("nope")).toBe("tip");
+    expect(parseSelectionBrushMode("stamp")).toBe("stamp");
+    expect(parseSelectionBrushMode("origin")).toBe("origin");
+    expect(parseSelectionBrushMode("destination")).toBe("destination");
+    expect(parseSelectionBrushMode("nope")).toBe("stamp");
+  });
+
+  it("stamps a captured selection centered on the dab", () => {
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    const brush = {
+      buffer: new Uint8ClampedArray([255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 0]),
+      mask: new Uint8Array([255, 255, 255, 255]),
+      width: 2,
+      height: 2,
+    };
+    const target = createPixelBuffer(6, 6);
+    drawImageStamp(target, 6, 6, 2, 2, brush, 1);
+    expect(getPixel(target, 6, 6, 2, 2)).toEqual(red);
+    expect(getPixel(target, 6, 6, 3, 2)).toEqual({ r: 0, g: 255, b: 0, a: 255 });
+    expect(getPixel(target, 6, 6, 2, 3)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+    expect(getPixel(target, 6, 6, 3, 3)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    expect(getPixel(target, 6, 6, 1, 1)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    // Mask zeroes whole texels out.
+    const masked = createPixelBuffer(6, 6);
+    const holed = { ...brush, mask: new Uint8Array([255, 0, 0, 255]) };
+    drawImageStamp(masked, 6, 6, 2, 2, holed, 1);
+    expect(getPixel(masked, 6, 6, 2, 2)).toEqual(red);
+    expect(getPixel(masked, 6, 6, 3, 2)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    expect(getPixel(masked, 6, 6, 2, 3)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    // Flow scales the stamped alpha.
+    const faint = createPixelBuffer(6, 6);
+    drawImageStamp(faint, 6, 6, 2, 2, brush, 0.5);
+    expect(getPixel(faint, 6, 6, 2, 2)).toEqual({ r: 255, g: 0, b: 0, a: 128 });
+    // Bad brushes paint nothing and never throw.
+    const empty = createPixelBuffer(2, 2);
+    drawImageStamp(empty, 2, 2, 0, 0, { buffer: new Uint8ClampedArray(0), mask: new Uint8Array(0), width: 0, height: 0 }, 1);
+    expect(getPixel(empty, 2, 2, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  });
+
+  it("paints origin-anchored patterns that stay put", () => {
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    // 4x1 stripe: red, green, blue, white.
+    const brush = {
+      buffer: new Uint8ClampedArray([255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255]),
+      mask: new Uint8Array([255, 255, 255, 255]),
+      width: 4,
+      height: 1,
+    };
+    const canvas = createPixelBuffer(8, 4);
+    // Dab at x=6 with a 1px line tip: pixel (6,1) samples brush x=(6-2)%4=0.
+    drawImagePatternStamp(canvas, 8, 4, 6, 1, 1, "line", 0, brush, 2, 1, 1);
+    expect(getPixel(canvas, 8, 4, 6, 1)).toEqual(red);
+    expect(getPixel(canvas, 8, 4, 6, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    // Same dab elsewhere reads the same anchor-relative texel.
+    const moved = createPixelBuffer(8, 4);
+    drawImagePatternStamp(moved, 8, 4, 2, 1, 1, "line", 0, brush, -2, 1, 1);
+    expect(getPixel(moved, 8, 4, 2, 1)).toEqual(red);
+    // Wrapping repeats the stripe every 4 px.
+    const wrapped = createPixelBuffer(12, 1);
+    drawImagePatternStamp(wrapped, 12, 1, 5, 0, 9, "square", 0, brush, 0, 0, 1);
+    expect(getPixel(wrapped, 12, 1, 4, 0)).toEqual(red);
+    expect(getPixel(wrapped, 12, 1, 8, 0)).toEqual(red);
+    expect(getPixel(wrapped, 12, 1, 5, 0)).toEqual({ r: 0, g: 255, b: 0, a: 255 });
+    expect(getPixel(wrapped, 12, 1, 1, 0)).toEqual({ r: 0, g: 255, b: 0, a: 255 });
   });
 
   it("draws brush lines with thickness and locks", () => {

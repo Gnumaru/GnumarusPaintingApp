@@ -59,6 +59,8 @@ import {
   compositePixelOver,
   createPixelBuffer,
   drawBrushStamp,
+  drawImagePatternStamp,
+  drawImageStamp,
   drawLineSegment,
   findAlphaBoundingBox,
   GNUMARUS_MAX_TEXTURE_DIM,
@@ -67,12 +69,14 @@ import {
   getPixel,
   normalizePointerPressure,
   parseBrushShape,
+  parseBrushSource,
   parsePressureResponse,
   pressureSizeInRange,
   parseBlendMode,
   parseChannelLock,
   parseHexColor,
   parseLayerBlendMode,
+  parseSelectionBrushMode,
   resizePixelBuffer,
   setPixel,
   stampSegmentCoverage,
@@ -80,12 +84,15 @@ import {
   blendPixelCoverage,
   type GnumarusBlendMode,
   type GnumarusBrushShape,
+  type GnumarusBrushSource,
   type GnumarusChannelLock,
   type GnumarusDabDirtyRect,
   type GnumarusLayerBlendMode,
   type GnumarusPixelWriteGate,
   type GnumarusPressureResponse,
   type GnumarusRgba,
+  type GnumarusSelectionBrush,
+  type GnumarusSelectionBrushMode,
   type GnumarusShadeDirection,
 } from "./GnumarusPixelBuffer";
 import {
@@ -1012,6 +1019,16 @@ export class GnumarusCanvasEngine {
   private brushShape: GnumarusBrushShape = "circle";
   /** Fixed dab rotation in degrees (-180..180); line and rotated square pixel stamps. */
   private brushAngle = 0;
+  /** Pixel tip ("tip") or captured selection ("selection") as the dab source. */
+  private brushSource: GnumarusBrushSource = "tip";
+  /** How a captured selection brush paints: stamped, or pattern-anchored. */
+  private selectionBrushMode: GnumarusSelectionBrushMode = "stamp";
+  /** Captured selection content used when the brush source is "selection". */
+  private selectionBrush: GnumarusSelectionBrush | null = null;
+  /** Home origin (layer pixels) of the captured selection brush. */
+  private selectionBrushOrigin: { x: number; y: number } = { x: 0, y: 0 };
+  /** Stroke-start dab (layer pixels), anchoring "destination" patterns. */
+  private strokeAnchor: { x: number; y: number } | null = null;
   private brushTipKind: GnumarusBrushTipKind = "pixel";
   private brushHardness = DEFAULT_BRUSH_HARDNESS;
   private brushSpacing = DEFAULT_BRUSH_SPACING;
@@ -9157,6 +9174,108 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
+  getBrushSource(): GnumarusBrushSource {
+    return this.brushSource;
+  }
+
+  setBrushSource(source: GnumarusBrushSource): boolean {
+    const parsed = parseBrushSource(source);
+    if (parsed === "selection" && this.selectionBrush === null) {
+      return false;
+    }
+    if (parsed === this.brushSource) {
+      return false;
+    }
+    this.brushSource = parsed;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  getSelectionBrushMode(): GnumarusSelectionBrushMode {
+    return this.selectionBrushMode;
+  }
+
+  setSelectionBrushMode(mode: GnumarusSelectionBrushMode): boolean {
+    const parsed = parseSelectionBrushMode(mode);
+    if (parsed === this.selectionBrushMode) {
+      return false;
+    }
+    this.selectionBrushMode = parsed;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  /** True when a captured selection brush is available to paint with. */
+  hasSelectionBrush(): boolean {
+    return this.selectionBrush !== null;
+  }
+
+  /** Capture bbox in pixels, or null when there is no selection brush. */
+  getSelectionBrushSize(): { width: number; height: number } | null {
+    const brush = this.selectionBrush;
+    return brush === null ? null : { width: brush.width, height: brush.height };
+  }
+
+  /**
+   * Capture the active floating selection as a paintable brush (straight
+   * RGBA plus coverage mask plus home origin in layer pixels). Read-only:
+   * no history entry. Selecting the capture as brush source acts like
+   * picking up the selection as a stamp.
+   */
+  captureSelectionBrush(): boolean {
+    const floating = this.floating;
+    if (floating === null || !floating.active) {
+      return false;
+    }
+    if (
+      floating.width < 1 ||
+      floating.height < 1 ||
+      floating.buffer.length !== floating.width * floating.height * 4 ||
+      floating.mask.length !== floating.width * floating.height
+    ) {
+      return false;
+    }
+    let buffer: Uint8ClampedArray;
+    let originX: number;
+    let originY: number;
+    if (floating.pendingCut) {
+      // Read the pixels straight from the intact home texture.
+      const tex = this.textures.get(floating.textureId);
+      if (tex === undefined) {
+        return false;
+      }
+      const minX = Math.round(floating.cx - floating.width / 2);
+      const minY = Math.round(floating.cy - floating.height / 2);
+      if (minX < 0 || minY < 0 || minX + floating.width > tex.width || minY + floating.height > tex.height) {
+        return false;
+      }
+      buffer = new Uint8ClampedArray(floating.width * floating.height * 4);
+      for (let row = 0; row < floating.height; row += 1) {
+        const from = (minY + row) * tex.width * 4 + minX * 4;
+        buffer.set(tex.buffer.subarray(from, from + floating.width * 4), row * floating.width * 4);
+      }
+      originX = minX;
+      originY = minY;
+    } else {
+      buffer = floating.buffer.slice();
+      originX = Math.round(floating.cx - floating.width / 2);
+      originY = Math.round(floating.cy - floating.height / 2);
+    }
+    this.selectionBrush = {
+      buffer,
+      mask: floating.mask.slice(),
+      width: floating.width,
+      height: floating.height,
+    };
+    this.selectionBrushOrigin = { x: originX, y: originY };
+    this.brushSource = "selection";
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
   getBrushTipKind(): GnumarusBrushTipKind {
     return this.brushTipKind;
   }
@@ -9789,21 +9908,29 @@ export class GnumarusCanvasEngine {
     const airbrushAngle = this.tipAngleMode === "direction" ? this.strokeDabAngle : 0;
     for (let i = 0; i < count; i += 1) {
       if (this.brushTipKind === "pixel") {
-        drawBrushStamp(
-          tex.buffer, tex.width, tex.height, Math.round(at.x), Math.round(at.y),
-          this.brushSize, this.brushShape, this.pressureBrushColor(), layer.lockedChannels, this.blendMode,
-          this.wrapMode, this.maxBrushSize, undefined, this.brushAngle,
-        );
+        if (this.tool === "pencil" && this.brushSource === "selection" && this.selectionBrush !== null) {
+          this.stampSelectionDab(tex, layer.lockedChannels, Math.round(at.x), Math.round(at.y), undefined);
+        } else {
+          drawBrushStamp(
+            tex.buffer, tex.width, tex.height, Math.round(at.x), Math.round(at.y),
+            this.brushSize, this.brushShape, this.pressureBrushColor(), layer.lockedChannels, this.blendMode,
+            this.wrapMode, this.maxBrushSize, undefined, this.brushAngle,
+          );
+        }
         if (this.symmetryMode !== "off") {
           for (const mirror of mirrorSegmentEndsOnAxis(
             Math.round(at.x), Math.round(at.y), Math.round(at.x), Math.round(at.y),
             this.symmetryCenter.x, this.symmetryCenter.y, this.symmetryMode,
           )) {
-            drawBrushStamp(
-              tex.buffer, tex.width, tex.height, mirror.x0, mirror.y0,
-              this.brushSize, this.brushShape, this.pressureBrushColor(), layer.lockedChannels, this.blendMode,
-              this.wrapMode, this.maxBrushSize, undefined, this.brushAngle,
-            );
+            if (this.tool === "pencil" && this.brushSource === "selection" && this.selectionBrush !== null) {
+              this.stampSelectionDab(tex, layer.lockedChannels, mirror.x0, mirror.y0, undefined);
+            } else {
+              drawBrushStamp(
+                tex.buffer, tex.width, tex.height, mirror.x0, mirror.y0,
+                this.brushSize, this.brushShape, this.pressureBrushColor(), layer.lockedChannels, this.blendMode,
+                this.wrapMode, this.maxBrushSize, undefined, this.brushAngle,
+              );
+            }
           }
         }
       } else {
@@ -9845,6 +9972,7 @@ export class GnumarusCanvasEngine {
   private resetPaintStroke(): void {
     this.strokeDabCarry = 0;
     this.strokeDabIndex = 0;
+    this.strokeAnchor = null;
     this.strokePaintStart = true;
     this.strokeTiltMag = 0;
     this.strokeVelocity = 0;
@@ -10852,6 +10980,95 @@ export class GnumarusCanvasEngine {
   }
 
   /**
+   * Stamp one selection-brush dab at integer layer coords: the whole
+   * capture in `stamp` mode, or the tip footprint sampling the capture as
+   * a pattern anchored at the copy point (`origin`) or the stroke start
+   * (`destination`, latched on the first dab). Flow scales dab alpha.
+   */
+  private stampSelectionDab(
+    tex: { buffer: Uint8ClampedArray; width: number; height: number },
+    locked: GnumarusChannelLock,
+    x: number,
+    y: number,
+    gate: GnumarusPixelWriteGate | undefined,
+  ): void {
+    const brush = this.selectionBrush;
+    if (brush === null) {
+      return;
+    }
+    if (this.selectionBrushMode === "stamp") {
+      drawImageStamp(tex.buffer, tex.width, tex.height, x, y, brush, this.brushFlow, locked, this.blendMode, this.wrapMode, gate);
+      return;
+    }
+    const anchor =
+      this.selectionBrushMode === "origin"
+        ? this.selectionBrushOrigin
+        : (this.strokeAnchor ?? { x: Math.round(x), y: Math.round(y) });
+    drawImagePatternStamp(
+      tex.buffer,
+      tex.width,
+      tex.height,
+      x,
+      y,
+      this.pressureBrushSize(),
+      this.brushShape,
+      this.brushAngle,
+      brush,
+      anchor.x,
+      anchor.y,
+      this.brushFlow,
+      locked,
+      this.blendMode,
+      this.wrapMode,
+      gate,
+      this.maxBrushSize,
+    );
+  }
+
+  /**
+   * Paint one integer selection-brush run `from -> to` (Bresenham walk,
+   * like the aliased pencil path). Latches the stroke-start dab for
+   * `destination` patterns on first use.
+   */
+  private paintSelectionStroke(
+    tex: { buffer: Uint8ClampedArray; width: number; height: number },
+    locked: GnumarusChannelLock,
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    gate: GnumarusPixelWriteGate | undefined,
+  ): void {
+    if (this.strokeAnchor === null) {
+      this.strokeAnchor = { x: Math.round(x0), y: Math.round(y0) };
+    }
+    let x = Math.round(x0);
+    let y = Math.round(y0);
+    const endX = Math.round(x1);
+    const endY = Math.round(y1);
+    const dx = Math.abs(endX - x);
+    const dy = Math.abs(endY - y);
+    const sx = x < endX ? 1 : -1;
+    const sy = y < endY ? 1 : -1;
+    let err = dx - dy;
+    for (;;) {
+      this.stampSelectionDab(tex, locked, x, y, gate);
+      if (x === endX && y === endY) {
+        break;
+      }
+      const e2 = 2 * err;
+      if (e2 > -dy) {
+        err -= dy;
+        x += sx;
+      }
+      if (e2 < dx) {
+        err += dx;
+        y += sy;
+      }
+    }
+  }
+
+  /**
    * Paint one integer pencil run, mirrored across the symmetry axes when a
    * symmetry mode is active and pixel perfect is off (the per-stroke
    * pixel-perfect filter cannot be shared across mirrored runs).
@@ -10894,6 +11111,10 @@ export class GnumarusCanvasEngine {
     const size = this.pressureBrushSize();
     const color = this.pressureBrushColor();
     const gate = this.pixelArtGate(color);
+    if (this.tool === "pencil" && this.brushSource === "selection" && this.selectionBrush !== null) {
+      this.paintSelectionStroke(tex, locked, x0, y0, x1, y1, gate);
+      return;
+    }
     const shade = this.shadeModeActive();
     // Shading always goes through the union mask (repainted from the
     // stroke-start snapshot), so both accumulate settings behave the same.
@@ -13810,6 +14031,15 @@ export class GnumarusCanvasEngine {
     const size = this.pressureBrushSize();
     const color = this.pressureBrushColor();
     const gate = this.pixelArtGate(color);
+    if (this.tool === "pencil" && this.brushSource === "selection" && this.selectionBrush !== null) {
+      this.paintSelectionStroke(tex, locked, qx0, qy0, qx1, qy1, gate);
+      if (this.symmetryMode !== "off") {
+        for (const mirror of mirrorSegmentEndsOnAxis(qx0, qy0, qx1, qy1, this.symmetryCenter.x, this.symmetryCenter.y, this.symmetryMode)) {
+          this.paintSelectionStroke(tex, locked, mirror.x0, mirror.y0, mirror.x1, mirror.y1, gate);
+        }
+      }
+      return;
+    }
     if (this.pencilPixelPerfectActive()) {
       this.paintPencilLine(tex, locked, qx0, qy0, qx1, qy1);
       return;
@@ -15565,24 +15795,41 @@ export class GnumarusCanvasEngine {
             : this.curveWidth) * this.zoom;
       const tipShape =
         this.tool === "pencil" ? this.brushShape : this.tool === "line" ? this.lineShape : this.curveShape;
+      // A captured brush stamps its whole bbox: outline it instead of the
+      // geometric tip (pattern modes keep the geometric preview below).
+      const stampBox =
+        this.tool === "pencil" && this.brushSource === "selection" && this.selectionBrushMode === "stamp"
+          ? this.getSelectionBrushSize()
+          : null;
       const size = Math.max(2, tipSize);
       this.previewTip.style.display = "block";
-      this.previewTip.style.width = `${size}px`;
-      this.previewTip.style.height = `${size}px`;
-      this.previewTip.style.left = `${mouse.x - rect.left - size / 2}px`;
-      this.previewTip.style.top = `${mouse.y - rect.top - size / 2}px`;
-      this.previewTip.style.borderRadius = tipShape === "circle" ? "50%" : "0";
-      // The line tip previews as a rotated bar (positive angles clockwise,
-      // matching the stamp); a rotated square shows its own rotation.
-      // Only the pencil uses dab tips (line/curve shapes are width profiles).
-      if (this.tool === "pencil" && tipShape === "line") {
-        this.previewTip.style.height = "2px";
-        this.previewTip.style.top = `${mouse.y - rect.top - 1}px`;
-        this.previewTip.style.transform = `rotate(${this.brushAngle}deg)`;
-      } else if (this.tool === "pencil" && tipShape === "square" && this.brushAngle !== 0) {
-        this.previewTip.style.transform = `rotate(${this.brushAngle}deg)`;
-      } else {
+      if (stampBox !== null) {
+        const stampW = Math.max(2, stampBox.width * this.zoom);
+        const stampH = Math.max(2, stampBox.height * this.zoom);
+        this.previewTip.style.width = `${stampW}px`;
+        this.previewTip.style.height = `${stampH}px`;
+        this.previewTip.style.left = `${mouse.x - rect.left - stampW / 2}px`;
+        this.previewTip.style.top = `${mouse.y - rect.top - stampH / 2}px`;
+        this.previewTip.style.borderRadius = "0";
         this.previewTip.style.transform = "";
+      } else {
+        this.previewTip.style.width = `${size}px`;
+        this.previewTip.style.height = `${size}px`;
+        this.previewTip.style.left = `${mouse.x - rect.left - size / 2}px`;
+        this.previewTip.style.top = `${mouse.y - rect.top - size / 2}px`;
+        this.previewTip.style.borderRadius = tipShape === "circle" ? "50%" : "0";
+        // The line tip previews as a rotated bar (positive angles clockwise,
+        // matching the stamp); a rotated square shows its own rotation.
+        // Only the pencil uses dab tips (line/curve shapes are width profiles).
+        if (this.tool === "pencil" && tipShape === "line") {
+          this.previewTip.style.height = "2px";
+          this.previewTip.style.top = `${mouse.y - rect.top - 1}px`;
+          this.previewTip.style.transform = `rotate(${this.brushAngle}deg)`;
+        } else if (this.tool === "pencil" && tipShape === "square" && this.brushAngle !== 0) {
+          this.previewTip.style.transform = `rotate(${this.brushAngle}deg)`;
+        } else {
+          this.previewTip.style.transform = "";
+        }
       }
     }
     this.updateTilePreview(mouse);

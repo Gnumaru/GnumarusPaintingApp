@@ -297,11 +297,15 @@ import {
   findAlphaBoundingBox,
   parseBlendMode,
   parseBrushShape,
+  parseBrushSource,
   parseLayerBlendMode,
   parsePressureResponse,
+  parseSelectionBrushMode,
   type GnumarusBlendMode,
   type GnumarusBrushShape,
+  type GnumarusBrushSource,
   type GnumarusPressureResponse,
+  type GnumarusSelectionBrushMode,
   type GnumarusShadeDirection,
 } from "../canvas/GnumarusPixelBuffer";
 import {
@@ -2108,6 +2112,8 @@ export class GnumarusShell extends LitElement {
     brushSizeMin: { type: Number },
     brushShape: { type: String },
     brushAngle: { type: Number },
+    brushSource: { type: String },
+    selectionBrushMode: { type: String },
     presetName: { type: String },
     brushTipKind: { type: String },
     drawerFront: { type: Object },
@@ -2376,6 +2382,8 @@ export class GnumarusShell extends LitElement {
   declare brushSizeMin: number;
   declare brushShape: GnumarusBrushShape;
   declare brushAngle: number;
+  declare brushSource: GnumarusBrushSource;
+  declare selectionBrushMode: GnumarusSelectionBrushMode;
   declare presetName: string;
   declare brushPresets: GnumarusBrushPreset[];
   declare brushTipKind: GnumarusBrushTipKind;
@@ -2642,6 +2650,8 @@ export class GnumarusShell extends LitElement {
     this.maxBrushSize = DEFAULT_BRUSH_SETTINGS.maxBrushSize;
     this.brushShape = "circle";
     this.brushAngle = 0;
+    this.brushSource = "tip";
+    this.selectionBrushMode = "stamp";
     this.presetName = "";
     this.brushPresets = [];
     this.brushTipKind = "pixel";
@@ -2763,6 +2773,7 @@ export class GnumarusShell extends LitElement {
                   <button title=${tr("menu.copySelectionTitle")} @click=${(): void => void this.runAction("copy-selection")}>${tr("menu.copySelection")}</button>
                   <button title=${tr("menu.copyMergedTitle")} @click=${(): void => void this.runAction("copy-merged")}>${tr("menu.copyMerged")}</button>
                   <button title=${tr("menu.pasteTitle")} @click=${(): void => void this.runAction("paste")}>${tr("menu.paste")}</button>
+        <button title=${tr("menu.createBrushFromSelectionTitle")} @click=${(): void => void this.runAction("create-brush-from-selection")}>${tr("menu.createBrushFromSelection")}</button>
                   <button title=${tr("menu.settingsTitle")} @click=${(): void => void this.runAction("settings")}>${tr("menu.settings")}</button>
                   <button title=${tr("menu.adjustBrightnessContrastTitle")} @click=${(): void => void this.runAction("adjust-brightness-contrast")}>${tr("menu.adjustBrightnessContrast")}</button>
                   <button title=${tr("menu.adjustHueSaturationTitle")} @click=${(): void => void this.runAction("adjust-hue-saturation")}>${tr("menu.adjustHueSaturation")}</button>
@@ -6137,6 +6148,23 @@ export class GnumarusShell extends LitElement {
                   @input=${(): void => this.applyBrushAngleFromDialog(sfx)}
                 />
               </label>
+              <label title=${tr("opt.brushSourceHint")}
+                >${tr("opt.brushSource")}
+                <select id="brushSource${sfx}" .value=${this.brushSource} @change=${(): void => this.applyBrushSourceFromDialog(sfx)}>
+                  <option value="tip">${tr("val.tip")}</option>
+                  <option value="selection" ?disabled=${!this.hasSelectionBrush()}>${tr("val.selectionBrush")}</option>
+                </select>
+              </label>
+              ${this.brushSource === "selection"
+                ? html`<label title=${tr("opt.brushModeHint")}
+                    >${tr("opt.brushMode")}
+                    <select id="brushMode${sfx}" .value=${this.selectionBrushMode} @change=${(): void => this.applySelectionBrushModeFromDialog(sfx)}>
+                      <option value="stamp">${tr("val.stamp")}</option>
+                      <option value="origin">${tr("val.origin")}</option>
+                      <option value="destination">${tr("val.destination")}</option>
+                    </select>
+                  </label>`
+                : html``}
               <label title=${tr("opt.brushTipHint")}
                 >${tr("opt.brushTip")}
                 <select id="brushTipKind${sfx}" .value=${this.brushTipKind} @change=${(): void => this.applyBrushTipKindFromDialog(sfx)}>
@@ -8301,6 +8329,14 @@ export class GnumarusShell extends LitElement {
       },
     });
     this.actionRegistry.register({
+      id: "create-brush-from-selection",
+      name: tr("menu.createBrushFromSelection"),
+      requirements: [requireFloatingSelection()],
+      run: (): void => {
+        this.createBrushFromSelection();
+      },
+    });
+    this.actionRegistry.register({
       id: "copy-merged",
       name: tr("menu.copyMerged"),
       requirements: [],
@@ -10202,6 +10238,73 @@ export class GnumarusShell extends LitElement {
     this.brushAngle = clamped;
     this.engine?.setBrushAngle(clamped);
     this.statusMessage = tr("status.brushAngle", { value: String(clamped) });
+  }
+
+  private applyBrushSourceFromDialog(scope = ""): void {
+    const select = this.shadowRoot?.getElementById("brushSource" + scope) as HTMLSelectElement | null;
+    this.setBrushSource(parseBrushSource(select?.value ?? "tip"));
+  }
+
+  /** Test hook: select the pixel tip ("tip") or the captured selection ("selection"). */
+  setBrushSource(source: GnumarusBrushSource): void {
+    const parsed = parseBrushSource(source);
+    if (parsed === "selection" && !this.hasSelectionBrush()) {
+      this.statusMessage = tr("status.noFloatingSelection");
+      return;
+    }
+    this.brushSource = parsed;
+    this.engine?.setBrushSource(parsed);
+    this.statusMessage = tr("status.brushSource", { value: this.brushSourceLabel(parsed) });
+  }
+
+  /** Translated label for a brush-source value. */
+  private brushSourceLabel(source: GnumarusBrushSource): string {
+    return tr(source === "selection" ? "val.selectionBrush" : "val.tip");
+  }
+
+  private applySelectionBrushModeFromDialog(scope = ""): void {
+    const select = this.shadowRoot?.getElementById("brushMode" + scope) as HTMLSelectElement | null;
+    this.setSelectionBrushMode(parseSelectionBrushMode(select?.value ?? "stamp"));
+  }
+
+  /** Test hook: set how a captured selection brush paints. */
+  setSelectionBrushMode(mode: GnumarusSelectionBrushMode): void {
+    const parsed = parseSelectionBrushMode(mode);
+    this.selectionBrushMode = parsed;
+    this.engine?.setSelectionBrushMode(parsed);
+    this.statusMessage = tr("status.brushMode", { value: this.brushModeLabel(parsed) });
+  }
+
+  /** Translated label for a selection-brush mode value. */
+  private brushModeLabel(mode: GnumarusSelectionBrushMode): string {
+    if (mode === "origin") {
+      return tr("val.origin");
+    }
+    return tr(mode === "destination" ? "val.destination" : "val.stamp");
+  }
+
+  /** True when a captured selection brush is available to paint with. */
+  private hasSelectionBrush(): boolean {
+    if (this.engine?.hasSelectionBrush() === true) {
+      return true;
+    }
+    return false;
+  }
+
+  /** Capture the active floating selection as a paintable brush (Edit menu + run action). */
+  private createBrushFromSelection(): void {
+    this.closeAllMenus();
+    if (this.engine === null) {
+      return;
+    }
+    if (!this.engine.captureSelectionBrush()) {
+      this.statusMessage = tr("status.noFloatingSelection");
+      this.showToast(tr("status.noFloatingSelection"));
+      return;
+    }
+    this.brushSource = "selection";
+    this.statusMessage = tr("status.brushCaptured");
+    this.requestUpdate();
   }
 
   private currentDialogBrushTipKind(scope = ""): GnumarusBrushTipKind {

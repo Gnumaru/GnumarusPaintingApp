@@ -652,14 +652,53 @@ export function pressureAlphaMultiplier(response: GnumarusPressureResponse, pres
   return response === "opacity" || response === "size+opacity" ? pressure : 1;
 }
 
+export type GnumarusBrushSource = "tip" | "selection";
+
+/** Parse a brush source, defaulting to the geometric tip. */
+export function parseBrushSource(value: unknown): GnumarusBrushSource {
+  return value === "selection" ? "selection" : "tip";
+}
+
+export type GnumarusSelectionBrushMode = "stamp" | "origin" | "destination";
+
+/** Parse a selection-brush mode, defaulting to per-dab stamping. */
+export function parseSelectionBrushMode(value: unknown): GnumarusSelectionBrushMode {
+  if (value === "origin") {
+    return "origin";
+  }
+  if (value === "destination") {
+    return "destination";
+  }
+  return "stamp";
+}
+
+/** Captured selection content usable as a brush (straight RGBA + coverage). */
+export interface GnumarusSelectionBrush {
+  buffer: Uint8ClampedArray;
+  mask: Uint8Array;
+  width: number;
+  height: number;
+}
+
+function validSelectionBrush(brush: GnumarusSelectionBrush): boolean {
+  return (
+    Number.isInteger(brush.width) &&
+    Number.isInteger(brush.height) &&
+    brush.width >= 1 &&
+    brush.height >= 1 &&
+    brush.buffer.length === brush.width * brush.height * 4 &&
+    brush.mask.length === brush.width * brush.height
+  );
+}
+
 /**
- * Integer dab offsets (relative to the rounded dab center) of a rotated tip.
+ * Integer dab offsets (relative to the rounded dab center) of a brush tip.
  * Angles are degrees clockwise (screen space, y down): 0 keeps the unrotated
  * footprint. Line walks one Bresenham segment of length `tip` through the
- * center; square tests the inverse-rotated box (same set as the plain box
- * at angle 0, up to the shared 1e-9 epsilon).
+ * center; circle uses the same disk test as the plain stamp; square tests
+ * the inverse-rotated box.
  */
-export function rotatedStampOffsets(tip: number, shape: "square" | "line", angleDeg: number): Array<[number, number]> {
+export function rotatedStampOffsets(tip: number, shape: GnumarusBrushShape, angleDeg: number): Array<[number, number]> {
   const angle = (clampBrushAngle(angleDeg) * Math.PI) / 180;
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
@@ -692,6 +731,22 @@ export function rotatedStampOffsets(tip: number, shape: "square" | "line", angle
       if (e2 < dx) {
         err += dx;
         y += sy;
+      }
+    }
+    return out;
+  }
+  if (shape === "circle") {
+    // Same disk test as the plain stamp path: iterate the tip box and test
+    // 0-based coords against the fractional center (bit-identical at angle 0).
+    const center = (tip - 1) / 2;
+    const threshold = Math.max(0, (tip * tip) / 4 - 0.5);
+    const anchor = Math.floor((tip - 1) / 2);
+    for (let dy = 0; dy < tip; dy += 1) {
+      for (let dx = 0; dx < tip; dx += 1) {
+        const distSquared = (dx - center) * (dx - center) + (dy - center) * (dy - center);
+        if (distSquared <= threshold + 1e-9) {
+          push(dx - anchor, dy - anchor);
+        }
       }
     }
     return out;
@@ -1023,6 +1078,122 @@ export function drawBrushStamp(
         buffer[i + 3] = Math.round(outA * 255);
       }
     }
+  }
+}
+
+/**
+ * Stamp a captured selection as a brush dab centered near (centerX, centerY).
+ * The whole capture is stamped (anchored by its own center); per-texel alpha
+ * is the image alpha times the capture mask times `flow`, composited with
+ * the standard channel-lock/blend/wrap/gate handling of setPixel.
+ */
+export function drawImageStamp(
+  buffer: Uint8ClampedArray,
+  width: number,
+  height: number,
+  centerX: number,
+  centerY: number,
+  brush: GnumarusSelectionBrush,
+  flow: number,
+  locked: GnumarusChannelLock | undefined = undefined,
+  blend: GnumarusBlendMode = "normal",
+  wrap: GnumarusWrapMode = "off",
+  gate: GnumarusPixelWriteGate | undefined = undefined,
+): void {
+  if (!validSelectionBrush(brush)) {
+    return;
+  }
+  const gain = Math.min(1, Math.max(0, flow));
+  if (!(gain > 0)) {
+    return;
+  }
+  const left = Math.round(centerX) - Math.floor((brush.width - 1) / 2);
+  const top = Math.round(centerY) - Math.floor((brush.height - 1) / 2);
+  for (let iy = 0; iy < brush.height; iy += 1) {
+    for (let ix = 0; ix < brush.width; ix += 1) {
+      const at = (iy * brush.width + ix) * 4;
+      const masked = ((brush.buffer[at + 3] ?? 0) / 255) * ((brush.mask[iy * brush.width + ix] ?? 0) / 255) * gain;
+      if (!(masked > 0)) {
+        continue;
+      }
+      setPixel(
+        buffer,
+        width,
+        height,
+        left + ix,
+        top + iy,
+        { r: brush.buffer[at] ?? 0, g: brush.buffer[at + 1] ?? 0, b: brush.buffer[at + 2] ?? 0, a: Math.round(masked * 255) },
+        locked,
+        blend,
+        wrap,
+        gate,
+      );
+    }
+  }
+}
+
+/**
+ * Paint through the geometric tip footprint (shape/size/angle mask) sampling
+ * the captured selection as a wrapping pattern. The pattern stays put while
+ * the dab moves: canvas pixel (x, y) reads capture texel
+ * ((x - anchorX) mod w, (y - anchorY) mod h), so anchoring at the copy point
+ * replays the selection in place and anchoring at the stroke start pins the
+ * pattern to where the stroke began. Image alpha times `flow` modulates
+ * coverage; channel locks, blend modes, wrap and gate behave as usual.
+ */
+export function drawImagePatternStamp(
+  buffer: Uint8ClampedArray,
+  width: number,
+  height: number,
+  centerX: number,
+  centerY: number,
+  tip: number,
+  shape: GnumarusBrushShape,
+  angleDeg: number,
+  brush: GnumarusSelectionBrush,
+  anchorX: number,
+  anchorY: number,
+  flow: number,
+  locked: GnumarusChannelLock | undefined = undefined,
+  blend: GnumarusBlendMode = "normal",
+  wrap: GnumarusWrapMode = "off",
+  gate: GnumarusPixelWriteGate | undefined = undefined,
+  maxSize: number = GNUMARUS_MAX_BRUSH_SIZE,
+): void {
+  if (!validSelectionBrush(brush)) {
+    return;
+  }
+  const gain = Math.min(1, Math.max(0, flow));
+  if (!(gain > 0)) {
+    return;
+  }
+  const size = clampBrushSize(tip, maxSize);
+  const cx = Math.round(centerX);
+  const cy = Math.round(centerY);
+  const ax = Math.round(anchorX);
+  const ay = Math.round(anchorY);
+  for (const [dx, dy] of rotatedStampOffsets(size, shape, angleDeg)) {
+    const x = cx + dx;
+    const y = cy + dy;
+    const sx = ((((x - ax) % brush.width) + brush.width) % brush.width) | 0;
+    const sy = ((((y - ay) % brush.height) + brush.height) % brush.height) | 0;
+    const at = (sy * brush.width + sx) * 4;
+    const alpha = ((brush.buffer[at + 3] ?? 0) / 255) * gain;
+    if (!(alpha > 0)) {
+      continue;
+    }
+    setPixel(
+      buffer,
+      width,
+      height,
+      x,
+      y,
+      { r: brush.buffer[at] ?? 0, g: brush.buffer[at + 1] ?? 0, b: brush.buffer[at + 2] ?? 0, a: Math.round(alpha * 255) },
+      locked,
+      blend,
+      wrap,
+      gate,
+    );
   }
 }
 
