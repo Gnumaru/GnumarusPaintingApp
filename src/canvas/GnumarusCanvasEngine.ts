@@ -13524,7 +13524,15 @@ export class GnumarusCanvasEngine {
       }
       return;
     }
-    if (this.floatingPlane === null || this.floatingPlaneFor !== floating) {
+    // Rebuild when the floating changes identity OR swaps its pixel buffer
+    // (materialize/resize/combine allocate a fresh array in place): the
+    // texture would otherwise keep showing the previous bytes.
+    if (
+      this.floatingPlane === null ||
+      this.floatingPlaneFor !== floating ||
+      this.floatingTexture === null ||
+      (this.floatingTexture.image as unknown as { data?: unknown }).data !== floating.buffer
+    ) {
       this.disposeFloatingPlane();
       const texture = new THREE.DataTexture(floating.buffer, floating.width, floating.height);
       texture.magFilter = THREE.NearestFilter;

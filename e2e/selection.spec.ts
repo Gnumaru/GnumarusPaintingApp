@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { dragRect, engineBrushSize, floatingRect, getFloatingSelection, getPendingResizeHandle, getViewState, layerScreenTarget, loadBlankProject, paintCenter, paintDot, readFloatingPixel, readPixel, selectTool, selectionMaskDisplay, selectionMaskMoves, selectionOverlayDisplay, setPencil } from "./e2e-helpers";
+import { canvasScreenPixel, dragRect, engineBrushSize, floatingRect, getFloatingSelection, getPendingResizeHandle, getViewState, layerScreenTarget, loadBlankProject, paintCenter, paintDot, readFloatingPixel, readPixel, selectTool, selectionMaskDisplay, selectionMaskMoves, selectionOverlayDisplay, setPencil } from "./e2e-helpers";
 
 test("final preview shows the canvas background", async ({ page }) => {
   await page.goto("/");
@@ -713,4 +713,32 @@ test("pending ellipse resizes via edge handle @recent", async ({ page }) => {
   expect(selection?.selected ?? 0).toBeGreaterThan(0);
   expect(selection?.selected ?? 0).toBeLessThan((after?.width ?? 0) * (after?.height ?? 0));
   expect(await readPixel(page, 15, 15)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("dragged pending selection shows its pixels while moving @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await setPencil(page, "#ff0000");
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { setBrushSize(size: number): void } };
+    };
+    root.__gnumarus?.engine?.setBrushSize(9);
+  });
+  await paintCenter(page);
+  await selectTool(page, "Rectangular selection");
+  await dragRect(page, 24, 24, 40, 40);
+  await selectTool(page, "Destructive selection transform");
+  const from = await layerScreenTarget(page, 32, 32);
+  const to = await layerScreenTarget(page, 42, 32);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 5 });
+  // The floating plane carries the cut pixels: the moved area paints red
+  // on the composited canvas instead of a transparent hole.
+  expect(await canvasScreenPixel(page, to.x, to.y)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  await page.mouse.up();
+  await page.keyboard.press("Enter");
+  expect(await readPixel(page, 42, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
