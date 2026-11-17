@@ -672,6 +672,9 @@ test("pending rect resizes via corner handle without touching pixels @recent", a
   await selectTool(page, "Rectangular selection");
   await dragRect(page, 28, 28, 36, 36);
   const zoom = (await getViewState(page)).zoom;
+  await expect
+    .poll(() => getFloatingSelection(page).then((selection) => (selection === null ? 0 : 1)))
+    .toBe(1);
   const handle = await getPendingResizeHandle(page, "se");
   await page.mouse.move(handle.x, handle.y);
   await page.mouse.down();
@@ -682,6 +685,27 @@ test("pending rect resizes via corner handle without touching pixels @recent", a
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 40, 40)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   expect(await readPixel(page, 28, 28)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+});
+
+test("pending rect resizes from any border point, not just handles @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  await selectTool(page, "Rectangular selection");
+  await dragRect(page, 28, 28, 36, 36);
+  // A quarter along the top edge: no handle lives there, but the continuous
+  // border band still grabs it as a north resize. The grab point is the
+  // pixel center, so +4 lands on a .5 boundary and rounds up.
+  const grab = await layerScreenTarget(page, 30, 28);
+  const zoom = (await getViewState(page)).zoom;
+  await page.mouse.move(grab.x, grab.y);
+  await page.mouse.down();
+  await page.mouse.move(grab.x, grab.y + 4 * zoom, { steps: 6 });
+  await page.mouse.up();
+  expect(await floatingRect(page)).toMatchObject({ x: 28, y: 33, width: 9, height: 4 });
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
 test("pending ellipse resizes via edge handle @recent", async ({ page }) => {
@@ -699,7 +723,9 @@ test("pending ellipse resizes via edge handle @recent", async ({ page }) => {
   const before = await floatingRect(page);
   expect(before).toMatchObject({ width: 11, height: 11 });
   const zoom = (await getViewState(page)).zoom;
-  await expect(page.locator('gnumarus-shell circle[data-testid="selection-resize-handle"]').first()).toBeVisible();
+  await expect
+    .poll(() => getFloatingSelection(page).then((selection) => (selection === null ? 0 : 1)))
+    .toBe(1);
   const handle = await getPendingResizeHandle(page, "e");
   await page.mouse.move(handle.x, handle.y);
   await page.mouse.down();

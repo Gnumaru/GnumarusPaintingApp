@@ -1184,8 +1184,8 @@ export class GnumarusCanvasEngine {
   private readonly previewTileRubber: SVGGElement;
   private readonly selectionHandles: Array<{ id: GnumarusSelectionHandleId; group: SVGGElement }> = [];
   /** Resize handles of a pending rect/ellipse selection (own overlay svg). */
-  private readonly pendingResizeHandles: Array<{ id: GnumarusPendingResizeHandleId; circle: SVGCircleElement }> = [];
-  private readonly pendingResizeSvg: SVGSVGElement;
+  /** Last hover cursor set for the pending-resize border band (avoids DOM churn). */
+  private pendingHoverCursor = "";
   /** Active pending-resize drag (float image pixels at grab time), or null. */
   private pendingResizeDrag: {
     id: GnumarusPendingResizeHandleId;
@@ -1755,30 +1755,7 @@ export class GnumarusCanvasEngine {
       this.symmetryHandles.push({ id, circle });
     });
 
-    this.pendingResizeSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    this.pendingResizeSvg.style.position = "absolute";
-    this.pendingResizeSvg.style.inset = "0";
-    this.pendingResizeSvg.style.width = "100%";
-    this.pendingResizeSvg.style.height = "100%";
-    this.pendingResizeSvg.style.pointerEvents = "none";
-    this.pendingResizeSvg.style.zIndex = "8";
-    this.pendingResizeSvg.style.overflow = "visible";
-    container.appendChild(this.pendingResizeSvg);
-    (["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const).forEach((id) => {
-      const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle") as SVGCircleElement;
-      circle.setAttribute("data-testid", "selection-resize-handle");
-      circle.setAttribute("data-handle", id);
-      circle.setAttribute("r", "6");
-      circle.setAttribute("fill", "#ffffff");
-      circle.setAttribute("stroke", "#ff9500");
-      circle.setAttribute("stroke-width", "2");
-      circle.style.display = "none";
-      circle.style.pointerEvents = "none";
-      circle.style.cursor =
-        id === "nw" || id === "se" ? "nwse-resize" : id === "ne" || id === "sw" ? "nesw-resize" : id === "n" || id === "s" ? "ns-resize" : "ew-resize";
-      this.pendingResizeSvg.appendChild(circle);
-      this.pendingResizeHandles.push({ id, circle });
-    });
+
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -10, 10);
@@ -12392,7 +12369,6 @@ export class GnumarusCanvasEngine {
     this.hsSession = null;
     this.clearTransformGestures();
     this.disposeFloatingPlane();
-    this.syncPendingResizeHandles();
     this.updatePreviews();
   }
 
@@ -14423,27 +14399,7 @@ export class GnumarusCanvasEngine {
     return (Object.keys(corners) as GnumarusPendingResizeHandleId[]).map((id) => ({ id, ...corners[id]! }));
   }
 
-  /** Position (or hide) the pending-resize handles. */
-  private syncPendingResizeHandles(): void {
-    const layout = this.pendingResizeHandleLayout();
-    const placed = new Set<string>();
-    if (layout !== null) {
-      for (const handle of layout) {
-        const circle = this.pendingResizeHandles.find((entry) => entry.id === handle.id)?.circle;
-        if (circle === undefined) {
-          continue;
-        }
-        circle.setAttribute("transform", `translate(${handle.x} ${handle.y})`);
-        circle.style.display = "block";
-        placed.add(handle.id);
-      }
-    }
-    for (const handle of this.pendingResizeHandles) {
-      if (!placed.has(handle.id)) {
-        handle.circle.style.display = "none";
-      }
-    }
-  }
+
 
   /** Test hook: pending resize handle positions in container pixels. */
   getPendingResizeHandles(): Array<{ id: string; x: number; y: number }> {
@@ -14451,6 +14407,12 @@ export class GnumarusCanvasEngine {
   }
 
   /** Nearest pending-resize handle within grab radius, or null. */
+  /**
+   * Continuous GIMP-style border hit test for a pending rect/ellipse: any
+   * point near the box outline grabs it (corners win ties), so zooming to
+   * an arbitrary border point still allows precise resizing. Null when no
+   * resizable pending selection applies.
+   */
   private hitPendingResizeHandle(clientX: number, clientY: number): GnumarusPendingResizeHandleId | null {
     const layout = this.pendingResizeHandleLayout();
     if (layout === null) {
@@ -14459,16 +14421,72 @@ export class GnumarusCanvasEngine {
     const rect = this.container.getBoundingClientRect();
     const px = clientX - rect.left;
     const py = clientY - rect.top;
-    let best: GnumarusPendingResizeHandleId | null = null;
-    let bestDist = 12 * 12;
+    const at: Record<string, { x: number; y: number }> = {};
     for (const handle of layout) {
-      const dist = (handle.x - px) * (handle.x - px) + (handle.y - py) * (handle.y - py);
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = handle.id;
+      at[handle.id] = handle;
+    }
+    const nw = at["nw"];
+    const ne = at["ne"];
+    const sw = at["sw"];
+    const se = at["se"];
+    if (nw === undefined || ne === undefined || sw === undefined || se === undefined) {
+      return null;
+    }
+    const cornerRadius = 14;
+    const corners: Array<{ id: GnumarusPendingResizeHandleId; x: number; y: number }> = [
+      { id: "nw", ...nw },
+      { id: "ne", ...ne },
+      { id: "sw", ...sw },
+      { id: "se", ...se },
+    ];
+    for (const corner of corners) {
+      const dx = corner.x - px;
+      const dy = corner.y - py;
+      if (dx * dx + dy * dy <= cornerRadius * cornerRadius) {
+        return corner.id;
+      }
+    }
+    // Distance from the point to each box side (container pixels).
+    const band = 8;
+    const top = Math.abs(py - nw.y);
+    const bottom = Math.abs(py - sw.y);
+    const left = Math.abs(px - nw.x);
+    const right = Math.abs(px - ne.x);
+    const withinX = px >= Math.min(nw.x, ne.x) - band && px <= Math.max(nw.x, ne.x) + band;
+    const withinY = py >= Math.min(nw.y, sw.y) - band && py <= Math.max(nw.y, sw.y) + band;
+    type Edge = { id: GnumarusPendingResizeHandleId; dist: number; near: boolean };
+    const edges: Edge[] = [
+      { id: "n", dist: top, near: withinX },
+      { id: "s", dist: bottom, near: withinX },
+      { id: "w", dist: left, near: withinY },
+      { id: "e", dist: right, near: withinY },
+    ];
+    let best: GnumarusPendingResizeHandleId | null = null;
+    let bestDist = band;
+    for (const edge of edges) {
+      if (edge.near && edge.dist <= bestDist) {
+        bestDist = edge.dist;
+        best = edge.id;
       }
     }
     return best;
+  }
+
+  /** Cursor for a pending-resize border hit (matches the drag it would start). */
+  private pendingResizeCursor(id: GnumarusPendingResizeHandleId): string {
+    switch (id) {
+      case "nw":
+      case "se":
+        return "nwse-resize";
+      case "ne":
+      case "sw":
+        return "nesw-resize";
+      case "n":
+      case "s":
+        return "ns-resize";
+      default:
+        return "ew-resize";
+    }
   }
 
   /** Begin a pending-resize drag on a box handle. */
@@ -14549,7 +14567,6 @@ export class GnumarusCanvasEngine {
     };
     this.syncFloatingPlane();
     this.updateSelectionOverlay();
-    this.syncPendingResizeHandles();
     this.render();
     this.updatePreviews();
   }
@@ -14756,7 +14773,6 @@ export class GnumarusCanvasEngine {
 
   /** Position the marching-ants selection polygon over the active layer. */
   private updateSelectionOverlay(): void {
-    this.syncPendingResizeHandles();
     const overlay = this.selectionOverlayQuad();
     const layer = this.activeLayer();
     if (overlay === null || layer === null || layer.width < 1 || layer.height < 1) {
@@ -17631,6 +17647,26 @@ export class GnumarusCanvasEngine {
       this.emitStats();
     });
     canvas.addEventListener("pointermove", (event: PointerEvent) => {
+      // Hover feedback for the pending-selection resize border: no buttons,
+      // plain pointer, matching the drag the press would start.
+      if (
+        event.buttons === 0 &&
+        !event.shiftKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        (this.tool === "rectselect" || this.tool === "ellipse")
+      ) {
+        const hovered = this.hitPendingResizeHandle(event.clientX, event.clientY);
+        const cursor = hovered === null ? "" : this.pendingResizeCursor(hovered);
+        if (cursor !== this.pendingHoverCursor) {
+          this.pendingHoverCursor = cursor;
+          canvas.style.cursor = cursor;
+        }
+      } else if (this.pendingHoverCursor !== "") {
+        this.pendingHoverCursor = "";
+        canvas.style.cursor = "";
+      }
       const usePaintMapping =
         this.wrapMode !== "off" &&
         (this.tool === "pencil" || this.tool === "line" || this.tool === "curve" || this.tool === "bucket");
