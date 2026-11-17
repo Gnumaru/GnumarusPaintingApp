@@ -38,6 +38,7 @@ describe("discovered content classification", () => {
     expect(classifyDiscoveredContentFile("svgs/packed.zip")).toBe("svg");
     expect(classifyDiscoveredContentFile("3dmodels/part.obj")).toBe("model3d");
     expect(classifyDiscoveredContentFile("3dmodels/scene.GLTF")).toBe("model3d");
+    expect(classifyDiscoveredContentFile("3dmodels/scene.blend")).toBe("model3d");
   });
 
   it("ignores companions, wrong extensions, wrong dirs and traversal", () => {

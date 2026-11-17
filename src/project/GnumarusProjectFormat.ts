@@ -259,8 +259,8 @@ export function decodeSvgFile(file: string, bytes: Uint8Array): string {
   return new TextDecoder().decode(entries[expected] as Uint8Array);
 }
 
-/** 3D model extensions readable via three.js loaders. */
-export const SUPPORTED_MODEL3D_EXTENSIONS = ["glb", "gltf", "obj", "stl", "ply", "fbx", "dae", "3mf", "amf"] as const;
+/** 3D model extensions readable via three.js loaders (plus .blend via in-memory glTF). */
+export const SUPPORTED_MODEL3D_EXTENSIONS = ["glb", "gltf", "obj", "stl", "ply", "fbx", "dae", "3mf", "amf", "blend"] as const;
 
 export type GnumarusModel3dExtension = (typeof SUPPORTED_MODEL3D_EXTENSIONS)[number];
 

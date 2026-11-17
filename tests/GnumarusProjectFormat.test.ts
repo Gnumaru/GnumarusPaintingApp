@@ -726,10 +726,13 @@ describe("GnumarusProjectFormat", () => {
     expect(model3dFilePath("car1", "GLB")).toBe("3dmodels/car1.glb");
     expect(parseModel3dExtension("car.glb")).toBe("glb");
     expect(parseModel3dExtension("CAR.FBX")).toBe("fbx");
+    expect(parseModel3dExtension("scene.blend")).toBe("blend");
+    expect(parseModel3dExtension("SCENE.BLEND")).toBe("blend");
     expect(parseModel3dExtension("car.txt")).toBeNull();
     expect(parseModel3dExtension("car")).toBeNull();
     expect(parseModel3dFilePath("3dmodels/car1.glb")).toBe("3dmodels/car1.glb");
     expect(parseModel3dFilePath("3dmodels/my-car_2.obj")).toBe("3dmodels/my-car_2.obj");
+    expect(parseModel3dFilePath("3dmodels/scene1.blend")).toBe("3dmodels/scene1.blend");
     expect(parseModel3dFilePath("3dmodels/car1.txt")).toBeNull();
     expect(parseModel3dFilePath("3dmodels/../car1.glb")).toBeNull();
     expect(parseModel3dFilePath("textures/car1.glb")).toBeNull();

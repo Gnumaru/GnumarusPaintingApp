@@ -16686,6 +16686,25 @@ export class GnumarusShell extends LitElement {
       this.showToast(tr("status.model3dInvalid"));
       return;
     }
+    // .blend files are validated up front so version/compression problems
+    // surface their specific reason instead of the generic invalid-model
+    // message (the engine converts to in-memory glb on decode).
+    if (ext === "blend") {
+      try {
+        const { parseBlendFile } = await import("../project/GnumarusBlend");
+        const doc = parseBlendFile(bytes);
+        if (doc.meshes.length === 0) {
+          this.statusMessage = tr("status.importFailed", { reason: "No meshes found in .blend file" });
+          this.showToast(tr("status.importFailed", { reason: "No meshes found in .blend file" }));
+          return;
+        }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.statusMessage = tr("status.importFailed", { reason });
+        this.showToast(tr("status.importFailed", { reason }));
+        return;
+      }
+    }
     const name = fileName.replace(/\.[^.]+$/, "").slice(0, 64) || "Model";
     const created = await this.engine.ensureModel3dContent(layerId, frame, name, ext, bytes);
     if (created === null) {

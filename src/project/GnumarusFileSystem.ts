@@ -152,7 +152,7 @@ export async function pickModel3dFile(): Promise<GnumarusFileHandle | null> {
           "model/obj": [".obj"],
           "model/stl": [".stl"],
           "model/ply": [".ply"],
-          "application/octet-stream": [".fbx", ".dae", ".3mf", ".amf"],
+          "application/octet-stream": [".fbx", ".dae", ".3mf", ".amf", ".blend"],
         },
       },
     ],

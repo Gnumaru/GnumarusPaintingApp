@@ -6098,11 +6098,22 @@ export class GnumarusCanvasEngine {
   private async loadModel3dObject(ext: string, bytes: Uint8Array): Promise<THREE.Object3D | null> {
     try {
       const normalized = ext.toLowerCase();
-      if (normalized === "glb" || normalized === "gltf") {
+      if (normalized === "glb" || normalized === "gltf" || normalized === "blend") {
         const { GLTFLoader } = await import("three/addons/loaders/GLTFLoader.js");
         const loader = new GLTFLoader();
-        const payload =
-          normalized === "glb" ? this.modelBytesToBuffer(bytes) : new TextDecoder().decode(bytes);
+        let payload: ArrayBuffer | string;
+        if (normalized === "blend") {
+          // .blend is converted to an in-memory .glb (Blender Z-up -> Y-up,
+          // packed textures, lights); the original bytes stay on disk.
+          const { parseBlendFile } = await import("../project/GnumarusBlend");
+          const { convertBlendDocument, encodeGlbScene } = await import("../project/GnumarusGltf");
+          const doc = parseBlendFile(bytes);
+          const glb = encodeGlbScene(convertBlendDocument(doc));
+          payload = this.modelBytesToBuffer(glb);
+        } else {
+          payload =
+            normalized === "glb" ? this.modelBytesToBuffer(bytes) : new TextDecoder().decode(bytes);
+        }
         const gltf = await loader.parseAsync(payload, "");
         return gltf.scene ?? null;
       }
