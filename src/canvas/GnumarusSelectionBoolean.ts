@@ -743,3 +743,43 @@ export function cellRectCells(
   }
   return cells;
 }
+
+/** Resize handle of a pending selection box (corners move two edges, edges move one). */
+export type GnumarusPendingResizeHandleId = "n" | "s" | "e" | "w" | "nw" | "ne" | "sw" | "se";
+
+/**
+ * Resize an integer selection box by dragging a handle to a float image
+ * position. Handles sit on box boundaries, so the cursor snaps to whole
+ * pixels (no half-pixel bias); the box stays at least 1px and is clamped
+ * to the texture. Null when the clamped box is degenerate.
+ */
+export function resizeSelectionBox(
+  box: { x0: number; y0: number; x1: number; y1: number },
+  id: GnumarusPendingResizeHandleId,
+  px: number,
+  py: number,
+  maxWidth: number,
+  maxHeight: number,
+): { x0: number; y0: number; x1: number; y1: number } | null {
+  let { x0, y0, x1, y1 } = box;
+  if (id === "nw" || id === "w" || id === "sw") {
+    x0 = Math.min(Math.round(px), x1 - 1);
+  }
+  if (id === "ne" || id === "e" || id === "se") {
+    x1 = Math.max(Math.round(px), x0 + 1);
+  }
+  if (id === "nw" || id === "n" || id === "ne") {
+    y0 = Math.min(Math.round(py), y1 - 1);
+  }
+  if (id === "sw" || id === "s" || id === "se") {
+    y1 = Math.max(Math.round(py), y0 + 1);
+  }
+  x0 = Math.max(0, Math.min(x0, maxWidth - 1));
+  y0 = Math.max(0, Math.min(y0, maxHeight - 1));
+  const nx1 = Math.min(maxWidth, Math.max(x1, x0 + 1));
+  const ny1 = Math.min(maxHeight, Math.max(y1, y0 + 1));
+  if (nx1 <= x0 || ny1 <= y0) {
+    return null;
+  }
+  return { x0, y0, x1: nx1, y1: ny1 };
+}

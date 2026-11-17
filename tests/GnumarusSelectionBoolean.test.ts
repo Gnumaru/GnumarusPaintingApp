@@ -16,6 +16,7 @@ import {
   isEmptySelectionRect,
   normalizeSelectionRect,
   polygonSelectMask,
+  resizeSelectionBox,
   previewEllipseSelection,
   selectionMaskBoundaryPath,
   selectionMaskBox,
@@ -294,5 +295,23 @@ describe("GnumarusMultiSelection", () => {
     expect(cellRectCells({ layerId: "ghost", frame: 0 }, { layerId: "top", frame: 0 }, order, 4)).toEqual([]);
     expect(cellRectCells({ layerId: "top", frame: 0 }, { layerId: "top", frame: 9 }, order, 4)).toEqual([]);
     expect(cellRectCells({ layerId: "top", frame: 0 }, { layerId: "top", frame: 1 }, order, 0)).toEqual([]);
+  });
+
+
+  it("resizeSelectionBox drags corners and edges with clamping", () => {
+    const box = { x0: 10, y0: 10, x1: 21, y1: 21 };
+    // East edge +6 grows; west edge -6 shrinks; minimum 1px holds.
+    expect(resizeSelectionBox(box, "e", 27, 15, 64, 64)).toEqual({ x0: 10, y0: 10, x1: 27, y1: 21 });
+    expect(resizeSelectionBox(box, "w", 4, 15, 64, 64)).toEqual({ x0: 4, y0: 10, x1: 21, y1: 21 });
+    expect(resizeSelectionBox(box, "w", 20, 15, 64, 64)).toEqual({ x0: 20, y0: 10, x1: 21, y1: 21 });
+    expect(resizeSelectionBox(box, "se", 30, 30, 64, 64)).toEqual({ x0: 10, y0: 10, x1: 30, y1: 30 });
+    expect(resizeSelectionBox(box, "n", 15, 3, 64, 64)).toEqual({ x0: 10, y0: 3, x1: 21, y1: 21 });
+    // Clamped to the texture and to whole pixels.
+    expect(resizeSelectionBox(box, "e", 100.6, 15, 64, 64)).toEqual({ x0: 10, y0: 10, x1: 64, y1: 21 });
+    expect(resizeSelectionBox(box, "nw", -5.4, -5.4, 64, 64)).toEqual({ x0: 0, y0: 0, x1: 21, y1: 21 });
+    // West past east collapses to the 1px minimum instead of inverting.
+    expect(resizeSelectionBox(box, "w", 100, 15, 64, 64)).toEqual({ x0: 20, y0: 10, x1: 21, y1: 21 });
+    // Degenerate textures collapse to null.
+    expect(resizeSelectionBox(box, "e", 5, 5, 0, 0)).toBeNull();
   });
 });

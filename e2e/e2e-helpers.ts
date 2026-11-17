@@ -942,6 +942,26 @@ export async function getSelectionHandle(
   return { x: box.x + position.x, y: box.y + position.y };
 }
 
+export async function getPendingResizeHandle(
+  page: import("@playwright/test").Page,
+  id: string,
+): Promise<{ x: number; y: number }> {
+  const box = await page.locator("gnumarus-shell canvas").boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const position = await page.evaluate((handleId: string) => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { getPendingResizeHandles(): Array<{ id: string; x: number; y: number }> } };
+    };
+    return root.__gnumarus?.engine?.getPendingResizeHandles().find((handle) => handle.id === handleId) ?? null;
+  }, id);
+  if (position === null) {
+    throw new Error(`pending resize handle ${id} is missing`);
+  }
+  return { x: box.x + position.x, y: box.y + position.y };
+}
+
 export async function redPixelCount(
   page: import("@playwright/test").Page,
   x0: number,

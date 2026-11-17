@@ -178,17 +178,20 @@ import {
   colorSelectTolerance,
   countSelectionMask,
   dilateSelectionMask,
+  ellipseSelectMask,
   erodeSelectionMask,
   floodSelectMask,
   globalSelectMask,
   intersectSelectionRects,
   isEmptySelectionRect,
+  resizeSelectionBox,
   normalizeSelectionRect,
   polygonSelectMask,
   previewEllipseSelection,
   selectionMaskBoundaryRuns,
   selectionMaskBox,
   unionSelectionBox,
+  type GnumarusPendingResizeHandleId,
   type GnumarusSelectionRect,
 } from "./GnumarusSelectionBoolean";
 import {
@@ -435,6 +438,15 @@ export interface GnumarusFloatingSelection {
   /** History undo depth right after the cut entry was pushed. */
   cutDepth: number;
   active: boolean;
+  /**
+   * True while the selection is mask-only: the layer is intact and
+   * `buffer` is empty. The hole is cut by `materializeFloatingCut` on the
+   * first texture-needing operation (explicit cut, transform/move, adjust
+   * bake). Copy reads without materializing; commit just clears.
+   */
+  pendingCut: boolean;
+  /** Selection tool shape while pending (resize handles); null once free-form or materialized. */
+  selectionKind: "rect" | "ellipse" | null;
 }
 
 /** Anchor ids for the destructive selection transform overlay. */
@@ -466,6 +478,8 @@ export type GnumarusSelectionHandleId =
 
 /** Draggable symmetry guide handles: line ends plus the four-way intersection. */
 export type GnumarusSymmetryHandleId = "sym-x-min" | "sym-x-max" | "sym-y-min" | "sym-y-max" | "sym-center";
+
+/** Resize handles of a pending (mask-only) rect/ellipse selection. */
 
 export interface GnumarusLayerInfo {
   id: string;
@@ -1169,6 +1183,17 @@ export class GnumarusCanvasEngine {
   /** Rubber preview of the armed tile line/rectangle (one rect per cell). */
   private readonly previewTileRubber: SVGGElement;
   private readonly selectionHandles: Array<{ id: GnumarusSelectionHandleId; group: SVGGElement }> = [];
+  /** Resize handles of a pending rect/ellipse selection (own overlay svg). */
+  private readonly pendingResizeHandles: Array<{ id: GnumarusPendingResizeHandleId; circle: SVGCircleElement }> = [];
+  private readonly pendingResizeSvg: SVGSVGElement;
+  /** Active pending-resize drag (float image pixels at grab time), or null. */
+  private pendingResizeDrag: {
+    id: GnumarusPendingResizeHandleId;
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+  } | null = null;
   /** 3D gizmo ring halves (front solid, back dashed) per rotation axis. */
   private readonly rot3dRings: Record<"x" | "y" | "z", { front: SVGPathElement; back: SVGPathElement }>;
   /** 3D gizmo visible axis lines per rotation axis. */
@@ -1728,6 +1753,31 @@ export class GnumarusCanvasEngine {
       });
       this.symmetrySvg.appendChild(circle);
       this.symmetryHandles.push({ id, circle });
+    });
+
+    this.pendingResizeSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    this.pendingResizeSvg.style.position = "absolute";
+    this.pendingResizeSvg.style.inset = "0";
+    this.pendingResizeSvg.style.width = "100%";
+    this.pendingResizeSvg.style.height = "100%";
+    this.pendingResizeSvg.style.pointerEvents = "none";
+    this.pendingResizeSvg.style.zIndex = "8";
+    this.pendingResizeSvg.style.overflow = "visible";
+    container.appendChild(this.pendingResizeSvg);
+    (["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const).forEach((id) => {
+      const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle") as SVGCircleElement;
+      circle.setAttribute("data-testid", "selection-resize-handle");
+      circle.setAttribute("data-handle", id);
+      circle.setAttribute("r", "6");
+      circle.setAttribute("fill", "#ffffff");
+      circle.setAttribute("stroke", "#ff9500");
+      circle.setAttribute("stroke-width", "2");
+      circle.style.display = "none";
+      circle.style.pointerEvents = "none";
+      circle.style.cursor =
+        id === "nw" || id === "se" ? "nwse-resize" : id === "ne" || id === "sw" ? "nesw-resize" : id === "n" || id === "s" ? "ns-resize" : "ew-resize";
+      this.pendingResizeSvg.appendChild(circle);
+      this.pendingResizeHandles.push({ id, circle });
     });
 
     this.scene = new THREE.Scene();
@@ -4328,6 +4378,9 @@ export class GnumarusCanvasEngine {
   private beginAdjustSession(into: "bc" | "hs"): boolean {
     const floating = this.floating;
     if (floating !== null && floating.active && this.floatingHomeVisible()) {
+      if (!this.materializeFloatingCut()) {
+        return false;
+      }
       if (
         floating.buffer.length !== floating.width * floating.height * 4 ||
         floating.mask.length !== floating.width * floating.height
@@ -10837,6 +10890,39 @@ export class GnumarusCanvasEngine {
     if (floating === null || !floating.active) {
       return false;
     }
+    if (floating.pendingCut) {
+      // Read the pixels straight from the intact home texture: copying
+      // leaves the layer and the pending selection untouched.
+      const tex = this.textures.get(floating.textureId);
+      if (tex === undefined) {
+        return false;
+      }
+      const minX = Math.round(floating.cx - floating.width / 2);
+      const minY = Math.round(floating.cy - floating.height / 2);
+      if (
+        minX < 0 ||
+        minY < 0 ||
+        minX + floating.width > tex.width ||
+        minY + floating.height > tex.height
+      ) {
+        return false;
+      }
+      const buffer = new Uint8ClampedArray(floating.width * floating.height * 4);
+      for (let row = 0; row < floating.height; row += 1) {
+        const from = ((minY + row) * tex.width + minX) * 4;
+        buffer.set(tex.buffer.subarray(from, from + floating.width * 4), row * floating.width * 4);
+      }
+      this.clipboard = {
+        buffer,
+        width: floating.width,
+        height: floating.height,
+        mask: floating.mask.slice(),
+        maskFull: floating.maskFull,
+        originX: minX,
+        originY: minY,
+      };
+      return true;
+    }
     this.clipboard = {
       buffer: floating.buffer.slice(),
       width: floating.width,
@@ -10914,6 +11000,10 @@ export class GnumarusCanvasEngine {
   cutFloatingSelection(): boolean {
     const floating = this.floating;
     if (floating === null || !floating.active) {
+      return false;
+    }
+    // Cutting needs the texture: materialize the pending hole first.
+    if (!this.materializeFloatingCut()) {
       return false;
     }
     if (!this.copyFloatingSelection()) {
@@ -10998,6 +11088,8 @@ export class GnumarusCanvasEngine {
       textureId: tex.id,
       cutDepth: this.history.undoDepth(),
       active: true,
+      pendingCut: false,
+      selectionKind: null,
     };
     this.markTextureViewsDirty(tex.id);
     this.syncAllLayerRenders();
@@ -11381,6 +11473,9 @@ export class GnumarusCanvasEngine {
   ): boolean {
     const floating = this.floating;
     if (floating === null || !floating.active) {
+      return false;
+    }
+    if (!this.materializeFloatingCut()) {
       return false;
     }
     const cursor = this.clientToLayerImageFloat(event.clientX, event.clientY);
@@ -12297,6 +12392,7 @@ export class GnumarusCanvasEngine {
     this.hsSession = null;
     this.clearTransformGestures();
     this.disposeFloatingPlane();
+    this.syncPendingResizeHandles();
     this.updatePreviews();
   }
 
@@ -12310,6 +12406,12 @@ export class GnumarusCanvasEngine {
   commitFloating(): boolean {
     const floating = this.floating;
     if (floating === null || !floating.active) {
+      return false;
+    }
+    if (floating.pendingCut) {
+      // Mask-only selection: nothing was cut, so there is nothing to merge.
+      this.dropFloating();
+      this.render();
       return false;
     }
     const tex = this.textures.get(floating.textureId);
@@ -12596,6 +12698,10 @@ export class GnumarusCanvasEngine {
     if (floating === null || !floating.active) {
       return "none";
     }
+    // Feathering bakes content, so a pending selection cuts first.
+    if (!this.materializeFloatingCut()) {
+      return "none";
+    }
     const r = Math.max(0, Math.floor(radius));
     if (r < 1) {
       return "ok";
@@ -12605,6 +12711,7 @@ export class GnumarusCanvasEngine {
     }
     floating.mask = blurSelectionMask(floating.mask, floating.width, floating.height, r);
     floating.maskFull = false;
+    floating.selectionKind = null;
     this.afterFloatingChange();
     this.updateSelectionOverlay();
     return "ok";
@@ -12619,6 +12726,10 @@ export class GnumarusCanvasEngine {
   reshapeFloatingSelection(delta: number): "ok" | "transformed" | "none" {
     const floating = this.floating;
     if (floating === null || !floating.active) {
+      return "none";
+    }
+    // Growing/shrinking bakes content, so a pending selection cuts first.
+    if (!this.materializeFloatingCut()) {
       return "none";
     }
     const steps = Math.abs(Math.floor(delta));
@@ -12647,6 +12758,7 @@ export class GnumarusCanvasEngine {
       return "ok";
     }
     floating.maskFull = countSelectionMask(floating.mask) === floating.width * floating.height;
+    floating.selectionKind = null;
     this.afterFloatingChange();
     this.updateSelectionOverlay();
     return "ok";
@@ -12657,7 +12769,13 @@ export class GnumarusCanvasEngine {
    * locks ignored like Delete). Commits any active floating selection first.
    * Returns false for empty or invalid rects.
    */
-  private cutRectToFloating(x0: number, y0: number, x1: number, y1: number): boolean {
+  private cutRectToFloating(
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    kind: "rect" | "ellipse" | null = null,
+  ): boolean {
     const layer = this.activeLayer();
     if (layer === null) {
       return false;
@@ -12678,14 +12796,15 @@ export class GnumarusCanvasEngine {
     }
     const width = maxX - minX;
     const height = maxY - minY;
-    return this.cutMaskToFloating(tex, minX, minY, width, height, new Uint8Array(width * height).fill(255));
+    return this.cutMaskToFloating(tex, minX, minY, width, height, new Uint8Array(width * height).fill(255), kind);
   }
 
   /**
-   * Cut masked pixels out of a texture into a fresh floating selection
-   * (layer-aligned, identity placement). Commits any active floating
-   * selection first. Unmasked pixels stay in the layer. Returns false for
-   * degenerate boxes or an empty mask.
+   * Select masked pixels as a fresh pending floating selection
+   * (layer-aligned, identity placement). The layer is left intact: the hole
+   * is cut by `materializeFloatingCut` on the first texture-needing
+   * operation. Commits any active floating selection first. Returns false
+   * for degenerate boxes or an empty mask.
    */
   private cutMaskToFloating(
     tex: { id: string; buffer: Uint8ClampedArray; width: number; height: number },
@@ -12694,6 +12813,7 @@ export class GnumarusCanvasEngine {
     width: number,
     height: number,
     mask: Uint8Array,
+    kind: "rect" | "ellipse" | null = null,
   ): boolean {
     const layer = this.activeLayer();
     if (layer === null || width < 1 || height < 1 || mask.length !== width * height) {
@@ -12706,27 +12826,8 @@ export class GnumarusCanvasEngine {
       return false;
     }
     this.commitFloating();
-    const base = tex.buffer.slice();
-    const cut = new Uint8ClampedArray(width * height * 4);
-    for (let row = 0; row < height; row += 1) {
-      for (let col = 0; col < width; col += 1) {
-        if ((mask[row * width + col] ?? 0) === 0) {
-          continue;
-        }
-        const at = ((minY + row) * tex.width + minX + col) * 4;
-        cut.set(tex.buffer.subarray(at, at + 4), (row * width + col) * 4);
-        tex.buffer[at] = 0;
-        tex.buffer[at + 1] = 0;
-        tex.buffer[at + 2] = 0;
-        tex.buffer[at + 3] = 0;
-      }
-    }
-    const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
-    if (diff !== null) {
-      this.pushHistory({ type: "stroke", layerId: tex.id, diff });
-    }
     this.floating = {
-      buffer: cut,
+      buffer: new Uint8ClampedArray(width * height * 4),
       width,
       height,
       mask: mask.slice(),
@@ -12760,7 +12861,74 @@ export class GnumarusCanvasEngine {
       textureId: tex.id,
       cutDepth: this.history.undoDepth(),
       active: true,
+      pendingCut: true,
+      selectionKind: kind,
     };
+    this.syncFloatingPlane();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  /**
+   * Cut the pending selection's masked pixels out of its home texture into
+   * the floating buffer (the deferred hole), pushing one history entry.
+   * No-op when already materialized; false without a pending selection or
+   * when the home texture/box is gone (the selection is dropped then).
+   */
+  private materializeFloatingCut(): boolean {
+    const floating = this.floating;
+    if (floating === null || !floating.active) {
+      return false;
+    }
+    if (!floating.pendingCut) {
+      return true;
+    }
+    const tex = this.textures.get(floating.textureId);
+    if (tex === undefined) {
+      this.dropFloating();
+      return false;
+    }
+    const minX = Math.round(floating.cx - floating.width / 2);
+    const minY = Math.round(floating.cy - floating.height / 2);
+    const width = floating.width;
+    const height = floating.height;
+    if (minX < 0 || minY < 0 || minX + width > tex.width || minY + height > tex.height) {
+      this.dropFloating();
+      return false;
+    }
+    const mask = floating.mask;
+    if (mask.length !== width * height || countSelectionMask(mask) === 0) {
+      this.dropFloating();
+      return false;
+    }
+    const base = tex.buffer.slice();
+    const cut = new Uint8ClampedArray(width * height * 4);
+    for (let row = 0; row < height; row += 1) {
+      for (let col = 0; col < width; col += 1) {
+        if ((mask[row * width + col] ?? 0) === 0) {
+          continue;
+        }
+        const at = ((minY + row) * tex.width + minX + col) * 4;
+        cut.set(tex.buffer.subarray(at, at + 4), (row * width + col) * 4);
+        tex.buffer[at] = 0;
+        tex.buffer[at + 1] = 0;
+        tex.buffer[at + 2] = 0;
+        tex.buffer[at + 3] = 0;
+      }
+    }
+    const diff = computeImageDiff(base, tex.buffer, tex.width, tex.height);
+    if (diff !== null) {
+      this.pushHistory({ type: "stroke", layerId: tex.id, diff });
+    }
+    floating.buffer = cut;
+    floating.pendingCut = false;
+    floating.selectionKind = null;
+    floating.cutDepth = this.history.undoDepth();
     this.markTextureViewsDirty(tex.id);
     this.syncAllLayerRenders();
     this.syncFloatingPlane();
@@ -12791,6 +12959,7 @@ export class GnumarusCanvasEngine {
     x1: number,
     y1: number,
     mode: "union" | "intersect" | "subtract",
+    kind: "rect" | "ellipse" | null = null,
   ): boolean {
     const layer = this.activeLayer();
     if (layer === null) {
@@ -12820,7 +12989,129 @@ export class GnumarusCanvasEngine {
       height,
       new Uint8Array(width * height).fill(255),
       mode,
+      kind,
     );
+  }
+
+  /**
+   * Boolean-combine a new mask with a pending (mask-only) floating
+   * selection: pure mask algebra, no layer pixels move and no history is
+   * pushed. The box grows to fit unions; empty results clear the selection.
+   */
+  private combineMaskWithPending(
+    floating: GnumarusFloatingSelection,
+    tex: { id: string; buffer: Uint8ClampedArray; width: number; height: number },
+    nx: number,
+    ny: number,
+    nw: number,
+    nh: number,
+    newMask: Uint8Array,
+    mode: "union" | "intersect" | "subtract",
+  ): boolean {
+    if (nw < 1 || nh < 1 || newMask.length !== nw * nh || countSelectionMask(newMask) === 0) {
+      if (mode === "intersect") {
+        this.dropFloating();
+        this.render();
+      }
+      return true;
+    }
+    const fx0 = Math.round(floating.cx - floating.width / 2);
+    const fy0 = Math.round(floating.cy - floating.height / 2);
+    const fx1 = fx0 + floating.width;
+    const fy1 = fy0 + floating.height;
+    let minX: number;
+    let minY: number;
+    let maxX: number;
+    let maxY: number;
+    if (mode === "union") {
+      minX = Math.max(0, Math.min(fx0, nx));
+      minY = Math.max(0, Math.min(fy0, ny));
+      maxX = Math.min(tex.width, Math.max(fx1, nx + nw));
+      maxY = Math.min(tex.height, Math.max(fy1, ny + nh));
+    } else if (mode === "intersect") {
+      minX = Math.max(fx0, nx);
+      minY = Math.max(fy0, ny);
+      maxX = Math.min(fx1, nx + nw);
+      maxY = Math.min(fy1, ny + nh);
+    } else {
+      // Subtract keeps the original box and only clears the new rect.
+      minX = Math.max(0, fx0);
+      minY = Math.max(0, fy0);
+      maxX = Math.min(tex.width, fx1);
+      maxY = Math.min(tex.height, fy1);
+    }
+    if (minX >= maxX || minY >= maxY) {
+      this.dropFloating();
+      this.render();
+      return true;
+    }
+    const width = maxX - minX;
+    const height = maxY - minY;
+    const mask = new Uint8Array(width * height);
+    const oldAt = (x: number, y: number): number =>
+      x >= fx0 && x < fx1 && y >= fy0 && y < fy1
+        ? (floating.mask[(y - fy0) * floating.width + (x - fx0)] ?? 0)
+        : 0;
+    const newAt = (x: number, y: number): number =>
+      x >= nx && x < nx + nw && y >= ny && y < ny + nh
+        ? (newMask[(y - ny) * nw + (x - nx)] ?? 0)
+        : 0;
+    for (let y = minY; y < maxY; y += 1) {
+      for (let x = minX; x < maxX; x += 1) {
+        const kept =
+          mode === "union"
+            ? oldAt(x, y) !== 0 || newAt(x, y) !== 0
+            : mode === "intersect"
+              ? oldAt(x, y) !== 0 && newAt(x, y) !== 0
+              : oldAt(x, y) !== 0 && newAt(x, y) === 0;
+        if (kept) {
+          mask[(y - minY) * width + (x - minX)] = 255;
+        }
+      }
+    }
+    if (countSelectionMask(mask) === 0) {
+      this.dropFloating();
+      this.render();
+      return true;
+    }
+    floating.buffer = new Uint8ClampedArray(width * height * 4);
+    floating.width = width;
+    floating.height = height;
+    floating.mask = mask;
+    floating.maskFull = countSelectionMask(mask) === width * height;
+    floating.cx = minX + width / 2;
+    floating.cy = minY + height / 2;
+    floating.rotation = 0;
+    floating.scaleX = 1;
+    floating.scaleY = 1;
+    floating.skewX = 0;
+    floating.skewY = 0;
+    floating.rotationX = 0;
+    floating.rotationY = 0;
+    floating.flipX = false;
+    floating.flipY = false;
+    floating.initial = {
+      cx: minX + width / 2,
+      cy: minY + height / 2,
+      rotation: 0,
+      scaleX: 1,
+      scaleY: 1,
+      skewX: 0,
+      skewY: 0,
+      rotationX: 0,
+      rotationY: 0,
+      flipX: false,
+      flipY: false,
+    };
+    floating.selectionKind = null;
+    this.syncFloatingPlane();
+    this.refreshLayerStacking();
+    this.render();
+    this.onPixelsChanged();
+    this.onLayersChanged?.();
+    this.emitStats();
+    this.updatePreviews();
+    return true;
   }
 
   /** Floating selection eligible for boolean ops on the given texture, or null. */
@@ -12855,12 +13146,17 @@ export class GnumarusCanvasEngine {
     nh: number,
     newMask: Uint8Array,
     mode: "union" | "intersect" | "subtract",
+    kind: "rect" | "ellipse" | null = null,
   ): boolean {
     const floating = this.combinableFloating(tex);
     if (floating === null) {
       // Combining with nothing yields the drawn shape itself, exactly like
       // the rectangular tool's cut fallback.
-      return this.cutMaskToFloating(tex, nx, ny, nw, nh, newMask);
+      return this.cutMaskToFloating(tex, nx, ny, nw, nh, newMask, kind);
+    }
+    if (floating.pendingCut) {
+      // Mask-only boolean op: the layer is intact, so no pixels move.
+      return this.combineMaskWithPending(floating, tex, nx, ny, nw, nh, newMask, mode);
     }
     if (nw < 1 || nh < 1 || newMask.length !== nw * nh || countSelectionMask(newMask) === 0) {
       if (mode === "intersect") {
@@ -13121,6 +13417,8 @@ export class GnumarusCanvasEngine {
       textureId: tex.id,
       cutDepth: this.history.undoDepth(),
       active: true,
+      pendingCut: false,
+      selectionKind: null,
     };
     this.markTextureViewsDirty(tex.id);
     this.syncAllLayerRenders();
@@ -13135,12 +13433,20 @@ export class GnumarusCanvasEngine {
   }
 
   /** Cut the whole current-cell texture into a floating selection. */
+  /**
+   * Grab-everything gestures (double-click empty cell, transform-tool
+   * fallback) always move pixels, so the whole-texture selection cuts
+   * immediately instead of staying pending.
+   */
   private cutAllToFloating(): boolean {
     const layer = this.activeLayer();
     if (layer === null || layer.width < 1 || layer.height < 1) {
       return false;
     }
-    return this.cutRectToFloating(0, 0, layer.width - 1, layer.height - 1);
+    if (!this.cutRectToFloating(0, 0, layer.width - 1, layer.height - 1)) {
+      return false;
+    }
+    return this.materializeFloatingCut();
   }
 
   /**
@@ -14044,6 +14350,202 @@ export class GnumarusCanvasEngine {
     }
   }
 
+  /** Integer layer box of the pending selection, or null when inapplicable. */
+  private pendingResizeBox(): { x0: number; y0: number; x1: number; y1: number } | null {
+    const floating = this.floating;
+    if (
+      floating === null ||
+      !floating.active ||
+      !floating.pendingCut ||
+      (floating.selectionKind !== "rect" && floating.selectionKind !== "ellipse")
+    ) {
+      return null;
+    }
+    const layer = this.activeLayer();
+    if (layer === null || layer.width < 1 || layer.height < 1) {
+      return null;
+    }
+    const x0 = Math.round(floating.cx - floating.width / 2);
+    const y0 = Math.round(floating.cy - floating.height / 2);
+    return { x0, y0, x1: x0 + floating.width, y1: y0 + floating.height };
+  }
+
+  /** Resize-handle positions in container pixels, or null when hidden. */
+  private pendingResizeHandleLayout(): Array<{ id: GnumarusPendingResizeHandleId; x: number; y: number }> | null {
+    const floating = this.floating;
+    if (
+      floating === null ||
+      !floating.active ||
+      !floating.pendingCut ||
+      (floating.selectionKind !== "rect" && floating.selectionKind !== "ellipse") ||
+      (this.tool !== "rectselect" && this.tool !== "ellipse") ||
+      !this.floatingHomeVisible()
+    ) {
+      return null;
+    }
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return null;
+    }
+    const rect = this.container.getBoundingClientRect();
+    const toLocal = (imageX: number, imageY: number): { x: number; y: number } => {
+      const project = layerImageToProject(imageX, imageY, layer.width, layer.height, layer.transform);
+      const client = projectToScreen(
+        project.x,
+        project.y,
+        { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+        this.viewTransform(),
+      );
+      return { x: client.x - rect.left, y: client.y - rect.top };
+    };
+    const box = this.pendingResizeBox();
+    if (box === null) {
+      return null;
+    }
+    const corners: Record<GnumarusPendingResizeHandleId, { x: number; y: number }> = {
+      nw: toLocal(box.x0, box.y0),
+      n: toLocal((box.x0 + box.x1) / 2, box.y0),
+      ne: toLocal(box.x1, box.y0),
+      e: toLocal(box.x1, (box.y0 + box.y1) / 2),
+      se: toLocal(box.x1, box.y1),
+      s: toLocal((box.x0 + box.x1) / 2, box.y1),
+      sw: toLocal(box.x0, box.y1),
+      w: toLocal(box.x0, (box.y0 + box.y1) / 2),
+    };
+    return (Object.keys(corners) as GnumarusPendingResizeHandleId[]).map((id) => ({ id, ...corners[id]! }));
+  }
+
+  /** Position (or hide) the pending-resize handles. */
+  private syncPendingResizeHandles(): void {
+    const layout = this.pendingResizeHandleLayout();
+    const placed = new Set<string>();
+    if (layout !== null) {
+      for (const handle of layout) {
+        const circle = this.pendingResizeHandles.find((entry) => entry.id === handle.id)?.circle;
+        if (circle === undefined) {
+          continue;
+        }
+        circle.setAttribute("transform", `translate(${handle.x} ${handle.y})`);
+        circle.style.display = "block";
+        placed.add(handle.id);
+      }
+    }
+    for (const handle of this.pendingResizeHandles) {
+      if (!placed.has(handle.id)) {
+        handle.circle.style.display = "none";
+      }
+    }
+  }
+
+  /** Test hook: pending resize handle positions in container pixels. */
+  getPendingResizeHandles(): Array<{ id: string; x: number; y: number }> {
+    return (this.pendingResizeHandleLayout() ?? []).map((handle) => ({ ...handle }));
+  }
+
+  /** Nearest pending-resize handle within grab radius, or null. */
+  private hitPendingResizeHandle(clientX: number, clientY: number): GnumarusPendingResizeHandleId | null {
+    const layout = this.pendingResizeHandleLayout();
+    if (layout === null) {
+      return null;
+    }
+    const rect = this.container.getBoundingClientRect();
+    const px = clientX - rect.left;
+    const py = clientY - rect.top;
+    let best: GnumarusPendingResizeHandleId | null = null;
+    let bestDist = 12 * 12;
+    for (const handle of layout) {
+      const dist = (handle.x - px) * (handle.x - px) + (handle.y - py) * (handle.y - py);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = handle.id;
+      }
+    }
+    return best;
+  }
+
+  /** Begin a pending-resize drag on a box handle. */
+  private beginPendingResizeDrag(event: PointerEvent, id: GnumarusPendingResizeHandleId): void {
+    event.preventDefault();
+    const box = this.pendingResizeBox();
+    if (box === null) {
+      return;
+    }
+    this.pendingResizeDrag = { id, x0: box.x0, y0: box.y0, x1: box.x1, y1: box.y1 };
+    window.addEventListener("pointermove", this.updatePendingResizeDrag);
+    window.addEventListener("pointerup", this.endPendingResizeDrag);
+    window.addEventListener("pointercancel", this.endPendingResizeDrag);
+  }
+
+  private readonly updatePendingResizeDrag = (event: PointerEvent): void => {
+    const drag = this.pendingResizeDrag;
+    const floating = this.floating;
+    const layer = this.activeLayer();
+    if (drag === null || floating === null || !floating.active || !floating.pendingCut || layer === null) {
+      return;
+    }
+    const cursor = this.clientToLayerImageFloat(event.clientX, event.clientY);
+    if (cursor === null) {
+      return;
+    }
+    // Handles sit on box boundaries (integer image coords), so snap the
+    // cursor to the nearest pixel instead of biasing by half a pixel.
+    const resized = resizeSelectionBox(
+      { x0: drag.x0, y0: drag.y0, x1: drag.x1, y1: drag.y1 },
+      drag.id,
+      cursor.x,
+      cursor.y,
+      layer.width,
+      layer.height,
+    );
+    if (resized === null) {
+      return;
+    }
+    this.applyPendingResizeBox(floating, resized.x0, resized.y0, resized.x1, resized.y1);
+  };
+
+  private readonly endPendingResizeDrag = (): void => {
+    window.removeEventListener("pointermove", this.updatePendingResizeDrag);
+    window.removeEventListener("pointerup", this.endPendingResizeDrag);
+    window.removeEventListener("pointercancel", this.endPendingResizeDrag);
+    this.pendingResizeDrag = null;
+  };
+
+  /** Resize the pending selection box and rebuild its mask (mask-only). */
+  private applyPendingResizeBox(
+    floating: GnumarusFloatingSelection,
+    minX: number,
+    minY: number,
+    maxX: number,
+    maxY: number,
+  ): void {
+    const width = maxX - minX;
+    const height = maxY - minY;
+    if (width < 1 || height < 1 || floating.selectionKind === null) {
+      return;
+    }
+    const mask =
+      floating.selectionKind === "rect"
+        ? new Uint8Array(width * height).fill(255)
+        : ellipseSelectMask({ minX, minY, maxX, maxY });
+    floating.buffer = new Uint8ClampedArray(width * height * 4);
+    floating.width = width;
+    floating.height = height;
+    floating.mask = mask;
+    floating.maskFull = countSelectionMask(mask) === width * height;
+    floating.cx = minX + width / 2;
+    floating.cy = minY + height / 2;
+    floating.initial = {
+      ...floating.initial,
+      cx: floating.cx,
+      cy: floating.cy,
+    };
+    this.syncFloatingPlane();
+    this.updateSelectionOverlay();
+    this.syncPendingResizeHandles();
+    this.render();
+    this.updatePreviews();
+  }
+
   /** Hide the 3D gizmo rings and axis lines. */
   private hideRot3dGizmo(): void {
     for (const axis of ["x", "y", "z"] as const) {
@@ -14246,6 +14748,7 @@ export class GnumarusCanvasEngine {
 
   /** Position the marching-ants selection polygon over the active layer. */
   private updateSelectionOverlay(): void {
+    this.syncPendingResizeHandles();
     const overlay = this.selectionOverlayQuad();
     const layer = this.activeLayer();
     if (overlay === null || layer === null || layer.width < 1 || layer.height < 1) {
@@ -16578,7 +17081,20 @@ export class GnumarusCanvasEngine {
         return;
       }
       if (this.tool === "rectselect") {
-        // Drag marks a rectangle; releasing cuts it out as a floating texture.
+        // A plain grab on a pending-selection handle resizes the mask
+        // instead of starting a new rectangle; modifiers always start a
+        // new rectangle for boolean combines.
+        if (!event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+          const resizeId = this.hitPendingResizeHandle(event.clientX, event.clientY);
+          if (resizeId !== null) {
+            this.beginPendingResizeDrag(event, resizeId);
+            this.lastMouseClient = { x: event.clientX, y: event.clientY };
+            canvas.setPointerCapture(event.pointerId);
+            this.updatePreviews();
+            return;
+          }
+        }
+        // Drag marks a rectangle; releasing selects it as a floating texture.
         const layer = this.activeLayer();
         if (layer === null) {
           return;
@@ -16597,7 +17113,17 @@ export class GnumarusCanvasEngine {
         return;
       }
       if (this.tool === "ellipse") {
-        // Drag marks an ellipse; releasing cuts it out as a floating texture.
+        if (!event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+          const resizeId = this.hitPendingResizeHandle(event.clientX, event.clientY);
+          if (resizeId !== null) {
+            this.beginPendingResizeDrag(event, resizeId);
+            this.lastMouseClient = { x: event.clientX, y: event.clientY };
+            canvas.setPointerCapture(event.pointerId);
+            this.updatePreviews();
+            return;
+          }
+        }
+        // Drag marks an ellipse; releasing selects it as a floating texture.
         const layer = this.activeLayer();
         if (layer === null) {
           return;
@@ -16981,6 +17507,10 @@ export class GnumarusCanvasEngine {
                 local.y >= 0 &&
                 local.y <= floating.height
               ) {
+                // Moving needs the pixels: cut the pending hole first.
+                if (!this.materializeFloatingCut()) {
+                  return;
+                }
                 this.moveDrag = { grabDX: cursor.x - floating.cx, grabDY: cursor.y - floating.cy };
                 this.lastMouseClient = { x: event.clientX, y: event.clientY };
                 canvas.setPointerCapture(event.pointerId);
@@ -17637,9 +18167,9 @@ export class GnumarusCanvasEngine {
         const mode = this.selectionReleaseMode(event);
         if (
           mode === null ||
-          !this.combineRectWithFloating(drag.x0, drag.y0, drag.x1, drag.y1, mode)
+          !this.combineRectWithFloating(drag.x0, drag.y0, drag.x1, drag.y1, mode, "rect")
         ) {
-          this.cutRectToFloating(drag.x0, drag.y0, drag.x1, drag.y1);
+          this.cutRectToFloating(drag.x0, drag.y0, drag.x1, drag.y1, "rect");
         }
         return;
       }
@@ -17685,9 +18215,9 @@ export class GnumarusCanvasEngine {
               tightMask[y * tw + x] = mask[(tight.minY + y) * width + tight.minX + x] ?? 0;
             }
           }
-          this.cutMaskToFloating(tex, box.minX + tight.minX, box.minY + tight.minY, tw, th, tightMask);
+          this.cutMaskToFloating(tex, box.minX + tight.minX, box.minY + tight.minY, tw, th, tightMask, "ellipse");
         } else {
-          this.combineMaskWithFloating(tex, box.minX, box.minY, width, height, mask, mode);
+          this.combineMaskWithFloating(tex, box.minX, box.minY, width, height, mask, mode, "ellipse");
         }
         return;
       }

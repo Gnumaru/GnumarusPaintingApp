@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { dragRect, engineBrushSize, floatingRect, getFloatingSelection, getViewState, layerScreenTarget, loadBlankProject, paintCenter, paintDot, readPixel, selectTool, selectionMaskDisplay, selectionMaskMoves, selectionOverlayDisplay, setPencil } from "./e2e-helpers";
+import { dragRect, engineBrushSize, floatingRect, getFloatingSelection, getPendingResizeHandle, getViewState, layerScreenTarget, loadBlankProject, paintCenter, paintDot, readFloatingPixel, readPixel, selectTool, selectionMaskDisplay, selectionMaskMoves, selectionOverlayDisplay, setPencil } from "./e2e-helpers";
 
 test("final preview shows the canvas background", async ({ page }) => {
   await page.goto("/");
@@ -107,7 +107,7 @@ test("polygonal lasso commits on Enter", async ({ page }) => {
   const selection = await getFloatingSelection(page);
   expect(selection).not.toBeNull();
   expect(selection?.selected ?? 0).toBeGreaterThan(50);
-  expect(await readPixel(page, 12, 12)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 12, 12)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 28, 28)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
@@ -133,8 +133,8 @@ test("polygonal lasso commits on right-click and combines with shift", async ({ 
   const selection = await getFloatingSelection(page);
   expect(selection).not.toBeNull();
   expect(selection?.selected ?? 0).toBeGreaterThan(9);
-  expect(await readPixel(page, 11, 11)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
-  expect(await readPixel(page, 21, 21)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 11, 11)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 21, 21)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
 test("selection drawer swaps the front tool on flyout pick", async ({ page }) => {
@@ -202,7 +202,7 @@ test("elliptical selection cuts an ellipse", async ({ page }) => {
   expect(selection?.selected ?? 0).toBeGreaterThan(0);
   expect(selection?.selected ?? 121).toBeLessThan(121);
   // Center cut out, bbox corner left intact.
-  expect(await readPixel(page, 15, 15)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 15, 15)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 10, 10)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
@@ -233,7 +233,7 @@ test("lasso selection cuts a freehand shape", async ({ page }) => {
   const selection = await getFloatingSelection(page);
   expect(selection).not.toBeNull();
   expect(selection?.selected ?? 0).toBeGreaterThan(100);
-  expect(await readPixel(page, 12, 12)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 12, 12)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 28, 28)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
@@ -247,7 +247,7 @@ test("color selection cuts the contiguous region", async ({ page }) => {
   const target = await layerScreenTarget(page, 10, 10);
   await page.mouse.click(target.x, target.y);
   expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 1, height: 1, selected: 1 });
-  expect(await readPixel(page, 10, 10)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 10, 10)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
   expect(await readPixel(page, 40, 40)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
 });
 
@@ -262,8 +262,8 @@ test("color selection matches the whole texture when not contiguous", async ({ p
   const target = await layerScreenTarget(page, 10, 10);
   await page.mouse.click(target.x, target.y);
   expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 31, height: 31, selected: 2 });
-  expect(await readPixel(page, 10, 10)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
-  expect(await readPixel(page, 40, 40)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 10, 10)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+  expect(await readPixel(page, 40, 40)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
 });
 
 test("color selection threshold gates near matches", async ({ page }) => {
@@ -302,8 +302,10 @@ test("boolean ops combine ellipse with rectangle", async ({ page }) => {
   await dragRect(page, 20, 20, 22, 22);
   await page.keyboard.up("Shift");
   expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 13, height: 13, selected: 18 });
+  // Layer and floating selection both untouched by the mask-only union.
   expect(await readPixel(page, 11, 11)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   expect(await readPixel(page, 21, 21)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readFloatingPixel(page, 1, 1)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
 });
 
 test("rectangular selection shift-drag adds to the selection", async ({ page }) => {
@@ -316,7 +318,7 @@ test("rectangular selection shift-drag adds to the selection", async ({ page }) 
   await selectTool(page, 'Rectangular selection');
   await dragRect(page, 10, 10, 12, 12);
   expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 3, height: 3, selected: 9 });
-  expect(await readPixel(page, 11, 11)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 11, 11)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   await page.keyboard.down("Shift");
   const unionFrom = await layerScreenTarget(page, 20, 20);
   const unionTo = await layerScreenTarget(page, 22, 22);
@@ -330,7 +332,7 @@ test("rectangular selection shift-drag adds to the selection", async ({ page }) 
   await page.mouse.up();
   await page.keyboard.up("Shift");
   expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 13, height: 13, selected: 18 });
-  expect(await readPixel(page, 21, 21)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 21, 21)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 15, 15)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   // Two disjoint boxes trace two outlines, not one bbox outline.
   expect(await selectionOverlayDisplay(page)).toBe("none");
@@ -355,7 +357,7 @@ test("rectangular selection ctrl-shift-drag intersects the selection", async ({ 
   await page.keyboard.up("Control");
   expect(await getFloatingSelection(page)).toEqual({ x: 15, y: 15, width: 6, height: 6, selected: 36 });
   expect(await readPixel(page, 12, 12)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
-  expect(await readPixel(page, 17, 17)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 17, 17)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 30, 30)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   // Full-mask result keeps the quad polygon overlay.
   expect(await selectionOverlayDisplay(page)).toBe("block");
@@ -396,7 +398,7 @@ test("rectangular selection alt-shift-drag subtracts from the selection", async 
   await page.keyboard.up("Shift");
   await page.keyboard.up("Alt");
   expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 11, height: 11, selected: 85 });
-  expect(await readPixel(page, 12, 12)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 12, 12)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 17, 17)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 30, 30)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   // The notch is traced: outline rendering switches to the mask path.
@@ -419,7 +421,7 @@ test("rectangular selection alt-shift-drag with no overlap changes nothing", asy
   await page.keyboard.up("Shift");
   await page.keyboard.up("Alt");
   expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 3, height: 3, selected: 9 });
-  expect(await readPixel(page, 11, 11)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 11, 11)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   expect(await readPixel(page, 41, 41)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
@@ -446,7 +448,7 @@ test("rectangular selection cuts to floating and destructive transform moves and
   await expect.poll(() => selectionOverlayDisplay(page)).toBe("block");
   await page.mouse.up();
   expect(await floatingRect(page)).toEqual({ x: 30, y: 30, width: 5, height: 5 });
-  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   await selectTool(page, 'Destructive selection transform');
   await expect(page.getByRole("button", { name: "Commit selection" })).toBeEnabled();
   const grab = await layerScreenTarget(page, 31, 31);
@@ -513,15 +515,15 @@ test("undo and redo track the floating selection lifecycle", async ({ page }) =>
   await page.keyboard.press("Control+z");
   expect(await readPixel(page, 10, 10)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   expect(await selectionOverlayDisplay(page)).toBe("block");
-  // Undoing the cut itself drops the selection and restores the pixels.
+  // The selection itself was never cut, so undoing the red dot just clears it.
   await page.keyboard.press("Control+z");
   expect(await selectionOverlayDisplay(page)).toBe("none");
   expect(await floatingRect(page)).toBeNull();
-  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
-  // Redoing the cut brings the hole and the selection back.
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  // Redoing the red dot reactivates the pending selection; nothing was cut.
   await page.keyboard.press("Control+y");
   expect(await selectionOverlayDisplay(page)).toBe("block");
-  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   await page.keyboard.press("Control+y");
   expect(await readPixel(page, 10, 10)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
 });
@@ -634,4 +636,81 @@ test("rectangular selection chains three unions", async ({ page }) => {
   expect(await getFloatingSelection(page)).toEqual({ x: 5, y: 5, width: 38, height: 38, selected: 27 });
   expect(await selectionMaskDisplay(page)).toBe("block");
   expect(await selectionMaskMoves(page)).toBe(12);
+});
+
+test("rectangular selection stays pending without cutting the layer @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  await selectTool(page, "Rectangular selection");
+  await dragRect(page, 28, 28, 36, 36);
+  // No hole: the layer is intact and the selection is pending.
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await getFloatingSelection(page)).not.toBeNull();
+  expect(await floatingRect(page)).toEqual({ x: 28, y: 28, width: 9, height: 9 });
+  // Copy leaves the layer (and the pending selection) untouched.
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { runAction(id: string): boolean } } };
+    root.__gnumarus?.shell?.runAction("copy-selection");
+  });
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await getFloatingSelection(page)).not.toBeNull();
+  // Committing a pending selection just clears it.
+  await page.keyboard.press("Enter");
+  expect(await getFloatingSelection(page)).toBeNull();
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+});
+
+test("pending rect resizes via corner handle without touching pixels @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await setPencil(page, "#ff0000");
+  await paintCenter(page);
+  await selectTool(page, "Rectangular selection");
+  await dragRect(page, 28, 28, 36, 36);
+  const zoom = (await getViewState(page)).zoom;
+  const handle = await getPendingResizeHandle(page, "se");
+  await page.mouse.move(handle.x, handle.y);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + 8 * zoom, handle.y + 8 * zoom, { steps: 6 });
+  await page.mouse.up();
+  expect(await floatingRect(page)).toMatchObject({ x: 28, y: 28, width: 17, height: 17 });
+  // Mask-only resize: painted pixels stay, empty stays empty, no hole anywhere.
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  expect(await readPixel(page, 40, 40)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 28, 28)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+});
+
+test("pending ellipse resizes via edge handle @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await setPencil(page, "#ff0000");
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  const corner = await layerScreenTarget(page, 0, 0);
+  await page.mouse.click(corner.x, corner.y);
+  const drawer = page.locator('gnumarus-shell [data-testid="selection-drawer"]');
+  await drawer.getByRole("button", { name: "Rectangular selection" }).click({ button: "right" });
+  await page.locator('gnumarus-shell [data-testid="selection-flyout"]').getByRole("button", { name: "Elliptical selection" }).click();
+  await dragRect(page, 10, 10, 20, 20);
+  const before = await floatingRect(page);
+  expect(before).toMatchObject({ width: 11, height: 11 });
+  const zoom = (await getViewState(page)).zoom;
+  await expect(page.locator('gnumarus-shell circle[data-testid="selection-resize-handle"]').first()).toBeVisible();
+  const handle = await getPendingResizeHandle(page, "e");
+  await page.mouse.move(handle.x, handle.y);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + 6 * zoom, handle.y, { steps: 6 });
+  await page.mouse.up();
+  const after = await floatingRect(page);
+  expect(after?.width ?? 0).toBeGreaterThan(before?.width ?? 0);
+  expect(after?.height).toBe(before?.height);
+  // Ellipse mask, layer intact.
+  const selection = await getFloatingSelection(page);
+  expect(selection?.selected ?? 0).toBeGreaterThan(0);
+  expect(selection?.selected ?? 0).toBeLessThan((after?.width ?? 0) * (after?.height ?? 0));
+  expect(await readPixel(page, 15, 15)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });

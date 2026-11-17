@@ -449,6 +449,9 @@ test("destructive transform merge grows the texture to fit @recent", async ({ pa
     engine.floating.rotation = Math.PI / 4;
   });
   await selectTool(page, "Destructive selection transform");
+  // A no-op body drag (off the center handle, which would reset the
+  // transform on tap) materializes the pending cut without moving it.
+  await dragLayerBox(page, 40, 32, 40, 32);
   await page.getByRole("button", { name: "Commit selection" }).click();
   // A 48x48 square rotated 45 degrees spans ~67.9px: the texture grows
   // from 64x64 to 68x68 instead of clipping the corners.

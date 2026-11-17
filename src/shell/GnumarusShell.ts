@@ -7222,6 +7222,12 @@ export class GnumarusShell extends LitElement {
     const open = !(
       which === "file" ? this.fileMenuOpen : which === "edit" ? this.editMenuOpen : this.helpMenuOpen
     );
+    // A menubar menu takes over the screen: dismiss picker popups so they
+    // never sit above menu items (their document-click guard may still be
+    // swallowing the opening click).
+    this.shadowRoot
+      ?.querySelectorAll("gnumarus-color-picker")
+      .forEach((picker) => (picker as GnumarusColorPicker).closePopup());
     this.closeAllMenus();
     if (which === "file") {
       this.fileMenuOpen = open;

@@ -970,7 +970,8 @@ export class GnumarusColorPicker extends LitElement {
     }
   }
 
-  private closePopup(): void {
+  /** Close the popup programmatically (e.g. when a menubar menu opens). */
+  closePopup(): void {
     this.open = false;
     this.popupPos = null;
     this.ignoreNextDocPointerDown = false;
