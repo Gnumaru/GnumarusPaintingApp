@@ -35,8 +35,8 @@ function gradient(width: number, height: number): Uint8ClampedArray {
 }
 
 describe("GnumarusFilters", () => {
-  it("registers 52 filters across 8 themes with unique ids", () => {
-    expect(GNUMARUS_FILTERS.length).toBe(52);
+  it("registers 63 filters across 8 themes with unique ids", () => {
+    expect(GNUMARUS_FILTERS.length).toBe(63);
     const ids = GNUMARUS_FILTERS.map((def) => def.id);
     expect(new Set(ids).size).toBe(ids.length);
     const themes = new Set(GNUMARUS_FILTERS.map((def) => def.theme));
@@ -595,5 +595,114 @@ describe("GnumarusFilters", () => {
     const gusty = runFilterKernel("wind", g, 8, 8, { strength: 100, seed: 1 });
     expect(gusty).not.toBeNull();
     expect(Array.from(gusty as Uint8ClampedArray)).not.toEqual(Array.from(g));
+  });
+
+  it("leaves the center alone with no whirl or pinch", () => {
+    const g = gradient(8, 8);
+    const none = runFilterKernel("whirl-pinch", g, 8, 8, { whirl: 0, pinch: 0 });
+    expect(none).not.toBeNull();
+    expect(Array.from(none as Uint8ClampedArray)).toEqual(Array.from(g));
+    const twisted = runFilterKernel("whirl-pinch", g, 8, 8, { whirl: 90, pinch: 0 });
+    expect(twisted).not.toBeNull();
+    expect(Array.from(twisted as Uint8ClampedArray)).not.toEqual(Array.from(g));
+  });
+
+  it("maps uniform input through polar modes unchanged", () => {
+    const white = solid(8, 8, 255, 255, 255, 255);
+    for (const mode of ["toPolar", "fromPolar"]) {
+      const out = runFilterKernel("polar-coordinates", white, 8, 8, { mode });
+      expect(out, mode).not.toBeNull();
+      expect(Array.from(out as Uint8ClampedArray)).toEqual(Array.from(white));
+    }
+    const changed = runFilterKernel("polar-coordinates", gradient(8, 8), 8, 8, { mode: "toPolar" });
+    expect(Array.from(changed as Uint8ClampedArray)).not.toEqual(Array.from(gradient(8, 8)));
+  });
+
+  it("leaves identity lens distortion alone", () => {
+    const g = gradient(8, 8);
+    const none = runFilterKernel("lens-distortion", g, 8, 8, {});
+    expect(none).not.toBeNull();
+    expect(Array.from(none as Uint8ClampedArray)).toEqual(Array.from(g));
+    const warped = runFilterKernel("lens-distortion", g, 8, 8, { main: 50 });
+    expect(Array.from(warped as Uint8ClampedArray)).not.toEqual(Array.from(g));
+  });
+
+  it("freezes motion blurs at zero amount", () => {
+    const g = gradient(8, 8);
+    for (const [id, values] of [
+      ["circular-motion", { angle: 0 }],
+      ["zoom-motion", { amount: 0 }],
+    ] as Array<[string, GnumarusFilterValues]>) {
+      const out = runFilterKernel(id, g, 8, 8, values);
+      expect(out, id).not.toBeNull();
+      expect(Array.from(out as Uint8ClampedArray)).toEqual(Array.from(g));
+    }
+    const spun = runFilterKernel("circular-motion", g, 8, 8, { angle: 90 });
+    expect(Array.from(spun as Uint8ClampedArray)).not.toEqual(Array.from(g));
+  });
+
+  it("selects only close neighbors", () => {
+    const g = gradient(8, 8);
+    const none = runFilterKernel("selective-blur", g, 8, 8, { maxDelta: 0 });
+    expect(none).not.toBeNull();
+    expect(Array.from(none as Uint8ClampedArray)).toEqual(Array.from(g));
+    const flat = solid(6, 6, 40, 40, 40, 255);
+    const same = runFilterKernel("selective-blur", flat, 6, 6, {});
+    expect(Array.from(same as Uint8ClampedArray)).toEqual(Array.from(flat));
+  });
+
+  it("blurs flat areas into themselves with a polygonal aperture", () => {
+    const flat = solid(8, 8, 90, 90, 90, 255);
+    const out = runFilterKernel("lens-blur", flat, 8, 8, {});
+    expect(out).not.toBeNull();
+    expect(Array.from(out as Uint8ClampedArray)).toEqual(Array.from(flat));
+  });
+
+  it("points flat height straight up", () => {
+    const flat = solid(4, 4, 128, 128, 128, 255);
+    const out = runFilterKernel("height-to-normal", flat, 4, 4, {});
+    expect(out).not.toBeNull();
+    expect(Array.from((out as Uint8ClampedArray).slice(0, 4))).toEqual([128, 128, 255, 255]);
+  });
+
+  it("adds deterministic hsv noise", () => {
+    const flat = solid(4, 4, 128, 128, 128, 255);
+    const none = runFilterKernel("hsv-noise", flat, 4, 4, { amount: 0 });
+    expect(none).not.toBeNull();
+    expect(Array.from(none as Uint8ClampedArray)).toEqual(Array.from(flat));
+    const a = runFilterKernel("hsv-noise", flat, 4, 4, { amount: 50, seed: 3 });
+    const b = runFilterKernel("hsv-noise", flat, 4, 4, { amount: 50, seed: 3 });
+    const c = runFilterKernel("hsv-noise", flat, 4, 4, { amount: 50, seed: 4 });
+    expect(Array.from(a as Uint8ClampedArray)).toEqual(Array.from(b as Uint8ClampedArray));
+    expect(Array.from(a as Uint8ClampedArray)).not.toEqual(Array.from(c as Uint8ClampedArray));
+  });
+
+  it("wraps shifted rows around", () => {
+    const g = gradient(8, 8);
+    const none = runFilterKernel("shift", g, 8, 8, { amount: 0 });
+    expect(none).not.toBeNull();
+    expect(Array.from(none as Uint8ClampedArray)).toEqual(Array.from(g));
+    // A full-width shift by the row count is a no-op rotation.
+    const full = runFilterKernel("shift", g, 8, 8, { amount: 8, seed: 1, direction: "horizontal" });
+    expect(full).not.toBeNull();
+  });
+
+  it("finds no gradient in flat input", () => {
+    const flat = solid(6, 6, 77, 77, 77, 255);
+    const out = runFilterKernel("image-gradient", flat, 6, 6, {});
+    expect(out).not.toBeNull();
+    expect(Array.from(out as Uint8ClampedArray)).toEqual(Array.from(solid(6, 6, 0, 0, 0, 255)));
+    const split = solid(8, 4, 0, 0, 0, 255);
+    for (let y = 0; y < 4; y += 1) {
+      for (let x = 4; x < 8; x += 1) {
+        const at = (y * 8 + x) * 4;
+        split[at] = 255;
+        split[at + 1] = 255;
+        split[at + 2] = 255;
+      }
+    }
+    const edges = runFilterKernel("image-gradient", split, 8, 4, {}) as Uint8ClampedArray;
+    expect(edges[(2 * 8 + 3) * 4]).toBeGreaterThan(0);
+    expect(edges[(2 * 8 + 6) * 4]).toBe(0);
   });
 });

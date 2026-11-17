@@ -1648,6 +1648,329 @@ function kernelWind(src: Uint8ClampedArray, width: number, height: number, v: Gn
   return dst;
 }
 
+function kernelWhirlPinch(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const whirl = (clampFloat(v["whirl"], -360, 360, 120) * Math.PI) / 180;
+  const pinch = clampFloat(v["pinch"], -100, 100, 0) / 100;
+  if (whirl === 0 && pinch === 0) {
+    // Exact fast path: polar round-trips are not bit-exact in floats.
+    return new Uint8ClampedArray(src);
+  }
+  const radius = Math.max(1, clampFloat(v["radius"], 1, 512, 128));
+  const cx = (width - 1) / 2;
+  const cy = (height - 1) / 2;
+  const dst = new Uint8ClampedArray(src.length);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const at = (y * width + x) * 4;
+      const dx = x - cx;
+      const dy = y - cy;
+      const r = Math.sqrt(dx * dx + dy * dy);
+      if (r >= radius || r === 0) {
+        dst[at] = src[at] ?? 0;
+        dst[at + 1] = src[at + 1] ?? 0;
+        dst[at + 2] = src[at + 2] ?? 0;
+        dst[at + 3] = src[at + 3] ?? 0;
+        continue;
+      }
+      const t = 1 - r / radius;
+      const ang = Math.atan2(dy, dx) + whirl * t;
+      const rad = Math.max(0, r * (1 - pinch * t));
+      const sx = cx + rad * Math.cos(ang);
+      const sy = cy + rad * Math.sin(ang);
+      for (let c = 0; c < 4; c += 1) {
+        dst[at + c] = clampByte(sampleBilinear(src, width, height, sx, sy, c));
+      }
+    }
+  }
+  return dst;
+}
+
+function kernelPolarCoordinates(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const toPolar = v["mode"] !== "fromPolar";
+  const rot = (clampFloat(v["rotation"], -180, 180, 0) * Math.PI) / 180;
+  const cx = (width - 1) / 2;
+  const cy = (height - 1) / 2;
+  const maxR = Math.min(width, height) / 2;
+  const dst = new Uint8ClampedArray(src.length);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const at = (y * width + x) * 4;
+      let sx: number;
+      let sy: number;
+      if (toPolar) {
+        const theta = (x / width) * 2 * Math.PI + rot;
+        const rho = (y / height) * maxR;
+        sx = cx + rho * Math.cos(theta);
+        sy = cy + rho * Math.sin(theta);
+      } else {
+        const dx = x - cx;
+        const dy = y - cy;
+        const rho = Math.sqrt(dx * dx + dy * dy);
+        const theta = Math.atan2(dy, dx) - rot;
+        const wrapped = (((theta % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)) / (2 * Math.PI);
+        sx = wrapped * width;
+        sy = (rho / maxR) * height;
+      }
+      for (let c = 0; c < 4; c += 1) {
+        dst[at + c] = clampByte(sampleBilinear(src, width, height, sx, sy, c));
+      }
+    }
+  }
+  return dst;
+}
+
+function kernelLensDistortion(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const main = clampFloat(v["main"], -100, 100, 0) / 100;
+  const edge = clampFloat(v["edge"], -100, 100, 0) / 100;
+  const zoom = 1 + clampFloat(v["zoom"], -50, 50, 0) / 100;
+  if (main === 0 && edge === 0 && zoom === 1) {
+    return new Uint8ClampedArray(src);
+  }
+  const cx = (width - 1) / 2;
+  const cy = (height - 1) / 2;
+  const norm = Math.min(width, height) / 2;
+  const dst = new Uint8ClampedArray(src.length);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const at = (y * width + x) * 4;
+      const nx = (x - cx) / norm;
+      const ny = (y - cy) / norm;
+      const r2 = nx * nx + ny * ny;
+      const f = (1 + main * r2 + edge * r2 * r2) * zoom;
+      const sx = cx + (x - cx) * f;
+      const sy = cy + (y - cy) * f;
+      for (let c = 0; c < 4; c += 1) {
+        dst[at + c] = clampByte(sampleBilinear(src, width, height, sx, sy, c));
+      }
+    }
+  }
+  return dst;
+}
+
+function kernelCircularMotion(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const sweep = (clampFloat(v["angle"], -360, 360, 30) * Math.PI) / 180;
+  if (sweep === 0) {
+    return new Uint8ClampedArray(src);
+  }
+  const samples = 16;
+  const cx = (width - 1) / 2;
+  const cy = (height - 1) / 2;
+  const dst = new Uint8ClampedArray(src.length);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const at = (y * width + x) * 4;
+      const base = Math.atan2(y - cy, x - cx);
+      const r = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+      for (let c = 0; c < 4; c += 1) {
+        let acc = 0;
+        for (let k = 0; k < samples; k += 1) {
+          const a = base + (sweep * k) / (samples - 1);
+          acc += sampleBilinear(src, width, height, cx + r * Math.cos(a), cy + r * Math.sin(a), c);
+        }
+        dst[at + c] = clampByte(acc / samples);
+      }
+    }
+  }
+  return dst;
+}
+
+function kernelZoomMotion(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const amount = clampFloat(v["amount"], 0, 100, 20) / 100;
+  if (amount === 0) {
+    return new Uint8ClampedArray(src);
+  }
+  const samples = 16;
+  const cx = (width - 1) / 2;
+  const cy = (height - 1) / 2;
+  const dst = new Uint8ClampedArray(src.length);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const at = (y * width + x) * 4;
+      const ang = Math.atan2(y - cy, x - cx);
+      const r = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+      const ux = Math.cos(ang);
+      const uy = Math.sin(ang);
+      for (let c = 0; c < 4; c += 1) {
+        let acc = 0;
+        for (let k = 0; k < samples; k += 1) {
+          const rk = r * (1 - amount + (amount * k) / (samples - 1));
+          acc += sampleBilinear(src, width, height, cx + rk * ux, cy + rk * uy, c);
+        }
+        dst[at + c] = clampByte(acc / samples);
+      }
+    }
+  }
+  return dst;
+}
+
+function kernelSelectiveBlur(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const radius = Math.max(1, Math.round(clampFloat(v["radius"], 1, 20, 3)));
+  const delta = clampInt(v["maxDelta"], 0, 255, 50);
+  const dst = new Uint8ClampedArray(src.length);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const at = (y * width + x) * 4;
+      for (let c = 0; c < 4; c += 1) {
+        const center = src[at + c] ?? 0;
+        let acc = center;
+        let count = 1;
+        for (let oy = -radius; oy <= radius; oy += 1) {
+          for (let ox = -radius; ox <= radius; ox += 1) {
+            if (ox === 0 && oy === 0) {
+              continue;
+            }
+            const value = sampleClamped(src, width, height, x + ox, y + oy, c) as number;
+            if (Math.abs(value - center) <= delta) {
+              acc += value;
+              count += 1;
+            }
+          }
+        }
+        dst[at + c] = Math.round(acc / count);
+      }
+    }
+  }
+  return dst;
+}
+
+function kernelLensBlur(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const radius = Math.max(1, Math.round(clampFloat(v["radius"], 1, 30, 8)));
+  const sides = clampInt(v["sides"], 3, 8, 6);
+  const taps = 24;
+  const dst = new Uint8ClampedArray(src.length);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const at = (y * width + x) * 4;
+      for (let c = 0; c < 4; c += 1) {
+        let acc = sampleBilinear(src, width, height, x, y, c);
+        for (let k = 0; k < taps; k += 1) {
+          const theta = (k / taps) * 2 * Math.PI;
+          const sector = (2 * Math.PI) / sides;
+          const rr = (radius * Math.cos(Math.PI / sides)) / Math.cos(((theta + Math.PI / sides) % sector) - Math.PI / sides);
+          acc += sampleBilinear(src, width, height, x + rr * Math.cos(theta), y + rr * Math.sin(theta), c);
+        }
+        dst[at + c] = clampByte(acc / (taps + 1));
+      }
+    }
+  }
+  return dst;
+}
+
+function kernelHeightToNormal(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const strength = clampFloat(v["strength"], 0, 10, 2);
+  const channel = v["channel"];
+  const sample = (x: number, y: number): number => {
+    const cx = Math.min(width - 1, Math.max(0, x));
+    const cy = Math.min(height - 1, Math.max(0, y));
+    const at = (cy * width + cx) * 4;
+    const r = src[at] ?? 0;
+    const g = src[at + 1] ?? 0;
+    const b = src[at + 2] ?? 0;
+    if (channel === "red") {
+      return r / 255;
+    }
+    if (channel === "green") {
+      return g / 255;
+    }
+    if (channel === "blue") {
+      return b / 255;
+    }
+    return luminance709(r, g, b) / 255;
+  };
+  const dst = new Uint8ClampedArray(src.length);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const at = (y * width + x) * 4;
+      const gx = (sample(x + 1, y) - sample(x - 1, y)) * strength;
+      const gy = (sample(x, y + 1) - sample(x, y - 1)) * strength;
+      const inv = 1 / Math.sqrt(gx * gx + gy * gy + 1);
+      dst[at] = clampByte((-gx * inv * 0.5 + 0.5) * 255);
+      dst[at + 1] = clampByte((-gy * inv * 0.5 + 0.5) * 255);
+      dst[at + 2] = clampByte(inv * 255);
+      dst[at + 3] = src[at + 3] ?? 0;
+    }
+  }
+  return dst;
+}
+
+function kernelHsvNoise(src: Uint8ClampedArray, _width: number, _height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const amount = clampFloat(v["amount"], 0, 100, 10) / 100;
+  const seed = clampInt(v["seed"], 1, 9999, 1);
+  const rand = filterRandom(seed * 131 + 7);
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    const [h, s, l] = rgbToHsv01((src[i] ?? 0) / 255, (src[i + 1] ?? 0) / 255, (src[i + 2] ?? 0) / 255);
+    const dh = (rand() * 2 - 1) * amount;
+    const ds = (rand() * 2 - 1) * amount;
+    const dv = (rand() * 2 - 1) * amount;
+    const [r, g, b] = hsvToRgb255(h + dh, s + ds, l + dv);
+    dst[i] = r;
+    dst[i + 1] = g;
+    dst[i + 2] = b;
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
+function kernelShift(src: Uint8ClampedArray, width: number, height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const amount = Math.max(0, Math.round(clampFloat(v["amount"], 0, 32, 8)));
+  const horizontal = v["direction"] !== "vertical";
+  const seed = clampInt(v["seed"], 1, 9999, 1);
+  const rand = filterRandom(seed * 29 + 3);
+  const dst = new Uint8ClampedArray(src.length);
+  if (horizontal) {
+    for (let y = 0; y < height; y += 1) {
+      const off = amount === 0 ? 0 : Math.floor(rand() * (amount * 2 + 1)) - amount;
+      for (let x = 0; x < width; x += 1) {
+        const from = (y * width + (((x - off) % width) + width) % width) * 4;
+        const at = (y * width + x) * 4;
+        dst[at] = src[from] ?? 0;
+        dst[at + 1] = src[from + 1] ?? 0;
+        dst[at + 2] = src[from + 2] ?? 0;
+        dst[at + 3] = src[from + 3] ?? 0;
+      }
+    }
+    return dst;
+  }
+  for (let x = 0; x < width; x += 1) {
+    const off = amount === 0 ? 0 : Math.floor(rand() * (amount * 2 + 1)) - amount;
+    for (let y = 0; y < height; y += 1) {
+      const from = ((((y - off) % height) + height) % height * width + x) * 4;
+      const at = (y * width + x) * 4;
+      dst[at] = src[from] ?? 0;
+      dst[at + 1] = src[from + 1] ?? 0;
+      dst[at + 2] = src[from + 2] ?? 0;
+      dst[at + 3] = src[from + 3] ?? 0;
+    }
+  }
+  return dst;
+}
+
+function kernelImageGradient(src: Uint8ClampedArray, width: number, height: number): Uint8ClampedArray {
+  const gxKernel = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
+  const gyKernel = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
+  const dst = new Uint8ClampedArray(src.length);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const at = (y * width + x) * 4;
+      for (let c = 0; c < 3; c += 1) {
+        let gx = 0;
+        let gy = 0;
+        for (let ky = -1; ky <= 1; ky += 1) {
+          for (let kx = -1; kx <= 1; kx += 1) {
+            const value = sampleClamped(src, width, height, x + kx, y + ky, c) as number;
+            gx += value * (gxKernel[(ky + 1) * 3 + (kx + 1)] ?? 0);
+            gy += value * (gyKernel[(ky + 1) * 3 + (kx + 1)] ?? 0);
+          }
+        }
+        dst[at + c] = clampByte(Math.sqrt(gx * gx + gy * gy) / 4);
+      }
+      dst[at + 3] = src[at + 3] ?? 0;
+    }
+  }
+  return dst;
+}
+
 /** Filter registry: id, theme, title, hint, and dialog params. */
 export const GNUMARUS_FILTERS: GnumarusFilterDef[] = [
   {
@@ -2235,6 +2558,136 @@ export const GNUMARUS_FILTERS: GnumarusFilterDef[] = [
       { key: "seed", kind: "number", label: "Seed", hint: "Random seed.", min: 1, max: 9999, step: 1, def: 1 },
     ],
   },
+  {
+    id: "whirl-pinch",
+    title: "Whirl and Pinch",
+    hint: "Rotates and squeezes the image around its center.",
+    theme: "distort",
+    params: [
+      { key: "whirl", kind: "number", label: "Whirl", hint: "Twist in degrees.", min: -360, max: 360, step: 1, def: 120 },
+      { key: "pinch", kind: "number", label: "Pinch", hint: "Squeeze toward the center.", min: -100, max: 100, step: 1, def: 0 },
+      { key: "radius", kind: "number", label: "Radius", hint: "Effect radius in pixels.", min: 1, max: 512, step: 1, def: 128 },
+    ],
+  },
+  {
+    id: "polar-coordinates",
+    title: "Polar Coordinates",
+    hint: "Converts between rectangular and polar layouts.",
+    theme: "distort",
+    params: [
+      {
+        key: "mode",
+        kind: "enum",
+        label: "Mode",
+        hint: "Conversion direction.",
+        def: "toPolar",
+        options: [
+          { value: "toPolar", label: "Rect to polar" },
+          { value: "fromPolar", label: "Polar to rect" },
+        ],
+      },
+      { key: "rotation", kind: "number", label: "Rotation", hint: "Angle offset in degrees.", min: -180, max: 180, step: 1, def: 0 },
+    ],
+  },
+  {
+    id: "lens-distortion",
+    title: "Lens Distortion",
+    hint: "Barrel and pincushion warping.",
+    theme: "distort",
+    params: [
+      { key: "main", kind: "number", label: "Main", hint: "Quadratic warp.", min: -100, max: 100, step: 1, def: 0 },
+      { key: "edge", kind: "number", label: "Edge", hint: "Quartic warp.", min: -100, max: 100, step: 1, def: 0 },
+      { key: "zoom", kind: "number", label: "Zoom (%)", hint: "Overall scale.", min: -50, max: 50, step: 1, def: 0 },
+    ],
+  },
+  {
+    id: "circular-motion",
+    title: "Circular Motion Blur",
+    hint: "Smears pixels along arcs around the center.",
+    theme: "blur",
+    params: [{ key: "angle", kind: "number", label: "Angle", hint: "Arc length in degrees.", min: -360, max: 360, step: 1, def: 30 }],
+  },
+  {
+    id: "zoom-motion",
+    title: "Zoom Motion Blur",
+    hint: "Smears pixels along rays from the center.",
+    theme: "blur",
+    params: [{ key: "amount", kind: "number", label: "Amount (%)", hint: "Radial smear length.", min: 0, max: 100, step: 1, def: 20 }],
+  },
+  {
+    id: "selective-blur",
+    title: "Selective Blur",
+    hint: "Averages only neighbors close to the center pixel.",
+    theme: "blur",
+    params: [
+      { key: "radius", kind: "number", label: "Radius", hint: "Neighborhood radius in pixels.", min: 1, max: 20, step: 1, def: 3 },
+      { key: "maxDelta", kind: "number", label: "Max delta", hint: "Largest accepted difference.", min: 0, max: 255, step: 1, def: 50 },
+    ],
+  },
+  {
+    id: "lens-blur",
+    title: "Lens Blur",
+    hint: "Polygonal-aperture bokeh blur.",
+    theme: "blur",
+    params: [
+      { key: "radius", kind: "number", label: "Radius", hint: "Aperture radius in pixels.", min: 1, max: 30, step: 1, def: 8 },
+      { key: "sides", kind: "number", label: "Sides", hint: "Aperture polygon sides.", min: 3, max: 8, step: 1, def: 6 },
+    ],
+  },
+  {
+    id: "height-to-normal",
+    title: "Height to Normal",
+    hint: "Turns luminance into a tangent-space normal map.",
+    theme: "edge",
+    params: [
+      { key: "strength", kind: "number", label: "Strength", hint: "Slope response.", min: 0, max: 10, step: 0.1, def: 2 },
+      {
+        key: "channel",
+        kind: "enum",
+        label: "Channel",
+        hint: "Height source.",
+        def: "luminance",
+        options: [
+          { value: "luminance", label: "Luminance" },
+          { value: "red", label: "Red" },
+          { value: "green", label: "Green" },
+          { value: "blue", label: "Blue" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "hsv-noise",
+    title: "HSV Noise",
+    hint: "Adds deterministic grain in HSV space (same seed replays).",
+    theme: "noise",
+    params: [
+      { key: "amount", kind: "number", label: "Amount (%)", hint: "Noise strength.", min: 0, max: 100, step: 1, def: 10 },
+      { key: "seed", kind: "number", label: "Seed", hint: "Random seed.", min: 1, max: 9999, step: 1, def: 1 },
+    ],
+  },
+  {
+    id: "shift",
+    title: "Shift",
+    hint: "Shifts rows or columns by seeded random offsets with wraparound.",
+    theme: "distort",
+    params: [
+      {
+        key: "direction",
+        kind: "enum",
+        label: "Direction",
+        hint: "Shift rows or columns.",
+        def: "horizontal",
+        options: [
+          { value: "horizontal", label: "Horizontal" },
+          { value: "vertical", label: "Vertical" },
+        ],
+      },
+      { key: "amount", kind: "number", label: "Amount", hint: "Max shift in pixels.", min: 0, max: 32, step: 1, def: 8 },
+      { key: "seed", kind: "number", label: "Seed", hint: "Random seed.", min: 1, max: 9999, step: 1, def: 1 },
+    ],
+  },
+  { id: "image-gradient", title: "Image Gradient", hint: "Per-channel Sobel magnitude in full color.", theme: "edge", params: [] },
 ];
 
 export function getFilterDef(id: string): GnumarusFilterDef | undefined {
@@ -2359,6 +2812,28 @@ export function runFilterKernel(
       return kernelWaves(src, width, height, v);
     case "wind":
       return kernelWind(src, width, height, v);
+    case "whirl-pinch":
+      return kernelWhirlPinch(src, width, height, v);
+    case "polar-coordinates":
+      return kernelPolarCoordinates(src, width, height, v);
+    case "lens-distortion":
+      return kernelLensDistortion(src, width, height, v);
+    case "circular-motion":
+      return kernelCircularMotion(src, width, height, v);
+    case "zoom-motion":
+      return kernelZoomMotion(src, width, height, v);
+    case "selective-blur":
+      return kernelSelectiveBlur(src, width, height, v);
+    case "lens-blur":
+      return kernelLensBlur(src, width, height, v);
+    case "height-to-normal":
+      return kernelHeightToNormal(src, width, height, v);
+    case "hsv-noise":
+      return kernelHsvNoise(src, width, height, v);
+    case "shift":
+      return kernelShift(src, width, height, v);
+    case "image-gradient":
+      return kernelImageGradient(src, width, height);
     default:
       return null;
   }
