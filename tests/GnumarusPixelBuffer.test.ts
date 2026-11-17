@@ -11,6 +11,7 @@ import {
   extractAlphaPlane,
   clampBrushSizeFloat,
   clearPixelBuffer,
+  clampBrushAngle,
   compositeOver,
   createPixelBuffer,
   cropBufferBox,
@@ -32,6 +33,7 @@ import {
   pressureAlphaMultiplier,
   pressureSizeInRange,
   pressureSizeMultiplier,
+  rotatedStampOffsets,
   roundBrushSizeForAliased,
   setPixel,
   stampSegmentCoverage,
@@ -221,6 +223,148 @@ describe("GnumarusPixelBuffer", () => {
     expect(getPixel(circle, 5, 5, 2, 1)).toEqual(red);
     expect(getPixel(circle, 5, 5, 1, 1)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
     expect(getPixel(circle, 5, 5, 3, 3)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  });
+
+  it("parses the line brush shape and clamps dab angles", () => {
+    expect(parseBrushShape("line")).toBe("line");
+    expect(parseBrushShape("circle")).toBe("circle");
+    expect(parseBrushShape("square")).toBe("square");
+    expect(parseBrushShape("triangle")).toBe("square");
+    expect(parseBrushShape(undefined)).toBe("square");
+    expect(clampBrushAngle(190)).toBe(180);
+    expect(clampBrushAngle(-200)).toBe(-180);
+    expect(clampBrushAngle(45.7)).toBe(45.7);
+    expect(clampBrushAngle(Number.NaN)).toBe(0);
+    expect(clampBrushAngle("90")).toBe(0);
+  });
+
+  it("stamps a straight horizontal line tip at angle 0", () => {
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    const buffer = createPixelBuffer(7, 7);
+    drawBrushStamp(buffer, 7, 7, 3, 3, 5, "line", red, undefined, "normal", "off", 64, undefined, 0);
+    // Length 5 centered on row 3, single pixel tall.
+    for (let x = 1; x <= 5; x += 1) {
+      expect(getPixel(buffer, 7, 7, x, 3)).toEqual(red);
+    }
+    expect(getPixel(buffer, 7, 7, 3, 2)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    expect(getPixel(buffer, 7, 7, 3, 4)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    expect(getPixel(buffer, 7, 7, 0, 3)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    const single = createPixelBuffer(3, 3);
+    drawBrushStamp(single, 3, 3, 1, 1, 1, "line", red, undefined, "normal", "off", 64, undefined, 45);
+    expect(getPixel(single, 3, 3, 1, 1)).toEqual(red);
+    expect(getPixel(single, 3, 3, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  });
+
+  it("rotates the line tip to vertical at 90 degrees", () => {
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    const buffer = createPixelBuffer(7, 7);
+    drawBrushStamp(buffer, 7, 7, 3, 3, 5, "line", red, undefined, "normal", "off", 64, undefined, 90);
+    for (let y = 1; y <= 5; y += 1) {
+      expect(getPixel(buffer, 7, 7, 3, y)).toEqual(red);
+    }
+    expect(getPixel(buffer, 7, 7, 2, 3)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    expect(getPixel(buffer, 7, 7, 4, 3)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  });
+
+  it("stamps a diagonal line tip at 45 degrees", () => {
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    const buffer = createPixelBuffer(9, 9);
+    drawBrushStamp(buffer, 9, 9, 4, 4, 5, "line", red, undefined, "normal", "off", 64, undefined, 45);
+    expect(getPixel(buffer, 9, 9, 3, 3)).toEqual(red);
+    expect(getPixel(buffer, 9, 9, 4, 4)).toEqual(red);
+    expect(getPixel(buffer, 9, 9, 5, 5)).toEqual(red);
+    expect(getPixel(buffer, 9, 9, 3, 4)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    expect(getPixel(buffer, 9, 9, 5, 3)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  });
+
+  it("rotates square tips and leaves circles alone", () => {
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    const diamond = createPixelBuffer(9, 9);
+    drawBrushStamp(diamond, 9, 9, 4, 4, 5, "square", red, undefined, "normal", "off", 64, undefined, 45);
+    expect(getPixel(diamond, 9, 9, 4, 4)).toEqual(red);
+    expect(getPixel(diamond, 9, 9, 4, 2)).toEqual(red);
+    expect(getPixel(diamond, 9, 9, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    const plain = createPixelBuffer(9, 9);
+    drawBrushStamp(plain, 9, 9, 4, 4, 5, "square", red);
+    const rotated = createPixelBuffer(9, 9);
+    drawBrushStamp(rotated, 9, 9, 4, 4, 5, "square", red, undefined, "normal", "off", 64, undefined, 0);
+    expect(buffersEqual(plain, rotated)).toBe(true);
+    const circled = createPixelBuffer(9, 9);
+    drawBrushStamp(circled, 9, 9, 4, 4, 5, "circle", red, undefined, "normal", "off", 64, undefined, 45);
+    const circledPlain = createPixelBuffer(9, 9);
+    drawBrushStamp(circledPlain, 9, 9, 4, 4, 5, "circle", red);
+    expect(buffersEqual(circled, circledPlain)).toBe(true);
+  });
+
+  it("lists rotated line offsets symmetric about the dab center", () => {
+    const horizontal = rotatedStampOffsets(5, "line", 0);
+    expect(horizontal).toContainEqual([-2, 0]);
+    expect(horizontal).toContainEqual([2, 0]);
+    expect(horizontal).toHaveLength(5);
+    const vertical = rotatedStampOffsets(5, "line", 90);
+    expect(vertical).toContainEqual([0, -2]);
+    expect(vertical).toContainEqual([0, 2]);
+    expect(vertical).toHaveLength(5);
+    // Every offset has its mirror (Bresenham through the center; +0 fixes -0).
+    for (const [dx, dy] of rotatedStampOffsets(7, "line", 30)) {
+      expect(rotatedStampOffsets(7, "line", 30)).toContainEqual([0 - dx + 0, 0 - dy + 0]);
+    }
+    expect(rotatedStampOffsets(1, "line", 123)).toEqual([[0, 0]]);
+  });
+
+  it("stamps line dabs along mask segments", () => {
+    const width = 8;
+    const height = 5;
+    const mask = new Uint8Array(width * height);
+    stampSegmentCoverage(mask, width, height, 0, 2, 6, 2, 3, "line", false);
+    for (let x = 0; x <= 6; x += 1) {
+      expect(mask[2 * width + x]).toBe(255);
+    }
+    expect(mask[1 * width + 3]).toBe(0);
+    expect(mask[3 * width + 3]).toBe(0);
+  });
+
+  it("drags the line footprint along strokes", () => {
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    const buffer = createPixelBuffer(7, 7);
+    // A horizontal drag stamps a 5-wide line at every step: full row 3.
+    drawLineSegment(buffer, 7, 7, 0, 3, 6, 3, 5, "line", false, red);
+    for (let x = 0; x <= 6; x += 1) {
+      expect(getPixel(buffer, 7, 7, x, 3)).toEqual(red);
+    }
+    expect(getPixel(buffer, 7, 7, 3, 2)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    expect(getPixel(buffer, 7, 7, 3, 4)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    // A diagonal drag unions the horizontal dabs into a band.
+    const diagonal = createPixelBuffer(7, 7);
+    drawLineSegment(diagonal, 7, 7, 0, 0, 4, 4, 5, "line", false, red);
+    expect(getPixel(diagonal, 7, 7, 2, 2)).toEqual(red);
+    expect(getPixel(diagonal, 7, 7, 0, 2)).toEqual(red);
+    expect(getPixel(diagonal, 7, 7, 6, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  });
+
+  it("rotates single square dabs", () => {
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    const straight = createPixelBuffer(9, 9);
+    drawBrushStamp(straight, 9, 9, 4, 4, 5, "square", red);
+    const rotated = createPixelBuffer(9, 9);
+    drawBrushStamp(rotated, 9, 9, 4, 4, 5, "square", red, undefined, "normal", "off", 64, undefined, 45);
+    // Corner of the plain box falls outside the 45-degree diamond.
+    expect(getPixel(straight, 9, 9, 2, 2)).toEqual(red);
+    expect(getPixel(rotated, 9, 9, 2, 2)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    expect(getPixel(straight, 9, 9, 4, 4)).toEqual(red);
+    expect(getPixel(rotated, 9, 9, 4, 4)).toEqual(red);
+    expect(buffersEqual(straight, rotated)).toBe(false);
+  });
+
+  it("forwards the dab angle through line segments", () => {
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    const straight = createPixelBuffer(9, 9);
+    drawLineSegment(straight, 9, 9, 4, 4, 4, 4, 9, "square", false, red);
+    const rotated = createPixelBuffer(9, 9);
+    drawLineSegment(rotated, 9, 9, 4, 4, 4, 4, 9, "square", false, red, undefined, "normal", "off", 64, undefined, 45);
+    expect(getPixel(straight, 9, 9, 0, 0)).toEqual(red);
+    expect(getPixel(rotated, 9, 9, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    expect(getPixel(rotated, 9, 9, 4, 4)).toEqual(red);
   });
 
   it("draws brush lines with thickness and locks", () => {

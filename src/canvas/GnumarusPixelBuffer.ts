@@ -559,7 +559,7 @@ export function floodFill(
   return filled;
 }
 
-export type GnumarusBrushShape = "square" | "circle";
+export type GnumarusBrushShape = "square" | "circle" | "line";
 
 export const GNUMARUS_MIN_BRUSH_SIZE = 1;
 export const GNUMARUS_MAX_BRUSH_SIZE = 64;
@@ -591,7 +591,13 @@ export function roundBrushSizeForAliased(value: number, max: number = GNUMARUS_M
 
 /** Parse a brush shape, defaulting to square for missing or invalid input. */
 export function parseBrushShape(value: unknown): GnumarusBrushShape {
-  return value === "circle" ? "circle" : "square";
+  return value === "circle" ? "circle" : value === "line" ? "line" : "square";
+}
+
+/** Clamp a brush rotation angle to -180..180 degrees (0 when not finite). */
+export function clampBrushAngle(value: unknown): number {
+  const num = typeof value === "number" && Number.isFinite(value) ? value : 0;
+  return Math.min(180, Math.max(-180, num));
 }
 
 export type GnumarusPressureResponse = "none" | "size" | "opacity" | "size+opacity";
@@ -647,6 +653,64 @@ export function pressureAlphaMultiplier(response: GnumarusPressureResponse, pres
 }
 
 /**
+ * Integer dab offsets (relative to the rounded dab center) of a rotated tip.
+ * Angles are degrees clockwise (screen space, y down): 0 keeps the unrotated
+ * footprint. Line walks one Bresenham segment of length `tip` through the
+ * center; square tests the inverse-rotated box (same set as the plain box
+ * at angle 0, up to the shared 1e-9 epsilon).
+ */
+export function rotatedStampOffsets(tip: number, shape: "square" | "line", angleDeg: number): Array<[number, number]> {
+  const angle = (clampBrushAngle(angleDeg) * Math.PI) / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const out: Array<[number, number]> = [];
+  const push = (dx: number, dy: number): void => {
+    // Normalize -0 so offsets compare cleanly (+0 everywhere).
+    out.push([dx === 0 ? 0 : dx, dy === 0 ? 0 : dy]);
+  };
+  if (shape === "line") {
+    const half = (tip - 1) / 2;
+    const ex = Math.round(half * cos);
+    const ey = Math.round(half * sin);
+    let x = -ex;
+    let y = -ey;
+    const dx = Math.abs(ex * 2);
+    const dy = Math.abs(ey * 2);
+    const sx = ex >= 0 ? 1 : -1;
+    const sy = ey >= 0 ? 1 : -1;
+    let err = dx - dy;
+    for (;;) {
+      push(x, y);
+      if (x === ex && y === ey) {
+        break;
+      }
+      const e2 = 2 * err;
+      if (e2 > -dy) {
+        err -= dy;
+        x += sx;
+      }
+      if (e2 < dx) {
+        err += dx;
+        y += sy;
+      }
+    }
+    return out;
+  }
+  const halfBox = (tip - 1) / 2;
+  const reach = Math.ceil(halfBox * (Math.abs(cos) + Math.abs(sin)));
+  for (let oy = -reach; oy <= reach; oy += 1) {
+    for (let ox = -reach; ox <= reach; ox += 1) {
+      const rx = ox * cos + oy * sin;
+      const ry = -ox * sin + oy * cos;
+      if (Math.max(Math.abs(rx), Math.abs(ry)) <= halfBox + 1e-9) {
+        push(ox, oy);
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Stamp a solid brush tip centered near (centerX, centerY).
  * Square paints the full size x size box; circle paints the disk mask
  * (squared distance from the box center within (size/2)^2 - 0.5, floored at 0,
@@ -667,11 +731,23 @@ export function drawBrushStamp(
   wrap: GnumarusWrapMode = "off",
   maxSize: number = GNUMARUS_MAX_BRUSH_SIZE,
   gate: GnumarusPixelWriteGate | undefined = undefined,
+  angleDeg = 0,
 ): void {
   const tip = clampBrushSize(size, maxSize);
   const anchor = Math.floor((tip - 1) / 2);
   const left = Math.round(centerX) - anchor;
   const top = Math.round(centerY) - anchor;
+  const angle = clampBrushAngle(angleDeg);
+  if (shape === "line" || (shape !== "circle" && angle !== 0)) {
+    // Rotated or line tip: one generic per-pixel pass (locks, blend,
+    // wrap and gate all honored by setPixel). Circle ignores the angle.
+    const cx = Math.round(centerX);
+    const cy = Math.round(centerY);
+    for (const [dx, dy] of rotatedStampOffsets(tip, shape, angle)) {
+      setPixel(buffer, width, height, cx + dx, cy + dy, color, locked, blend, wrap, gate);
+    }
+    return;
+  }
   if (gate !== undefined && wrap === "off") {
     // Pixel-art brushes (spray/dither/shade) need per-pixel decisions, so
     // they take the instructive setPixel path instead of the fast blits.
@@ -975,6 +1051,7 @@ export function drawBrushLine(
   wrap: GnumarusWrapMode = "off",
   maxSize: number = GNUMARUS_MAX_BRUSH_SIZE,
   gate: GnumarusPixelWriteGate | undefined = undefined,
+  angleDeg = 0,
 ): void {
   const tip = clampBrushSize(size, maxSize);
   if (tip <= 1) {
@@ -993,7 +1070,7 @@ export function drawBrushLine(
   let err = dx - dy;
   if (!useSpacing) {
     for (;;) {
-      drawBrushStamp(buffer, width, height, x, y, tip, shape, color, locked, blend, wrap, maxSize, gate);
+      drawBrushStamp(buffer, width, height, x, y, tip, shape, color, locked, blend, wrap, maxSize, gate, angleDeg);
       if (x === x1 && y === y1) {
         break;
       }
@@ -1011,7 +1088,7 @@ export function drawBrushLine(
   }
   let lastX = x0;
   let lastY = y0;
-  drawBrushStamp(buffer, width, height, x0, y0, tip, shape, color, locked, blend, wrap, maxSize, gate);
+  drawBrushStamp(buffer, width, height, x0, y0, tip, shape, color, locked, blend, wrap, maxSize, gate, angleDeg);
   for (;;) {
     if (x === x1 && y === y1) {
       break;
@@ -1031,7 +1108,7 @@ export function drawBrushLine(
     const ddx = x - lastX;
     const ddy = y - lastY;
     if (ddx * ddx + ddy * ddy >= stepSquared) {
-      drawBrushStamp(buffer, width, height, x, y, tip, shape, color, locked, blend, wrap, maxSize, gate);
+      drawBrushStamp(buffer, width, height, x, y, tip, shape, color, locked, blend, wrap, maxSize, gate, angleDeg);
       lastX = x;
       lastY = y;
     }
@@ -1039,7 +1116,7 @@ export function drawBrushLine(
   const edx = x1 - lastX;
   const edy = y1 - lastY;
   if (edx !== 0 || edy !== 0) {
-    drawBrushStamp(buffer, width, height, x1, y1, tip, shape, color, locked, blend, wrap, maxSize, gate);
+    drawBrushStamp(buffer, width, height, x1, y1, tip, shape, color, locked, blend, wrap, maxSize, gate, angleDeg);
   }
 }
 
@@ -1144,13 +1221,17 @@ export function drawLineSegment(
   wrap: GnumarusWrapMode = "off",
   maxSize: number = GNUMARUS_MAX_BRUSH_SIZE,
   gate: GnumarusPixelWriteGate | undefined = undefined,
+  angleDeg = 0,
 ): void {
   const thick = antialiased ? clampBrushSizeFloat(lineWidth, maxSize) : roundBrushSizeForAliased(lineWidth, maxSize);
-  if (!antialiased) {
+  const angle = clampBrushAngle(angleDeg);
+  // The line tip has no swept-capsule form (always stamp rotated dabs,
+  // hence always aliased), and neither does a rotated square.
+  if (!antialiased || shape === "line" || (shape === "square" && angle !== 0)) {
     if (thick <= 1) {
       drawPixelLine(buffer, width, height, x0, y0, x1, y1, color, locked, blend, wrap, gate);
     } else {
-      drawBrushLine(buffer, width, height, x0, y0, x1, y1, thick, shape, color, locked, blend, wrap, maxSize, gate);
+      drawBrushLine(buffer, width, height, x0, y0, x1, y1, thick, shape, color, locked, blend, wrap, maxSize, gate, angle);
     }
     return;
   }
@@ -1332,10 +1413,45 @@ function stampDotCoverage(
   shape: GnumarusBrushShape,
   wrap: GnumarusWrapMode = "off",
   allow: ((x: number, y: number) => boolean) | undefined = undefined,
+  angleDeg = 0,
 ): void {
   const anchor = Math.floor((tip - 1) / 2);
   const left = Math.round(centerX) - anchor;
   const top = Math.round(centerY) - anchor;
+  const angle = clampBrushAngle(angleDeg);
+  if (shape === "line" || (shape !== "circle" && angle !== 0)) {
+    // Line tip (always) or rotated square: hard stamp through the mask plot
+    // closure (wrap, gate and max-union semantics preserved).
+    const plot = (x: number, y: number): void => {
+      if (allow !== undefined && !allow(x, y)) {
+        return;
+      }
+      if (wrap !== "off") {
+        const wrapped = wrapLayerPixel(x, y, width, height, wrap);
+        if (wrapped === null) {
+          return;
+        }
+        const at = wrapped.y * width + wrapped.x;
+        if (255 > (mask[at] ?? 0)) {
+          mask[at] = 255;
+        }
+        return;
+      }
+      if (x < 0 || y < 0 || x >= width || y >= height) {
+        return;
+      }
+      const at = y * width + x;
+      if (255 > (mask[at] ?? 0)) {
+        mask[at] = 255;
+      }
+    };
+    const cx = Math.round(centerX);
+    const cy = Math.round(centerY);
+    for (const [dx, dy] of rotatedStampOffsets(tip, shape, angle)) {
+      plot(cx + dx, cy + dy);
+    }
+    return;
+  }
   if (wrap !== "off") {
     const stamp = (x: number, y: number): void => {
       if (allow !== undefined && !allow(x, y)) {
@@ -1440,6 +1556,7 @@ export function stampSegmentCoverage(
   wrap: GnumarusWrapMode = "off",
   maxSize: number = GNUMARUS_MAX_BRUSH_SIZE,
   gate: GnumarusPixelWriteGate | undefined = undefined,
+  angleDeg = 0,
 ): void {
   if (mask.length !== width * height) {
     return;
@@ -1467,7 +1584,10 @@ export function stampSegmentCoverage(
       mask[at] = value;
     }
   };
-  if (!antialiased) {
+  const angle = clampBrushAngle(angleDeg);
+  // The line tip has no swept-capsule form (always stamp rotated dabs,
+  // hence always aliased), and neither does a rotated square.
+  if (!antialiased || shape === "line" || (shape === "square" && angle !== 0)) {
     const thick = roundBrushSizeForAliased(size, maxSize);
     // Integer rasterization (Bresenham walkers require integers to terminate).
     let x = Math.round(x0);
@@ -1508,7 +1628,7 @@ export function stampSegmentCoverage(
       const sy = y < endY ? 1 : -1;
       let err = dx - dy;
       for (;;) {
-        stampDotCoverage(mask, width, height, x, y, thick, shape, wrap, gate === undefined ? undefined : (x, y) => gate.allow(x, y));
+        stampDotCoverage(mask, width, height, x, y, thick, shape, wrap, gate === undefined ? undefined : (x, y) => gate.allow(x, y), angleDeg);
         if (x === endX && y === endY) {
           break;
         }
@@ -1524,7 +1644,7 @@ export function stampSegmentCoverage(
       }
       return;
     }
-    stampDotCoverage(mask, width, height, x, y, thick, shape, wrap, gate === undefined ? undefined : (x, y) => gate.allow(x, y));
+    stampDotCoverage(mask, width, height, x, y, thick, shape, wrap, gate === undefined ? undefined : (x, y) => gate.allow(x, y), angleDeg);
     let lastX = x;
     let lastY = y;
     const dx = Math.abs(endX - x);
@@ -1551,13 +1671,13 @@ export function stampSegmentCoverage(
       const ddx = x - lastX;
       const ddy = y - lastY;
       if (ddx * ddx + ddy * ddy >= stepSquared) {
-        stampDotCoverage(mask, width, height, x, y, thick, shape, wrap, gate === undefined ? undefined : (x, y) => gate.allow(x, y));
+        stampDotCoverage(mask, width, height, x, y, thick, shape, wrap, gate === undefined ? undefined : (x, y) => gate.allow(x, y), angleDeg);
         lastX = x;
         lastY = y;
       }
     }
     if (lastX !== endX || lastY !== endY) {
-      stampDotCoverage(mask, width, height, endX, endY, thick, shape, wrap, gate === undefined ? undefined : (x, y) => gate.allow(x, y));
+      stampDotCoverage(mask, width, height, endX, endY, thick, shape, wrap, gate === undefined ? undefined : (x, y) => gate.allow(x, y), angleDeg);
     }
     return;
   }

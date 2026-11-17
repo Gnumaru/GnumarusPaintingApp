@@ -162,7 +162,7 @@ export function parseBrushPreset(jsonText: string): GnumarusBrushPreset {
     name,
     brushSize: numeric["brushSize"] ?? 1,
     brushSizeMin: numeric["brushSizeMin"] ?? numeric["brushSize"] ?? 1,
-    brushShape: checkString(parsed["brushShape"], "brushShape", ["square", "circle"]) as GnumarusBrushShape,
+    brushShape: checkString(parsed["brushShape"], "brushShape", ["square", "circle", "line"]) as GnumarusBrushShape,
     brushTipKind: checkString(parsed["brushTipKind"], "brushTipKind", ["pixel", "soft", "image"]) as GnumarusBrushTipKind,
     brushHardness: numeric["brushHardness"] ?? 0.5,
     brushSpacing: numeric["brushSpacing"] ?? 0.15,

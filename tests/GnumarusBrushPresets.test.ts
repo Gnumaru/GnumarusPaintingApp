@@ -169,6 +169,8 @@ describe("GnumarusBrushPresets", () => {
     expect(parseBrushPreset(JSON.stringify({ ...base, brushSize: 999 })).brushSize).toBe(999);
     expect(() => parseBrushPreset(JSON.stringify({ ...base, brushTipKind: "fancy" }))).toThrow(GnumarusBrushPresetError);
     expect(() => parseBrushPreset(JSON.stringify({ ...base, accumulate: "yes" }))).toThrow(GnumarusBrushPresetError);
+    expect(parseBrushPreset(JSON.stringify({ ...base, brushShape: "line" })).brushShape).toBe("line");
+    expect(() => parseBrushPreset(JSON.stringify({ ...base, brushShape: "triangle" }))).toThrow(GnumarusBrushPresetError);
     expect(() => parseBrushPresetList("{}")).toThrow(GnumarusBrushPresetError);
     expect(() => parseBrushPresetList("[{}]")).toThrow(GnumarusBrushPresetError);
   });

@@ -289,6 +289,7 @@ import {
 import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
 import {
   applyAlphaPlane,
+  clampBrushAngle,
   clampBrushSizeFloat,
   clampLayerDim,
   cropBufferBox,
@@ -2106,6 +2107,7 @@ export class GnumarusShell extends LitElement {
     brushSize: { type: Number },
     brushSizeMin: { type: Number },
     brushShape: { type: String },
+    brushAngle: { type: Number },
     presetName: { type: String },
     brushTipKind: { type: String },
     drawerFront: { type: Object },
@@ -2373,6 +2375,7 @@ export class GnumarusShell extends LitElement {
   declare brushSize: number;
   declare brushSizeMin: number;
   declare brushShape: GnumarusBrushShape;
+  declare brushAngle: number;
   declare presetName: string;
   declare brushPresets: GnumarusBrushPreset[];
   declare brushTipKind: GnumarusBrushTipKind;
@@ -2638,6 +2641,7 @@ export class GnumarusShell extends LitElement {
     this.brushSizeMin = 1;
     this.maxBrushSize = DEFAULT_BRUSH_SETTINGS.maxBrushSize;
     this.brushShape = "circle";
+    this.brushAngle = 0;
     this.presetName = "";
     this.brushPresets = [];
     this.brushTipKind = "pixel";
@@ -6118,7 +6122,20 @@ export class GnumarusShell extends LitElement {
                 <select id="brushShape${sfx}" .value=${this.brushShape} @change=${(): void => this.applyBrushShapeFromDialog(sfx)}>
                   <option value="square">${tr("val.square")}</option>
                   <option value="circle">${tr("val.circle")}</option>
+                  <option value="line">${tr("val.line")}</option>
                 </select>
+              </label>
+              <label title=${tr("opt.brushAngleHint")}
+                >${tr("opt.brushAngle")}
+                <input
+                  type="number"
+                  id="brushAngle${sfx}"
+                  min="-180"
+                  max="180"
+                  step="1"
+                  .value=${String(Math.round(this.brushAngle))}
+                  @input=${(): void => this.applyBrushAngleFromDialog(sfx)}
+                />
               </label>
               <label title=${tr("opt.brushTipHint")}
                 >${tr("opt.brushTip")}
@@ -9249,6 +9266,9 @@ export class GnumarusShell extends LitElement {
 
   /** Translated display label for a brush-shape value. */
   private shapeLabel(shape: string): string {
+    if (shape === "line") {
+      return tr("val.line");
+    }
     return tr(shape === "square" ? "val.square" : "val.circle");
   }
 
@@ -9888,12 +9908,20 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = this.brushSizeStatus();
   }
 
-  /** Test hook: set the brush shape (square/circle, defaults to circle). */
+  /** Test hook: set the brush shape (square/circle/line, defaults to square). */
   setBrushShape(shape: GnumarusBrushShape): void {
     const parsed = parseBrushShape(shape);
     this.brushShape = parsed;
     this.engine?.setBrushShape(parsed);
     this.statusMessage = tr("status.brushShape", { value: this.shapeLabel(parsed) });
+  }
+
+  /** Test hook: set the fixed dab rotation in degrees (-180..180). */
+  setBrushAngle(degrees: number): void {
+    const clamped = clampBrushAngle(degrees);
+    this.brushAngle = clamped;
+    this.engine?.setBrushAngle(clamped);
+    this.statusMessage = tr("status.brushAngle", { value: String(clamped) });
   }
 
   /** Test hook: set the brush pressure response (none/size/opacity/size+opacity). */
@@ -10165,6 +10193,15 @@ export class GnumarusShell extends LitElement {
     this.brushShape = shape;
     this.engine?.setBrushShape(shape);
     this.statusMessage = tr("status.brushShape", { value: this.shapeLabel(shape) });
+  }
+
+  private applyBrushAngleFromDialog(scope = ""): void {
+    const input = this.shadowRoot?.getElementById("brushAngle" + scope) as HTMLInputElement | null;
+    const raw = Number(input?.value ?? "0");
+    const clamped = Number.isFinite(raw) ? Math.min(180, Math.max(-180, Math.round(raw))) : 0;
+    this.brushAngle = clamped;
+    this.engine?.setBrushAngle(clamped);
+    this.statusMessage = tr("status.brushAngle", { value: String(clamped) });
   }
 
   private currentDialogBrushTipKind(scope = ""): GnumarusBrushTipKind {

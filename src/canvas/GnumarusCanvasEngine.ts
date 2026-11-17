@@ -53,6 +53,7 @@ import { rasterizeLaidOutText } from "../text/GnumarusTextRaster";
 import {
   applyCoverageMask,
   clearPixelBuffer,
+  clampBrushAngle,
   clampBrushSizeFloat,
   clampLayerDim,
   compositePixelOver,
@@ -1009,6 +1010,8 @@ export class GnumarusCanvasEngine {
   /** Ceiling for brush/line/curve sizes (brush setting, default 512, up to 2048). */
   private maxBrushSize = DEFAULT_BRUSH_SETTINGS.maxBrushSize;
   private brushShape: GnumarusBrushShape = "circle";
+  /** Fixed dab rotation in degrees (-180..180); line and rotated square pixel stamps. */
+  private brushAngle = 0;
   private brushTipKind: GnumarusBrushTipKind = "pixel";
   private brushHardness = DEFAULT_BRUSH_HARDNESS;
   private brushSpacing = DEFAULT_BRUSH_SPACING;
@@ -9138,6 +9141,22 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
+  /** Fixed dab rotation in degrees (-180..180); line and rotated square pixel stamps. */
+  getBrushAngle(): number {
+    return this.brushAngle;
+  }
+
+  setBrushAngle(degrees: number): boolean {
+    const next = clampBrushAngle(degrees);
+    if (next === this.brushAngle) {
+      return false;
+    }
+    this.brushAngle = next;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
   getBrushTipKind(): GnumarusBrushTipKind {
     return this.brushTipKind;
   }
@@ -9773,7 +9792,7 @@ export class GnumarusCanvasEngine {
         drawBrushStamp(
           tex.buffer, tex.width, tex.height, Math.round(at.x), Math.round(at.y),
           this.brushSize, this.brushShape, this.pressureBrushColor(), layer.lockedChannels, this.blendMode,
-          this.wrapMode, this.maxBrushSize,
+          this.wrapMode, this.maxBrushSize, undefined, this.brushAngle,
         );
         if (this.symmetryMode !== "off") {
           for (const mirror of mirrorSegmentEndsOnAxis(
@@ -9783,7 +9802,7 @@ export class GnumarusCanvasEngine {
             drawBrushStamp(
               tex.buffer, tex.width, tex.height, mirror.x0, mirror.y0,
               this.brushSize, this.brushShape, this.pressureBrushColor(), layer.lockedChannels, this.blendMode,
-              this.wrapMode, this.maxBrushSize,
+              this.wrapMode, this.maxBrushSize, undefined, this.brushAngle,
             );
           }
         }
@@ -10095,7 +10114,8 @@ export class GnumarusCanvasEngine {
 
   setLineShape(shape: GnumarusBrushShape): boolean {
     const parsed = parseBrushShape(shape);
-    if (parsed === this.lineShape) {
+    // Width profiles stay square/circle: "line" is a dab footprint, not a cap.
+    if (parsed === "line" || parsed === this.lineShape) {
       return false;
     }
     this.lineShape = parsed;
@@ -10511,7 +10531,8 @@ export class GnumarusCanvasEngine {
 
   setCurveShape(shape: GnumarusBrushShape): boolean {
     const parsed = parseBrushShape(shape);
-    if (parsed === this.curveShape) {
+    // Width profiles stay square/circle: "line" is a dab footprint, not a cap.
+    if (parsed === "line" || parsed === this.curveShape) {
       return false;
     }
     this.curveShape = parsed;
@@ -10663,6 +10684,17 @@ export class GnumarusCanvasEngine {
   }
 
   /** Merge one dab bbox into a dirty union (null starts the box). */
+  /** Half-extent of one dab for dirty-rect tracking: a rotated square tip
+   * reaches its diagonal, while line tips always fit the tip box. */
+  private dabReach(size: number): number {
+    const rounded = Math.round(size);
+    if (this.brushShape !== "square" || this.brushAngle === 0) {
+      return (this.pencilAntialias ? size : rounded) / 2 + 1;
+    }
+    const radians = (Math.abs(this.brushAngle) * Math.PI) / 180;
+    return Math.ceil(((rounded - 1) / 2) * (Math.abs(Math.cos(radians)) + Math.abs(Math.sin(radians)))) + 1;
+  }
+
   private unionDabDirty(
     acc: GnumarusDabDirtyRect | null,
     centerX: number,
@@ -10938,8 +10970,9 @@ export class GnumarusCanvasEngine {
         this.wrapMode,
         this.maxBrushSize,
         gate,
+        this.brushAngle,
       );
-      const reach = (this.pencilAntialias ? size : Math.round(size)) / 2 + 1;
+      const reach = this.dabReach(size);
       const dirty: GnumarusDabDirtyRect = {
         left: Math.floor(Math.min(x0, x1) - reach),
         top: Math.floor(Math.min(y0, y1) - reach),
@@ -10964,8 +10997,9 @@ export class GnumarusCanvasEngine {
         this.wrapMode,
         this.maxBrushSize,
         gate,
+        this.brushAngle,
       );
-      const reach = (this.pencilAntialias ? size : Math.round(size)) / 2 + 1;
+      const reach = this.dabReach(size);
       const dirty: GnumarusDabDirtyRect = {
         left: Math.floor(Math.min(x0, x1) - reach),
         top: Math.floor(Math.min(y0, y1) - reach),
@@ -10992,6 +11026,7 @@ export class GnumarusCanvasEngine {
       this.wrapMode,
       this.maxBrushSize,
       gate,
+      this.brushAngle,
     );
   }
 
@@ -13785,7 +13820,7 @@ export class GnumarusCanvasEngine {
     }
     const shade = this.shadeModeActive();
     if (shade && this.strokeBase !== null && this.strokeMask !== null) {
-      const reach = (this.pencilAntialias ? size : Math.round(size)) / 2 + 1;
+      const reach = this.dabReach(size);
       let dirty: GnumarusDabDirtyRect | null = null;
       const ends = [
         { x0: qx0, y0: qy0, x1: qx1, y1: qy1 },
@@ -13808,6 +13843,7 @@ export class GnumarusCanvasEngine {
           this.wrapMode,
           this.maxBrushSize,
           gate,
+          this.brushAngle,
         );
         dirty = this.unionDabDirty(
           this.unionDabDirty(dirty, end.x0, end.y0, reach),
@@ -13827,7 +13863,7 @@ export class GnumarusCanvasEngine {
           : mirrorSegmentEndsOnAxis(qx0, qy0, qx1, qy1, this.symmetryCenter.x, this.symmetryCenter.y, this.symmetryMode)),
       ];
       let dirty: GnumarusDabDirtyRect | null = null;
-      const reach = (this.pencilAntialias ? size : Math.round(size)) / 2 + 1;
+      const reach = this.dabReach(size);
       for (const end of ends) {
         stampSegmentCoverage(
           this.strokeMask,
@@ -13843,6 +13879,7 @@ export class GnumarusCanvasEngine {
           this.wrapMode,
           this.maxBrushSize,
           gate,
+          this.brushAngle,
         );
         dirty = this.unionDabDirty(
           this.unionDabDirty(dirty, end.x0, end.y0, reach),
@@ -13881,6 +13918,7 @@ export class GnumarusCanvasEngine {
         this.wrapMode,
         this.maxBrushSize,
         gate,
+        this.brushAngle,
       );
     }
   }
@@ -15534,6 +15572,18 @@ export class GnumarusCanvasEngine {
       this.previewTip.style.left = `${mouse.x - rect.left - size / 2}px`;
       this.previewTip.style.top = `${mouse.y - rect.top - size / 2}px`;
       this.previewTip.style.borderRadius = tipShape === "circle" ? "50%" : "0";
+      // The line tip previews as a rotated bar (positive angles clockwise,
+      // matching the stamp); a rotated square shows its own rotation.
+      // Only the pencil uses dab tips (line/curve shapes are width profiles).
+      if (this.tool === "pencil" && tipShape === "line") {
+        this.previewTip.style.height = "2px";
+        this.previewTip.style.top = `${mouse.y - rect.top - 1}px`;
+        this.previewTip.style.transform = `rotate(${this.brushAngle}deg)`;
+      } else if (this.tool === "pencil" && tipShape === "square" && this.brushAngle !== 0) {
+        this.previewTip.style.transform = `rotate(${this.brushAngle}deg)`;
+      } else {
+        this.previewTip.style.transform = "";
+      }
     }
     this.updateTilePreview(mouse);
     this.syncTileRubber();
