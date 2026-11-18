@@ -29,7 +29,8 @@ Dinâmicas de pixel
 * **Dithering** (Bayer 4x4): o pixel só pinta quando o limiar da matriz
   supera o alfa efetivo. Com caneta, pressione leve para padrões
   ralos; com mouse, baixe o **Fluxo** — ele aparece para todas as
-  pontas e ralenta o padrão como a pressão faria.
+  pontas e ralenta o padrão como a pressão faria. Os pixels pintados
+  mantêm sempre opacidade total: só a densidade do padrão varia.
 * **Sombra por paleta**: avança cada pixel pintado pela paleta de
   sombreamento em vez de cor chapada.
 

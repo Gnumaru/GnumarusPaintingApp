@@ -3,6 +3,7 @@ import {
   applyPaintDualTip,
   airbrushDabsDue,
   blendDabAngle,
+  ditherPaintColor,
   clampAirbrushRate,
   clampBrushFlow,
   clampBrushHardness,
@@ -181,6 +182,14 @@ describe("GnumarusPaintBrush", () => {
         expect(pixelSprayAllow(7, 3, x, y, -1)).toBe(false);
       }
     }
+  });
+
+  it("ditherPaintColor keeps full base opacity under dithering", () => {
+    const base = { r: 10, g: 20, b: 30, a: 200 };
+    const pressured = { r: 10, g: 20, b: 30, a: 100 };
+    expect(ditherPaintColor(base, pressured, true)).toEqual({ r: 10, g: 20, b: 30, a: 200 });
+    expect(ditherPaintColor(base, pressured, false)).toEqual(pressured);
+    expect(ditherPaintColor(base, base, true)).toEqual(base);
   });
 
   it("pixelSprayAllow is deterministic per pixel and varies across pixels and strokes", () => {

@@ -126,6 +126,7 @@ import {
   DEFAULT_PAINT_SMUDGE_RATE,
   DEFAULT_PAINT_SMUDGE_WET,
   blendDabAngle,
+  ditherPaintColor,
   evalPressureCurve,
   normalizePointerTilt,
   paintDabFuzzyAlpha,
@@ -11111,6 +11112,8 @@ export class GnumarusCanvasEngine {
     const size = this.pressureBrushSize();
     const color = this.pressureBrushColor();
     const gate = this.pixelArtGate(color);
+    // Dithered dabs keep full opacity: pressure already thins the pattern.
+    const paint = ditherPaintColor(this.color, color, this.brushDither);
     if (this.tool === "pencil" && this.brushSource === "selection" && this.selectionBrush !== null) {
       this.paintSelectionStroke(tex, locked, x0, y0, x1, y1, gate);
       return;
@@ -11149,7 +11152,7 @@ export class GnumarusCanvasEngine {
         if (shade) {
           this.repaintShadeFromMask(tex, base, mask, locked, dirty);
         } else {
-          this.repaintFromMask(tex, base, mask, locked, color, dirty);
+          this.repaintFromMask(tex, base, mask, locked, paint, dirty);
         }
         return;
       }
@@ -11167,7 +11170,7 @@ export class GnumarusCanvasEngine {
               tex.buffer[at + 3] = base[at + 3]!;
             }
           }
-          setPixel(tex.buffer, tex.width, tex.height, x, y, color, locked, this.blendMode, undefined, gate);
+          setPixel(tex.buffer, tex.width, tex.height, x, y, paint, locked, this.blendMode, undefined, gate);
         });
         return;
       }
@@ -11227,7 +11230,7 @@ export class GnumarusCanvasEngine {
         right: Math.ceil(Math.max(x0, x1) + reach) + 1,
         bottom: Math.ceil(Math.max(y0, y1) + reach) + 1,
       };
-      this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked, color, dirty);
+      this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked, paint, dirty);
       return;
     }
     drawLineSegment(
@@ -11241,7 +11244,7 @@ export class GnumarusCanvasEngine {
       size,
       this.brushShape,
       this.pencilAntialias,
-      color,
+      paint,
       locked,
       this.blendMode,
       this.wrapMode,
@@ -14031,6 +14034,8 @@ export class GnumarusCanvasEngine {
     const size = this.pressureBrushSize();
     const color = this.pressureBrushColor();
     const gate = this.pixelArtGate(color);
+    // Dithered dabs keep full opacity: pressure already thins the pattern.
+    const paint = ditherPaintColor(this.color, color, this.brushDither);
     if (this.tool === "pencil" && this.brushSource === "selection" && this.selectionBrush !== null) {
       this.paintSelectionStroke(tex, locked, qx0, qy0, qx1, qy1, gate);
       if (this.symmetryMode !== "off") {
@@ -14118,7 +14123,7 @@ export class GnumarusCanvasEngine {
           reach,
         );
       }
-      this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked, color, dirty);
+      this.repaintFromMask(tex, this.strokeBase, this.strokeMask, locked, paint, dirty);
       return;
     }
     // The aliased rasterizer walks integer pixels with Bresenham and only
@@ -14142,7 +14147,7 @@ export class GnumarusCanvasEngine {
         size,
         this.brushShape,
         this.pencilAntialias,
-        color,
+        paint,
         locked,
         this.blendMode,
         this.wrapMode,

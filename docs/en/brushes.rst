@@ -5,7 +5,7 @@ Using presets
 -------------
 
 The preset select in the tool options bar applies a full brush setup at
-once (19 built-ins: Pixel Hard, Pixel Spray, Pixel Dither, Palette
+once (21 built-ins: Pixel Hard, Pixel Hard (Pressure = Size), Pixel Spray, Pixel Spray (Pressure = Size), Pixel Dither, Palette
 Shade, Soft Round, Chalk, Ink, Airbrush, Smudge, hard/soft Erasers,
 Glaze, Dry Brush, Charcoal, Blender, Spray, Chisel Marker, Velocity
 Ink, Tilt Pencil). Tweak anything afterwards freely.

@@ -142,6 +142,30 @@ test("brush preset names translate to Brazilian Portuguese @recent", async ({ pa
   await expect(options.locator("select#brushPreset")).toHaveValue("Pixel Dither");
 });
 
+test("Pixel Spray (Pressure = Size) applies size response with 8/1 range @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  const options = page.locator('gnumarus-shell [aria-label="Pencil options"]');
+  await options.locator("select#brushPreset").selectOption("Pixel Spray (Pressure = Size)");
+  await expect(page.locator("gnumarus-shell")).toContainText("Preset: Pixel Spray (Pressure = Size)");
+  await expect(options.locator("input#brushSize")).toHaveValue("8");
+  await expect(options.locator("input#brushSizeMin")).toHaveValue("1");
+  await expect(options.locator("select#pressureResponse")).toHaveValue("size");
+});
+
+test("Pixel Hard (Pressure = Size) applies size response with 8/1 range @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  const options = page.locator('gnumarus-shell [aria-label="Pencil options"]');
+  await options.locator("select#brushPreset").selectOption("Pixel Hard (Pressure = Size)");
+  await expect(page.locator("gnumarus-shell")).toContainText("Preset: Pixel Hard (Pressure = Size)");
+  await expect(options.locator("input#brushSize")).toHaveValue("8");
+  await expect(options.locator("input#brushSizeMin")).toHaveValue("1");
+  await expect(options.locator("select#pressureResponse")).toHaveValue("size");
+});
+
 test("brush presets apply, save and persist", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
@@ -332,10 +356,10 @@ test("pixel-art spray dither and palette shade @recent", async ({ page }) => {
   await setPencil(page, "#ff0000");
   // Pixel-art brushes lead the preset list.
   expect(await bar.locator("select#brushPreset option").allTextContents()).toEqual(
-    expect.arrayContaining(["Pixel Hard", "Pixel Spray", "Pixel Dither", "Palette Shade"]),
+    expect.arrayContaining(["Pixel Hard", "Pixel Hard (Pressure = Size)", "Pixel Spray", "Pixel Spray (Pressure = Size)", "Pixel Dither", "Palette Shade"]),
   );
-  const firstOptions = (await bar.locator("select#brushPreset option").allTextContents()).slice(0, 4);
-  expect(firstOptions).toEqual(["Pixel Hard", "Pixel Spray", "Pixel Dither", "Palette Shade"]);
+  const firstOptions = (await bar.locator("select#brushPreset option").allTextContents()).slice(0, 6);
+  expect(firstOptions).toEqual(["Pixel Hard", "Pixel Hard (Pressure = Size)", "Pixel Spray", "Pixel Spray (Pressure = Size)", "Pixel Dither", "Palette Shade"]);
 
   // Solid reference: Pixel Hard at size 8.
   await loadBlankProject(page, 64);

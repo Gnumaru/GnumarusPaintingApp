@@ -604,6 +604,23 @@ export function pixelSprayAllow(
   return hashDabRandom(mixed, 0) < density;
 }
 
+/**
+ * Paint color for pixel dabs under ordered dithering: the Bayer gate
+ * already thins the pattern with pressure, so painted pixels keep the
+ * full base opacity instead of stacking a second alpha fade on top.
+ * Without dithering the pressure-scaled color paints as usual.
+ */
+export function ditherPaintColor(
+  base: GnumarusRgba,
+  pressured: GnumarusRgba,
+  dither: boolean,
+): GnumarusRgba {
+  if (!dither) {
+    return pressured;
+  }
+  return { r: base.r, g: base.g, b: base.b, a: base.a };
+}
+
 /** Per-dab dynamics bundle: fuzzy jitter plus anchored paper grain. */
 export interface GnumarusPaintDabJitter {
   fuzzy: number;

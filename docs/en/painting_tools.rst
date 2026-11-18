@@ -28,7 +28,8 @@ Pixel dynamics
 * **Dither** (Bayer 4x4): a pixel paints only when its matrix threshold
   beats the effective alpha. With a pen, press lightly for sparse
   patterns; with a mouse, lower **Flow** — flow is shown for every tip
-  and thins the pattern exactly like pressure would.
+  and thins the pattern exactly like pressure would. Painted pixels
+  always keep full opacity: only the pattern density varies.
 * **Palette shade**: steps each painted pixel through the shading
   palette instead of laying flat color.
 

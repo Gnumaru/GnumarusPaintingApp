@@ -5,7 +5,7 @@ Usando predefinições
 --------------------
 
 O seletor na barra de opções aplica uma configuração completa de uma
-vez (19 embutidas: Pixel Hard, Pixel Spray, Pixel Dither, Palette
+vez (21 embutidas: Pixel Hard, Pixel Hard (Pressure = Size), Pixel Spray, Pixel Spray (Pressure = Size), Pixel Dither, Palette
 Shade, Soft Round, Chalk, Ink, Airbrush, Smudge, borrachas dura/suave,
 Glaze, Dry Brush, Charcoal, Blender, Spray, Chisel Marker, Velocity
 Ink, Tilt Pencil). Depois ajuste à vontade.

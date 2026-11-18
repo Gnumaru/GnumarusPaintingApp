@@ -34,6 +34,7 @@ describe("GnumarusBrushPresets", () => {
     const names = BUILT_IN_BRUSH_PRESETS.map((preset) => preset.name);
     for (const expected of [
       "Pixel Hard",
+      "Pixel Hard (Pressure = Size)",
       "Soft Round",
       "Chalk",
       "Ink",
@@ -50,6 +51,7 @@ describe("GnumarusBrushPresets", () => {
       "Velocity Ink",
       "Tilt Pencil",
       "Pixel Spray",
+      "Pixel Spray (Pressure = Size)",
       "Pixel Dither",
       "Palette Shade",
     ]) {
@@ -59,7 +61,50 @@ describe("GnumarusBrushPresets", () => {
 
   it("lists pixel-art brushes first", () => {
     const names = BUILT_IN_BRUSH_PRESETS.map((preset) => preset.name);
-    expect(names.slice(0, 4)).toEqual(["Pixel Hard", "Pixel Spray", "Pixel Dither", "Palette Shade"]);
+    expect(names.slice(0, 6)).toEqual([
+      "Pixel Hard",
+      "Pixel Hard (Pressure = Size)",
+      "Pixel Spray",
+      "Pixel Spray (Pressure = Size)",
+      "Pixel Dither",
+      "Palette Shade",
+    ]);
+  });
+
+  it("ships Pixel Hard (Pressure = Size) as a size-response Pixel Hard", () => {
+    const preset = BUILT_IN_BRUSH_PRESETS.find((entry) => entry.name === "Pixel Hard (Pressure = Size)");
+    if (preset === undefined) {
+      throw new Error("missing size-response Pixel Hard preset");
+    }
+    const hard = BUILT_IN_BRUSH_PRESETS.find((entry) => entry.name === "Pixel Hard");
+    if (hard === undefined) {
+      throw new Error("missing Pixel Hard preset");
+    }
+    expect(preset.brushSize).toBe(8);
+    expect(preset.brushSizeMin).toBe(1);
+    expect(preset.pressureResponse).toBe("size");
+    expect(preset.labelPt).toBe("Pixel duro (pressão = tamanho)");
+    expect({ ...preset, name: hard.name, labelPt: hard.labelPt, pressureResponse: hard.pressureResponse, brushSize: hard.brushSize, brushSizeMin: hard.brushSizeMin }).toEqual(hard);
+    expect(displayBrushPresetName(preset, "pt-BR")).toBe("Pixel duro (pressão = tamanho)");
+    expect(parseBrushPreset(serializeBrushPreset(preset))).toEqual(preset);
+  });
+
+  it("ships Pixel Spray (Pressure = Size) as a size-response Pixel Spray", () => {
+    const preset = BUILT_IN_BRUSH_PRESETS.find((entry) => entry.name === "Pixel Spray (Pressure = Size)");
+    if (preset === undefined) {
+      throw new Error("missing size-response Pixel Spray preset");
+    }
+    const spray = BUILT_IN_BRUSH_PRESETS.find((entry) => entry.name === "Pixel Spray");
+    if (spray === undefined) {
+      throw new Error("missing Pixel Spray preset");
+    }
+    expect(preset.brushSize).toBe(8);
+    expect(preset.brushSizeMin).toBe(1);
+    expect(preset.pressureResponse).toBe("size");
+    expect(preset.labelPt).toBe("Spray de pixels (pressão = tamanho)");
+    expect({ ...preset, name: spray.name, labelPt: spray.labelPt, pressureResponse: spray.pressureResponse, brushSizeMin: spray.brushSizeMin }).toEqual(spray);
+    expect(displayBrushPresetName(preset, "pt-BR")).toBe("Spray de pixels (pressão = tamanho)");
+    expect(parseBrushPreset(serializeBrushPreset(preset))).toEqual(preset);
   });
 
   it("round-trips the Brazilian Portuguese label", () => {
