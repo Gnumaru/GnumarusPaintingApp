@@ -17214,7 +17214,7 @@ export class GnumarusShell extends LitElement {
   /** Leave the local/dev build for the public GitHub Pages deploy (same tab). */
   private openGitHubPagesDeploy(): void {
     this.closeAllMenus();
-    window.location.href = GNUMARUS_PAGES_URL;
+    window.open(GNUMARUS_PAGES_URL, "_blank", "noopener");
   }
 
   private onRenameCommit(id: string): void {
