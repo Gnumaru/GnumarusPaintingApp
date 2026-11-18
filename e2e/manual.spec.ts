@@ -1,16 +1,26 @@
-import { expect, test } from "@playwright/test";
-import * as fs from "node:fs";
-import * as path from "node:path";
+import { expect, test, type Page } from "@playwright/test";
 
-const MANUAL = path.resolve(process.cwd(), "dist/manual");
-const BUILT =
-  fs.existsSync(path.join(MANUAL, "en", "index.html")) &&
-  fs.existsSync(path.join(MANUAL, "pt_BR", "index.html"));
+// The manual is a static Sphinx build in dist/manual (no app server
+// involved). Node type definitions are intentionally not a dependency,
+// so file URLs are derived from import.meta instead of node:path, and
+// the "is it built?" probe reads a marker from the loaded page.
+const manualFile = (lang: string, file: string): string =>
+  new URL(`../dist/manual/${lang}/${file}`, import.meta.url).href;
 
-test.skip(!BUILT, "user manual not built; run npm run docs:build first");
+async function gotoManual(page: Page, lang: string, file: string): Promise<boolean> {
+  try {
+    await page.goto(manualFile(lang, file));
+  } catch {
+    return false;
+  }
+  return (await page.locator("#manual-language").count()) > 0;
+}
 
 test("language dropdown sits below search and switches immediately @recent", async ({ page }) => {
-  await page.goto("file://" + path.join(MANUAL, "en", "index.html"));
+  test.skip(
+    !(await gotoManual(page, "en", "index.html")),
+    "user manual not built; run npm run docs:build first",
+  );
   const select = page.locator("#manual-language");
   await expect(select).toBeVisible();
   const order = await page.evaluate(() => {
@@ -31,7 +41,10 @@ test("language dropdown sits below search and switches immediately @recent", asy
 });
 
 test("collapsed sections show expand markers and toggle @recent", async ({ page }) => {
-  await page.goto("file://" + path.join(MANUAL, "en", "getting_started.html"));
+  test.skip(
+    !(await gotoManual(page, "en", "getting_started.html")),
+    "user manual not built; run npm run docs:build first",
+  );
   const section = page.locator('.wy-menu-vertical li:has(> a[href="painting.html"])').first();
   const marker = section.locator("> a > button.toctree-expand");
   await expect(marker).toBeVisible();
