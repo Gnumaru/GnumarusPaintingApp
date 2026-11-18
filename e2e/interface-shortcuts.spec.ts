@@ -1,6 +1,27 @@
 import { expect, test } from "@playwright/test";
 import { getLayers, loadBlankProject, readPixel, setPencil } from "./e2e-helpers";
 
+test("shortcuts dialog shows translated key labels in Brazilian Portuguese @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const settings = page.locator("gnumarus-shell dialog#settingsDialog");
+  await settings.locator("select#localeSelect").selectOption("pt-BR");
+  await settings.getByRole("button", { name: "Fechar" }).click();
+  await page.getByRole("button", { name: "Ajuda", exact: true }).click();
+  await page.getByRole("button", { name: "Atalhos", exact: true }).click();
+  const dialog = page.locator("gnumarus-shell dialog#shortcutsDialog");
+  await expect(dialog).toBeVisible();
+  // Qualifiers and gestures are translated; bare key names stay universal.
+  const labels = (await dialog.locator("kbd").allTextContents()).join("\n");
+  expect(labels).toContain("teclado principal e numérico");
+  expect(labels).toContain("arraste uma âncora de redimensionamento");
+  expect(labels).not.toContain("main and numpad");
+  expect(labels).not.toContain("drag a transform resize handle");
+  await page.keyboard.press("Escape");
+});
+
 test("Tab hides and shows the interface, toast still works", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

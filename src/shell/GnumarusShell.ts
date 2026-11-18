@@ -417,6 +417,8 @@ import type { GnumarusColorPicker } from "../color/GnumarusColorPicker";
 
 interface GnumarusShortcutEntry {
   keys: string;
+  /** Brazilian Portuguese key label (shown when the locale is pt-BR). */
+  keysPt?: string;
   action: string;
 }
 
@@ -479,29 +481,29 @@ function gnumarusShortcuts(): GnumarusShortcutSection[] {
     {
       title: tr("sc.file"),
       entries: [
-        { keys: "Ctrl+S (Cmd+S on macOS)", action: tr("sc.saveFolder") },
+        { keys: "Ctrl+S (Cmd+S on macOS)", keysPt: "Ctrl+S (Cmd+S no macOS)", action: tr("sc.saveFolder") },
       ],
     },
     {
       title: tr("sc.history"),
       entries: [
-        { keys: "Ctrl+Z (Cmd+Z on macOS)", action: tr("sc.undo") },
-        { keys: "Ctrl+Y or Shift+Ctrl+Z (Cmd+Y or Shift+Cmd+Z on macOS)", action: tr("sc.redo") },
+        { keys: "Ctrl+Z (Cmd+Z on macOS)", keysPt: "Ctrl+Z (Cmd+Z no macOS)", action: tr("sc.undo") },
+        { keys: "Ctrl+Y or Shift+Ctrl+Z (Cmd+Y or Shift+Cmd+Z on macOS)", keysPt: "Ctrl+Y ou Shift+Ctrl+Z (Cmd+Y ou Shift+Cmd+Z no macOS)", action: tr("sc.redo") },
       ],
     },
     {
       title: tr("sc.edit"),
       entries: [
-        { keys: "Ctrl+X (Cmd+X on macOS)", action: tr("sc.cut") },
-        { keys: "Ctrl+C (Cmd+C on macOS)", action: tr("sc.copySelection") },
-        { keys: "Ctrl+Shift+C (Cmd+Shift+C on macOS)", action: tr("sc.copyMerged") },
-        { keys: "Ctrl+V (Cmd+V on macOS)", action: tr("sc.paste") },
+        { keys: "Ctrl+X (Cmd+X on macOS)", keysPt: "Ctrl+X (Cmd+X no macOS)", action: tr("sc.cut") },
+        { keys: "Ctrl+C (Cmd+C on macOS)", keysPt: "Ctrl+C (Cmd+C no macOS)", action: tr("sc.copySelection") },
+        { keys: "Ctrl+Shift+C (Cmd+Shift+C on macOS)", keysPt: "Ctrl+Shift+C (Cmd+Shift+C no macOS)", action: tr("sc.copyMerged") },
+        { keys: "Ctrl+V (Cmd+V on macOS)", keysPt: "Ctrl+V (Cmd+V no macOS)", action: tr("sc.paste") },
       ],
     },
     {
       title: tr("sc.layers"),
       entries: [
-        { keys: "Ctrl+E (Cmd+E on macOS)", action: tr("sc.mergeDown") },
+        { keys: "Ctrl+E (Cmd+E on macOS)", keysPt: "Ctrl+E (Cmd+E no macOS)", action: tr("sc.mergeDown") },
         { keys: "PageUp", action: tr("sc.layerAbove") },
         { keys: "PageDown", action: tr("sc.layerBelow") },
         { keys: "ArrowUp", action: tr("sc.layerAbove") },
@@ -512,8 +514,8 @@ function gnumarusShortcuts(): GnumarusShortcutSection[] {
         { keys: "Alt+ArrowRight", action: tr("sc.nestIn") },
         { keys: "Insert", action: tr("sc.insertLayer") },
         { keys: "Delete", action: tr("sc.deleteCell") },
-        { keys: "Ctrl+Shift+ArrowUp (Cmd+Shift+ArrowUp on macOS)", action: tr("sc.newLayerAbove") },
-        { keys: "Ctrl+Shift+ArrowDown (Cmd+Shift+ArrowDown on macOS)", action: tr("sc.newLayerBelow") },
+        { keys: "Ctrl+Shift+ArrowUp (Cmd+Shift+ArrowUp on macOS)", keysPt: "Ctrl+Shift+ArrowUp (Cmd+Shift+ArrowUp no macOS)", action: tr("sc.newLayerAbove") },
+        { keys: "Ctrl+Shift+ArrowDown (Cmd+Shift+ArrowDown on macOS)", keysPt: "Ctrl+Shift+ArrowDown (Cmd+Shift+ArrowDown no macOS)", action: tr("sc.newLayerBelow") },
         { keys: "Ctrl+Alt+ArrowUp", action: tr("sc.expandUp") },
         { keys: "Ctrl+Alt+ArrowDown", action: tr("sc.expandDown") },
         { keys: "Ctrl+Alt+ArrowLeft", action: tr("sc.expandLeft") },
@@ -527,15 +529,15 @@ function gnumarusShortcuts(): GnumarusShortcutSection[] {
         { keys: "ArrowRight", action: tr("sc.nextFrame") },
         { keys: "Shift+ArrowLeft", action: tr("sc.moveFrameLeft") },
         { keys: "Shift+ArrowRight", action: tr("sc.moveFrameRight") },
-        { keys: "Ctrl+Shift+ArrowLeft (Cmd+Shift+ArrowLeft on macOS)", action: tr("sc.newFrameLeft") },
-        { keys: "Ctrl+Shift+ArrowRight (Cmd+Shift+ArrowRight on macOS)", action: tr("sc.newFrameRight") },
+        { keys: "Ctrl+Shift+ArrowLeft (Cmd+Shift+ArrowLeft on macOS)", keysPt: "Ctrl+Shift+ArrowLeft (Cmd+Shift+ArrowLeft no macOS)", action: tr("sc.newFrameLeft") },
+        { keys: "Ctrl+Shift+ArrowRight (Cmd+Shift+ArrowRight on macOS)", keysPt: "Ctrl+Shift+ArrowRight (Cmd+Shift+ArrowRight no macOS)", action: tr("sc.newFrameRight") },
       ],
     },
     {
       title: tr("sc.tools"),
       entries: [
         { keys: "B", action: tr("sc.toolPencil") },
-        { keys: "G or F", action: tr("sc.toolBucket") },
+        { keys: "G or F", keysPt: "G ou F", action: tr("sc.toolBucket") },
         { keys: "N", action: tr("sc.toolLine") },
         { keys: "C", action: tr("sc.toolCurve") },
         { keys: "D", action: tr("sc.toolRectangle") },
@@ -555,49 +557,49 @@ function gnumarusShortcuts(): GnumarusShortcutSection[] {
         { keys: "P", action: tr("sc.toolPolylasso") },
         { keys: "W", action: tr("sc.toolColorselect") },
         { keys: "X", action: tr("sc.swapColors") },
-        { keys: "Toolbar, palette", action: tr("sc.toolText") },
-        { keys: "R (tile brush)", action: tr("sc.tileRotate") },
-        { keys: "H (tile brush)", action: tr("sc.tileFlipH") },
-        { keys: "V (tile brush)", action: tr("sc.tileFlipV") },
-        { keys: "Shift / Ctrl+Shift / Alt+Shift + drag", action: tr("sc.rectselectModifiers") },
-        { keys: "Alt + drag a transform resize handle", action: tr("sc.transformProportional") },
-        { keys: "Right-click a drawer button", action: tr("sc.drawerFlyout") },
+        { keys: "Toolbar, palette", keysPt: "Barra de ferramentas, paleta", action: tr("sc.toolText") },
+        { keys: "R (tile brush)", keysPt: "R (pincel de tiles)", action: tr("sc.tileRotate") },
+        { keys: "H (tile brush)", keysPt: "H (pincel de tiles)", action: tr("sc.tileFlipH") },
+        { keys: "V (tile brush)", keysPt: "V (pincel de tiles)", action: tr("sc.tileFlipV") },
+        { keys: "Shift / Ctrl+Shift / Alt+Shift + drag", keysPt: "Shift / Ctrl+Shift / Alt+Shift + arrastar", action: tr("sc.rectselectModifiers") },
+        { keys: "Alt + drag a transform resize handle", keysPt: "Alt + arraste uma âncora de redimensionamento", action: tr("sc.transformProportional") },
+        { keys: "Right-click a drawer button", keysPt: "Botão direito numa gaveta de ferramentas", action: tr("sc.drawerFlyout") },
         { keys: "V", action: tr("sc.toolDestransform") },
         { keys: "U", action: tr("sc.toolDestransform3d") },
         { keys: "E", action: tr("sc.toggleEraser") },
-        { keys: "Hold Ctrl", action: tr("sc.tempEyedropper") },
-        { keys: "Enter, Return or Esc", action: tr("sc.mergeFloating") },
+        { keys: "Hold Ctrl", keysPt: "Segurar Ctrl", action: tr("sc.tempEyedropper") },
+        { keys: "Enter, Return or Esc", keysPt: "Enter, Return ou Esc", action: tr("sc.mergeFloating") },
         { keys: "Escape", action: tr("sc.cancelStroke") },
       ],
     },
     {
       title: tr("sc.view"),
       entries: [
-        { keys: "1 (main keyboard)", action: tr("sc.zoom100") },
-        { keys: "2 (main keyboard)", action: tr("sc.fitRotated") },
-        { keys: "0 (main keyboard)", action: tr("sc.resetTransform") },
-        { keys: "4 (main and numpad)", action: tr("sc.rotateCcw") },
-        { keys: "6 (main and numpad)", action: tr("sc.rotateCw") },
-        { keys: "5 (main and numpad)", action: tr("sc.resetRotation") },
+        { keys: "1 (main keyboard)", keysPt: "1 (teclado principal)", action: tr("sc.zoom100") },
+        { keys: "2 (main keyboard)", keysPt: "2 (teclado principal)", action: tr("sc.fitRotated") },
+        { keys: "0 (main keyboard)", keysPt: "0 (teclado principal)", action: tr("sc.resetTransform") },
+        { keys: "4 (main and numpad)", keysPt: "4 (teclado principal e numérico)", action: tr("sc.rotateCcw") },
+        { keys: "6 (main and numpad)", keysPt: "6 (teclado principal e numérico)", action: tr("sc.rotateCw") },
+        { keys: "5 (main and numpad)", keysPt: "5 (teclado principal e numérico)", action: tr("sc.resetRotation") },
         { keys: "M", action: tr("sc.flipH") },
         { keys: "Shift+M", action: tr("sc.flipV") },
         { keys: "Ctrl+Alt+=", action: tr("sc.zoomIn") },
         { keys: "Ctrl+Alt+-", action: tr("sc.zoomOut") },
-        { keys: "Hold Space and drag, or middle-drag", action: tr("sc.pan") },
-        { keys: "Mouse wheel", action: tr("sc.zoomAtCursor") },
-        { keys: "Hold Ctrl+Space, left-drag up/down", action: tr("sc.loupeZoom") },
-        { keys: "Hold Shift+Space and left-drag", action: tr("sc.loupeRotate") },
-        { keys: "Alt+middle-click (loupe or cell transform tool)", action: tr("sc.loupeReset") },
-        { keys: "Middle-click (loupe or cell transform tool)", action: tr("sc.loupeFlip") },
-        { keys: "Right-drag (loupe or cell transform tool)", action: tr("sc.loupeRotateDrag") },
-        { keys: "Shift+Left-drag (pencil, line, curve)", action: tr("sc.liveResize") },
+        { keys: "Hold Space and drag, or middle-drag", keysPt: "Segurar Espaço e arrastar, ou botão do meio", action: tr("sc.pan") },
+        { keys: "Mouse wheel", keysPt: "Roda do mouse", action: tr("sc.zoomAtCursor") },
+        { keys: "Hold Ctrl+Space, left-drag up/down", keysPt: "Segurar Ctrl+Espaço, arrastar com botão esquerdo para cima/baixo", action: tr("sc.loupeZoom") },
+        { keys: "Hold Shift+Space and left-drag", keysPt: "Segurar Shift+Espaço e arrastar com botão esquerdo", action: tr("sc.loupeRotate") },
+        { keys: "Alt+middle-click (loupe or cell transform tool)", keysPt: "Alt+clique do meio (lupa ou ferramenta de transformação de célula)", action: tr("sc.loupeReset") },
+        { keys: "Middle-click (loupe or cell transform tool)", keysPt: "Clique do meio (lupa ou ferramenta de transformação de célula)", action: tr("sc.loupeFlip") },
+        { keys: "Right-drag (loupe or cell transform tool)", keysPt: "Arrastar com botão direito (lupa ou ferramenta de transformação de célula)", action: tr("sc.loupeRotateDrag") },
+        { keys: "Shift+Left-drag (pencil, line, curve)", keysPt: "Shift+arrastar com botão esquerdo (lápis, linha, curva)", action: tr("sc.liveResize") },
       ],
     },
     {
       title: tr("sc.actions"),
       entries: [
         {
-          keys: "Ctrl+Shift+P (Cmd+Shift+P on macOS)",
+          keys: "Ctrl+Shift+P (Cmd+Shift+P on macOS)", keysPt: "Ctrl+Shift+P (Cmd+Shift+P no macOS)",
           action: tr("sc.quickSearch"),
         },
       ],
@@ -4085,7 +4087,7 @@ export class GnumarusShell extends LitElement {
                 ${section.entries.map(
                   (entry) => html`
                     <tr>
-                      <td><kbd>${entry.keys}</kbd></td>
+                      <td><kbd>${entry.keysPt !== undefined && getActiveLocale() === "pt-BR" ? entry.keysPt : entry.keys}</kbd></td>
                       <td>${entry.action}</td>
                     </tr>
                   `,
