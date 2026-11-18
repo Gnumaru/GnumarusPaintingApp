@@ -9,6 +9,7 @@ from conf_shared import (  # noqa: E402
     author,
     exclude_patterns,
     extensions,
+    html_css_files,
     html_js_files,
     html_show_sourcelink,
     html_static_path,

@@ -35,6 +35,16 @@ test("language dropdown sits below search and switches immediately @recent", asy
   });
   expect(order).toBe("after");
   await expect(select).toHaveValue("en");
+  // Krita-style visibility: opaque light field with dark text.
+  const field = await page.evaluate(() => {
+    const el = document.getElementById("manual-language");
+    if (el === null) {
+      return null;
+    }
+    const style = getComputedStyle(el);
+    return { background: style.backgroundColor, color: style.color };
+  });
+  expect(field).toEqual({ background: "rgb(252, 252, 252)", color: "rgb(64, 64, 64)" });
   await select.selectOption("pt_BR");
   await expect(page).toHaveURL(/manual\/pt_BR\/index\.html$/);
   await expect(page.locator("#manual-language")).toHaveValue("pt_BR");
@@ -48,6 +58,9 @@ test("collapsed sections show expand markers and toggle @recent", async ({ page 
   const section = page.locator('.wy-menu-vertical li:has(> a[href="painting.html"])').first();
   const marker = section.locator("> a > button.toctree-expand");
   await expect(marker).toBeVisible();
+  // Godot-style visibility: bright marker on the dark collapsed row.
+  const markerColor = await marker.evaluate((el) => getComputedStyle(el).color);
+  expect(markerColor).toBe("rgb(240, 240, 240)");
   // Godot-style: the collapsed section hides its children until toggled.
   await expect(section.locator(":scope > ul")).toBeHidden();
   await marker.click();

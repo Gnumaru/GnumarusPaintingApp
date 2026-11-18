@@ -1,0 +1,44 @@
+/* High-visibility sidebar affordances on the dark nav (Godot/Krita-style).
+ * The stock theme paints collapsed expand markers #4d4d4d on #343131
+ * (nearly invisible) and renders the language switcher as borderless
+ * translucent text, so both get explicit bright styling here. This file
+ * loads after theme.css, so equal-specificity rules win by order. */
+
+/* Expand/collapse markers: bright on every level, brighter on hover. */
+.wy-menu-vertical li button.toctree-expand {
+  color: #f0f0f0;
+  font-size: 16px;
+}
+.wy-menu-vertical li.toctree-l2 button.toctree-expand,
+.wy-menu-vertical li.toctree-l3 button.toctree-expand {
+  color: #dcdcdc;
+}
+.wy-menu-vertical a:hover button.toctree-expand {
+  color: #ffffff;
+}
+
+/* Language switcher below the search box: white field, dark text. */
+.wy-side-nav-search div.switch-menus {
+  display: block;
+  margin: 0.4em 0.8em 0.8em;
+}
+.wy-side-nav-search div.switch-menus div.language-switch {
+  display: block;
+}
+.wy-side-nav-search div.switch-menus div.language-switch select {
+  width: 100%;
+  max-width: 100%;
+  background: #fcfcfc;
+  color: #404040;
+  border: 1px solid #2472a4;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 100%;
+  cursor: pointer;
+  appearance: auto;
+  -webkit-appearance: auto;
+  -moz-appearance: auto;
+}
+.wy-side-nav-search div.switch-menus div.language-switch select option {
+  color: #404040;
+}
