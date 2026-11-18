@@ -284,6 +284,7 @@ import {
 } from "../project/GnumarusUpdateCheck";
 import {
   GNUMARUS_PAGES_URL,
+  gnumarusManualPath,
   isGitHubPagesDeploy,
 } from "./GnumarusDeploy";
 import { parseHexColor } from "../canvas/GnumarusPixelBuffer";
@@ -2912,6 +2913,7 @@ export class GnumarusShell extends LitElement {
           ${this.helpMenuOpen
             ? html`
                 <div class="dropdown">
+                  <button title=${tr("menu.manualTitle")} @click=${(): void => void this.runAction("manual")}>${tr("menu.manual")}</button>
                   <button title=${tr("menu.shortcutsTitle")} @click=${(): void => void this.runAction("shortcuts")}>${tr("menu.shortcuts")}</button>
                   <button title=${tr("menu.sourceCodeTitle")} @click=${(): void => void this.runAction("source-code")}>${tr("menu.sourceCode")}</button>
                   ${!this.isGitHubPagesDeploy()
@@ -8370,6 +8372,14 @@ export class GnumarusShell extends LitElement {
       requirements: [],
       run: (): void => {
         this.openShortcutsDialog();
+      },
+    });
+    this.actionRegistry.register({
+      id: "manual",
+      name: tr("menu.manual"),
+      requirements: [],
+      run: (): void => {
+        this.openManual();
       },
     });
     this.actionRegistry.register({
@@ -17182,6 +17192,13 @@ export class GnumarusShell extends LitElement {
   private closeShortcutsDialog(): void {
     const dialog = this.shadowRoot?.getElementById("shortcutsDialog") as HTMLDialogElement | null;
     dialog?.close();
+  }
+
+  /** Open the user manual (locale-aware) in a new tab. */
+  private openManual(): void {
+    this.helpMenuOpen = false;
+    const url = new URL(gnumarusManualPath(getActiveLocale()), document.baseURI).href;
+    window.open(url, "_blank", "noopener");
   }
 
   private openSourceCode(): void {

@@ -62,7 +62,8 @@ Classic desktop-like painting app (top menu bar, central canvas, bottom status b
 - `npm run test` — unit tests (Vitest).
 - `npm run test:e2e` — end-to-end tests, whole suite (Playwright, headless Chromium).
 - `npm run test:e2e:full` — alias for the whole end-to-end suite.
-- `npm run deploy` — rebuild and copy `dist/` to `/var/www/html/GnumarusPaintingAndAnimationApp` (needs write access to `/var/www/html`; run with sudo if required).
+- `npm run deploy` — rebuild the app, build the Sphinx user manual (`docs:build` → `dist/manual/` with English + Brazilian Portuguese trees) and copy `dist/` to `/var/www/html/GnumarusPaintingAndAnimationApp` (needs write access to `/var/www/html`; run with sudo if required).
+- `npm run docs:build` — build only the manual into `dist/manual/` (uses a venv in `./tmp/docsvenv`; `docs/requirements.txt` pins Sphinx + the Read the Docs theme).
 
 ## Hosting
 

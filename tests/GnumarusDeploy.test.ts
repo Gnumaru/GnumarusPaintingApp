@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GNUMARUS_PAGES_URL, isGitHubPagesDeploy } from "../src/shell/GnumarusDeploy";
+import { GNUMARUS_PAGES_URL, gnumarusManualPath, isGitHubPagesDeploy } from "../src/shell/GnumarusDeploy";
 
 describe("GnumarusDeploy", () => {
   it("points at the public Pages build", () => {
@@ -18,5 +18,10 @@ describe("GnumarusDeploy", () => {
     expect(isGitHubPagesDeploy("127.0.0.1", "/")).toBe(false);
     expect(isGitHubPagesDeploy("", "/")).toBe(false);
     expect(isGitHubPagesDeploy("example.com", "/GnumarusPaintingApp")).toBe(false);
+  });
+
+  it("resolves the manual subpath per locale", () => {
+    expect(gnumarusManualPath("en")).toBe("manual/en/");
+    expect(gnumarusManualPath("pt-BR")).toBe("manual/pt_BR/");
   });
 });

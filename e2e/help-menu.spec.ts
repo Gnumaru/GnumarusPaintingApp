@@ -3,6 +3,25 @@ import { loadBlankProject } from "./e2e-helpers";
 
 const PAGES_URL = "https://gnumaru.github.io/GnumarusPaintingApp/";
 
+test("help menu offers the manual with a locale-aware link @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await page.getByRole("button", { name: "Help", exact: true }).click();
+  const entry = page
+    .locator("gnumarus-shell .menu .dropdown")
+    .getByRole("button", { name: "Manual", exact: true });
+  await expect(entry).toBeVisible();
+  await expect(entry).toHaveAttribute("title", /.+/);
+  const [popup] = await Promise.all([
+    page.waitForEvent("popup"),
+    entry.click(),
+  ]);
+  expect(new URL(popup.url()).pathname).toMatch(/manual\/en\/$/);
+  await popup.close();
+  await page.keyboard.press("Escape");
+});
+
 test("help menu offers the pages deploy with a tooltip @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
