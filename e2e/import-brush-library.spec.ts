@@ -125,6 +125,23 @@ test("brush quality setting persists and tips archive as JXL", async ({ page }) 
   }
 });
 
+test("brush preset names translate to Brazilian Portuguese @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const settings = page.locator("gnumarus-shell dialog#settingsDialog");
+  await settings.locator("select#localeSelect").selectOption("pt-BR");
+  await settings.getByRole("button", { name: "Fechar" }).click();
+  const options = page.locator('gnumarus-shell [aria-label="Opções do lápis"]');
+  await expect(options.locator("select#brushPreset")).toContainText("Giz");
+  // Values stay the stable English identity names.
+  await expect(options.locator("select#brushPreset")).toHaveValue("Pixel Hard");
+  await options.locator("select#brushPreset").selectOption("Pixel Dither");
+  await expect(page.locator("gnumarus-shell")).toContainText("Predefinição: Dithering de pixels");
+  await expect(options.locator("select#brushPreset")).toHaveValue("Pixel Dither");
+});
+
 test("brush presets apply, save and persist", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

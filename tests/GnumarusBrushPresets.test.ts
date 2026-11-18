@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   BRUSH_PRESET_STORAGE_KEY,
   BUILT_IN_BRUSH_PRESETS,
+  displayBrushPresetName,
   GnumarusBrushPresetError,
   parseBrushPreset,
   parseBrushPresetList,
@@ -59,6 +60,37 @@ describe("GnumarusBrushPresets", () => {
   it("lists pixel-art brushes first", () => {
     const names = BUILT_IN_BRUSH_PRESETS.map((preset) => preset.name);
     expect(names.slice(0, 4)).toEqual(["Pixel Hard", "Pixel Spray", "Pixel Dither", "Palette Shade"]);
+  });
+
+  it("round-trips the Brazilian Portuguese label", () => {
+    const preset = BUILT_IN_BRUSH_PRESETS[0];
+    if (preset === undefined) {
+      throw new Error("missing built-in preset");
+    }
+    const parsed = parseBrushPreset(serializeBrushPreset(preset));
+    expect(parsed.labelPt).toBe(preset.labelPt);
+    const without = JSON.parse(serializeBrushPreset(preset)) as Record<string, unknown>;
+    delete without["labelPt"];
+    expect(parseBrushPreset(JSON.stringify(without)).labelPt).toBeUndefined();
+    expect(() => parseBrushPreset(JSON.stringify({ ...without, labelPt: "" }))).toThrow(
+      GnumarusBrushPresetError,
+    );
+  });
+
+  it("shows the Portuguese label only in pt-BR with fallback to the name", () => {
+    for (const preset of BUILT_IN_BRUSH_PRESETS) {
+      expect(preset.labelPt).toBeTruthy();
+      expect(displayBrushPresetName(preset, "pt-BR")).toBe(preset.labelPt);
+      expect(displayBrushPresetName(preset, "en")).toBe(preset.name);
+    }
+    const first = BUILT_IN_BRUSH_PRESETS[0];
+    if (first === undefined) {
+      throw new Error("missing built-in preset");
+    }
+    const custom = { ...first };
+    delete custom.labelPt;
+    expect(displayBrushPresetName(custom, "pt-BR")).toBe(custom.name);
+    expect(displayBrushPresetName(custom, "en")).toBe(custom.name);
   });
 
   it("fills pixel-art defaults for older preset files", () => {

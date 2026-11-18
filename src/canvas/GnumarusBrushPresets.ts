@@ -14,6 +14,7 @@ import type { GnumarusTipAngleMode } from "./GnumarusPaintBrush";
 import type { GnumarusWrapMode } from "./GnumarusViewportMath";
 import type { GnumarusBrushShape, GnumarusShadeDirection } from "./GnumarusPixelBuffer";
 import { GNUMARUS_MAX_MAX_BRUSH_SIZE } from "../settings/GnumarusBrushSettings";
+import type { GnumarusLocale } from "../i18n/GnumarusI18n";
 
 /** Pencil color source: solid foreground or stepping through a palette. */
 export type GnumarusBrushColorMode = "solid" | "palette";
@@ -21,6 +22,8 @@ export type GnumarusBrushColorMode = "solid" | "palette";
 export interface GnumarusBrushPreset {
   version: 1;
   name: string;
+  /** Brazilian Portuguese display label; absent means showing `name`. */
+  labelPt?: string;
   brushSize: number;
   /** Minimum pressure size; absent in older files means a fixed brushSize. */
   brushSizeMin?: number;
@@ -121,6 +124,11 @@ export function parseBrushPreset(jsonText: string): GnumarusBrushPreset {
   if (typeof name !== "string" || name.length === 0 || name.length > 64) {
     throw new GnumarusBrushPresetError("preset has an invalid name");
   }
+  const labelPtRaw = parsed["labelPt"];
+  if (labelPtRaw !== undefined && (typeof labelPtRaw !== "string" || labelPtRaw.length === 0 || labelPtRaw.length > 64)) {
+    throw new GnumarusBrushPresetError("preset has an invalid labelPt");
+  }
+  const labelPt = labelPtRaw === undefined ? undefined : (labelPtRaw as string);
   const numbers: Array<[string, number, number]> = [
     ["brushSize", 0.1, GNUMARUS_MAX_MAX_BRUSH_SIZE],
     ["brushSizeMin", 0.1, GNUMARUS_MAX_MAX_BRUSH_SIZE],
@@ -160,6 +168,7 @@ export function parseBrushPreset(jsonText: string): GnumarusBrushPreset {
   const preset: GnumarusBrushPreset = {
     version: 1,
     name,
+    ...(labelPt === undefined ? {} : { labelPt }),
     brushSize: numeric["brushSize"] ?? 1,
     brushSizeMin: numeric["brushSizeMin"] ?? numeric["brushSize"] ?? 1,
     brushShape: checkString(parsed["brushShape"], "brushShape", ["square", "circle", "line"]) as GnumarusBrushShape,
@@ -216,6 +225,18 @@ export function serializeBrushPreset(preset: GnumarusBrushPreset): string {
   return JSON.stringify(preset, null, 2);
 }
 
+/**
+ * Display name of a preset for a locale: the Brazilian Portuguese label
+ * when asked and present, otherwise the stable English identity name.
+ * Custom (user-named) presets have no label and always show their name.
+ */
+export function displayBrushPresetName(preset: GnumarusBrushPreset, locale: GnumarusLocale): string {
+  if (locale === "pt-BR" && preset.labelPt !== undefined && preset.labelPt.length > 0) {
+    return preset.labelPt;
+  }
+  return preset.name;
+}
+
 /** Parse a stored custom-preset list (array of preset JSON strings or objects). */
 export function parseBrushPresetList(jsonText: string): GnumarusBrushPreset[] {
   let parsed: unknown;
@@ -239,6 +260,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
   {
     version: 1,
     name: "Pixel Hard",
+    labelPt: "Pixel duro",
     brushSize: 1,
     brushSizeMin: 1,
     brushShape: "circle",
@@ -272,6 +294,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
   {
     version: 1,
     name: "Pixel Spray",
+    labelPt: "Spray de pixels",
     brushSize: 8,
     brushSizeMin: 8,
     brushShape: "circle",
@@ -305,6 +328,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
   {
     version: 1,
     name: "Pixel Dither",
+    labelPt: "Dithering de pixels",
     brushSize: 8,
     brushSizeMin: 8,
     brushShape: "circle",
@@ -338,6 +362,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
   {
     version: 1,
     name: "Palette Shade",
+    labelPt: "Sombreamento de paleta",
     brushSize: 4,
     brushSizeMin: 4,
     brushShape: "circle",
@@ -371,6 +396,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
   {
     version: 1,
     name: "Soft Round",
+    labelPt: "Redonda suave",
     brushSize: 16,
     brushSizeMin: 4,
     brushShape: "circle",
@@ -404,6 +430,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
   {
     version: 1,
     name: "Chalk",
+    labelPt: "Giz",
     brushSize: 20,
     brushSizeMin: 6,
     brushShape: "circle",
@@ -437,6 +464,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
   {
     version: 1,
     name: "Ink",
+    labelPt: "Nanquim",
     brushSize: 8,
     brushSizeMin: 2,
     brushShape: "circle",
@@ -470,6 +498,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
   {
     version: 1,
     name: "Airbrush",
+    labelPt: "Aerógrafo",
     brushSize: 32,
     brushSizeMin: 8,
     brushShape: "circle",
@@ -503,6 +532,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
   {
     version: 1,
     name: "Smudge",
+    labelPt: "Esfuminho",
     brushSize: 24,
     brushSizeMin: 8,
     brushShape: "circle",
@@ -536,6 +566,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
   {
     version: 1,
     name: "Eraser Hard",
+    labelPt: "Borracha dura",
     brushSize: 32,
     brushSizeMin: 8,
     brushShape: "circle",
@@ -569,6 +600,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
   {
     version: 1,
     name: "Eraser Soft",
+    labelPt: "Borracha suave",
     brushSize: 48,
     brushSizeMin: 12,
     brushShape: "circle",
@@ -602,6 +634,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
   {
     version: 1,
     name: "Glaze",
+    labelPt: "Veladura",
     brushSize: 64,
     brushSizeMin: 16,
     brushShape: "circle",
@@ -635,6 +668,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
   {
     version: 1,
     name: "Dry Brush",
+    labelPt: "Pincel seco",
     brushSize: 32,
     brushSizeMin: 8,
     brushShape: "circle",
@@ -668,6 +702,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
   {
     version: 1,
     name: "Charcoal",
+    labelPt: "Carvão",
     brushSize: 24,
     brushSizeMin: 6,
     brushShape: "circle",
@@ -701,6 +736,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
   {
     version: 1,
     name: "Blender",
+    labelPt: "Misturador",
     brushSize: 24,
     brushSizeMin: 8,
     brushShape: "circle",
@@ -734,6 +770,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
   {
     version: 1,
     name: "Spray",
+    labelPt: "Spray",
     brushSize: 16,
     brushSizeMin: 16,
     brushShape: "circle",
@@ -767,6 +804,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
   {
     version: 1,
     name: "Chisel Marker",
+    labelPt: "Marcador chanfrado",
     brushSize: 16,
     brushSizeMin: 4,
     brushShape: "square",
@@ -800,6 +838,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
   {
     version: 1,
     name: "Velocity Ink",
+    labelPt: "Nanquim por velocidade",
     brushSize: 12,
     brushSizeMin: 2,
     brushShape: "circle",
@@ -833,6 +872,7 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
   {
     version: 1,
     name: "Tilt Pencil",
+    labelPt: "Lápis de inclinação",
     brushSize: 16,
     brushSizeMin: 4,
     brushShape: "circle",

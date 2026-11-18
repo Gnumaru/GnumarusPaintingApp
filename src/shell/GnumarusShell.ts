@@ -364,6 +364,7 @@ import {
 import {
   BRUSH_PRESET_STORAGE_KEY,
   BUILT_IN_BRUSH_PRESETS,
+  displayBrushPresetName,
   parseBrushPreset,
   parseBrushPresetList,
   serializeBrushPreset,
@@ -4911,7 +4912,7 @@ export class GnumarusShell extends LitElement {
           >${tr("opt.preset")}
           <select id="brushPresetDialog" @change=${(): void => this.applyBrushPresetFromDialog("Dialog")}>
             ${[...BUILT_IN_BRUSH_PRESETS, ...this.brushPresets].map(
-              (preset) => html`<option value=${preset.name}>${preset.name}</option>`,
+              (preset) => html`<option value=${preset.name}>${displayBrushPresetName(preset, getActiveLocale())}</option>`,
             )}
           </select>
         </label>
@@ -6101,7 +6102,7 @@ export class GnumarusShell extends LitElement {
                 <button data-testid="brush-reset${sfx}" aria-label=${tr("opt.resetPreset")} title=${tr("opt.resetPresetHint")} @click=${(): void => this.resetBrushPresetFromDialog(sfx)}>${tr("opt.resetPreset")}</button>
                 <select id="brushPreset${sfx}" .value=${this.brushPresetName} @change=${(): void => this.applyBrushPresetFromDialog(sfx)}>
                   ${[...BUILT_IN_BRUSH_PRESETS, ...this.brushPresets].map(
-                    (preset) => html`<option value=${preset.name}>${preset.name}</option>`,
+                    (preset) => html`<option value=${preset.name}>${displayBrushPresetName(preset, getActiveLocale())}</option>`,
                   )}
                 </select>
                 <button data-testid="brush-presets${sfx}" aria-label=${tr("opt.presets")} title=${tr("opt.presetsHint")} @click=${(): void => this.openBrushPresetDialog()}>${tr("opt.presets")}</button>
@@ -10753,7 +10754,7 @@ export class GnumarusShell extends LitElement {
     this.engine?.setWrapMode(this.wrapMode);
     this.brushPresetName = preset.name;
     this.syncBrushPresetSelects();
-    this.statusMessage = tr("status.preset", { value: preset.name });
+    this.statusMessage = tr("status.preset", { value: displayBrushPresetName(preset, getActiveLocale()) });
   }
 
   /** Keep the bar/panel/dialog preset dropdowns on the last applied preset. */
