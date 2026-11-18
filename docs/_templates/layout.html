@@ -1,0 +1,17 @@
+{# Language switcher injected right below the search box (Krita-style).
+   Reuses the theme's own .switch-menus > .language-switch markup and
+   CSS, so it matches Read the Docs hosting visually with no custom
+   styling. The current language is pre-selected server-side from the
+   Sphinx `language` variable; custom.js navigates in place. #}
+{% extends "!layout.html" %}
+{%- block sidebartitle %}
+{{ super() }}
+<div class="switch-menus">
+  <div class="language-switch">
+    <select id="manual-language" aria-label="{{ 'Idioma' if language == 'pt_BR' else 'Language' }}">
+      <option value="en"{% if language != 'pt_BR' %} selected{% endif %}>English</option>
+      <option value="pt_BR"{% if language == 'pt_BR' %} selected{% endif %}>Português (BR)</option>
+    </select>
+  </div>
+</div>
+{%- endblock %}

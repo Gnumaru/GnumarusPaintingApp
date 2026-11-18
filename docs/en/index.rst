@@ -18,18 +18,11 @@ Access API) or in browser storage, and every edit stays on your machine.
    getting_started
    interface
    painting
-   brushes
-   selections
-   layers
-   filters
-   adjustments
+   canvas
+   effects
    animation
-   text
-   transforms
-   import_export
-   settings
-   shortcuts
-   faq
+   content
+   reference
 
 Indices and tables
 ==================

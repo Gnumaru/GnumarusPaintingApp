@@ -28,9 +28,15 @@ release = version
 
 extensions: list[str] = []
 
-templates_path = ["_templates"]
+templates_path = ["_templates", "../_templates"]
 exclude_patterns: list[str] = ["_build", "Thumbs.db", ".DS_Store"]
 
 html_theme = "sphinx_rtd_theme"
-html_static_path = ["_static"]
+html_theme_options = {
+    # Render the full tree so collapsed parents keep their <ul> children:
+    # the theme then prepends a visible expand marker to every section.
+    "collapse_navigation": False,
+}
+html_static_path = ["_static", "../_static"]
+html_js_files = ["custom.js"]
 html_show_sourcelink = False

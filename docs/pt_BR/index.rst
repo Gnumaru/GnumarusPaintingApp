@@ -19,18 +19,11 @@ permanece na sua máquina.
    getting_started
    interface
    painting
-   brushes
-   selections
-   layers
-   filters
-   adjustments
+   canvas
+   effects
    animation
-   text
-   transforms
-   import_export
-   settings
-   shortcuts
-   faq
+   content
+   reference
 
 Índices e tabelas
 =================
