@@ -13,7 +13,9 @@ test("quick action palette filters and runs actions", async ({ page }) => {
   await expect(dialog).toBeVisible();
   const input = dialog.locator('[data-testid="action-palette-input"]');
   await expect(input).toBeFocused();
-  await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveText([
+  // The palette lists every registered action: the core actions plus all
+  // tool-<name> and filter-<id> run actions (Tools/Filters menus route here).
+  const coreActions = [
     "Adjust brightness/contrast",
     "Adjust colors…",
     "Adjust hue/saturation",
@@ -52,7 +54,21 @@ test("quick action palette filters and runs actions", async ({ page }) => {
     "Undo",
     "Unlink cell content",
     "Upload project",
-  ]);
+  ];
+  const listed = await dialog.locator('[data-testid="action-palette-item"]').allTextContents();
+  for (const name of coreActions) {
+    expect(listed).toContain(name);
+  }
+  for (const id of ["tool-pencil", "tool-rectselect", "filter-levels", "filter-gaussian-blur"]) {
+    await expect(
+      dialog.locator(`[data-testid="action-palette-item"][data-action-id="${id}"]`),
+    ).toBeVisible();
+  }
+  const registered = await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { shell?: { actionRegistry?: { actions(): Array<{ id: string }> } } } };
+    return root.__gnumarus?.shell?.actionRegistry?.actions().length ?? -1;
+  });
+  expect(listed.length).toBe(registered);
   await input.fill("xyz-nothing");
   await expect(dialog.locator('[data-testid="action-palette-empty"]')).toBeVisible();
   await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveCount(0);
@@ -61,6 +77,7 @@ test("quick action palette filters and runs actions", async ({ page }) => {
   await input.fill("reset");
   await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveText([
     "Reset Canvas Transform",
+    "Rectangular selection",
     "Reload All Contents Except Textures",
   ]);
   await page.keyboard.press("Enter");

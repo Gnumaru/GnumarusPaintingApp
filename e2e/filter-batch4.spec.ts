@@ -108,6 +108,7 @@ test("levels low clamps and resets @recent", async ({ page }) => {
   expect(await runFilter(page, "levels")).toBe(true);
   const popup = dialog(page);
   await expect(popup).toBeVisible();
+  await expect(popup.locator('[data-testid="filter-param-channel"]')).toContainText("All channels");
   await expect(popup.locator('[data-testid="filter-param-low-reset"]')).toHaveCount(0);
   await popup.locator('[data-testid="filter-param-low-num"]').fill("100");
   await expect(popup.locator('[data-testid="filter-param-low-reset"]')).toHaveCount(1);
