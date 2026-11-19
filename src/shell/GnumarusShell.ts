@@ -254,6 +254,17 @@ import {
 } from "../export/GnumarusWebpExport";
 import { createGifEncoder } from "../export/GnumarusGifExport";
 import {
+  encodeAnimationVideo,
+  queryVideoCodecSupport,
+  type GnumarusVideoCodec,
+} from "../export/GnumarusVideoEncode";
+import {
+  muxFragmentedMp4,
+  muxMatroska,
+  muxWebM,
+  parseAvcDecoderConfig,
+} from "../export/GnumarusVideoMux";
+import {
   composeSheet,
   computeSheetGeometry,
   GNUMARUS_SHEET_LAYOUTS,
@@ -2071,6 +2082,8 @@ export class GnumarusShell extends LitElement {
     exportSheetFormat: { type: String },
     exportSheetCount: { type: Number },
     exportSheetAll: { type: Boolean },
+    videoSupportWebm: { type: Boolean },
+    videoSupportMp4: { type: Boolean },
     exportBackground: { type: Boolean },
     exportBackgroundType: { type: String },
     exportSolidColor: { type: String },
@@ -2336,6 +2349,8 @@ export class GnumarusShell extends LitElement {
   declare exportSheetFormat: string;
   declare exportSheetCount: number;
   declare exportSheetAll: boolean;
+  declare videoSupportWebm: boolean;
+  declare videoSupportMp4: boolean;
   declare exportSheetQuality: number;
   declare exportSheetLossless: boolean;
   declare exportBackground: boolean;
@@ -2623,6 +2638,8 @@ export class GnumarusShell extends LitElement {
     this.exportAnimatedFormat = "gif";
     this.exportAnimatedQuality = GNUMARUS_DEFAULT_STILL_QUALITY;
     this.exportAnimatedLossless = true;
+    this.videoSupportWebm = true;
+    this.videoSupportMp4 = true;
     this.exportSheetLayout = "line";
     this.exportSheetFormat = "image/png";
     this.exportSheetCount = 2;
@@ -5247,6 +5264,9 @@ export class GnumarusShell extends LitElement {
             <option value="gif">${tr("dialog.animGif")}</option>
             <option value="jxl">${tr("dialog.animJxl")}</option>
             <option value="webp">${tr("dialog.animWebp")}</option>
+            <option value="webm-video" ?disabled=${!this.videoSupportWebm} title=${this.videoSupportWebm ? tr("dialog.animVideoWebmTitle") : tr("dialog.animVideoNeedsVp9")}>${tr("dialog.animVideoWebm")}</option>
+            <option value="mkv-video" ?disabled=${!this.videoSupportWebm} title=${this.videoSupportWebm ? tr("dialog.animVideoMkvTitle") : tr("dialog.animVideoNeedsVp9")}>${tr("dialog.animVideoMkv")}</option>
+            <option value="mp4-video" ?disabled=${!this.videoSupportMp4} title=${this.videoSupportMp4 ? tr("dialog.animVideoMp4Title") : tr("dialog.animVideoNeedsAvc")}>${tr("dialog.animVideoMp4")}</option>
             ${this.exportFormats.map(
               (format) => html`<option value=${format.mime}>${tr("dialog.sequence", { label: format.label })}</option>`,
             )}
@@ -14964,6 +14984,23 @@ export class GnumarusShell extends LitElement {
     this.exportCheckerHeight = projectChecker.sizeY;
     this.exportCheckerColorA = projectChecker.colorA;
     this.exportCheckerColorB = projectChecker.colorB;
+    try {
+      const support = await queryVideoCodecSupport(this.engine.size.width, this.engine.size.height);
+      this.videoSupportWebm = support.vp9;
+      this.videoSupportMp4 = support.avc;
+    } catch {
+      this.videoSupportWebm = false;
+      this.videoSupportMp4 = false;
+    }
+    if (this.exportAnimatedFormat === "webm-video" && !this.videoSupportWebm) {
+      this.exportAnimatedFormat = "gif";
+    }
+    if (this.exportAnimatedFormat === "mkv-video" && !this.videoSupportWebm) {
+      this.exportAnimatedFormat = "gif";
+    }
+    if (this.exportAnimatedFormat === "mp4-video" && !this.videoSupportMp4) {
+      this.exportAnimatedFormat = "gif";
+    }
     await this.updateComplete;
     const dialog = this.shadowRoot?.getElementById("exportDialog") as HTMLDialogElement | null;
     dialog?.showModal();
@@ -15275,7 +15312,15 @@ export class GnumarusShell extends LitElement {
    * True when the animation export format goes through a WASM codec with a
    * lossless toggle (single-file jxl/webp or a jxl/webp still sequence).
    */
+  /** Animated export formats rendered from the live canvas (video files). */
+  private isVideoExportFormat(format: string): boolean {
+    return format === "webm-video" || format === "mkv-video" || format === "mp4-video";
+  }
+
   private animatedFormatUsesLossless(): boolean {
+    if (this.isVideoExportFormat(this.exportAnimatedFormat)) {
+      return false;
+    }
     if (this.exportAnimatedFormat === "jxl" || this.exportAnimatedFormat === "webp") {
       return true;
     }
@@ -15285,6 +15330,9 @@ export class GnumarusShell extends LitElement {
 
   /** True when the animation export format has no quality control. */
   private animatedFormatHidesQuality(): boolean {
+    if (this.isVideoExportFormat(this.exportAnimatedFormat)) {
+      return false;
+    }
     if (this.exportAnimatedFormat === "gif") {
       return true;
     }
@@ -15376,6 +15424,82 @@ export class GnumarusShell extends LitElement {
         if (await this.saveExportBlob(blob, fileName, "GIF animation")) {
           this.statusMessage = tr("status.exported", { file: fileName });
           this.showToast(tr("status.exported", { file: fileName }));
+        }
+        return;
+      }
+      if (formatValue === "webm-video" || formatValue === "mkv-video" || formatValue === "mp4-video") {
+        const size = this.engine.size;
+        const background = this.exportBackgroundForFormat(true);
+        const buffers: Uint8ClampedArray[] = [];
+        const delays: number[] = [];
+        for (const entry of resolved.frames) {
+          const inputs = this.engine.getFrameFlattenInputs(entry.frame);
+          if (inputs === null) {
+            this.failAnimatedExport("Export failed: invalid frame");
+            return;
+          }
+          buffers.push(compositeFinalImage(size.width, size.height, inputs, background));
+          delays.push(entry.delayMs);
+        }
+        const videoQualityInput = this.shadowRoot?.getElementById(
+          "exportAnimatedQuality",
+        ) as HTMLInputElement | null;
+        const videoQuality = normalizeStillQualityPercent(
+          Number(videoQualityInput?.value ?? this.exportAnimatedQuality),
+        );
+        this.exportAnimatedQuality = videoQuality;
+        const codec: GnumarusVideoCodec = formatValue === "mp4-video" ? "avc" : "vp9";
+        try {
+          const encoded = await encodeAnimationVideo({
+            frames: buffers,
+            width: size.width,
+            height: size.height,
+            codec,
+            delaysMs: delays,
+            quality01: videoQuality / 100,
+          });
+          const samples = encoded.chunks.map((chunk) => ({
+            data: chunk.data,
+            timestampMs: chunk.timestampUs / 1000,
+            durationMs: Math.max(1, Math.round(chunk.durationUs / 1000)),
+            key: chunk.key,
+          }));
+          let videoBlob: Blob;
+          let videoExt: string;
+          let videoLabel: string;
+          if (formatValue === "mp4-video") {
+            if (encoded.description === null) {
+              throw new Error("the H.264 encoder produced no codec description");
+            }
+            const avc = parseAvcDecoderConfig(encoded.description);
+            const file = muxFragmentedMp4(
+              { width: encoded.width, height: encoded.height, avc },
+              samples,
+            );
+            videoBlob = new Blob([file as Uint8Array<ArrayBuffer>], { type: "video/mp4" });
+            videoExt = "mp4";
+            videoLabel = "MP4 video";
+          } else {
+            const track = { width: size.width, height: size.height };
+            const file =
+              formatValue === "mkv-video"
+                ? muxMatroska(track, samples, "V_VP9")
+                : muxWebM(track, samples, "V_VP9");
+            videoBlob = new Blob([file as Uint8Array<ArrayBuffer>], {
+              type: formatValue === "mkv-video" ? "video/x-matroska" : "video/webm",
+            });
+            videoExt = formatValue === "mkv-video" ? "mkv" : "webm";
+            videoLabel = formatValue === "mkv-video" ? "MKV video" : "WebM video";
+          }
+          const fileName = `${base}-${resolved.label}.${videoExt}`;
+          this.closeExportDialog();
+          if (await this.saveExportBlob(videoBlob, fileName, videoLabel)) {
+            this.statusMessage = tr("status.exported", { file: fileName });
+            this.showToast(tr("status.exported", { file: fileName }));
+          }
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          this.failAnimatedExport(`Export failed: ${reason}`);
         }
         return;
       }

@@ -25,7 +25,11 @@ Arquivos animados
 -----------------
 
 JXL, WebP e GIF respeitam as durações dos quadros; o diálogo de
-duração total divide igualmente pelo intervalo.
+duração total divide igualmente pelo intervalo. WebM e MKV exportam
+vídeo VP9 e MP4 exporta vídeo H.264 (todos pelo codificador da
+plataforma, com o controle de qualidade definindo a taxa de bits);
+opções cujo codec o navegador não codifica ficam desativadas com o
+motivo.
 
 Vetores, 3D e azulejos
 ----------------------

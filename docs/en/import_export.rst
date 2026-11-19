@@ -25,7 +25,10 @@ Animated files
 
 JXL (still/lossy/animated/sheet), WebP (still/lossy/animated/sheet)
 and GIF export honor frame durations; the total-duration dialog splits
-evenly across the selected range.
+evenly across the selected range. WebM and MKV export encode VP9 video
+and MP4 exports H.264 video (all through the platform encoder, with
+the quality slider driving the bitrate); options whose codec the
+browser cannot encode are disabled with a reason.
 
 Vectors, 3D and tilemaps
 ------------------------
