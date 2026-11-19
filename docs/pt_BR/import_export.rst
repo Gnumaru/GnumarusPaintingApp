@@ -47,4 +47,7 @@ Projetos de terceiros
 **Arquivo > Importar** lê Aseprite (tags viram animações nomeadas),
 PSD/XCF em camadas (mesclagens preservadas) e Kra/GIF, com
 tratamento de ocupação, corrupção e cancelamento — importação falha
-nunca toca o projeto atual.
+nunca toca o projeto atual. Soltar um arquivo de imagem raster em
+qualquer lugar do app importa ele como textura da célula atual (uma
+célula ocupada mostra um erro pedindo uma célula vazia em vez de
+criar camada).

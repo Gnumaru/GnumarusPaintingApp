@@ -37,6 +37,7 @@ import {
   isOpfsSupported,
   listEmbeddedProjects,
   openEmbeddedProjectStore,
+  isRasterDropFile,
   pickImportFile,
   pickImageFile,
   pickModel3dFile,
@@ -490,6 +491,15 @@ function isGimpFile(bytes: Uint8Array): boolean {
     bytes[7] === 0x66 &&
     bytes[8] === 0x20
   );
+}
+
+/** True when a drag event carries OS files (ignores inner canvas/layer drags). */
+function hasDroppedFiles(event: DragEvent): boolean {
+  const types = event.dataTransfer?.types;
+  if (types === undefined || types === null) {
+    return false;
+  }
+  return Array.from(types).some((entry) => entry === "Files");
 }
 
 /** Public source repository opened by Help > Source code. */
@@ -7265,10 +7275,70 @@ export class GnumarusShell extends LitElement {
     this.fitContextMenusToViewport();
   }
 
+  override connectedCallback(): void {
+    super.connectedCallback();
+    this.addEventListener("dragenter", this.handleAppDragEnter);
+    this.addEventListener("dragover", this.handleAppDragOver);
+    this.addEventListener("drop", this.handleAppDrop);
+  }
+
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this.stopUpdateChecker();
+    this.removeEventListener("dragenter", this.handleAppDragEnter);
+    this.removeEventListener("dragover", this.handleAppDragOver);
+    this.removeEventListener("drop", this.handleAppDrop);
   }
+
+  /** Keep file drags alive over the app without disturbing inner drags. */
+  private handleAppDragEnter = (event: DragEvent): void => {
+    if (!hasDroppedFiles(event)) {
+      return;
+    }
+    event.preventDefault();
+  };
+
+  /** Allow file drops over the app (copy into the current cell). */
+  private handleAppDragOver = (event: DragEvent): void => {
+    if (!hasDroppedFiles(event)) {
+      return;
+    }
+    event.preventDefault();
+    if (event.dataTransfer !== null) {
+      event.dataTransfer.dropEffect = "copy";
+    }
+  };
+
+  /**
+   * Import a dropped raster image as the current cell texture. Unlike the
+   * file-picker import this never spills onto a new layer: an occupied
+   * cell reports an error asking for an empty cell instead.
+   */
+  private handleAppDrop = (event: DragEvent): void => {
+    // Always swallow drops so the browser never navigates to the file.
+    event.preventDefault();
+    if (this.engine === null) {
+      return;
+    }
+    const files = Array.from(event.dataTransfer?.files ?? []);
+    const dropped = files.find((file) => isRasterDropFile(file.name, file.type));
+    if (dropped === undefined) {
+      return;
+    }
+    this.stopPlayback();
+    this.exitFlycam();
+    void (async (): Promise<void> => {
+      let decoded: { width: number; height: number; buffer: Uint8ClampedArray };
+      try {
+        decoded = await this.decodeRasterBytes(new Uint8Array(await dropped.arrayBuffer()));
+      } catch {
+        this.statusMessage = tr("status.imageInvalid");
+        this.showToast(tr("status.imageInvalid"));
+        return;
+      }
+      await this.placeRasterOnCurrentCell(decoded, dropped.name, true);
+    })();
+  };
 
   /** Shift fixed-position context menus left/up only by the measured overflow so they stay adjacent to the cursor. */
   private fitContextMenusToViewport(): void {
@@ -18316,35 +18386,61 @@ export class GnumarusShell extends LitElement {
     const picked = await handle.getFile();
     let decoded: { width: number; height: number; buffer: Uint8ClampedArray };
     try {
-      const bitmap = await createImageBitmap(new Blob([new Uint8Array(await picked.arrayBuffer())]));
-      const canvas = document.createElement("canvas");
-      canvas.width = bitmap.width;
-      canvas.height = bitmap.height;
-      const context = canvas.getContext("2d");
-      if (context === null) {
-        bitmap.close();
-        throw new Error("2D canvas is unavailable for image decoding.");
-      }
-      context.drawImage(bitmap, 0, 0);
-      bitmap.close();
-      if (canvas.width < 1 || canvas.height < 1) {
-        throw new Error("Decoded image is empty.");
-      }
-      const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-      decoded = { width: canvas.width, height: canvas.height, buffer: imageData.data };
+      decoded = await this.decodeRasterBytes(new Uint8Array(await picked.arrayBuffer()));
     } catch {
       this.statusMessage = tr("status.imageInvalid");
       this.showToast(tr("status.imageInvalid"));
       return;
     }
+    await this.placeRasterOnCurrentCell(decoded, fileName, false);
+  }
+
+  /** Decode raster bytes with the browser decoder (throws on invalid input). */
+  private async decodeRasterBytes(bytes: Uint8Array<ArrayBuffer>): Promise<{ width: number; height: number; buffer: Uint8ClampedArray }> {
+    const bitmap = await createImageBitmap(new Blob([bytes]));
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    if (context === null) {
+      bitmap.close();
+      throw new Error("2D canvas is unavailable for image decoding.");
+    }
+    context.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    if (canvas.width < 1 || canvas.height < 1) {
+      throw new Error("Decoded image is empty.");
+    }
+    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+    return { width: canvas.width, height: canvas.height, buffer: imageData.data };
+  }
+
+  /**
+   * Place decoded raster pixels on the current cell. When strictEmptyCell
+   * is true (file drops) an occupied cell reports an error instead of
+   * spilling onto a new layer like the file-picker import does.
+   */
+  private async placeRasterOnCurrentCell(
+    decoded: { width: number; height: number; buffer: Uint8ClampedArray },
+    fileName: string,
+    strictEmptyCell: boolean,
+  ): Promise<boolean> {
+    if (this.engine === null) {
+      return false;
+    }
     if (decoded.width > 16384 || decoded.height > 16384) {
       this.statusMessage = tr("status.imageTooLarge");
       this.showToast(tr("status.imageTooLarge"));
-      return;
+      return false;
     }
     let layerId = this.engine.getActiveLayerId();
     const frame = this.engine.getCurrentFrame();
     if (!this.engine.isCellContentEmpty(layerId, frame)) {
+      if (strictEmptyCell) {
+        this.statusMessage = tr("status.imageCellOccupied");
+        this.showToast(tr("status.imageCellOccupied"));
+        return false;
+      }
       layerId = this.engine.insertLayerAboveActive();
       this.refreshLayers();
     }
@@ -18353,13 +18449,14 @@ export class GnumarusShell extends LitElement {
     if (created === null) {
       this.statusMessage = tr("status.imageInvalid");
       this.showToast(tr("status.imageInvalid"));
-      return;
+      return false;
     }
     this.refreshLayers();
     this.dirty = true;
     const layerName = this.engine.getLayers().find((layer) => layer.id === layerId)?.name ?? layerId;
     this.statusMessage = tr("status.imageImported", { name, layer: layerName });
     this.showToast(this.statusMessage);
+    return true;
   }
 
   /**

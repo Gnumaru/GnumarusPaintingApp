@@ -161,6 +161,24 @@ export async function pickModel3dFile(): Promise<GnumarusFileHandle | null> {
 }
 
 /**
+ * Raster extensions accepted both by the image file picker and by
+ * drag-and-drop onto the app (anything the browser decodes natively).
+ */
+export const GNUMARUS_RASTER_DROP_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"];
+
+/** MIME types accepted for drops, mirroring the image file picker. */
+const GNUMARUS_RASTER_DROP_MIMES = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"];
+
+/** True for dropped files the app can import as raster images. */
+export function isRasterDropFile(fileName: string, mimeType: string): boolean {
+  if (GNUMARUS_RASTER_DROP_MIMES.includes(mimeType.toLowerCase())) {
+    return true;
+  }
+  const lower = fileName.toLowerCase();
+  return GNUMARUS_RASTER_DROP_EXTENSIONS.some((extension) => lower.endsWith(extension));
+}
+
+/**
  * Open the operating system file dialog to pick a raster image (PNG, JPEG,
  * WebP, GIF or BMP — anything the browser decodes natively). Returns null
  * when the dialog API is missing; throws AbortError when the user cancels
