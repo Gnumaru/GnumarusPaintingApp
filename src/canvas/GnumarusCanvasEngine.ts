@@ -1162,7 +1162,7 @@ export class GnumarusCanvasEngine {
   private onionFuture = 1;
   private onionTint = true;
   /** Ghost planes (past blue / future red), project-sized. */
-  private onionPlanes: Array<{ mesh: THREE.Mesh; texture: THREE.DataTexture | null }> = [];
+  private onionPlanes: Array<{ mesh: THREE.Mesh; texture: THREE.DataTexture | null; scratch: Uint8ClampedArray | null }> = [];
   /** Stroke-start dab center for aligned clone offsets. */
   private retouchStart: { x: number; y: number } | null = null;
   /** Live raster preview of the pending shape/line/curve/gradient gesture. */
@@ -1860,7 +1860,7 @@ export class GnumarusCanvasEngine {
       mesh.visible = false;
       mesh.frustumCulled = false;
       this.scene.add(mesh);
-      this.onionPlanes.push({ mesh, texture: null });
+      this.onionPlanes.push({ mesh, texture: null, scratch: null });
     }
     const makeAxisLine = (color: number): { material: THREE.LineBasicMaterial; line: THREE.LineSegments } => {
       const material = new THREE.LineBasicMaterial({ color, transparent: true, depthWrite: false });
@@ -10508,6 +10508,42 @@ export class GnumarusCanvasEngine {
     return plane !== undefined && plane.mesh.visible;
   }
 
+  /** Flatten composites performed by refreshOnionSkins (test hook for the empty-frame early-out). */
+  private onionFlattenCount = 0;
+
+  /** Test hook: how many neighbor flatten composites the onion rebuild ran. */
+  getOnionFlattenCount(): number {
+    return this.onionFlattenCount;
+  }
+
+  /**
+   * True when any layer cell at `frame` holds content that could paint
+   * (texture, text, vector, 3D or tilemap — all rasterize in the flatten).
+   * Map lookups only, no allocation: keeps empty frame switches instant.
+   */
+  private frameMayHavePixels(frame: number): boolean {
+    for (const layer of this.layers) {
+      const contentId = this.cells.get(animationCellKey(layer.id, frame));
+      if (contentId === undefined) {
+        continue;
+      }
+      const content = this.contents.get(contentId);
+      if (content === undefined) {
+        continue;
+      }
+      if (
+        content.textureId !== null ||
+        content.textId !== null ||
+        content.svgId !== null ||
+        content.model3dId !== null ||
+        content.tilemapId !== null
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /**
    * Rebuild the onion ghost textures from neighbor frames (past blue,
    * future red like Pixelorama; white when tinting is off). Each side bakes
@@ -10530,11 +10566,39 @@ export class GnumarusCanvasEngine {
         slot.mesh.visible = false;
         continue;
       }
-      const ghost = new Uint8ClampedArray(width * height * 4);
+      // Empty neighbor frames cannot paint: skip the whole side before
+      // allocating anything so frame switches stay instant on blank films.
+      let anyContent = false;
+      for (let i = 1; i <= side.rate; i += 1) {
+        const neighbor = this.currentFrame + side.direction * i;
+        if (neighbor < 0 || neighbor >= this.frameCount) {
+          continue;
+        }
+        if (this.frameMayHavePixels(neighbor)) {
+          anyContent = true;
+          break;
+        }
+      }
+      if (!anyContent) {
+        slot.mesh.visible = false;
+        continue;
+      }
+      // Persistent per-side scratch: no per-switch allocation and no copy
+      // into the live texture — the update path paints the backing array.
+      let ghost = slot.scratch;
+      if (ghost === null || ghost.length !== width * height * 4) {
+        ghost = new Uint8ClampedArray(width * height * 4);
+        slot.scratch = ghost;
+      } else {
+        ghost.fill(0);
+      }
       let painted = false;
       for (let i = 1; i <= side.rate; i += 1) {
         const frame = this.currentFrame + side.direction * i;
         if (frame < 0 || frame >= this.frameCount) {
+          continue;
+        }
+        if (!this.frameMayHavePixels(frame)) {
           continue;
         }
         const inputs = this.getFrameFlattenInputs(frame);
@@ -10542,6 +10606,7 @@ export class GnumarusCanvasEngine {
           continue;
         }
         const flat = compositeFinalImage(width, height, inputs);
+        this.onionFlattenCount += 1;
         const alpha = 0.6 / i;
         for (let p = 0; p < width * height; p += 1) {
           const a = (flat[p * 4 + 3] as number) / 255;
@@ -10577,8 +10642,12 @@ export class GnumarusCanvasEngine {
         slot.texture = texture;
         const material = slot.mesh.material as THREE.ShaderMaterial;
         material.uniforms["uMap"]!.value = texture;
-      } else {
+      } else if (current.image.data !== ghost) {
+        // Backing array replaced out from under the texture: copy instead.
         (current.image.data as Uint8ClampedArray).set(ghost);
+        current.needsUpdate = true;
+      } else {
+        // Painted straight into the live backing array: just re-upload.
         current.needsUpdate = true;
       }
       slot.mesh.renderOrder = 900 + side.index;

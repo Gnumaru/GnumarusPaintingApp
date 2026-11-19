@@ -2595,6 +2595,14 @@ export async function onionVisible(page: import("@playwright/test").Page): Promi
   });
 }
 
+/** Onion flatten composites performed so far (engine test hook for the empty-frame early-out). */
+export async function onionFlattenCount(page: import("@playwright/test").Page): Promise<number> {
+  return page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { getOnionFlattenCount(): number } } };
+    return root.__gnumarus?.engine?.getOnionFlattenCount() ?? -1;
+  });
+}
+
 export async function setOnion(page: import("@playwright/test").Page, enabled: boolean, past: number, future: number): Promise<void> {
   await page.evaluate(([on, p, f]: [boolean, number, number]) => {
     const root = window as unknown as { __gnumarus?: { shell?: { setOnionState(a: boolean, b: number, c: number, d: boolean): void } } };
