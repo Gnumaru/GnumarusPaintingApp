@@ -740,10 +740,10 @@ export class GnumarusShell extends LitElement {
     .tool-drawer > button::after {
       content: "";
       position: absolute;
-      right: 3px;
-      bottom: 3px;
-      border-left: 5px solid transparent;
-      border-bottom: 5px solid #9a9a9a;
+      right: 2px;
+      bottom: 2px;
+      border-left: 7px solid transparent;
+      border-bottom: 7px solid #ffb300;
     }
     .tool-drawer > button {
       position: relative;

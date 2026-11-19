@@ -393,3 +393,28 @@ test("onion toggle tooltip and single-line animation controls @recent", async ({
   });
   expect(overlap).toBe(true);
 });
+
+test("drawer buttons carry a high-contrast amber marker, plain buttons do not @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const marker = await page.evaluate(() => {
+    const root = document.querySelector("gnumarus-shell")?.shadowRoot ?? null;
+    const byTestId = (id: string): Element | null =>
+      root?.querySelector(`[data-testid="${id}"] > button`) ?? null;
+    const colorOf = (element: Element | null): string | null =>
+      element === null
+        ? null
+        : getComputedStyle(element, "::after").getPropertyValue("border-bottom-color").trim();
+    const contentOf = (element: Element | null): string | null =>
+      element === null ? null : getComputedStyle(element, "::after").getPropertyValue("content");
+    return {
+      paint: colorOf(byTestId("paint-drawer")),
+      view: colorOf(byTestId("view-drawer")),
+      // Standalone tool button: no corner marker at all.
+      tileContent: contentOf(root?.querySelector('[aria-label="Tile brush"]') ?? null),
+    };
+  });
+  expect(marker.paint).toBe("rgb(255, 179, 0)");
+  expect(marker.view).toBe("rgb(255, 179, 0)");
+  expect(marker.tileContent).toBe("none");
+});
