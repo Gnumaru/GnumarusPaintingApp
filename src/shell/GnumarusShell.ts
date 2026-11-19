@@ -222,7 +222,7 @@ import {
   parseBrushSettings,
   serializeBrushSettings,
 } from "../settings/GnumarusBrushSettings";
-import { compositeFinalImage, type GnumarusPreviewBackground } from "../preview/GnumarusFinalRender";
+import { compositeFinalImage, parseExportBackgroundType, resolveExportBackground, type GnumarusPreviewBackground } from "../preview/GnumarusFinalRender";
 import {
   detectStillFormats,
   decodeJpegToBuffer,
@@ -2071,6 +2071,13 @@ export class GnumarusShell extends LitElement {
     exportSheetFormat: { type: String },
     exportSheetCount: { type: Number },
     exportSheetAll: { type: Boolean },
+    exportBackground: { type: Boolean },
+    exportBackgroundType: { type: String },
+    exportSolidColor: { type: String },
+    exportCheckerWidth: { type: Number },
+    exportCheckerHeight: { type: Number },
+    exportCheckerColorA: { type: String },
+    exportCheckerColorB: { type: String },
     exportSheetQuality: { type: Number },
     exportSheetLossless: { type: Boolean },
     playing: { type: Boolean },
@@ -2329,6 +2336,13 @@ export class GnumarusShell extends LitElement {
   declare exportSheetAll: boolean;
   declare exportSheetQuality: number;
   declare exportSheetLossless: boolean;
+  declare exportBackground: boolean;
+  declare exportBackgroundType: string;
+  declare exportSolidColor: string;
+  declare exportCheckerWidth: number;
+  declare exportCheckerHeight: number;
+  declare exportCheckerColorA: string;
+  declare exportCheckerColorB: string;
   declare playing: boolean;
   declare uiHidden: boolean;
   /** Explicit animation-matrix height in px (null = automatic). */
@@ -2609,6 +2623,13 @@ export class GnumarusShell extends LitElement {
     this.exportSheetFormat = "image/png";
     this.exportSheetCount = 2;
     this.exportSheetAll = false;
+    this.exportBackground = false;
+    this.exportBackgroundType = "project";
+    this.exportSolidColor = DEFAULT_BACKGROUND_SETTINGS.color;
+    this.exportCheckerWidth = DEFAULT_CHECKER_SETTINGS.sizeX;
+    this.exportCheckerHeight = DEFAULT_CHECKER_SETTINGS.sizeY;
+    this.exportCheckerColorA = DEFAULT_CHECKER_SETTINGS.colorA;
+    this.exportCheckerColorB = DEFAULT_CHECKER_SETTINGS.colorB;
     this.exportSheetQuality = GNUMARUS_DEFAULT_STILL_QUALITY;
     this.exportSheetLossless = true;
     this.playing = false;
@@ -5154,6 +5175,7 @@ export class GnumarusShell extends LitElement {
                 }}
               />
             </label>`}
+        ${this.renderExportBackgroundOptions("Frame")}
         <div class="dialog-actions">
           <button @click=${(): void => this.closeExportDialog()}>${tr("btn.cancel")}</button>
           <button id="exportOk" @click=${(): void => void this.confirmExportFrame()}>
@@ -5225,6 +5247,7 @@ export class GnumarusShell extends LitElement {
                 }}
               />
             </label>`}
+        ${this.renderExportBackgroundOptions("Animated")}
         <div class="dialog-actions">
           <button @click=${(): void => this.closeExportDialog()}>${tr("btn.cancel")}</button>
           <button id="exportAnimatedOk" @click=${(): void => void this.confirmExportAnimated()}>
@@ -5330,6 +5353,7 @@ export class GnumarusShell extends LitElement {
                 }}
               />
             </label>`}
+        ${this.renderExportBackgroundOptions("Sheet")}
         <div class="dialog-actions">
           <button @click=${(): void => this.closeExportDialog()}>${tr("btn.cancel")}</button>
           <button id="exportSheetOk" @click=${(): void => void this.confirmExportSheet()}>
@@ -14858,6 +14882,15 @@ export class GnumarusShell extends LitElement {
     }
     this.exportSheetAll = false;
     this.exportTab = "frame";
+    this.exportBackground = false;
+    this.exportBackgroundType = "project";
+    const projectBackground = this.engine.getBackgroundSettings();
+    this.exportSolidColor = projectBackground.color;
+    const projectChecker = this.engine.getCheckerSettings();
+    this.exportCheckerWidth = projectChecker.sizeX;
+    this.exportCheckerHeight = projectChecker.sizeY;
+    this.exportCheckerColorA = projectChecker.colorA;
+    this.exportCheckerColorB = projectChecker.colorB;
     await this.updateComplete;
     const dialog = this.shadowRoot?.getElementById("exportDialog") as HTMLDialogElement | null;
     dialog?.showModal();
@@ -14972,6 +15005,140 @@ export class GnumarusShell extends LitElement {
     return encodeStillImage(buffer, width, height, format.mime, fraction);
   }
 
+  /** Shared export-background controls for one export tab (state is shared). */
+  private renderExportBackgroundOptions(sfx: "Frame" | "Animated" | "Sheet"): unknown {
+    return html`
+      <label title=${tr("dialog.exportBackgroundTitle")}
+        ><input
+          type="checkbox"
+          id="exportBackground${sfx}"
+          ?checked=${this.exportBackground}
+          @change=${(event: Event): void => {
+            this.exportBackground = (event.target as HTMLInputElement | null)?.checked === true;
+          }}
+        />${tr("dialog.exportBackground")}
+      </label>
+      ${this.exportBackground
+        ? html`<label title=${tr("dialog.backgroundTypeTitle")}
+            >${tr("dialog.backgroundType")}
+            <select
+              id="exportBackgroundType${sfx}"
+              .value=${this.exportBackgroundType}
+              @change=${(event: Event): void => {
+                this.exportBackgroundType = parseExportBackgroundType(
+                  (event.target as HTMLSelectElement | null)?.value,
+                );
+              }}
+            >
+              <option value="project">${tr("dialog.backgroundProject")}</option>
+              <option value="solid">${tr("dialog.backgroundSolid")}</option>
+              <option value="checkers">${tr("dialog.backgroundCheckers")}</option>
+            </select>
+          </label>`
+        : html``}
+      ${this.exportBackground && this.exportBackgroundType === "solid"
+        ? html`<label
+            >${tr("dialog.backgroundColor")}
+            <input
+              type="color"
+              id="exportSolidColor${sfx}"
+              .value=${this.exportSolidColor}
+              @input=${(event: Event): void => {
+                const next = (event.target as HTMLInputElement | null)?.value ?? "";
+                if (/^#[0-9a-fA-F]{6}$/.test(next)) {
+                  this.exportSolidColor = next;
+                }
+              }}
+            />
+          </label>`
+        : html``}
+      ${this.exportBackground && this.exportBackgroundType === "checkers"
+        ? html`<label
+            >${tr("dialog.checkerWidth")}
+            <input
+              type="number"
+              id="exportCheckerWidth${sfx}"
+              min="1"
+              max="128"
+              step="1"
+              .value=${String(this.exportCheckerWidth)}
+              @input=${(event: Event): void => {
+                const raw = Math.floor(Number((event.target as HTMLInputElement | null)?.value));
+                if (Number.isFinite(raw)) {
+                  this.exportCheckerWidth = Math.min(128, Math.max(1, raw));
+                }
+              }}
+            />
+          </label>
+          <label
+            >${tr("dialog.checkerHeight")}
+            <input
+              type="number"
+              id="exportCheckerHeight${sfx}"
+              min="1"
+              max="128"
+              step="1"
+              .value=${String(this.exportCheckerHeight)}
+              @input=${(event: Event): void => {
+                const raw = Math.floor(Number((event.target as HTMLInputElement | null)?.value));
+                if (Number.isFinite(raw)) {
+                  this.exportCheckerHeight = Math.min(128, Math.max(1, raw));
+                }
+              }}
+            />
+          </label>
+          <label
+            >${tr("dialog.checkerColorA")}
+            <input
+              type="color"
+              id="exportCheckerColorA${sfx}"
+              .value=${this.exportCheckerColorA}
+              @input=${(event: Event): void => {
+                const next = (event.target as HTMLInputElement | null)?.value ?? "";
+                if (/^#[0-9a-fA-F]{6}$/.test(next)) {
+                  this.exportCheckerColorA = next;
+                }
+              }}
+            />
+          </label>
+          <label
+            >${tr("dialog.checkerColorB")}
+            <input
+              type="color"
+              id="exportCheckerColorB${sfx}"
+              .value=${this.exportCheckerColorB}
+              @input=${(event: Event): void => {
+                const next = (event.target as HTMLInputElement | null)?.value ?? "";
+                if (/^#[0-9a-fA-F]{6}$/.test(next)) {
+                  this.exportCheckerColorB = next;
+                }
+              }}
+            />
+          </label>`
+        : html``}
+    `;
+  }
+
+  /** Background for an export: legacy transparency rules when off, chosen type when on. */
+  private exportBackgroundForFormat(formatHasAlpha: boolean): GnumarusPreviewBackground | undefined {
+    if (this.engine === null) {
+      return undefined;
+    }
+    const checker = this.engine.getCheckerSettings();
+    const background = this.engine.getBackgroundSettings();
+    return resolveExportBackground(formatHasAlpha, {
+      enabled: this.exportBackground,
+      type: parseExportBackgroundType(this.exportBackgroundType),
+      project: this.canvasBackground(checker, background),
+      solidColor: this.exportSolidColor,
+      checkerSizeX: this.exportCheckerWidth,
+      checkerSizeY: this.exportCheckerHeight,
+      checkerColorA: this.exportCheckerColorA,
+      checkerColorB: this.exportCheckerColorB,
+      checkerMode: checker.mode,
+    });
+  }
+
   private async confirmExportFrame(): Promise<void> {
     if (this.engine === null) {
       this.closeExportDialog();
@@ -14998,9 +15165,7 @@ export class GnumarusShell extends LitElement {
     }
     try {
       const size = this.engine.size;
-      const background = format.alpha
-        ? undefined
-        : this.canvasBackground(this.engine.getCheckerSettings(), this.engine.getBackgroundSettings());
+      const background = this.exportBackgroundForFormat(format.alpha);
       const qualityInput = this.shadowRoot?.getElementById("exportQuality") as HTMLInputElement | null;
       const quality = normalizeStillQualityPercent(Number(qualityInput?.value ?? this.exportQuality));
       this.exportQuality = quality;
@@ -15130,7 +15295,7 @@ export class GnumarusShell extends LitElement {
             this.failAnimatedExport("Export failed: invalid frame");
             return;
           }
-          encoder.addFrame(compositeFinalImage(size.width, size.height, inputs), entry.delayMs);
+          encoder.addFrame(compositeFinalImage(size.width, size.height, inputs, this.exportBackgroundForFormat(true)), entry.delayMs);
         }
         const blob = new Blob([encoder.finish() as Uint8Array<ArrayBuffer>], { type: "image/gif" });
         const fileName = `${base}-${resolved.label}.gif`;
@@ -15158,7 +15323,7 @@ export class GnumarusShell extends LitElement {
             return;
           }
           frames.push({
-            buffer: compositeFinalImage(size.width, size.height, inputs),
+            buffer: compositeFinalImage(size.width, size.height, inputs, this.exportBackgroundForFormat(true)),
             delayMs: entry.delayMs,
           });
         }
@@ -15197,7 +15362,7 @@ export class GnumarusShell extends LitElement {
             return;
           }
           frames.push({
-            buffer: compositeFinalImage(size.width, size.height, inputs),
+            buffer: compositeFinalImage(size.width, size.height, inputs, this.exportBackgroundForFormat(true)),
             delayMs: entry.delayMs,
           });
         }
@@ -15225,9 +15390,7 @@ export class GnumarusShell extends LitElement {
         return;
       }
       const size = this.engine.size;
-      const background = format.alpha
-        ? undefined
-        : this.canvasBackground(this.engine.getCheckerSettings(), this.engine.getBackgroundSettings());
+      const background = this.exportBackgroundForFormat(format.alpha);
       const animatedQualityInput = this.shadowRoot?.getElementById(
         "exportAnimatedQuality",
       ) as HTMLInputElement | null;
@@ -15398,9 +15561,7 @@ export class GnumarusShell extends LitElement {
     const base = exportBaseName(this.projectName);
     try {
       const size = this.engine.size;
-      const background = format.alpha
-        ? undefined
-        : this.canvasBackground(this.engine.getCheckerSettings(), this.engine.getBackgroundSettings());
+      const background = this.exportBackgroundForFormat(format.alpha);
       const sheetQualityInput = this.shadowRoot?.getElementById(
         "exportSheetQuality",
       ) as HTMLInputElement | null;

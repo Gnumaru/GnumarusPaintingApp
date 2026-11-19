@@ -14,7 +14,10 @@ Quadros e folhas
 ----------------
 
 Exportar grava PNG, JPEG, WebP e spritesheets (linhas/colunas,
-pintura por quadro). As ações em massa de ajustar/cortar normalizam
+pintura por quadro). Marque **Exportar fundo** para assar um fundo
+sob a imagem (igual ao projeto, cor sólida ou quadriculado
+personalizado); desmarcado mantém a transparência onde o formato
+suporta. As ações em massa de ajustar/cortar normalizam
 antes; recarregar texturas restaura edições externas, pulando
 texturas novas (desfazível).
 

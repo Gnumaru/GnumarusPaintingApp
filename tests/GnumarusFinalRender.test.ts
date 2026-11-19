@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { createPixelBuffer, setPixel } from "../src/canvas/GnumarusPixelBuffer";
 import { IDENTITY_LAYER_TRANSFORM } from "../src/canvas/GnumarusViewportMath";
-import { compositeFinalImage, compositeLayersAt } from "../src/preview/GnumarusFinalRender";
+import {
+  compositeFinalImage,
+  compositeLayersAt,
+  parseExportBackgroundType,
+  resolveExportBackground,
+  type GnumarusExportBackgroundRequest,
+} from "../src/preview/GnumarusFinalRender";
 
 describe("GnumarusFinalRender", () => {
   it("renders transparent for empty layers", () => {
@@ -184,5 +190,73 @@ describe("layer masks", () => {
       { ...base, buffer: red, masks: [{ width: 1, height: 1, buffer: black, transform: { ...IDENTITY_LAYER_TRANSFORM }, opacity: 0 }] },
     ]);
     expect(Array.from(disabled)).toEqual([255, 0, 0, 255]);
+  });
+
+  it("parses the export background type with a project fallback", () => {
+    expect(parseExportBackgroundType("solid")).toBe("solid");
+    expect(parseExportBackgroundType("checkers")).toBe("checkers");
+    expect(parseExportBackgroundType("project")).toBe("project");
+    expect(parseExportBackgroundType("nope")).toBe("project");
+    expect(parseExportBackgroundType(undefined)).toBe("project");
+  });
+
+  it("resolves the export background for legacy and explicit choices", () => {
+    const project = {
+      mode: "checkerboard",
+      checkerMode: "image",
+      sizeX: 16,
+      sizeY: 16,
+      colorA: "#ffffff",
+      colorB: "#000000",
+      color: "#808080",
+    } as const;
+    const base: GnumarusExportBackgroundRequest = {
+      enabled: false,
+      type: "project",
+      project: { ...project },
+      solidColor: "#ff0000",
+      checkerSizeX: 8,
+      checkerSizeY: 8,
+      checkerColorA: "#00ff00",
+      checkerColorB: "#0000ff",
+      checkerMode: "image",
+    };
+    // Unchecked keeps the legacy rule: transparent for alpha formats.
+    expect(resolveExportBackground(true, base)).toBeUndefined();
+    // ... and the project background otherwise.
+    expect(resolveExportBackground(false, base)).toEqual({ ...project });
+    // Checked with "project" bakes the canvas background even with alpha.
+    expect(resolveExportBackground(true, { ...base, enabled: true })).toEqual({ ...project });
+    // Checked with "solid" paints the solid color.
+    expect(resolveExportBackground(true, { ...base, enabled: true, type: "solid" })).toEqual({
+      ...project,
+      mode: "solid",
+      color: "#ff0000",
+    });
+    // Checked with "checkers" paints the custom pattern.
+    expect(resolveExportBackground(true, { ...base, enabled: true, type: "checkers" })).toEqual({
+      ...project,
+      mode: "checkerboard",
+      checkerMode: "image",
+      sizeX: 8,
+      sizeY: 8,
+      colorA: "#00ff00",
+      colorB: "#0000ff",
+    });
+    // Invalid colors fall back to the project ones; sizes clamp to 1..128.
+    const bad = resolveExportBackground(true, {
+      ...base,
+      enabled: true,
+      type: "checkers",
+      checkerColorA: "nope",
+      checkerSizeX: 999,
+      checkerSizeY: 0,
+    });
+    expect(bad?.colorA).toBe("#ffffff");
+    expect(bad?.colorB).toBe("#0000ff");
+    expect(bad?.sizeX).toBe(128);
+    expect(bad?.sizeY).toBe(1);
+    const badSolid = resolveExportBackground(true, { ...base, enabled: true, type: "solid", solidColor: "zzz" });
+    expect(badSolid?.color).toBe("#808080");
   });
 });

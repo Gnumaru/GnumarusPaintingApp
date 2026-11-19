@@ -13,7 +13,10 @@ Stills and sheets
 -----------------
 
 Export writes PNG, JPEG, WebP stills and spritesheets (rows/columns,
-per-frame painting). Fit-all-textures and crop-all-cells batch jobs
+per-frame painting). Tick **Export background** to bake a background
+under the image (same as project, a solid color, or a custom
+checkerboard); unticked keeps transparency where the format supports
+it. Fit-all-textures and crop-all-cells batch jobs
 normalize the project first; reload-all-textures restores files edited
 externally, skipping new textures (undoable).
 

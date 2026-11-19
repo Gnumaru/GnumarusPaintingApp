@@ -49,6 +49,87 @@ export interface GnumarusPreviewBackground {
   color: string;
 }
 
+/** Export background source picked in the export dialog. */
+export type GnumarusExportBackgroundType = "project" | "solid" | "checkers";
+
+/** Parse an export background type, defaulting to the project background. */
+export function parseExportBackgroundType(value: unknown): GnumarusExportBackgroundType {
+  if (value === "solid") {
+    return "solid";
+  }
+  if (value === "checkers") {
+    return "checkers";
+  }
+  return "project";
+}
+
+/** Inputs for resolving the export background (dialog state + project). */
+export interface GnumarusExportBackgroundRequest {
+  enabled: boolean;
+  type: GnumarusExportBackgroundType;
+  /** "Same as project" background, already resolved from settings. */
+  project: GnumarusPreviewBackground;
+  /** Solid color hex when type is "solid". */
+  solidColor: string;
+  /** Checker geometry/colors when type is "checkers". */
+  checkerSizeX: number;
+  checkerSizeY: number;
+  checkerColorA: string;
+  checkerColorB: string;
+  /** Checker layout (image/screen), following the project. */
+  checkerMode: "image" | "screen";
+}
+
+function fallbackCheckerSize(value: number, fallback: number): number {
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.min(128, Math.max(1, Math.floor(value)));
+}
+
+/**
+ * Background to paint under an export, or undefined for transparency.
+ * Unchecked keeps the legacy behavior (transparent when the format stores
+ * alpha, project canvas background otherwise); checked bakes the chosen
+ * type, opaque even for alpha formats. Invalid colors fall back to the
+ * project ones, sizes clamp to 1..128.
+ */
+export function resolveExportBackground(
+  formatHasAlpha: boolean,
+  request: GnumarusExportBackgroundRequest,
+): GnumarusPreviewBackground | undefined {
+  if (!request.enabled) {
+    return formatHasAlpha ? undefined : request.project;
+  }
+  if (request.type === "solid") {
+    const color =
+      typeof request.solidColor === "string" && parseHexColor(request.solidColor) !== null
+        ? request.solidColor
+        : request.project.color;
+    return { ...request.project, mode: "solid", color };
+  }
+  if (request.type === "checkers") {
+    const colorA =
+      typeof request.checkerColorA === "string" && parseHexColor(request.checkerColorA) !== null
+        ? request.checkerColorA
+        : request.project.colorA;
+    const colorB =
+      typeof request.checkerColorB === "string" && parseHexColor(request.checkerColorB) !== null
+        ? request.checkerColorB
+        : request.project.colorB;
+    return {
+      ...request.project,
+      mode: "checkerboard",
+      checkerMode: request.checkerMode,
+      sizeX: fallbackCheckerSize(request.checkerSizeX, request.project.sizeX),
+      sizeY: fallbackCheckerSize(request.checkerSizeY, request.project.sizeY),
+      colorA,
+      colorB,
+    };
+  }
+  return request.project;
+}
+
 const GNUMARUS_PREVIEW_CHECKER_FALLBACK_SIZE = 16;
 
 function clampPreviewCheckerSize(value: number): number {

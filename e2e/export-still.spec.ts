@@ -25,6 +25,55 @@ test("File > Export saves the current frame as PNG with exact pixels", async ({ 
   expect(file?.corner).toEqual([0, 0, 0, 0]);
 });
 
+test("File > Export paints a solid background when enabled @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  // Off by default: legacy behavior (transparent PNG) is preserved.
+  await expect(dialog.locator("input#exportBackgroundFrame")).not.toBeChecked();
+  await dialog.locator("input#exportBackgroundFrame").check();
+  await dialog.locator("select#exportBackgroundTypeFrame").selectOption("solid");
+  await dialog.locator('input#exportSolidColorFrame[type="color"]').fill("#ff0000");
+  await dialog.locator("#exportOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported");
+  const file = await exportedFile(page);
+  expect(file?.type).toBe("image/png");
+  expect(file?.corner).toEqual([255, 0, 0, 255]);
+  expect(file?.center).toEqual([255, 0, 0, 255]);
+});
+
+test("File > Export paints a custom checkered background @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator("input#exportBackgroundFrame").check();
+  // Checker controls only show for the checkers type.
+  await expect(dialog.locator("input#exportCheckerWidthFrame")).toHaveCount(0);
+  await dialog.locator("select#exportBackgroundTypeFrame").selectOption("checkers");
+  await expect(dialog.locator("input#exportCheckerWidthFrame")).toBeVisible();
+  await dialog.locator("input#exportCheckerWidthFrame").fill("8");
+  await dialog.locator("input#exportCheckerHeightFrame").fill("8");
+  await dialog.locator('input#exportCheckerColorAFrame[type="color"]').fill("#ffffff");
+  await dialog.locator('input#exportCheckerColorBFrame[type="color"]').fill("#000000");
+  await dialog.locator("#exportOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported");
+  const file = await exportedFile(page);
+  expect(file?.type).toBe("image/png");
+  // Corner (0,0) of an 8px image-space pattern is color B; fully opaque.
+  expect(file?.corner).toEqual([0, 0, 0, 255]);
+  expect(file?.center?.[3]).toBe(255);
+});
+
 test("File > Export flattens JPEG without alpha", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
