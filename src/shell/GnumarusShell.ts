@@ -253,6 +253,7 @@ import {
   WEBP_STORAGE_EFFORT,
 } from "../export/GnumarusWebpExport";
 import { createGifEncoder } from "../export/GnumarusGifExport";
+import { encodeAnimatedPng } from "../export/GnumarusApngExport";
 import {
   encodeAnimationVideo,
   queryVideoCodecSupport,
@@ -5262,6 +5263,7 @@ export class GnumarusShell extends LitElement {
             }}
           >
             <option value="gif">${tr("dialog.animGif")}</option>
+            <option value="apng">${tr("dialog.animApng")}</option>
             <option value="jxl">${tr("dialog.animJxl")}</option>
             <option value="webp">${tr("dialog.animWebp")}</option>
             <option value="webm-video" ?disabled=${!this.videoSupportWebm} title=${this.videoSupportWebm ? tr("dialog.animVideoWebmTitle") : tr("dialog.animVideoNeedsVp9")}>${tr("dialog.animVideoWebm")}</option>
@@ -15333,7 +15335,7 @@ export class GnumarusShell extends LitElement {
     if (this.isVideoExportFormat(this.exportAnimatedFormat)) {
       return false;
     }
-    if (this.exportAnimatedFormat === "gif") {
+    if (this.exportAnimatedFormat === "gif" || this.exportAnimatedFormat === "apng") {
       return true;
     }
     if (this.exportAnimatedFormat === "jxl" || this.exportAnimatedFormat === "webp") {
@@ -15424,6 +15426,33 @@ export class GnumarusShell extends LitElement {
         if (await this.saveExportBlob(blob, fileName, "GIF animation")) {
           this.statusMessage = tr("status.exported", { file: fileName });
           this.showToast(tr("status.exported", { file: fileName }));
+        }
+        return;
+      }
+      if (formatValue === "apng") {
+        const size = this.engine.size;
+        const background = this.exportBackgroundForFormat(true);
+        const frames: Array<{ pixels: Uint8ClampedArray; delayMs: number }> = [];
+        for (const entry of resolved.frames) {
+          const inputs = this.engine.getFrameFlattenInputs(entry.frame);
+          if (inputs === null) {
+            this.failAnimatedExport("Export failed: invalid frame");
+            return;
+          }
+          frames.push({ pixels: compositeFinalImage(size.width, size.height, inputs, background), delayMs: entry.delayMs });
+        }
+        try {
+          const bytes = await encodeAnimatedPng({ frames, width: size.width, height: size.height, loop: resolved.loop });
+          const blob = new Blob([bytes as Uint8Array<ArrayBuffer>], { type: "image/apng" });
+          const fileName = `${base}-${resolved.label}.png`;
+          this.closeExportDialog();
+          if (await this.saveExportBlob(blob, fileName, "APNG animation")) {
+            this.statusMessage = tr("status.exported", { file: fileName });
+            this.showToast(tr("status.exported", { file: fileName }));
+          }
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          this.failAnimatedExport(`Export failed: ${reason}`);
         }
         return;
       }

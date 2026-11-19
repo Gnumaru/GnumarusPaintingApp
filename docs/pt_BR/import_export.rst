@@ -24,7 +24,8 @@ texturas novas (desfazível).
 Arquivos animados
 -----------------
 
-JXL, WebP e GIF respeitam as durações dos quadros; o diálogo de
+JXL, WebP, APNG (sem perda, o primeiro quadro serve também como imagem
+estática) e GIF respeitam as durações dos quadros; o diálogo de
 duração total divide igualmente pelo intervalo. WebM e MKV exportam
 vídeo VP9 e MP4 exporta vídeo H.264 (todos pelo codificador da
 plataforma, com o controle de qualidade definindo a taxa de bits);
