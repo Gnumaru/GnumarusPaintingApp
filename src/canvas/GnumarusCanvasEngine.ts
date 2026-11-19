@@ -320,6 +320,7 @@ import {
   type GnumarusTexturePixels,
 } from "../animation/GnumarusAnimationModel";
 import {
+  GNUMARUS_ANIMATION_LOOPS,
   mapNamedAnimationFrames,
   type GnumarusNamedAnimation,
 } from "../animation/GnumarusNamedAnimations";
@@ -2647,7 +2648,7 @@ export class GnumarusCanvasEngine {
     if (
       typeof animation.name !== "string" ||
       animation.name.trim().length === 0 ||
-      (loop !== "none" && loop !== "forward" && loop !== "ping-pong") ||
+      !GNUMARUS_ANIMATION_LOOPS.includes(loop) ||
       !Array.isArray(animation.frames) ||
       this.namedAnimations.some((entry) => entry.name === animation.name)
     ) {

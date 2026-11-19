@@ -150,7 +150,7 @@ test("named animations reject bad definitions and list valid ones", async ({ pag
   const dialog = await animationDialog(page);
   await dialog.locator("input#animationInput").fill("walk,sideways,1");
   await dialog.getByRole("button", { name: "Add", exact: true }).click();
-  await expect(dialog.locator('[role="alert"]')).toContainText("none, forward or ping-pong");
+  await expect(dialog.locator('[role="alert"]')).toContainText("none, forward, ping-pong, backward or ping-pong-backward");
   await dialog.locator("input#animationInput").fill("walk,forward,1,2");
   await dialog.getByRole("button", { name: "Add", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Animation walk added (2 frames)");

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { getLayers, getMatrix, loadBlankProject, namedAnimations, paintCenter, setPencil, stubProjectDirectory } from "./e2e-helpers";
+import { addAnimation, getLayers, getMatrix, loadBlankProject, namedAnimations, paintCenter, setPencil, stubProjectDirectory } from "./e2e-helpers";
 
 test("content manager dialog lists every project content @recent", async ({ page }) => {
   await page.goto("/");
@@ -175,6 +175,36 @@ test("new animation dialog lists the selected frames in Brazilian Portuguese @re
     "A animação usará os seguintes quadros: 1,2",
   );
   await dialog.locator('[data-testid="animation-create-cancel"]').click();
+});
+
+test("new animation dialog offers the reverse loops and stores them @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click({ button: "right" });
+  await page.getByRole("button", { name: "New animation" }).click();
+  const dialog = page.locator('gnumarus-shell dialog#animationCreateDialog');
+  await expect(dialog).toBeVisible();
+  const loop = dialog.locator('[data-testid="animation-create-loop"]');
+  await expect(loop.locator('option[value="backward"]')).toHaveCount(1);
+  await expect(loop.locator('option[value="ping-pong-backward"]')).toHaveCount(1);
+  await dialog.locator('[data-testid="animation-create-name"]').fill("Back");
+  await loop.selectOption("backward");
+  await dialog.locator('[data-testid="animation-create-ok"]').click();
+  expect(await namedAnimations(page)).toEqual([{ name: "Back", loop: "backward", frames: [{ frame: 0, duration: null }] }]);
+});
+
+test("new animation from a string accepts the reverse loops @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Add frame", exact: true }).click();
+  await page.getByRole("button", { name: "Add frame", exact: true }).click();
+  await addAnimation(page, "Back,backward,3,2,1");
+  await addAnimation(page, "Yo,ping-pong-backward,1,2");
+  expect(await namedAnimations(page)).toEqual([
+    { name: "Back", loop: "backward", frames: [{ frame: 2, duration: null }, { frame: 1, duration: null }, { frame: 0, duration: null }] },
+    { name: "Yo", loop: "ping-pong-backward", frames: [{ frame: 0, duration: null }, { frame: 1, duration: null }] },
+  ]);
 });
 
 test("new animation from a single frame menu @recent", async ({ page }) => {

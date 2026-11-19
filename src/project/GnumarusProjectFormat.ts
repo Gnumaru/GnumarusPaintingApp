@@ -12,6 +12,7 @@ import { parseModelLighting, type GnumarusModelLighting } from "../settings/Gnum
 import type { GnumarusLayerTransform } from "../canvas/GnumarusViewportMath";
 import { IDENTITY_LAYER_TRANSFORM } from "../canvas/GnumarusViewportMath";
 import type { GnumarusAnimationLoop } from "../animation/GnumarusNamedAnimations";
+import { GNUMARUS_ANIMATION_LOOPS } from "../animation/GnumarusNamedAnimations";
 import { parseChannelLock, parseLayerBlendMode, type GnumarusChannelLock, type GnumarusLayerBlendMode } from "../canvas/GnumarusPixelBuffer";
 import { sanitizeLayerMasks, sanitizeLayerParents } from "../canvas/GnumarusLayerTree";
 import {
@@ -1026,7 +1027,7 @@ function parseNamedAnimationMetas(value: unknown, frameCount: number, durationsI
       throw new GnumarusProjectError(`project.json has a duplicated animation name "${trimmed}"`);
     }
     seenNames.add(trimmed);
-    if (loop !== "none" && loop !== "forward" && loop !== "ping-pong") {
+    if (typeof loop !== "string" || !GNUMARUS_ANIMATION_LOOPS.includes(loop as GnumarusAnimationLoop)) {
       throw new GnumarusProjectError(`project.json has an animation with an invalid loop mode`);
     }
     if (!Array.isArray(frames)) {
@@ -1049,7 +1050,8 @@ function parseNamedAnimationMetas(value: unknown, frameCount: number, durationsI
         duration: duration === undefined || duration === null ? null : clampFrameDurationSec(durationsInMs ? (duration as number) / 1000 : (duration as number)),
       });
     }
-    checked.push({ name: trimmed, loop, frames: checkedFrames });
+    const checkedLoop: GnumarusAnimationLoop = loop as GnumarusAnimationLoop;
+    checked.push({ name: trimmed, loop: checkedLoop, frames: checkedFrames });
   }
   return checked;
 }

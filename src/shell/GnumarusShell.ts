@@ -5008,6 +5008,8 @@ export class GnumarusShell extends LitElement {
             <option value="none">none</option>
             <option value="forward">forward</option>
             <option value="ping-pong">ping-pong</option>
+            <option value="backward">backward</option>
+            <option value="ping-pong-backward">ping-pong-backward</option>
           </select>
         </label>
         ${this.animationCreateError !== null
@@ -14697,7 +14699,13 @@ export class GnumarusShell extends LitElement {
       this.animationCreateError = tr("dialog.animNameRequired");
       return;
     }
-    const loop = this.animationCreateLoop === "none" || this.animationCreateLoop === "ping-pong" ? this.animationCreateLoop : "forward";
+    const loop =
+      this.animationCreateLoop === "none" ||
+      this.animationCreateLoop === "ping-pong" ||
+      this.animationCreateLoop === "backward" ||
+      this.animationCreateLoop === "ping-pong-backward"
+        ? this.animationCreateLoop
+        : "forward";
     if (
       !this.engine.addNamedAnimation({
         name,
@@ -15694,7 +15702,14 @@ export class GnumarusShell extends LitElement {
     }
     this.playing = true;
     this.playbackAnimation = animation;
-    this.playbackDirection = 1;
+    // Reverse loops start at the last entry: backwards walks down with
+    // direction -1, the backward-starting ping-pong turns around from
+    // the end with direction +1.
+    const reversedStart =
+      animation !== null &&
+      (animation.loop === "backward" || animation.loop === "ping-pong-backward") &&
+      animation.frames.length > 0;
+    this.playbackDirection = animation !== null && animation.loop === "backward" ? -1 : 1;
     // Onion ghosts smear across playing frames: suspend them silently and
     // restore the previous state on stop.
     this.onionBeforePlayback = this.onionEnabled;
@@ -15704,6 +15719,14 @@ export class GnumarusShell extends LitElement {
     if (animation === null) {
       this.playbackIndex = 0;
       this.statusMessage = tr("status.playingFrom", { frame: this.engine.getCurrentFrame() + 1 });
+    } else if (reversedStart) {
+      this.playbackIndex = animation.frames.length - 1;
+      const start = animation.frames[this.playbackIndex];
+      if (start !== undefined) {
+        this.engine.setCurrentFrame(start.frame);
+        this.refreshLayers();
+      }
+      this.statusMessage = tr("status.playingAnimFrom", { name: animation.name, frame: (start?.frame ?? 0) + 1 });
     } else {
       const current = this.engine.getCurrentFrame();
       const resume = animation.frames.findIndex((entry) => entry.frame === current);

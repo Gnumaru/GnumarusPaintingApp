@@ -28,8 +28,10 @@ em dica quais animações incluem o quadro.
 Animações nomeadas
 ------------------
 
-Defina strings ``nome,loop,quadros`` (lista + destaque + reprodução
-restrita, importação de tags do Aseprite) e exclua com confirmação.
+Defina strings ``nome,loop,quadros`` (loop é um de ``none``,
+``forward``, ``ping-pong``, ``backward`` ou ``ping-pong-backward``;
+lista + destaque + reprodução restrita, importação de tags do Aseprite)
+e exclua com confirmação.
 A paleta oferece menus de quadro/camada, navegação por setas e menus
 de contexto para excluir em massa, duração por intervalo e duração
 total (dividida igualmente).

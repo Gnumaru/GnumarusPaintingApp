@@ -272,6 +272,34 @@ test("playback advances frames by duration and stops on demand", async ({ page }
   await expect(matrix.getByRole("button", { name: "Play animation", exact: true })).toBeVisible();
 });
 
+test("backward animation plays frames in reverse order @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { setFrameDuration(f: number, d: number | null): boolean } } };
+    root.__gnumarus?.engine?.setFrameDuration(0, 0.2);
+    root.__gnumarus?.engine?.setFrameDuration(1, 0.2);
+    root.__gnumarus?.engine?.setFrameDuration(2, 0.2);
+  });
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click({ modifiers: ["Control"] });
+  await matrix.locator('[data-testid="anim-frame"][data-frame="2"]').click({ modifiers: ["Control"] });
+  await matrix.locator('[data-testid="anim-frame"][data-frame="2"]').click({ button: "right" });
+  await page.getByRole("button", { name: "New animation" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#animationCreateDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator('[data-testid="animation-create-name"]').fill("Back");
+  await dialog.locator('[data-testid="animation-create-loop"]').selectOption("backward");
+  await dialog.locator('[data-testid="animation-create-ok"]').click();
+  await matrix.getByRole("button", { name: "Play animation", exact: true }).click();
+  await expect.poll(async () => getMatrixFrame(page), { timeout: 5000 }).toBe(1);
+  await expect.poll(async () => getMatrixFrame(page), { timeout: 5000 }).toBe(0);
+  await matrix.getByRole("button", { name: "Stop animation", exact: true }).click();
+});
+
 test("opening the picker on black switches out immediately @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

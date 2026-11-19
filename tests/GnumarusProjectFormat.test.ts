@@ -409,6 +409,8 @@ describe("GnumarusProjectFormat", () => {
         ],
       },
       { name: "idle", loop: "ping-pong", frames: [{ frame: 1, duration: 0.2 }] },
+      { name: "moon", loop: "backward", frames: [{ frame: 2, duration: null }] },
+      { name: "yoyo", loop: "ping-pong-backward", frames: [{ frame: 0, duration: null }] },
     ];
     project.animation.activeAnimation = "walk";
     const parsed = parseProject(serializeProject(project));

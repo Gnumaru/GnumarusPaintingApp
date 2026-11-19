@@ -53,6 +53,14 @@ describe("GnumarusNamedAnimations", () => {
     });
   });
 
+  it("parses the reverse loop modes", () => {
+    expect(parseNamedAnimation("moon,backward,1,2,3", 3).loop).toBe("backward");
+    expect(parseNamedAnimation("moon,Ping-Pong-Backward,1,2,3", 3).loop).toBe("ping-pong-backward");
+    expect(serializeNamedAnimation(parseNamedAnimation("moon,backward,1-3", 3))).toBe("moon,backward,1-3");
+    expect(serializeNamedAnimation(parseNamedAnimation("moon,ping-pong-backward,1-3", 3))).toBe(
+      "moon,ping-pong-backward,1-3",
+    );
+  });
   it("tolerates whitespace and loop casing", () => {
     expect(parseNamedAnimation("  walk , Forward , 1 , 2-3 ", 3)).toEqual({
       name: "walk",
@@ -69,7 +77,7 @@ describe("GnumarusNamedAnimations", () => {
     expect(() => parseNamedAnimation("", 4)).toThrow(GnumarusNamedAnimationError);
     expect(() => parseNamedAnimation("walk,forward", 4)).toThrow(GnumarusNamedAnimationError);
     expect(() => parseNamedAnimation(",forward,1", 4)).toThrow(GnumarusNamedAnimationError);
-    expect(() => parseNamedAnimation("walk,sidestep,1", 4)).toThrow(/none, forward or ping-pong/);
+    expect(() => parseNamedAnimation("walk,sidestep,1", 4)).toThrow(/none, forward, ping-pong, backward or ping-pong-backward/);
     expect(() => parseNamedAnimation("walk,forward,0", 4)).toThrow(GnumarusNamedAnimationError);
     expect(() => parseNamedAnimation("walk,forward,5", 4)).toThrow(/does not exist/);
     expect(() => parseNamedAnimation("walk,forward,4-2", 4)).toThrow(/before its start/);
@@ -164,6 +172,38 @@ describe("GnumarusNamedAnimations", () => {
     expect(nextAnimationStep({ ...single, loop: "none" }, 0, 1)).toBeNull();
     expect(nextAnimationStep({ ...single, loop: "ping-pong" }, 0, -1)).toEqual({ index: 0, direction: 1 });
     expect(nextAnimationStep({ ...single, frames: [] }, 0, 1)).toBeNull();
+  });
+
+  it("steps backward like a mirrored forward loop", () => {
+    const anim: GnumarusNamedAnimation = {
+      name: "moon",
+      loop: "backward",
+      frames: [
+        { frame: 0, duration: null },
+        { frame: 1, duration: null },
+        { frame: 2, duration: null },
+      ],
+    };
+    expect(nextAnimationStep(anim, 2, -1)).toEqual({ index: 1, direction: -1 });
+    expect(nextAnimationStep(anim, 1, -1)).toEqual({ index: 0, direction: -1 });
+    expect(nextAnimationStep(anim, 0, -1)).toEqual({ index: 2, direction: -1 });
+    expect(nextAnimationStep(anim, 2, 1)).toEqual({ index: 0, direction: 1 });
+    expect(resolveExportSequence(anim).map((entry) => entry.frame)).toEqual([2, 1, 0]);
+  });
+
+  it("starts the backward ping-pong at the last frame", () => {
+    const anim: GnumarusNamedAnimation = {
+      name: "yoyo",
+      loop: "ping-pong-backward",
+      frames: [
+        { frame: 0, duration: null },
+        { frame: 1, duration: null },
+        { frame: 2, duration: null },
+      ],
+    };
+    expect(nextAnimationStep(anim, 2, 1)).toEqual({ index: 1, direction: -1 });
+    expect(nextAnimationStep(anim, 0, -1)).toEqual({ index: 1, direction: 1 });
+    expect(resolveExportSequence(anim).map((entry) => entry.frame)).toEqual([2, 1, 0, 1]);
   });
 
   it("remaps referenced frames for structural edits", () => {

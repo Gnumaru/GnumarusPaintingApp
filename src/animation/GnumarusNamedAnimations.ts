@@ -8,9 +8,15 @@
  */
 import { clampFrameDurationSec } from "./GnumarusAnimationModel";
 
-export type GnumarusAnimationLoop = "none" | "forward" | "ping-pong";
+export type GnumarusAnimationLoop = "none" | "forward" | "ping-pong" | "backward" | "ping-pong-backward";
 
-export const GNUMARUS_ANIMATION_LOOPS: GnumarusAnimationLoop[] = ["none", "forward", "ping-pong"];
+export const GNUMARUS_ANIMATION_LOOPS: GnumarusAnimationLoop[] = [
+  "none",
+  "forward",
+  "ping-pong",
+  "backward",
+  "ping-pong-backward",
+];
 
 export interface GnumarusNamedAnimationFrame {
   /** 0-based project frame index. */
@@ -76,9 +82,15 @@ export function parseNamedAnimation(text: string, frameCount: number): GnumarusN
     throw new GnumarusNamedAnimationError("Animation name is empty.");
   }
   const loopText = (parts[1] ?? "").trim().toLowerCase();
-  if (loopText !== "none" && loopText !== "forward" && loopText !== "ping-pong") {
+  if (
+    loopText !== "none" &&
+    loopText !== "forward" &&
+    loopText !== "ping-pong" &&
+    loopText !== "backward" &&
+    loopText !== "ping-pong-backward"
+  ) {
     throw new GnumarusNamedAnimationError(
-      `Unknown loop mode "${(parts[1] ?? "").trim()}": use none, forward or ping-pong.`,
+      `Unknown loop mode "${(parts[1] ?? "").trim()}": use none, forward, ping-pong, backward or ping-pong-backward.`,
     );
   }
   const loop: GnumarusAnimationLoop = loopText;
@@ -164,20 +176,28 @@ export function nextAnimationStep(
   if (length === 0 || !Number.isInteger(index) || index < 0 || index >= length) {
     return null;
   }
+  // Backward mirrors forward (reverse start handled by the caller); the
+  // backward-starting ping-pong flips exactly like the forward one.
+  const effective =
+    animation.loop === "backward"
+      ? "forward"
+      : animation.loop === "ping-pong-backward"
+        ? "ping-pong"
+        : animation.loop;
   if (length === 1) {
-    if (animation.loop === "none") {
+    if (effective === "none") {
       return null;
     }
-    return { index: 0, direction: animation.loop === "ping-pong" ? ((direction * -1) as 1 | -1) : direction };
+    return { index: 0, direction: effective === "ping-pong" ? ((direction * -1) as 1 | -1) : direction };
   }
   const candidate = index + direction;
   if (candidate >= 0 && candidate < length) {
     return { index: candidate, direction };
   }
-  if (animation.loop === "none") {
+  if (effective === "none") {
     return null;
   }
-  if (animation.loop === "forward") {
+  if (effective === "forward") {
     return direction === 1 ? { index: 0, direction } : { index: length - 1, direction };
   }
   const flipped = (direction * -1) as 1 | -1;
@@ -246,16 +266,19 @@ export interface GnumarusExportFrame {
 }
 
 /**
- * Walk an animation from its first entry until it stops (`none`) or
- * completes one full cycle (loops), returning the playback order.
+ * Walk an animation from its first played entry until it stops (`none`)
+ * or completes one full cycle (loops), returning the playback order.
+ * Reverse loops start at the last entry (backwards with direction -1,
+ * backward-starting ping-pong with direction +1 so it turns around).
  */
 export function resolveExportSequence(animation: GnumarusNamedAnimation): GnumarusExportFrame[] {  const sequence: GnumarusExportFrame[] = [];
   if (animation.frames.length === 0) {
     return sequence;
   }
+  const reversedStart = animation.loop === "backward" || animation.loop === "ping-pong-backward";
   const seen = new Set<string>();
-  let index = 0;
-  let direction: 1 | -1 = 1;
+  let index = reversedStart ? animation.frames.length - 1 : 0;
+  let direction: 1 | -1 = animation.loop === "backward" ? -1 : 1;
   for (;;) {
     const key = `${index}:${direction}`;
     if (seen.has(key)) {

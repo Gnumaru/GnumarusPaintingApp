@@ -28,8 +28,10 @@ show tooltips naming every animation that includes the frame.
 Named animations
 ----------------
 
-Define ``name,loop,frames`` strings (dropdown + highlight + scoped
-playback, Aseprite tag import) and delete with confirmation. The
+Define ``name,loop,frames`` strings (loop is one of ``none``,
+``forward``, ``ping-pong``, ``backward`` or ``ping-pong-backward``;
+dropdown + highlight + scoped playback, Aseprite tag import) and delete
+with confirmation. The
 action palette offers frame/layer menus, arrows navigation and the
 matrix context menus for bulk delete, per-range duration and total
 duration (evenly split).
