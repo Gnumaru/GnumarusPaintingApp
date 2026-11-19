@@ -259,7 +259,7 @@ import {
   type GnumarusVideoCodec,
 } from "../export/GnumarusVideoEncode";
 import {
-  muxFragmentedMp4,
+  muxProgressiveMp4,
   muxMatroska,
   muxWebM,
   parseAvcDecoderConfig,
@@ -15472,7 +15472,7 @@ export class GnumarusShell extends LitElement {
               throw new Error("the H.264 encoder produced no codec description");
             }
             const avc = parseAvcDecoderConfig(encoded.description);
-            const file = muxFragmentedMp4(
+            const file = muxProgressiveMp4(
               { width: encoded.width, height: encoded.height, avc },
               samples,
             );

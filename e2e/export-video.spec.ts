@@ -198,7 +198,7 @@ test("mp4 animation exports a valid fragmented mp4 @recent", async ({ page }) =>
   expect(mp4.bytes[5]).toBe(0x74);
   expect(mp4.bytes[6]).toBe(0x79);
   expect(mp4.bytes[7]).toBe(0x70);
-  // Box walk stays inside the file and finds moov +mdat.
+  // Box walk stays inside the file and finds moov + a single mdat.
   let at = 0;
   const types: string[] = [];
   while (at + 8 <= mp4.bytes.length) {
@@ -210,8 +210,7 @@ test("mp4 animation exports a valid fragmented mp4 @recent", async ({ page }) =>
     at += size;
   }
   expect(at).toBe(mp4.bytes.length);
-  expect(types).toContain("moov");
-  expect(types.filter((type) => type === "mdat").length).toBeGreaterThanOrEqual(2);
+  expect(types).toEqual(["ftyp", "moov", "mdat"]);
   const meta = await videoMetadata(page, mp4.bytes, "video/mp4");
   expect(meta.width).toBe(64);
   expect(meta.height).toBe(64);

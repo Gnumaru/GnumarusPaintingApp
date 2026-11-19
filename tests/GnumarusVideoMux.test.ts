@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   annexBToAvccSample,
-  muxFragmentedMp4,
+  muxProgressiveMp4,
   muxMatroska,
   muxWebM,
   parseAvcDecoderConfig,
@@ -130,6 +130,82 @@ describe("GnumarusVideoMux EBML", () => {
     expect(codec).toBe("V_VP9");
   });
 
+  it("writes a SeekHead indexing Info, Tracks and every cluster", () => {
+    const frames = fakeFrames(3);
+    const file = muxWebM({ width: 64, height: 64 }, frames);
+    const segment = ebmlChildren(file)[1];
+    expect(segment?.id).toBe(0x18538067);
+    if (segment === undefined) {
+      throw new Error("missing segment");
+    }
+    const children = ebmlChildren(segment.value);
+    expect(children[0]?.id).toBe(0x114d9b74);
+    // Collect absolute offsets of each segment child.
+    const offsets = new Map<number, number>();
+    let at = segment.start + segment.header;
+    for (const child of children) {
+      offsets.set(child.id, at - (segment.start + segment.header));
+      at += child.header + child.size;
+    }
+    // Seek entries resolve to content-relative positions.
+    const seek = children[0];
+    if (seek === undefined) {
+      throw new Error("missing seek head");
+    }
+    const targets = new Map<number, number>();
+    for (const entry of ebmlChildren(seek.value)) {
+      expect(entry.id).toBe(0x4dbb);
+      let target = -1;
+      let position = -1;
+      for (const field of ebmlChildren(entry.value)) {
+        if (field.id === 0x53ab) {
+          let id = 0;
+          for (const byte of field.value) {
+            id = id * 256 + (byte as number);
+          }
+          target = id;
+        }
+        if (field.id === 0x53ac) {
+          position = 0;
+          for (const byte of field.value) {
+            position = position * 256 + (byte as number);
+          }
+        }
+      }
+      expect(target).toBeGreaterThan(0);
+      expect(position).toBeGreaterThanOrEqual(0);
+      targets.set(target, position);
+    }
+    expect(targets.get(0x1549a966)).toBe(offsets.get(0x1549a966));
+    expect(targets.get(0x1654ae6b)).toBe(offsets.get(0x1654ae6b));
+    expect(targets.get(0x1f43b675)).toBe(offsets.get(0x1f43b675));
+  });
+
+  it("writes a DefaultDuration matching the average frame duration", () => {
+    const file = muxWebM({ width: 64, height: 64 }, fakeFrames(4));
+    const segment = ebmlChildren(file)[1];
+    if (segment === undefined) {
+      throw new Error("missing segment");
+    }
+    let durationNs = -1;
+    const walk = (data: Uint8Array, containers: number[]): void => {
+      for (const child of ebmlChildren(data)) {
+        if (child.id === 0x23e383) {
+          durationNs = 0;
+          for (const byte of child.value) {
+            durationNs = durationNs * 256 + (byte as number);
+          }
+        }
+        if (containers.includes(child.id)) {
+          walk(child.value, containers);
+        }
+      }
+    };
+    walk(segment.value, [0x1654ae6b, 0xae]);
+    // 4 frames x 200ms = 800ms total, average 200ms = 200000000ns.
+    expect(durationNs).toBe(200000000);
+  });
+
   it("splits clusters before the int16 SimpleBlock range overflows", () => {
     const frames: GnumarusMuxedSample[] = [];
     for (let i = 0; i < 4; i += 1) {
@@ -202,19 +278,39 @@ describe("GnumarusVideoMux Annex B", () => {
   });
 });
 
-describe("GnumarusVideoMux fragmented MP4", () => {
+describe("GnumarusVideoMux progressive MP4", () => {
   const sps = new Uint8Array([0x67, 0x42, 0x00, 0x1e, 0x01, 0x02]);
   const pps = new Uint8Array([0x68, 0xce, 0x38, 0x80]);
   const config = { profile: 0x42, compatibility: 0, level: 0x1f, sps, pps };
 
-  it("writes ftyp/moov/moof/mdat with a coherent box walk", () => {
+  /** Find a nested box by walking container payloads. */
+  function findBox(root: Uint8Array, path: string[]): Uint8Array | null {
+    let level: Array<{ type: string; start: number; payload: Uint8Array }> = mp4Boxes(root);
+    for (const want of path) {
+      const next = level.find((box) => box.type === want);
+      if (next === undefined) {
+        return null;
+      }
+      if (want === path[path.length - 1]) {
+        return next.payload;
+      }
+      level = mp4Boxes(next.payload);
+    }
+    return null;
+  }
+
+  function u32(view: Uint8Array, at: number): number {
+    return new DataView(view.buffer, view.byteOffset, view.length).getUint32(at);
+  }
+
+  it("writes ftyp/moov/mdat with complete sample tables", () => {
     const frames: GnumarusMuxedSample[] = [
       { data: new Uint8Array([0, 0, 0, 1, 0x67, 1, 0, 0, 1, 0x65, 2]), timestampMs: 0, durationMs: 200, key: true },
-      { data: new Uint8Array([0, 0, 1, 0x41, 9, 9]), timestampMs: 200, durationMs: 200, key: false },
+      { data: new Uint8Array([0, 0, 1, 0x41, 9, 9]), timestampMs: 200, durationMs: 300, key: false },
     ];
-    const file = muxFragmentedMp4({ width: 64, height: 64, avc: config }, frames);
+    const file = muxProgressiveMp4({ width: 64, height: 64, avc: config }, frames);
     const boxes = mp4Boxes(file);
-    expect(boxes.map((box) => box.type)).toEqual(["ftyp", "moov", "moof", "mdat", "moof", "mdat"]);
+    expect(boxes.map((box) => box.type)).toEqual(["ftyp", "moov", "mdat"]);
     expect(boxes[0]?.size).toBe(32);
     // moov carries avcC with our SPS.
     const moov = boxes[1]?.payload ?? new Uint8Array(0);
@@ -230,14 +326,45 @@ describe("GnumarusVideoMux fragmented MP4", () => {
     expect(avccAt).toBeGreaterThanOrEqual(0);
     expect(moov[avccAt + 4]).toBe(1);
     expect(moov[avccAt + 12]).toBe(0x67);
-    // trun data offsets point at the following mdat payload.
-    const moof = boxes[2];
-    expect(moof?.type).toBe("moof");
-    expect(moof?.size).toBe(80);
-    const mdat = boxes[3];
-    expect(mdat?.type).toBe("mdat");
-    expect(mdat !== undefined && mdat.size).toBe(8 + (4 + 2) + (4 + 2));
-    expect(() => muxFragmentedMp4({ width: 64, height: 64, avc: config }, [])).toThrow(/no frames/);
+    // stts compresses the two durations into two runs (200, 300).
+    const stts = findBox(file, ["moov", "trak", "mdia", "minf", "stbl", "stts"]);
+    expect(stts).not.toBeNull();
+    if (stts !== null) {
+      expect(u32(stts, 4)).toBe(2);
+      expect(u32(stts, 8)).toBe(1);
+      expect(u32(stts, 12)).toBe(200);
+      expect(u32(stts, 16)).toBe(1);
+      expect(u32(stts, 20)).toBe(300);
+    }
+    // stss marks only the first sample as a keyframe.
+    const stss = findBox(file, ["moov", "trak", "mdia", "minf", "stbl", "stss"]);
+    expect(stss).not.toBeNull();
+    if (stss !== null) {
+      expect(u32(stss, 4)).toBe(1);
+      expect(u32(stss, 8)).toBe(1);
+    }
+    // stsz carries one exact size per sample (no default sample size).
+    const stsz = findBox(file, ["moov", "trak", "mdia", "minf", "stbl", "stsz"]);
+    expect(stsz).not.toBeNull();
+    if (stsz !== null) {
+      expect(u32(stsz, 4)).toBe(0);
+      expect(u32(stsz, 8)).toBe(2);
+      expect(u32(stsz, 12)).toBe(12);
+      expect(u32(stsz, 16)).toBe(7);
+    }
+    // stco points at the single mdat payload; samples split AVCC-cleanly.
+    const stco = findBox(file, ["moov", "trak", "mdia", "minf", "stbl", "stco"]);
+    expect(stco).not.toBeNull();
+    if (stco !== null) {
+      expect(u32(stco, 4)).toBe(1);
+      const mdat = boxes[2];
+      expect(mdat?.type).toBe("mdat");
+      if (mdat !== undefined) {
+        expect(u32(stco, 8)).toBe(mdat.start + 8);
+        expect(mdat.size).toBe(8 + 12 + 7);
+      }
+    }
+    expect(() => muxProgressiveMp4({ width: 64, height: 64, avc: config }, [])).toThrow(/no frames/);
   });
 });
 

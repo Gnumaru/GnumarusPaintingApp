@@ -6,10 +6,12 @@
  * the browser only enters through `VideoEncoder` in GnumarusVideoEncode.
  *
  * Layout notes: WebM clusters split before the signed 16-bit SimpleBlock
- * timestamp would overflow; the MP4 is fragmented (ftyp + moov with empty
- * sample tables + one moof/mdat pair per frame) so no sample table has to
- * be built; H.264 samples are reframed from Annex B to length-prefixed
- * AVCC. Durations come from the export delay list (millisecond timescale).
+ * timestamp would overflow; a leading SeekHead points at Info, Tracks and
+ * every Cluster (strict players index through it). The MP4 is progressive
+ * (ftyp + moov with complete sample tables + one mdat) so VLC/QuickTime
+ * play it reliably; H.264 samples are reframed from Annex B to
+ * length-prefixed AVCC. Durations come from the export delay list
+ * (millisecond timescale).
  */
 
 export interface GnumarusMuxedSample {
@@ -32,6 +34,11 @@ export interface GnumarusMuxedTrack {
 class EbmlWriter {
   private parts: Uint8Array[] = [];
   private length = 0;
+
+  /** Buffered content length in bytes. */
+  size(): number {
+    return this.length;
+  }
 
   writeBytes(data: Uint8Array): void {
     this.parts.push(data);
@@ -154,6 +161,7 @@ const TRACK_NUMBER = 0xd7;
 const TRACK_UID = 0x73c5;
 const TRACK_TYPE = 0x83;
 const FLAG_LACING = 0x9c;
+const DEFAULT_DURATION = 0x23e383;
 const CODEC_ID = 0x86;
 const VIDEO_SETTINGS = 0xe0;
 const PIXEL_WIDTH = 0xb0;
@@ -161,6 +169,10 @@ const PIXEL_HEIGHT = 0xba;
 const CLUSTER = 0x1f43b675;
 const CLUSTER_TIMECODE = 0xe7;
 const SIMPLE_BLOCK = 0xa3;
+const SEEK_HEAD = 0x114d9b74;
+const SEEK = 0x4dbb;
+const SEEK_ID = 0x53ab;
+const SEEK_POSITION = 0x53ac;
 
 const GNUMARUS_MUXER_APP = "Gnumaru's Painting and Animation App";
 
@@ -189,7 +201,7 @@ function writeSegmentInfo(writer: EbmlWriter, totalMs: number): void {
   });
 }
 
-function writeVideoTrack(writer: EbmlWriter, codecId: string, track: GnumarusMuxedTrack): void {
+function writeVideoTrack(writer: EbmlWriter, codecId: string, track: GnumarusMuxedTrack, defaultDurationMs: number): void {
   const width = Math.max(1, Math.floor(track.width));
   const height = Math.max(1, Math.floor(track.height));
   writer.element(TRACKS, (tracks) => {
@@ -198,6 +210,9 @@ function writeVideoTrack(writer: EbmlWriter, codecId: string, track: GnumarusMux
       entry.writeUint(TRACK_UID, 1, 4);
       entry.writeUint(TRACK_TYPE, 1, 1);
       entry.writeUint(FLAG_LACING, 0, 1);
+      // Default frame duration in nanoseconds (players fall back to block
+      // timestamp deltas for variable frame rates).
+      entry.writeUint(DEFAULT_DURATION, Math.max(1, Math.round(defaultDurationMs * 1000000)), 8);
       entry.writeString(CODEC_ID, codecId);
       entry.element(VIDEO_SETTINGS, (video) => {
         video.writeUint(PIXEL_WIDTH, width, 2);
@@ -205,6 +220,26 @@ function writeVideoTrack(writer: EbmlWriter, codecId: string, track: GnumarusMux
       });
     });
   });
+}
+
+/** EBML VINT width for a definite size value (mirrors writeSize). */
+function ebmlVintWidth(value: number): number {
+  let bytes = 1;
+  while (bytes < 8 && value >= 2 ** (7 * bytes) - 1) {
+    bytes += 1;
+  }
+  return bytes;
+}
+
+/** EBML ID width in bytes (mirrors writeId). */
+function ebmlIdWidth(id: number): number {
+  if (id <= 0xff) {
+    return 1;
+  }
+  if (id <= 0xffff) {
+    return 2;
+  }
+  return id <= 0xffffff ? 3 : 4;
 }
 
 function writeSimpleBlock(writer: EbmlWriter, sample: GnumarusMuxedSample, clusterStartMs: number): void {
@@ -240,20 +275,18 @@ function muxEbmlContainer(
   const totalMs = Math.max(0, last.timestampMs + last.durationMs);
   const writer = new EbmlWriter();
   writeEbmlHead(writer, docType);
-  const segment = new EbmlWriter();
-  writeSegmentInfo(segment, totalMs);
-  writeVideoTrack(segment, codecId, track);
+  const info = new EbmlWriter();
+  writeSegmentInfo(info, totalMs);
+  const tracks = new EbmlWriter();
+  writeVideoTrack(tracks, codecId, track, frames.length > 0 ? Math.max(1, Math.round((last.timestampMs + last.durationMs) / frames.length)) : 0);
+  const clusters: EbmlWriter[] = [];
   let clusterStart = -1;
   let cluster: EbmlWriter | null = null;
-  const flushCluster = (): void => {
-    if (cluster !== null) {
-      segment.appendWriter(CLUSTER, cluster);
-      cluster = null;
-    }
-  };
   for (const sample of frames) {
     if (cluster === null || sample.timestampMs - clusterStart >= MAX_CLUSTER_SPAN_MS) {
-      flushCluster();
+      if (cluster !== null) {
+        clusters.push(cluster);
+      }
       cluster = new EbmlWriter();
       clusterStart = sample.timestampMs;
       cluster.writeUint(CLUSTER_TIMECODE, Math.max(0, Math.round(clusterStart)), 4);
@@ -263,7 +296,54 @@ function muxEbmlContainer(
     }
     writeSimpleBlock(cluster, sample, clusterStart);
   }
-  flushCluster();
+  if (cluster !== null) {
+    clusters.push(cluster);
+  }
+  // SeekHead first (strict players index through it): fixed-width entries
+  // so positions resolve in a single pass. Positions are segment-content
+  // relative, matching what mainstream muxers write. Note info/tracks are
+  // already complete elements (their writers wrap once), so their totals
+  // are their own lengths.
+  const elementTotal = (id: number, content: EbmlWriter): number =>
+    ebmlIdWidth(id) + ebmlVintWidth(content.size()) + content.size();
+  const infoTotal = info.size();
+  const tracksTotal = tracks.size();
+  const clusterTotals = clusters.map((item) => elementTotal(CLUSTER, item));
+  const seekEntryContent = (ebmlIdWidth(SEEK_ID) + 1 + ebmlIdWidth(INFO)) + (ebmlIdWidth(SEEK_POSITION) + 1 + 4);
+  const seekContentLength = (2 + clusters.length) * (ebmlIdWidth(SEEK) + ebmlVintWidth(seekEntryContent) + seekEntryContent);
+  const seekTotal = ebmlIdWidth(SEEK_HEAD) + ebmlVintWidth(seekContentLength) + seekContentLength;
+  const seekContent = new EbmlWriter();
+  let position = seekTotal;
+  const seekTargets: number[] = [INFO, TRACKS];
+  for (const item of clusters) {
+    void item;
+    seekTargets.push(CLUSTER);
+  }
+  let clusterIndex = 0;
+  for (const target of seekTargets) {
+    const targetPosition = position;
+    seekContent.element(SEEK, (entry) => {
+      entry.element(SEEK_ID, (id) => {
+        id.writeId(target);
+      });
+      entry.writeUint(SEEK_POSITION, targetPosition, 4);
+    });
+    if (target === INFO) {
+      position += infoTotal;
+    } else if (target === TRACKS) {
+      position += tracksTotal;
+    } else {
+      position += clusterTotals[clusterIndex] as number;
+      clusterIndex += 1;
+    }
+  }
+  const segment = new EbmlWriter();
+  segment.appendWriter(SEEK_HEAD, seekContent);
+  segment.writeBytes(info.bytes());
+  segment.writeBytes(tracks.bytes());
+  for (const item of clusters) {
+    segment.appendWriter(CLUSTER, item);
+  }
   writer.appendWriter(SEGMENT, segment);
   return writer.bytes();
 }
@@ -554,11 +634,14 @@ export interface GnumarusMp4Track {
 }
 
 /**
- * Mux H.264 frames into a fragmented MP4 (ftyp + moov with empty sample
- * tables + one moof/mdat pair per frame). Timescale is milliseconds, so
- * delay values map 1:1. Video-only; players loop or stop at the end.
+ * Mux H.264 frames into a progressive MP4 (ftyp + moov with complete sample
+ * tables + one mdat with every sample). Timescale is milliseconds, so delay
+ * values map 1:1. Progressive (not fragmented) because strict players
+ * (VLC, QuickTime) handle full sample tables far more reliably than
+ * fragments; files stay small since animations are short. Video-only;
+ * players loop or stop at the end.
  */
-export function muxFragmentedMp4(
+export function muxProgressiveMp4(
   track: GnumarusMp4Track,
   frames: GnumarusMuxedSample[],
 ): Uint8Array {
@@ -606,9 +689,57 @@ export function muxFragmentedMp4(
   const avcCBox = mp4Box("avcC", avcC.bytes());
   const avc1 = mp4Box("avc1", visualEntry.bytes(), avcCBox);
   const stsd = mp4FullBox("stsd", 0, 0, new Uint8Array([0, 0, 0, 1]), avc1);
-  const emptyTable = (type: string): Uint8Array => mp4FullBox(type, 0, 0, new Uint8Array([0, 0, 0, 0]));
-  const stszBody = new Uint8Array(12);
-  const stbl = mp4Box("stbl", stsd, emptyTable("stts"), emptyTable("stsc"), mp4Box("stsz", stszBody), emptyTable("stco"));
+  // Sample tables: every sample lives in one chunk inside a single mdat.
+  const payloads: Uint8Array[] = [];
+  for (const sample of frames) {
+    const { bytes, containsSps } = annexBToAvccSample(sample.data);
+    void containsSps;
+    payloads.push(bytes);
+  }
+  const sttsBody = new Mp4Writer();
+  const runs: Array<{ count: number; delta: number }> = [];
+  for (const duration of durations) {
+    const prev = runs[runs.length - 1];
+    if (prev !== undefined && prev.delta === duration) {
+      prev.count += 1;
+    } else {
+      runs.push({ count: 1, delta: duration });
+    }
+  }
+  sttsBody.u32(runs.length);
+  for (const run of runs) {
+    sttsBody.u32(run.count);
+    sttsBody.u32(run.delta);
+  }
+  const stts = mp4FullBox("stts", 0, 0, sttsBody.bytes());
+  const stscBody = new Mp4Writer();
+  stscBody.u32(1);
+  stscBody.u32(1);
+  stscBody.u32(frames.length);
+  stscBody.u32(1);
+  const stsc = mp4FullBox("stsc", 0, 0, stscBody.bytes());
+  // Sync samples: without stss every sample counts as a keyframe, which
+  // breaks delta frames (only the forced first frame is a keyframe here).
+  const stssBody = new Mp4Writer();
+  const keyframes: number[] = [];
+  frames.forEach((sample, index) => {
+    if (sample.key) {
+      keyframes.push(index + 1);
+    }
+  });
+  stssBody.u32(keyframes.length);
+  for (const keyframe of keyframes) {
+    stssBody.u32(keyframe);
+  }
+  const stss = mp4FullBox("stss", 0, 0, stssBody.bytes());
+  const stszBody = new Mp4Writer();
+  stszBody.u32(0);
+  stszBody.u32(0);
+  stszBody.u32(frames.length);
+  for (const payload of payloads) {
+    stszBody.u32(payload.length);
+  }
+  const stsz = mp4Box("stsz", stszBody.bytes());
   const dinfWriter = new Mp4Writer();
   dinfWriter.writeBytes(mp4FullBox("dref", 0, 0, new Uint8Array([0, 0, 0, 1])));
   dinfWriter.writeBytes(
@@ -622,7 +753,6 @@ export function muxFragmentedMp4(
   );
   const dinf = mp4Box("dinf", dinfWriter.bytes());
   const vmhd = mp4FullBox("vmhd", 0, 1, new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0]));
-  const minf = mp4Box("minf", vmhd, dinf, stbl);
   const mdhdWriter = new Mp4Writer();
   mdhdWriter.u32(0);
   mdhdWriter.u32(0);
@@ -638,7 +768,6 @@ export function muxFragmentedMp4(
   hdlrBody.writeBytes(new Uint8Array(12));
   hdlrBody.writeBytes(hdlrName);
   const hdlr = mp4FullBox("hdlr", 0, 0, hdlrBody.bytes());
-  const mdia = mp4Box("mdia", mdhd, hdlr, minf);
   const tkhdWriter = new Mp4Writer();
   tkhdWriter.u32(0);
   tkhdWriter.u32(0);
@@ -654,15 +783,20 @@ export function muxFragmentedMp4(
   tkhdWriter.u32(width * 65536);
   tkhdWriter.u32(height * 65536);
   const tkhd = mp4FullBox("tkhd", 0, 7, tkhdWriter.bytes());
-  const trak = mp4Box("trak", tkhd, mdia);
-  const trexWriter = new Mp4Writer();
-  trexWriter.u32(1);
-  trexWriter.u32(1);
-  trexWriter.u32(0);
-  trexWriter.u32(0);
-  trexWriter.u32(0);
-  const trex = mp4FullBox("trex", 0, 0, trexWriter.bytes());
-  const mvex = mp4Box("mvex", trex);
+  // Chunk offset depends on the moov size but never on its own value, so a
+  // probe build fixes the offset for the final build (single pass overall).
+  const buildMoov = (chunkOffset: number): Uint8Array => {
+    const stcoBody = new Mp4Writer();
+    stcoBody.u32(0);
+    stcoBody.u32(1);
+    stcoBody.u32(chunkOffset);
+    const stco = mp4Box("stco", stcoBody.bytes());
+    const table = mp4Box("stbl", stsd, stts, stss, stsc, stsz, stco);
+    const trackMinf = mp4Box("minf", vmhd, dinf, table);
+    const trackMdia = mp4Box("mdia", mdhd, hdlr, trackMinf);
+    const trackTrak = mp4Box("trak", tkhd, trackMdia);
+    return mp4Box("moov", mvhd, trackTrak);
+  };
   const mvhdWriter = new Mp4Writer();
   mvhdWriter.u32(0);
   mvhdWriter.u32(0);
@@ -676,47 +810,24 @@ export function muxFragmentedMp4(
   mvhdWriter.writeBytes(new Uint8Array(24));
   mvhdWriter.u32(2);
   const mvhd = mp4FullBox("mvhd", 0, 0, mvhdWriter.bytes());
-  const moov = mp4Box("moov", mvhd, trak, mvex);
   const ftypWriter = new Mp4Writer();
   ftypWriter.ascii("isom");
   ftypWriter.u32(0);
   ftypWriter.ascii("isomiso6avc1mp41");
   const ftyp = mp4Box("ftyp", ftypWriter.bytes());
+  const chunkOffset = ftyp.length + buildMoov(0).length + 8;
+  const moov = buildMoov(chunkOffset);
 
   const parts: Uint8Array[] = [ftyp, moov];
-  // Fixed layout per fragment: moof(80) + mdat header(8) => data at +88.
-  const MOOF_BOX_SIZE = 80;
-  const DATA_OFFSET = MOOF_BOX_SIZE + 8;
-  let sequence = 1;
-  for (let index = 0; index < frames.length; index += 1) {
-    const sample = frames[index];
-    if (sample === undefined) {
-      continue;
-    }
-    const { bytes: payload, containsSps } = annexBToAvccSample(sample.data);
-    void containsSps;
-    const trun = new Mp4Writer();
-    trun.u32(1);
-    trun.u32(DATA_OFFSET);
-    trun.u32(sample.key ? 0x02000000 : 0x01010000);
-    trun.u32(durations[index] as number);
-    trun.u32(payload.length);
-    const trunBox = mp4FullBox("trun", 0, 0x305, trun.bytes());
-    const tfhd = mp4FullBox("tfhd", 0, 0x020000, new Uint8Array([0, 0, 0, 1]));
-    const traf = mp4Box("traf", tfhd, trunBox);
-    const mfhdWriter = new Mp4Writer();
-    mfhdWriter.u32(sequence);
-    const mfhd = mp4FullBox("mfhd", 0, 0, mfhdWriter.bytes());
-    const moof = mp4Box("moof", mfhd, traf);
-    if (moof.length !== MOOF_BOX_SIZE) {
-      throw new Error(`unexpected moof size ${moof.length} (expected ${MOOF_BOX_SIZE})`);
-    }
-    sequence += 1;
-    parts.push(moof);
-    const mdatHead = new Mp4Writer();
-    mdatHead.u32(8 + payload.length);
-    mdatHead.ascii("mdat");
-    parts.push(mdatHead.bytes());
+  const mdatHead = new Mp4Writer();
+  let mediaBytes = 0;
+  for (const payload of payloads) {
+    mediaBytes += payload.length;
+  }
+  mdatHead.u32(8 + mediaBytes);
+  mdatHead.ascii("mdat");
+  parts.push(mdatHead.bytes());
+  for (const payload of payloads) {
     parts.push(payload);
   }
   let total = 0;
