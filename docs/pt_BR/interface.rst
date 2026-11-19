@@ -19,8 +19,9 @@ Barra de menus
 * **Filtros**: todos os filtros destrutivos agrupados por tema
   (desfoque, realce, artístico, bordas, ruído, cores, decoração,
   distorção).
-* **Ajuda**: este manual, a lista de atalhos, a página do
-  código-fonte e um atalho para a versão pública no GitHub Pages.
+* **Ajuda**: este manual, a lista de atalhos, a lista de licenças
+  de terceiros, a página do código-fonte e um atalho para a versão
+  pública no GitHub Pages.
 
 Barra de opções da ferramenta
 -----------------------------

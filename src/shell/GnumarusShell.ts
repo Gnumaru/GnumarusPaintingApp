@@ -253,6 +253,7 @@ import {
   WEBP_STORAGE_EFFORT,
 } from "../export/GnumarusWebpExport";
 import { createGifEncoder } from "../export/GnumarusGifExport";
+import { GNUMARUS_LICENSES } from "../licenses/GnumarusLicenses";
 import { encodeAnimatedPng } from "../export/GnumarusApngExport";
 import {
   encodeAnimationVideo,
@@ -1731,6 +1732,32 @@ export class GnumarusShell extends LitElement {
       padding: 1px 6px;
       white-space: nowrap;
     }
+    .licenses-list {
+      max-height: min(60vh, 420px);
+      min-width: min(480px, 80vw);
+      overflow-y: auto;
+      margin: 8px 0;
+    }
+    .licenses-list h4 {
+      margin: 12px 0 4px 0;
+    }
+    .licenses-list h4:first-child {
+      margin-top: 0;
+    }
+    .licenses-list .licenses-source {
+      margin: 0 0 4px 0;
+      opacity: 0.85;
+    }
+    .licenses-list pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #1e1e1e;
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 8px;
+      margin: 0 0 4px 0;
+      font-size: 12px;
+    }
     .action-palette-list {
       display: flex;
       flex-direction: column;
@@ -2970,6 +2997,7 @@ export class GnumarusShell extends LitElement {
                 <div class="dropdown">
                   <button title=${tr("menu.manualTitle")} @click=${(): void => void this.runAction("manual")}>${tr("menu.manual")}</button>
                   <button title=${tr("menu.shortcutsTitle")} @click=${(): void => void this.runAction("shortcuts")}>${tr("menu.shortcuts")}</button>
+                  <button title=${tr("menu.licensesTitle")} @click=${(): void => void this.runAction("licenses")}>${tr("menu.licenses")}</button>
                   <button title=${tr("menu.sourceCodeTitle")} @click=${(): void => void this.runAction("source-code")}>${tr("menu.sourceCode")}</button>
                   ${!this.isGitHubPagesDeploy()
                     ? html`<button
@@ -4118,6 +4146,22 @@ export class GnumarusShell extends LitElement {
         <div class="dialog-actions">
           <button @click=${(): void => this.closeAdjustColorsDialog()}>${tr("btn.cancel")}</button>
           <button id="adjustColorsOk" @click=${(): void => this.confirmAdjustColors()}>${tr("btn.ok")}</button>
+        </div>
+      </dialog>
+      <dialog id="licensesDialog">
+        <h3>${tr("dialog.licenses")}</h3>
+        <p>${tr("dialog.licensesIntro")}</p>
+        <div class="licenses-list">
+          ${GNUMARUS_LICENSES.map(
+            (entry) => html`
+              <h4>${entry.name} ${entry.version} — ${entry.license}</h4>
+              <p class="licenses-source">${entry.source}<br />${entry.copyright}</p>
+              <pre>${entry.text}</pre>
+            `,
+          )}
+        </div>
+        <div class="dialog-actions">
+          <button @click=${(): void => this.closeLicensesDialog()}>${tr("btn.close")}</button>
         </div>
       </dialog>
       <dialog id="shortcutsDialog">
@@ -8503,6 +8547,14 @@ export class GnumarusShell extends LitElement {
       requirements: [],
       run: (): void => {
         this.openShortcutsDialog();
+      },
+    });
+    this.actionRegistry.register({
+      id: "licenses",
+      name: tr("action.showLicenses"),
+      requirements: [],
+      run: (): void => {
+        this.openLicensesDialog();
       },
     });
     this.actionRegistry.register({
@@ -17666,6 +17718,18 @@ export class GnumarusShell extends LitElement {
 
   private closeShortcutsDialog(): void {
     const dialog = this.shadowRoot?.getElementById("shortcutsDialog") as HTMLDialogElement | null;
+    dialog?.close();
+  }
+
+  private openLicensesDialog(): void {
+    this.helpMenuOpen = false;
+    this.requestUpdate();
+    const dialog = this.shadowRoot?.getElementById("licensesDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+  }
+
+  private closeLicensesDialog(): void {
+    const dialog = this.shadowRoot?.getElementById("licensesDialog") as HTMLDialogElement | null;
     dialog?.close();
   }
 

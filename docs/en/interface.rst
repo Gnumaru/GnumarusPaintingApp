@@ -15,8 +15,9 @@ Menu bar
   transform and 3D tool, grouped in drawer submenus.
 * **Filters**: all destructive filters grouped by theme (blur, enhance,
   artistic, edge, noise, colors, decor, distort).
-* **Help**: this manual, the shortcuts list, the source code page and a
-  shortcut to the public GitHub Pages build.
+* **Help**: this manual, the shortcuts list, the third-party licenses
+  list, the source code page and a shortcut to the public GitHub
+  Pages build.
 
 Tool options bar
 ----------------
