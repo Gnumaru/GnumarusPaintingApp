@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isRasterDropFile } from "../src/project/GnumarusFileSystem";
+import { isRasterDropFile, projectDropKind } from "../src/project/GnumarusFileSystem";
 
 describe("isRasterDropFile", () => {
   it("accepts the picker raster types by MIME or extension", () => {
@@ -21,5 +21,20 @@ describe("isRasterDropFile", () => {
     expect(isRasterDropFile("noext", "")).toBe(false);
     expect(isRasterDropFile("vector.svg", "image/svg+xml")).toBe(false);
     expect(isRasterDropFile("photo.avif", "image/avif")).toBe(false);
+  });
+});
+
+describe("projectDropKind", () => {
+  it("routes project drops by extension", () => {
+    expect(projectDropKind("art.psd")).toBe("psd");
+    expect(projectDropKind("ART.PSD")).toBe("psd");
+    expect(projectDropKind("art.xcf")).toBe("xcf");
+    expect(projectDropKind("art.kra")).toBe("kra");
+    expect(projectDropKind("art.krz")).toBe("kra");
+    expect(projectDropKind("hero.ase")).toBe("ase");
+    expect(projectDropKind("hero.aseprite")).toBe("ase");
+    expect(projectDropKind("photo.png")).toBeNull();
+    expect(projectDropKind("notes.txt")).toBeNull();
+    expect(projectDropKind("noext")).toBeNull();
   });
 });

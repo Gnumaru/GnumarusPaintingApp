@@ -38,6 +38,7 @@ import {
   listEmbeddedProjects,
   openEmbeddedProjectStore,
   isRasterDropFile,
+  projectDropKind,
   pickImportFile,
   pickImageFile,
   pickModel3dFile,
@@ -2309,6 +2310,8 @@ export class GnumarusShell extends LitElement {
   declare collapsedLayers: string[];
   declare dragLayerId: string | null;
   declare dropTargetLayerId: string | null;
+  /** Dropped project file awaiting import confirmation (null = none). */
+  private pendingProjectDrop: { fileName: string; bytes: Uint8Array } | null = null;
   declare contextMenuLayerId: string | null;
   /** Multi-layer targets for the shared layers context menu (null = single). */
   declare contextMenuLayerIds: string[] | null;
@@ -5206,6 +5209,14 @@ export class GnumarusShell extends LitElement {
           <button id="deleteFramesYes" @click=${(): void => this.confirmDeleteFrames()}>${tr("btn.ok")}</button>
         </div>
       </dialog>
+      <dialog id="projectDropDialog" @close=${(): void => this.cancelProjectDrop()}>
+        <h3>${tr("dialog.projectDrop")}</h3>
+        <p>${tr("dialog.projectDropConfirm", { file: this.pendingProjectDrop?.fileName ?? "" })}</p>
+        <div class="dialog-actions">
+          <button id="projectDropNo" @click=${(): void => this.cancelProjectDrop()}>${tr("btn.cancel")}</button>
+          <button id="projectDropYes" @click=${(): void => void this.confirmProjectDrop()}>${tr("btn.import")}</button>
+        </div>
+      </dialog>
       <dialog id="exportDialog">
         <div class="export-tabs" role="tablist" aria-label=${tr("menu.export")}>
           <button
@@ -7310,7 +7321,8 @@ export class GnumarusShell extends LitElement {
   };
 
   /**
-   * Import a dropped raster image as the current cell texture. Unlike the
+   * Dropped project files ask for confirmation (they replace the project);
+   * otherwise a dropped raster image lands on the current cell. Unlike the
    * file-picker import this never spills onto a new layer: an occupied
    * cell reports an error asking for an empty cell instead.
    */
@@ -7321,6 +7333,13 @@ export class GnumarusShell extends LitElement {
       return;
     }
     const files = Array.from(event.dataTransfer?.files ?? []);
+    const project = files.find((file) => projectDropKind(file.name) !== null);
+    if (project !== undefined) {
+      void project.arrayBuffer().then((buffer) => {
+        this.openProjectDropDialog(project.name, new Uint8Array(buffer));
+      });
+      return;
+    }
     const dropped = files.find((file) => isRasterDropFile(file.name, file.type));
     if (dropped === undefined) {
       return;
@@ -15103,6 +15122,65 @@ export class GnumarusShell extends LitElement {
     this.deleteFramesTarget = null;
   }
 
+  /** Offer a dropped project file for import (replaces the current project). */
+  private async openProjectDropDialog(fileName: string, bytes: Uint8Array): Promise<void> {
+    this.fileMenuOpen = false;
+    this.pendingProjectDrop = { fileName, bytes };
+    this.requestUpdate();
+    await this.updateComplete;
+    const dialog = this.shadowRoot?.getElementById("projectDropDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+    const cancel = this.shadowRoot?.getElementById("projectDropNo") as HTMLButtonElement | null;
+    cancel?.focus();
+  }
+
+  private cancelProjectDrop(): void {
+    const dialog = this.shadowRoot?.getElementById("projectDropDialog") as HTMLDialogElement | null;
+    if (dialog?.open === true) {
+      dialog.close();
+    }
+    this.pendingProjectDrop = null;
+  }
+
+  private async confirmProjectDrop(): Promise<void> {
+    const pending = this.pendingProjectDrop;
+    const dialog = this.shadowRoot?.getElementById("projectDropDialog") as HTMLDialogElement | null;
+    dialog?.close();
+    this.pendingProjectDrop = null;
+    if (pending === null) {
+      return;
+    }
+    await this.importProjectDropFile(pending.fileName, pending.bytes);
+  }
+
+  /** Import dropped project bytes, replacing the current project on success. */
+  private async importProjectDropFile(fileName: string, bytes: Uint8Array): Promise<void> {
+    if (this.engine === null) {
+      return;
+    }
+    const dot = fileName.lastIndexOf(".");
+    this.stopPlayback();
+    this.exitFlycam();
+    try {
+      const kind = projectDropKind(fileName);
+      if (kind === "psd") {
+        await this.loadPsdDocument(fileName, dot, bytes);
+      } else if (kind === "xcf") {
+        await this.loadXcfDocument(fileName, dot, bytes);
+      } else if (kind === "kra") {
+        await this.loadKraDocument(fileName, dot, bytes);
+      } else if (kind === "ase") {
+        await this.loadAseDocument(fileName, dot, bytes);
+      } else {
+        throw new Error(`Unsupported project file: ${fileName}`);
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.statusMessage = tr("status.importFailed", { reason });
+      this.showToast(tr("status.importFailed", { reason }));
+    }
+  }
+
   private onSelectAnimation(event: Event): void {
     if (this.engine === null) {
       return;
@@ -18518,7 +18596,17 @@ export class GnumarusShell extends LitElement {
         await this.loadKraDocument(fileName, dot, bytes);
         return;
       }
-      const imported = await parseAsepriteFile(bytes);
+      await this.loadAseDocument(fileName, dot, bytes);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.error(tr("status.importFailed", { reason }));
+      this.statusMessage = tr("status.importFailed", { reason });
+      this.showToast(tr("status.importFailed", { reason }));
+    }
+  }
+
+  private async loadAseDocument(fileName: string, dot: number, bytes: Uint8Array): Promise<void> {
+    const imported = await parseAsepriteFile(bytes);
       this.engine?.loadAnimationProject(imported.width, imported.height, {
         layers: imported.layers.map((layer) => ({
           id: layer.id,
@@ -18575,12 +18663,6 @@ export class GnumarusShell extends LitElement {
         }) + this.applyImportCleanup();
       this.statusMessage = summary;
       this.showToast(summary);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      console.error(tr("status.importFailed", { reason }));
-      this.statusMessage = tr("status.importFailed", { reason });
-      this.showToast(tr("status.importFailed", { reason }));
-    }
   }
 
   private async loadPsdDocument(fileName: string, dot: number, bytes: Uint8Array): Promise<void> {

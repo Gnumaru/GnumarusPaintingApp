@@ -178,6 +178,26 @@ export function isRasterDropFile(fileName: string, mimeType: string): boolean {
   return GNUMARUS_RASTER_DROP_EXTENSIONS.some((extension) => lower.endsWith(extension));
 }
 
+export type GnumarusProjectDropKind = "psd" | "xcf" | "kra" | "ase";
+
+/** Project-file kind by extension for drag-and-drop imports, if any. */
+export function projectDropKind(fileName: string): GnumarusProjectDropKind | null {
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith(".psd")) {
+    return "psd";
+  }
+  if (lower.endsWith(".xcf")) {
+    return "xcf";
+  }
+  if (lower.endsWith(".kra") || lower.endsWith(".krz")) {
+    return "kra";
+  }
+  if (lower.endsWith(".ase") || lower.endsWith(".aseprite")) {
+    return "ase";
+  }
+  return null;
+}
+
 /**
  * Open the operating system file dialog to pick a raster image (PNG, JPEG,
  * WebP, GIF or BMP — anything the browser decodes natively). Returns null

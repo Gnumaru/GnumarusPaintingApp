@@ -50,3 +50,6 @@ occupancy, corruption and cancellation handling — failed imports never
 touch the current project. Dropping a raster image file anywhere onto
 the app imports it as the current cell texture (an occupied cell
 reports an error asking for an empty cell instead of adding a layer).
+Dropping a project file (.psd/.xcf/.kra/.krz/.ase/.aseprite) opens a
+confirmation: canceling does nothing, importing discards the current
+project and loads the file.
