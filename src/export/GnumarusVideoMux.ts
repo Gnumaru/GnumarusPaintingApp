@@ -255,6 +255,50 @@ function writeSimpleBlock(writer: EbmlWriter, sample: GnumarusMuxedSample, clust
   writer.writeBytes(payload);
 }
 
+/** Most common frame duration in milliseconds (DefaultDuration hint). */
+export function modalFrameDurationMs(frames: GnumarusMuxedSample[]): number {
+  const counts = new Map<number, number>();
+  let best = 0;
+  let bestCount = 0;
+  for (const frame of frames) {
+    const duration = Math.max(1, Math.round(frame.durationMs));
+    const count = (counts.get(duration) ?? 0) + 1;
+    counts.set(duration, count);
+    if (count > bestCount) {
+      bestCount = count;
+      best = duration;
+    }
+  }
+  return Math.max(1, best);
+}
+
+/**
+ * Append a 1 ms duplicate of the last sample (VLC 3.0 workaround, opt-in).
+ * VLC drops a trailing zero-duration SimpleBlock and stops MP4 playback at
+ * the last PTS instead of holding it, so the real last frame never shows.
+ * A 1 ms tail makes the true last frame non-final (it then carries its full
+ * duration everywhere) while the tail itself stays invisible to every
+ * player; total length grows by exactly 1 ms.
+ */
+export function withVlcTailFrame(frames: GnumarusMuxedSample[]): GnumarusMuxedSample[] {
+  if (frames.length === 0) {
+    throw new Error("cannot mux an animation with no frames");
+  }
+  const last = frames[frames.length - 1];
+  if (last === undefined) {
+    throw new Error("cannot mux an animation with no frames");
+  }
+  return [
+    ...frames,
+    {
+      data: last.data,
+      timestampMs: last.timestampMs + Math.max(1, Math.round(last.durationMs)),
+      durationMs: 1,
+      key: false,
+    },
+  ];
+}
+
 function muxEbmlContainer(
   docType: string,
   codecId: string,
@@ -278,7 +322,7 @@ function muxEbmlContainer(
   const info = new EbmlWriter();
   writeSegmentInfo(info, totalMs);
   const tracks = new EbmlWriter();
-  writeVideoTrack(tracks, codecId, track, frames.length > 0 ? Math.max(1, Math.round((last.timestampMs + last.durationMs) / frames.length)) : 0);
+  writeVideoTrack(tracks, codecId, track, modalFrameDurationMs(frames));
   const clusters: EbmlWriter[] = [];
   let clusterStart = -1;
   let cluster: EbmlWriter | null = null;

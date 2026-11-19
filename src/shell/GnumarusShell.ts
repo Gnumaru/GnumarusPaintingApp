@@ -264,6 +264,7 @@ import {
   muxMatroska,
   muxWebM,
   parseAvcDecoderConfig,
+  withVlcTailFrame,
 } from "../export/GnumarusVideoMux";
 import {
   composeSheet,
@@ -2085,6 +2086,7 @@ export class GnumarusShell extends LitElement {
     exportSheetAll: { type: Boolean },
     videoSupportWebm: { type: Boolean },
     videoSupportMp4: { type: Boolean },
+    exportVideoVlcTail: { type: Boolean },
     exportBackground: { type: Boolean },
     exportBackgroundType: { type: String },
     exportSolidColor: { type: String },
@@ -2352,6 +2354,7 @@ export class GnumarusShell extends LitElement {
   declare exportSheetAll: boolean;
   declare videoSupportWebm: boolean;
   declare videoSupportMp4: boolean;
+  declare exportVideoVlcTail: boolean;
   declare exportSheetQuality: number;
   declare exportSheetLossless: boolean;
   declare exportBackground: boolean;
@@ -2641,6 +2644,7 @@ export class GnumarusShell extends LitElement {
     this.exportAnimatedLossless = true;
     this.videoSupportWebm = true;
     this.videoSupportMp4 = true;
+    this.exportVideoVlcTail = false;
     this.exportSheetLayout = "line";
     this.exportSheetFormat = "image/png";
     this.exportSheetCount = 2;
@@ -5305,6 +5309,19 @@ export class GnumarusShell extends LitElement {
                 }}
               />
             </label>`}
+        ${this.isVideoExportFormat(this.exportAnimatedFormat)
+          ? html`<label title=${tr("dialog.animVideoTailTitle")}
+              >${tr("dialog.animVideoTail")}
+              <input
+                type="checkbox"
+                id="exportVideoVlcTail"
+                ?checked=${this.exportVideoVlcTail}
+                @change=${(event: Event): void => {
+                  this.exportVideoVlcTail = (event.target as HTMLInputElement).checked;
+                }}
+              />
+            </label>`
+          : html``}
         ${this.renderExportBackgroundOptions("Animated")}
         <div class="dialog-actions">
           <button @click=${(): void => this.closeExportDialog()}>${tr("btn.cancel")}</button>
@@ -15493,6 +15510,7 @@ export class GnumarusShell extends LitElement {
             durationMs: Math.max(1, Math.round(chunk.durationUs / 1000)),
             key: chunk.key,
           }));
+          const videoSamples = this.exportVideoVlcTail ? withVlcTailFrame(samples) : samples;
           let videoBlob: Blob;
           let videoExt: string;
           let videoLabel: string;
@@ -15503,7 +15521,7 @@ export class GnumarusShell extends LitElement {
             const avc = parseAvcDecoderConfig(encoded.description);
             const file = muxProgressiveMp4(
               { width: encoded.width, height: encoded.height, avc },
-              samples,
+              videoSamples,
             );
             videoBlob = new Blob([file as Uint8Array<ArrayBuffer>], { type: "video/mp4" });
             videoExt = "mp4";
@@ -15512,8 +15530,8 @@ export class GnumarusShell extends LitElement {
             const track = { width: size.width, height: size.height };
             const file =
               formatValue === "mkv-video"
-                ? muxMatroska(track, samples, "V_VP9")
-                : muxWebM(track, samples, "V_VP9");
+                ? muxMatroska(track, videoSamples, "V_VP9")
+                : muxWebM(track, videoSamples, "V_VP9");
             videoBlob = new Blob([file as Uint8Array<ArrayBuffer>], {
               type: formatValue === "mkv-video" ? "video/x-matroska" : "video/webm",
             });

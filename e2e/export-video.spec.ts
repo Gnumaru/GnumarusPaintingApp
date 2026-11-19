@@ -128,6 +128,63 @@ async function paintSingleRedFrame(page: import("@playwright/test").Page): Promi
   await paintLayerRect(page, "#ff0000", 0, 0, 63, 63);
 }
 
+async function paintRedBlueFrames(page: import("@playwright/test").Page): Promise<void> {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await paintLayerRect(page, "#ff0000", 0, 0, 63, 63);
+  await addFrames(page, 1);
+  await page.locator('gnumarus-shell [data-testid="anim-frame"][data-frame="1"]').click();
+  await paintLayerRect(page, "#0000ff", 0, 0, 63, 63);
+}
+
+/** Count SimpleBlocks and report the last relative timestamp in a WebM/MKV. */
+async function webmBlockInfo(page: import("@playwright/test").Page, bytes: number[]): Promise<{ count: number; lastRel: number }> {
+  return page.evaluate((data: number[]) => {
+    const buf = new Uint8Array(data);
+    const readId = (at: number): [number, number] => {
+      let length = 1;
+      for (let mask = 0x80; !((buf[at] as number) & mask) && length < 8; mask >>= 1) {
+        length += 1;
+      }
+      let id = 0;
+      for (let i = 0; i < length; i += 1) {
+        id = id * 256 + (buf[at + i] as number);
+      }
+      return [id, length];
+    };
+    const readSize = (at: number): [number, number] => {
+      let length = 1;
+      for (let mask = 0x80; !((buf[at] as number) & mask) && length < 8; mask >>= 1) {
+        length += 1;
+      }
+      let size = (buf[at] as number) & (0xff >> length);
+      for (let i = 1; i < length; i += 1) {
+        size = size * 256 + (buf[at + i] as number);
+      }
+      return [size, length];
+    };
+    let count = 0;
+    let lastRel = -1;
+    const walk = (at: number, end: number, depth: number): void => {
+      while (at < end) {
+        const [id, il] = readId(at);
+        const [size, sl] = readSize(at + il);
+        if (id === 0xa3) {
+          count += 1;
+          lastRel = (((buf[at + il + sl + 1] as number) << 8) | (buf[at + il + sl + 2] as number)) << 16 >> 16;
+        }
+        if ((id === 0x18538067 || id === 0x1f43b675) && depth < 3) {
+          walk(at + il + sl, at + il + sl + size, depth + 1);
+        }
+        at += il + sl + size;
+      }
+    };
+    walk(0, buf.length, 0);
+    return { count, lastRel };
+  }, bytes);
+}
+
 test("animated export dialog lists the video formats @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
@@ -231,4 +288,60 @@ test("mkv animation exports a valid matroska @recent", async ({ page }) => {
   expect(mkv.bytes.slice(0, 4)).toEqual([0x1a, 0x45, 0xdf, 0xa3]);
   const text = String.fromCharCode(...mkv.bytes.slice(0, 64));
   expect(text).toContain("matroska");
+});
+
+test("vlc tail frame appends an invisible 1 ms duplicate @recent", async ({ page }) => {
+  await paintRedBlueFrames(page);
+  await stubSaveFilePicker(page);
+  await page.getByRole("button", { name: "File" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#exportDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("tab", { name: "Export animation" }).click();
+  await dialog.locator("select#exportAnimatedFormat").selectOption("webm-video");
+  const tail = dialog.locator("#exportVideoVlcTail");
+  await expect(tail).toBeVisible();
+  await expect(tail).not.toBeChecked();
+  // Hidden for non-video formats.
+  await dialog.locator("select#exportAnimatedFormat").selectOption("gif");
+  await expect(tail).toBeHidden();
+  await dialog.locator("select#exportAnimatedFormat").selectOption("webm-video");
+  await tail.check();
+  await dialog.locator("#exportAnimatedOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported");
+  const result = await page.evaluate(() => {
+    const root = window as unknown as { __gnumarusExportTest?: { blob: Blob | null } };
+    const blob = root.__gnumarusExportTest?.blob;
+    if (blob == null) {
+      return null;
+    }
+    return blob.arrayBuffer().then((buffer) => Array.from(new Uint8Array(buffer)));
+  });
+  expect(result).not.toBeNull();
+  const info = await webmBlockInfo(page, result as number[]);
+  // Two painted frames plus the 1 ms tail duplicate of the last one.
+  expect(info.count).toBe(3);
+  expect(info.lastRel).toBe(500);
+  // Same checkbox feeds the MP4 branch: total duration grows by exactly 1 ms.
+  await page.getByRole("button", { name: "File" }).click();
+  await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Export" }).click();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("tab", { name: "Export animation" }).click();
+  await dialog.locator("select#exportAnimatedFormat").selectOption("mp4-video");
+  await expect(dialog.locator("#exportVideoVlcTail")).toBeChecked();
+  await dialog.locator("#exportAnimatedOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported");
+  const mp4 = await page.evaluate(() => {
+    const root = window as unknown as { __gnumarusExportTest?: { blob: Blob | null } };
+    const blob = root.__gnumarusExportTest?.blob;
+    if (blob == null) {
+      return null;
+    }
+    return blob.arrayBuffer().then((buffer) => Array.from(new Uint8Array(buffer)));
+  });
+  expect(mp4).not.toBeNull();
+  const meta = await videoMetadata(page, mp4 as number[], "video/mp4");
+  expect(meta.width).toBe(64);
+  expect(meta.duration).toBeGreaterThan(0.5);
+  expect(meta.duration).toBeLessThan(0.51);
 });

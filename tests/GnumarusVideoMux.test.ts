@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   annexBToAvccSample,
+  modalFrameDurationMs,
   muxProgressiveMp4,
   muxMatroska,
   muxWebM,
   parseAvcDecoderConfig,
   splitAnnexBNalus,
+  withVlcTailFrame,
   type GnumarusMuxedSample,
 } from "../src/export/GnumarusVideoMux";
 import { padFramesToEven, videoBitrateForQuality, videoCodecString, videoTotalDurationMs } from "../src/export/GnumarusVideoEncode";
@@ -179,6 +181,32 @@ describe("GnumarusVideoMux EBML", () => {
     expect(targets.get(0x1549a966)).toBe(offsets.get(0x1549a966));
     expect(targets.get(0x1654ae6b)).toBe(offsets.get(0x1654ae6b));
     expect(targets.get(0x1f43b675)).toBe(offsets.get(0x1f43b675));
+  });
+
+  it("uses the modal duration so a tail frame never skews the hint", () => {
+    expect(modalFrameDurationMs(fakeFrames(3))).toBe(200);
+    const mixed: GnumarusMuxedSample[] = [
+      { data: new Uint8Array([1]), timestampMs: 0, durationMs: 100, key: true },
+      { data: new Uint8Array([2]), timestampMs: 100, durationMs: 300, key: false },
+      { data: new Uint8Array([3]), timestampMs: 400, durationMs: 100, key: false },
+    ];
+    expect(modalFrameDurationMs(mixed)).toBe(100);
+    expect(modalFrameDurationMs([])).toBe(1);
+  });
+
+  it("appends an invisible 1 ms duplicate of the last sample", () => {
+    const frames = fakeFrames(3);
+    const tailed = withVlcTailFrame(frames);
+    expect(tailed).toHaveLength(4);
+    expect(tailed.slice(0, 3)).toEqual(frames);
+    const tail = tailed[3] as GnumarusMuxedSample;
+    expect(tail.timestampMs).toBe(600);
+    expect(tail.durationMs).toBe(1);
+    expect(tail.key).toBe(false);
+    expect(tail.data).toBe((frames[2] as GnumarusMuxedSample).data);
+    // The mode duration ignores the tail frame.
+    expect(modalFrameDurationMs(tailed)).toBe(200);
+    expect(() => withVlcTailFrame([])).toThrow(/no frames/);
   });
 
   it("writes a DefaultDuration matching the average frame duration", () => {
