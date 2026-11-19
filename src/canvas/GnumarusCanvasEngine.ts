@@ -366,6 +366,7 @@ export type GnumarusCanvasTool =
   | "line"
   | "curve"
   | "loupe"
+  | "pan"
   | "transform"
   | "transform3d"
   | "eyedropper"
@@ -17388,6 +17389,15 @@ export class GnumarusCanvasEngine {
         canvas.setPointerCapture(event.pointerId);
         return;
       }
+      if (this.tool === "pan" && (event.button === 0 || event.button === 1 || event.button === 2)) {
+        // The pan tool pans with any mouse button and ignores every
+        // modifier (Ctrl/Alt/Shift/Super) and the space bar: it always wins
+        // over paint/zoom/rotate gestures and the color-picker shortcut.
+        event.preventDefault();
+        this.panning = true;
+        canvas.setPointerCapture(event.pointerId);
+        return;
+      }
       if (event.button === 1 && (this.tool === "loupe" || this.tool === "transform")) {
         event.preventDefault();
         if (event.altKey) {
@@ -18924,7 +18934,8 @@ export class GnumarusCanvasEngine {
           this.tool !== "polylasso" &&
           this.tool !== "colorselect" &&
           this.tool !== "tilebrush" &&
-          this.tool !== "flycam"
+          this.tool !== "flycam" &&
+          this.tool !== "pan"
         ) {
           this.beginTempEyedropper();
         }

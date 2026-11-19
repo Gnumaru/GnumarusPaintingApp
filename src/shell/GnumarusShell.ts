@@ -550,6 +550,7 @@ function gnumarusShortcuts(): GnumarusShortcutSection[] {
         { keys: "A", action: tr("sc.toolClone") },
         { keys: "Q", action: tr("sc.toolRecolor") },
         { keys: "Z", action: tr("sc.toolLoupe") },
+        { keys: "Toolbar, palette", keysPt: "Barra de ferramentas, paleta", action: tr("sc.toolPan") },
         { keys: "T", action: tr("sc.toolTransform") },
         { keys: "Y", action: tr("sc.toolRot3d") },
         { keys: "R", action: tr("sc.toolRectselect") },
@@ -2964,6 +2965,31 @@ export class GnumarusShell extends LitElement {
             }}
           >
             <span class="tool-icon">⌕</span>
+          </button>
+          <button
+            class=${this.tool === "pan" ? "active" : ""}
+            title=${tr("tool.panHint")}
+            aria-label=${tr("tool.pan")}
+            @click=${(): void => {
+              this.tool = "pan";
+              this.engine?.setTool("pan");
+            }}
+          >
+            <span class="tool-icon"
+              ><svg
+                viewBox="0 0 16 16"
+                width="13"
+                height="13"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M5.5 7.5V3.4a1 1 0 0 1 2 0v3.4m0-4.6a1 1 0 0 1 2 0v4.6m0-3.6a1 1 0 0 1 2 0V8m0-1.2a1 1 0 0 1 2 0v3.4a4.5 4.5 0 0 1-4.5 4.5h-.9a4.5 4.5 0 0 1-3.5-1.7l-1.9-2.5a1 1 0 0 1 1.6-1.2l1.1 1.4" />
+              </svg>
+            </span>
           </button>
           <button
             class=${this.tool === "bucket" ? "active" : ""}
@@ -5451,6 +5477,9 @@ export class GnumarusShell extends LitElement {
     if (tool === "loupe") {
       return tr("toolname.loupe");
     }
+    if (tool === "pan") {
+      return tr("toolname.pan");
+    }
     if (tool === "bucket") {
       return tr("toolname.bucket");
     }
@@ -5496,7 +5525,7 @@ export class GnumarusShell extends LitElement {
   /** Drawer helpers: the front tool doubles as the drawer button. */
   /** Tools without a drawer, in toolbar order (menu items before the drawer submenus). */
   private standaloneTools(): GnumarusCanvasTool[] {
-    return ["loupe", "bucket", "eyedropper", "text", "tilebrush"];
+    return ["loupe", "pan", "bucket", "eyedropper", "text", "tilebrush"];
   }
 
   /** Every tool reachable from the Tools menu, standalone first, then drawer order. */

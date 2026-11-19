@@ -24,7 +24,7 @@ test("tools menu sits right of edit with standalone items @recent", async ({ pag
   expect(order.map((label) => label.trim())).toEqual(["File", "Edit", "Tools", "Filters", "Help"]);
   await page.getByRole("button", { name: "Tools", exact: true }).click();
   const menu = toolsMenu(page);
-  for (const name of ["Loupe", "Bucket fill", "Eyedropper", "Text", "Tile brush"]) {
+  for (const name of ["Loupe", "Pan", "Bucket fill", "Eyedropper", "Text", "Tile brush"]) {
     await expect(menu.getByRole("button", { name, exact: true })).toBeVisible();
   }
   // Every dropdown entry carries a tooltip.
@@ -86,6 +86,7 @@ test("every tool runs from the action palette @recent", async ({ page }) => {
   await loadBlankProject(page, 64);
   const cases: Array<[string, string]> = [
     ["tool-loupe", "loupe"],
+    ["tool-pan", "pan"],
     ["tool-bucket", "bucket"],
     ["tool-eyedropper", "eyedropper"],
     ["tool-text", "text"],

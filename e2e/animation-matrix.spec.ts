@@ -448,10 +448,11 @@ test("toolbar icons fill buttons without growing them", async ({ page }) => {
       ];
     });
   });
-  expect(boxes).toHaveLength(16);
+  expect(boxes).toHaveLength(17);
   const expected: Record<string, { w: number; h: number }> = {
     Pencil: { w: 33, h: 25 },
     Loupe: { w: 30, h: 25 },
+    Pan: { w: 34, h: 26 },
     "Bucket fill": { w: 35, h: 26 },
     Eyedropper: { w: 35, h: 26 },
     Text: { w: 32, h: 25 },

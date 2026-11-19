@@ -577,6 +577,7 @@ test("tool tooltips start with the selection shortcut", async ({ page }) => {
   expect(titles).toEqual([
     { label: "Pencil", title: expect.stringMatching(/^B: Pencil \(/) },
     { label: "Loupe", title: expect.stringMatching(/^Z: Loupe \(/) },
+    { label: "Pan", title: expect.stringMatching(/^Pan \(/) },
     { label: "Bucket fill", title: expect.stringMatching(/^G or F: Bucket fill \(/) },
     { label: "Eyedropper", title: expect.stringMatching(/^Ctrl \(hold\): Eyedropper \(/) },
     { label: "Text", title: expect.stringMatching(/^Text \(/) },
