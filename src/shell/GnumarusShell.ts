@@ -5204,7 +5204,7 @@ export class GnumarusShell extends LitElement {
               <input
                 type="checkbox"
                 id="exportLossless"
-                ?checked=${this.exportLossless}
+                .checked=${this.exportLossless}
                 @change=${(event: Event): void => {
                   this.exportLossless = (event.target as HTMLInputElement).checked;
                 }}
@@ -5281,7 +5281,7 @@ export class GnumarusShell extends LitElement {
               <input
                 type="checkbox"
                 id="exportAnimatedLossless"
-                ?checked=${this.exportAnimatedLossless}
+                .checked=${this.exportAnimatedLossless}
                 @change=${(event: Event): void => {
                   this.exportAnimatedLossless = (event.target as HTMLInputElement).checked;
                 }}
@@ -5320,7 +5320,7 @@ export class GnumarusShell extends LitElement {
             ><input
               type="checkbox"
               id="exportSheetAll"
-              ?checked=${this.exportSheetAll}
+              .checked=${this.exportSheetAll}
               @change=${(event: Event): void => {
                 this.exportSheetAll = (event.target as HTMLInputElement).checked;
               }}
@@ -5386,7 +5386,7 @@ export class GnumarusShell extends LitElement {
               <input
                 type="checkbox"
                 id="exportSheetLossless"
-                ?checked=${this.exportSheetLossless}
+                .checked=${this.exportSheetLossless}
                 @change=${(event: Event): void => {
                   this.exportSheetLossless = (event.target as HTMLInputElement).checked;
                 }}
@@ -6825,7 +6825,7 @@ export class GnumarusShell extends LitElement {
                 ><input
                   type="checkbox"
                   id="colorContiguous"
-                  ?checked=${this.colorContiguous}
+                  .checked=${this.colorContiguous}
                   @change=${(): void => this.applyColorContiguousFromDialog()}
                 />
                 ${tr("opt.contiguous")}
@@ -15125,7 +15125,7 @@ export class GnumarusShell extends LitElement {
         ><input
           type="checkbox"
           id="exportBackground${sfx}"
-          ?checked=${this.exportBackground}
+          .checked=${this.exportBackground}
           @change=${(event: Event): void => {
             this.exportBackground = (event.target as HTMLInputElement | null)?.checked === true;
           }}
