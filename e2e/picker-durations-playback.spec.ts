@@ -230,6 +230,21 @@ test("menubar switches menus on hover while open", async ({ page }) => {
   await expect(helpItem).toBeVisible();
 });
 
+test("playback suspends onion skin and restores it on stop @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  const onion = matrix.locator('[data-testid="onion-toggle"]');
+  await onion.click();
+  await expect(onion).toHaveClass(/active/);
+  await matrix.getByRole("button", { name: "Play animation", exact: true }).click();
+  await expect(matrix.getByRole("button", { name: "Stop animation", exact: true })).toBeVisible();
+  await expect(onion).not.toHaveClass(/active/);
+  await matrix.getByRole("button", { name: "Stop animation", exact: true }).click();
+  await expect(matrix.getByRole("button", { name: "Play animation", exact: true })).toBeVisible();
+  await expect(onion).toHaveClass(/active/);
+});
+
 test("playback advances frames by duration and stops on demand", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

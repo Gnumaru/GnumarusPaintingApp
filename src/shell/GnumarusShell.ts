@@ -2461,6 +2461,8 @@ export class GnumarusShell extends LitElement {
   private playbackAnimation: GnumarusNamedAnimation | null = null;
   private playbackIndex = 0;
   private playbackDirection: 1 | -1 = 1;
+  /** Onion state to restore when playback stops; null when not suspended. */
+  private onionBeforePlayback: boolean | null = null;
   private toastTimer: number | null = null;
 
   private actionRegistry = new GnumarusActionRegistry();
@@ -9007,6 +9009,10 @@ export class GnumarusShell extends LitElement {
 
   /** Matrix corner action: toggle onion skinning ghosts. */
   private toggleOnionSkinning(): void {
+    // An explicit toggle during playback takes over: no restore on stop.
+    if (this.playing) {
+      this.onionBeforePlayback = null;
+    }
     this.setOnionState(!this.onionEnabled, this.onionPast, this.onionFuture, this.onionTint);
     this.statusMessage = this.onionEnabled ? tr("status.onionOn") : tr("status.onionOff");
   }
@@ -9048,6 +9054,10 @@ export class GnumarusShell extends LitElement {
 
   private applyOnionFromDialog(): void {
     const next = this.currentDialogOnionState();
+    // An explicit settings change during playback takes over: no restore.
+    if (this.playing) {
+      this.onionBeforePlayback = null;
+    }
     this.onionEnabled = next.enabled;
     this.onionPast = next.past;
     this.onionFuture = next.future;
@@ -15684,6 +15694,12 @@ export class GnumarusShell extends LitElement {
     this.playing = true;
     this.playbackAnimation = animation;
     this.playbackDirection = 1;
+    // Onion ghosts smear across playing frames: suspend them silently and
+    // restore the previous state on stop.
+    this.onionBeforePlayback = this.onionEnabled;
+    if (this.onionEnabled) {
+      this.setOnionState(false, this.onionPast, this.onionFuture, this.onionTint);
+    }
     if (animation === null) {
       this.playbackIndex = 0;
       this.statusMessage = tr("status.playingFrom", { frame: this.engine.getCurrentFrame() + 1 });
@@ -15707,6 +15723,11 @@ export class GnumarusShell extends LitElement {
       this.playTimer = null;
     }
     this.playbackAnimation = null;
+    if (this.onionBeforePlayback !== null) {
+      const restore = this.onionBeforePlayback;
+      this.onionBeforePlayback = null;
+      this.setOnionState(restore, this.onionPast, this.onionFuture, this.onionTint);
+    }
     if (this.playing) {
       this.playing = false;
       if (message !== "") {
