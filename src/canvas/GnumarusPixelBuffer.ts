@@ -240,6 +240,39 @@ export function resizePixelBuffer(
   return next;
 }
 
+/**
+ * Nearest-neighbor downscale by a 0 < scale <= 1 factor (dims floored at
+ * 1px): each output texel copies the source texel at its scaled origin.
+ * Used for reduced-resolution caches where blockiness is acceptable.
+ */
+export function downscalePixelBufferNearest(
+  buffer: Uint8ClampedArray,
+  width: number,
+  height: number,
+  scale: number,
+): { buffer: Uint8ClampedArray; width: number; height: number } {
+  const gain = Number.isFinite(scale) && scale > 0 ? Math.min(1, scale) : 1;
+  const scaledWidth = Math.max(1, Math.floor(width * gain));
+  const scaledHeight = Math.max(1, Math.floor(height * gain));
+  if (scaledWidth >= width && scaledHeight >= height) {
+    return { buffer, width, height };
+  }
+  const next = new Uint8ClampedArray(scaledWidth * scaledHeight * 4);
+  for (let y = 0; y < scaledHeight; y += 1) {
+    const sourceY = Math.min(height - 1, Math.floor((y * height) / scaledHeight));
+    for (let x = 0; x < scaledWidth; x += 1) {
+      const sourceX = Math.min(width - 1, Math.floor((x * width) / scaledWidth));
+      const from = (sourceY * width + sourceX) * 4;
+      const to = (y * scaledWidth + x) * 4;
+      next[to] = buffer[from] ?? 0;
+      next[to + 1] = buffer[from + 1] ?? 0;
+      next[to + 2] = buffer[from + 2] ?? 0;
+      next[to + 3] = buffer[from + 3] ?? 0;
+    }
+  }
+  return { buffer: next, width: scaledWidth, height: scaledHeight };
+}
+
 export interface GnumarusAlphaBoundingBox {
   left: number;
   top: number;

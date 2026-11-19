@@ -58,6 +58,7 @@ import {
   clampLayerDim,
   compositePixelOver,
   createPixelBuffer,
+  downscalePixelBufferNearest,
   drawBrushStamp,
   drawImagePatternStamp,
   drawImageStamp,
@@ -10507,10 +10508,28 @@ export class GnumarusCanvasEngine {
     this.onLayersChanged?.();
   }
 
-  /** Onion flatten cache (LRU): raw neighbor flats keyed by frame + size + content. */
+  /** Onion flatten cache (LRU): raw neighbor flats keyed by frame + size + scale + content. */
   private onionFlatCache = new Map<string, { width: number; height: number; flat: Uint8ClampedArray }>();
-  /** Max cached flats (whole canvases; 4 ~= 33 MB at 1080p). */
-  private readonly onionFlatCacheSize = 4;
+  /** Max cached neighbor flats (0 disables the cache). */
+  private onionCacheFrames = 10;
+  /** Cached ghost resolution multiplier (0.1..1). */
+  private onionResolutionScale = 1;
+
+  /** Tune the onion flat cache (resolution multiplier 0.1..1, frame cap 0..1000). */
+  setOnionCache(resolutionScale: number, cacheFrames: number): void {
+    const scale = Number.isFinite(resolutionScale) && resolutionScale > 0 ? Math.min(1, resolutionScale) : 1;
+    this.onionResolutionScale = Math.max(0.1, scale);
+    this.onionCacheFrames = Number.isFinite(cacheFrames) ? Math.min(1000, Math.max(0, Math.floor(cacheFrames))) : 10;
+    while (this.onionFlatCache.size > this.onionCacheFrames) {
+      const oldest = this.onionFlatCache.keys().next();
+      if (oldest.done) {
+        break;
+      }
+      this.onionFlatCache.delete(oldest.value);
+    }
+    this.refreshOnionSkins();
+    this.render();
+  }
 
   /** Onion ghost visibility for tests and the matrix toggle. */
   onionGhostVisible(which: "past" | "future"): boolean {
@@ -10561,8 +10580,8 @@ export class GnumarusCanvasEngine {
    * visibility, opacity, blend, exact transform, parent, mask flag and
    * every content id slot). Cheap string build, no pixel reads.
    */
-  private onionFlatCacheKey(frame: number, width: number, height: number): string {
-    const parts: Array<string | number> = [frame, width, height, this.pixelsVersion];
+  private onionFlatCacheKey(frame: number, width: number, height: number, scale: number): string {
+    const parts: Array<string | number> = [frame, width, height, scale, this.pixelsVersion];
     for (const layer of this.layers) {
       const t = layer.transform;
       let content = "";
@@ -10599,31 +10618,56 @@ export class GnumarusCanvasEngine {
 
   /**
    * Raw flattened neighbor frame, served from the LRU flat-cache when the
-   * key matches (counts only real composites for the test hook).
+   * key matches (counts only real composites for the test hook). Cached
+   * flats are downscaled to the ghost resolution.
    */
   private onionCachedFlat(
     frame: number,
     width: number,
     height: number,
     inputs: GnumarusFlattenLayerInput[],
-  ): Uint8ClampedArray {
-    const key = this.onionFlatCacheKey(frame, width, height);
-    const hit = this.onionFlatCache.get(key);
-    if (hit !== undefined && hit.width === width && hit.height === height) {
-      this.onionFlatCache.delete(key);
-      this.onionFlatCache.set(key, hit);
-      return hit.flat;
-    }
-    const flat = compositeFinalImage(width, height, inputs);
-    this.onionFlattenCount += 1;
-    if (this.onionFlatCache.size >= this.onionFlatCacheSize) {
-      const oldest = this.onionFlatCache.keys().next();
-      if (!oldest.done) {
-        this.onionFlatCache.delete(oldest.value);
+  ): { flat: Uint8ClampedArray; width: number; height: number } {
+    const scale = this.clampedOnionScale();
+    const cacheWidth = Math.max(1, Math.floor(width * scale));
+    const cacheHeight = Math.max(1, Math.floor(height * scale));
+    if (this.onionCacheFrames >= 1) {
+      const key = this.onionFlatCacheKey(frame, width, height, scale);
+      const hit = this.onionFlatCache.get(key);
+      if (hit !== undefined && hit.width === cacheWidth && hit.height === cacheHeight) {
+        this.onionFlatCache.delete(key);
+        this.onionFlatCache.set(key, hit);
+        return hit;
       }
     }
-    this.onionFlatCache.set(key, { width, height, flat });
-    return flat;
+    const full = compositeFinalImage(width, height, inputs);
+    this.onionFlattenCount += 1;
+    const scaled = downscalePixelBufferNearest(full, width, height, scale);
+    const entry = {
+      flat: scaled.buffer,
+      width: scaled.width,
+      height: scaled.height,
+    };
+    if (this.onionCacheFrames >= 1) {
+      const storeKey = this.onionFlatCacheKey(frame, width, height, scale);
+      while (this.onionFlatCache.size >= this.onionCacheFrames) {
+        const oldest = this.onionFlatCache.keys().next();
+        if (oldest.done) {
+          break;
+        }
+        this.onionFlatCache.delete(oldest.value);
+      }
+      this.onionFlatCache.set(storeKey, entry);
+    }
+    return entry;
+  }
+
+  /** Ghost resolution multiplier, hardened to 0.1..1 even if set directly. */
+  private clampedOnionScale(): number {
+    const scale = this.onionResolutionScale;
+    if (!Number.isFinite(scale) || scale <= 0) {
+      return 1;
+    }
+    return Math.min(1, Math.max(0.1, scale));
   }
 
   /**
@@ -10665,11 +10709,14 @@ export class GnumarusCanvasEngine {
         slot.mesh.visible = false;
         continue;
       }
+      // Ghosts render at the cache resolution and upscale on the plane.
+      const cacheWidth = Math.max(1, Math.floor(width * this.clampedOnionScale()));
+      const cacheHeight = Math.max(1, Math.floor(height * this.clampedOnionScale()));
       // Persistent per-side scratch: no per-switch allocation and no copy
       // into the live texture — the update path paints the backing array.
       let ghost = slot.scratch;
-      if (ghost === null || ghost.length !== width * height * 4) {
-        ghost = new Uint8ClampedArray(width * height * 4);
+      if (ghost === null || ghost.length !== cacheWidth * cacheHeight * 4) {
+        ghost = new Uint8ClampedArray(cacheWidth * cacheHeight * 4);
         slot.scratch = ghost;
       } else {
         ghost.fill(0);
@@ -10687,9 +10734,10 @@ export class GnumarusCanvasEngine {
         if (inputs === null) {
           continue;
         }
-        const flat = this.onionCachedFlat(frame, width, height, inputs);
+        const cached = this.onionCachedFlat(frame, width, height, inputs);
+        const flat = cached.flat;
         const alpha = 0.6 / i;
-        for (let p = 0; p < width * height; p += 1) {
+        for (let p = 0; p < cacheWidth * cacheHeight; p += 1) {
           const a = (flat[p * 4 + 3] as number) / 255;
           if (!(a > 0)) {
             continue;
@@ -10712,9 +10760,9 @@ export class GnumarusCanvasEngine {
         continue;
       }
       const current = slot.texture;
-      if (current === null || current.image.width !== width || current.image.height !== height) {
+      if (current === null || current.image.width !== cacheWidth || current.image.height !== cacheHeight) {
         current?.dispose();
-        const texture = new THREE.DataTexture(ghost, width, height);
+        const texture = new THREE.DataTexture(ghost, cacheWidth, cacheHeight);
         texture.magFilter = THREE.NearestFilter;
         texture.minFilter = THREE.NearestFilter;
         texture.generateMipmaps = false;

@@ -2089,6 +2089,8 @@ export class GnumarusShell extends LitElement {
     swatches: { attribute: false },
     recentColors: { attribute: false },
     onionEnabled: { type: Boolean },
+    onionResolutionScale: { type: Number },
+    onionCacheFrames: { type: Number },
     onionPast: { type: Number },
     onionFuture: { type: Number },
     onionTint: { type: Boolean },
@@ -2352,6 +2354,8 @@ export class GnumarusShell extends LitElement {
   declare updateStatus: GnumarusUpdateStatus;
   declare toastDurationSec: number;
   declare onionEnabled: boolean;
+  declare onionResolutionScale: number;
+  declare onionCacheFrames: number;
   declare onionPast: number;
   declare onionFuture: number;
   declare onionTint: boolean;
@@ -2640,6 +2644,8 @@ export class GnumarusShell extends LitElement {
     this.updateStatus = "unknown";
     this.toastDurationSec = DEFAULT_TOAST_SETTINGS.durationSec;
     this.onionEnabled = DEFAULT_ONION_SETTINGS.enabled;
+    this.onionResolutionScale = DEFAULT_ONION_SETTINGS.resolutionScale;
+    this.onionCacheFrames = DEFAULT_ONION_SETTINGS.cacheFrames;
     this.onionPast = DEFAULT_ONION_SETTINGS.past;
     this.onionFuture = DEFAULT_ONION_SETTINGS.future;
     this.onionTint = DEFAULT_ONION_SETTINGS.tint;
@@ -4531,7 +4537,9 @@ export class GnumarusShell extends LitElement {
           ${this.onionEnabled !== DEFAULT_ONION_SETTINGS.enabled ||
           this.onionPast !== DEFAULT_ONION_SETTINGS.past ||
           this.onionFuture !== DEFAULT_ONION_SETTINGS.future ||
-          this.onionTint !== DEFAULT_ONION_SETTINGS.tint
+          this.onionTint !== DEFAULT_ONION_SETTINGS.tint ||
+          this.onionResolutionScale !== DEFAULT_ONION_SETTINGS.resolutionScale ||
+          this.onionCacheFrames !== DEFAULT_ONION_SETTINGS.cacheFrames
             ? html`<button
                 class="reset-btn"
                 aria-label=${tr("setting.onion")}
@@ -4541,6 +4549,34 @@ export class GnumarusShell extends LitElement {
                 ↻
               </button>`
             : html``}
+        </div>
+        <div class="setting-row">
+          <label title=${tr("setting.onionResolutionHint")}
+            >${tr("setting.onionResolution")}
+            <input
+              type="number"
+              id="onionResolution"
+              min="0.1"
+              max="1"
+              step="0.1"
+              .value=${String(this.onionResolutionScale)}
+              @input=${(): void => this.applyOnionFromDialog()}
+            />
+          </label>
+        </div>
+        <div class="setting-row">
+          <label title=${tr("setting.onionCacheHint")}
+            >${tr("setting.onionCache")}
+            <input
+              type="number"
+              id="onionCacheFrames"
+              min="0"
+              max="1000"
+              step="1"
+              .value=${String(this.onionCacheFrames)}
+              @input=${(): void => this.applyOnionFromDialog()}
+            />
+          </label>
         </div>
         <div class="settings-section">${tr("setting.interface")}</div>
         <div class="setting-row">
@@ -7227,6 +7263,8 @@ export class GnumarusShell extends LitElement {
     this.recentColors = storedSwatches.recent;
     const storedOnion = this.loadOnionSettings();
     this.onionEnabled = storedOnion.enabled;
+    this.onionResolutionScale = storedOnion.resolutionScale;
+    this.onionCacheFrames = storedOnion.cacheFrames;
     this.onionPast = storedOnion.past;
     this.onionFuture = storedOnion.future;
     this.onionTint = storedOnion.tint;
@@ -7385,6 +7423,7 @@ export class GnumarusShell extends LitElement {
       this.engine.setOnionEnabled(this.onionEnabled);
       this.engine.setOnionCounts(this.onionPast, this.onionFuture);
       this.engine.setOnionTint(this.onionTint);
+      this.engine.setOnionCache(this.onionResolutionScale, this.onionCacheFrames);
       this.engine.setPencilPixelPerfect(this.pencilPixelPerfect);
       this.engine.setCurvePixelPerfect(this.curvePixelPerfect);
       this.engine.setModelLighting(this.storageModelLighting);
@@ -8993,7 +9032,14 @@ export class GnumarusShell extends LitElement {
     this.persistBlackSwitch();
   }
 
-  private loadOnionSettings(): { enabled: boolean; past: number; future: number; tint: boolean } {
+  private loadOnionSettings(): {
+    enabled: boolean;
+    past: number;
+    future: number;
+    tint: boolean;
+    resolutionScale: number;
+    cacheFrames: number;
+  } {
     try {
       const stored = window.localStorage.getItem(ONION_SETTINGS_STORAGE_KEY);
       if (stored !== null) {
@@ -9011,6 +9057,8 @@ export class GnumarusShell extends LitElement {
         ONION_SETTINGS_STORAGE_KEY,
         serializeOnionSettings({
           enabled: this.onionEnabled,
+          resolutionScale: this.onionResolutionScale,
+          cacheFrames: this.onionCacheFrames,
           past: this.onionPast,
           future: this.onionFuture,
           tint: this.onionTint,
@@ -9062,20 +9110,35 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.toastReset");
   }
 
-  private currentDialogOnionState(): { enabled: boolean; past: number; future: number; tint: boolean } {
+  private currentDialogOnionState(): {
+    enabled: boolean;
+    past: number;
+    future: number;
+    tint: boolean;
+    resolutionScale: number;
+    cacheFrames: number;
+  } {
     const enabledInput = this.shadowRoot?.getElementById("onionEnabled") as HTMLInputElement | null;
     const pastInput = this.shadowRoot?.getElementById("onionPast") as HTMLInputElement | null;
     const futureInput = this.shadowRoot?.getElementById("onionFuture") as HTMLInputElement | null;
     const tintInput = this.shadowRoot?.getElementById("onionTint") as HTMLInputElement | null;
+    const resolutionInput = this.shadowRoot?.getElementById("onionResolution") as HTMLInputElement | null;
+    const cacheInput = this.shadowRoot?.getElementById("onionCacheFrames") as HTMLInputElement | null;
     const count = (input: HTMLInputElement | null, fallback: number): number => {
       const parsed = Math.floor(Number(input?.value ?? String(fallback)));
       return Number.isFinite(parsed) ? Math.min(8, Math.max(0, parsed)) : fallback;
     };
+    const rawScale = Number(resolutionInput?.value ?? String(this.onionResolutionScale));
     return {
       enabled: enabledInput?.checked === true,
       past: count(pastInput, this.onionPast),
       future: count(futureInput, this.onionFuture),
       tint: tintInput?.checked !== false,
+      resolutionScale: Number.isFinite(rawScale) ? Math.min(1, Math.max(0.1, rawScale)) : this.onionResolutionScale,
+      cacheFrames: (() => {
+        const raw = Math.floor(Number(cacheInput?.value ?? String(this.onionCacheFrames)));
+        return Number.isFinite(raw) ? Math.min(1000, Math.max(0, raw)) : this.onionCacheFrames;
+      })(),
     };
   }
 
@@ -9089,9 +9152,12 @@ export class GnumarusShell extends LitElement {
     this.onionPast = next.past;
     this.onionFuture = next.future;
     this.onionTint = next.tint;
+    this.onionResolutionScale = next.resolutionScale;
+    this.onionCacheFrames = next.cacheFrames;
     this.engine?.setOnionEnabled(next.enabled);
     this.engine?.setOnionCounts(next.past, next.future);
     this.engine?.setOnionTint(next.tint);
+    this.engine?.setOnionCache(next.resolutionScale, next.cacheFrames);
     this.persistOnion();
     this.refreshLayers();
     this.statusMessage = next.enabled ? tr("status.onionOn") : tr("status.onionOff");
@@ -9104,6 +9170,10 @@ export class GnumarusShell extends LitElement {
       DEFAULT_ONION_SETTINGS.future,
       DEFAULT_ONION_SETTINGS.tint,
     );
+    this.onionResolutionScale = DEFAULT_ONION_SETTINGS.resolutionScale;
+    this.onionCacheFrames = DEFAULT_ONION_SETTINGS.cacheFrames;
+    this.engine?.setOnionCache(this.onionResolutionScale, this.onionCacheFrames);
+    this.persistOnion();
     this.statusMessage = tr("status.onionOff");
   }
 
@@ -11747,10 +11817,13 @@ export class GnumarusShell extends LitElement {
     this.toastDurationSec = DEFAULT_TOAST_SETTINGS.durationSec;
     this.persistToast();
     this.onionEnabled = DEFAULT_ONION_SETTINGS.enabled;
+    this.onionResolutionScale = DEFAULT_ONION_SETTINGS.resolutionScale;
+    this.onionCacheFrames = DEFAULT_ONION_SETTINGS.cacheFrames;
     this.onionPast = DEFAULT_ONION_SETTINGS.past;
     this.onionFuture = DEFAULT_ONION_SETTINGS.future;
     this.onionTint = DEFAULT_ONION_SETTINGS.tint;
     this.engine?.setOnionEnabled(this.onionEnabled);
+    this.engine?.setOnionCache(this.onionResolutionScale, this.onionCacheFrames);
     this.engine?.setOnionCounts(this.onionPast, this.onionFuture);
     this.engine?.setOnionTint(this.onionTint);
     this.persistOnion();

@@ -12,6 +12,10 @@ export interface GnumarusOnionSettings {
   future: number;
   /** Blue past / red future tint instead of plain white ghosts. */
   tint: boolean;
+  /** Cached ghost resolution multiplier (0.1..1); 1 keeps full size. */
+  resolutionScale: number;
+  /** Max cached neighbor flats, LRU (0..1000); 0 disables the cache. */
+  cacheFrames: number;
 }
 
 export const DEFAULT_ONION_SETTINGS: GnumarusOnionSettings = {
@@ -19,11 +23,16 @@ export const DEFAULT_ONION_SETTINGS: GnumarusOnionSettings = {
   past: 1,
   future: 1,
   tint: true,
+  resolutionScale: 1,
+  cacheFrames: 10,
 };
 
 export const ONION_SETTINGS_STORAGE_KEY = "gnumarus.settings.onion.v1";
 
 export const GNUMARUS_MAX_ONION_FRAMES = 8;
+
+/** Largest cached neighbor-flat count (0 disables the cache). */
+export const GNUMARUS_MAX_ONION_CACHE_FRAMES = 1000;
 
 export class GnumarusOnionSettingsError extends Error {
   constructor(message: string) {
@@ -43,6 +52,20 @@ function clampCount(value: unknown, fallback: number): number {
   return Math.min(GNUMARUS_MAX_ONION_FRAMES, Math.max(0, Math.floor(value)));
 }
 
+function clampResolutionScale(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return fallback;
+  }
+  return Math.min(1, Math.max(0.1, value));
+}
+
+function clampCacheFrames(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.min(GNUMARUS_MAX_ONION_CACHE_FRAMES, Math.max(0, Math.floor(value)));
+}
+
 export function parseOnionSettings(jsonText: string): GnumarusOnionSettings {
   let parsed: unknown;
   try {
@@ -58,6 +81,8 @@ export function parseOnionSettings(jsonText: string): GnumarusOnionSettings {
     past: clampCount(parsed["past"], DEFAULT_ONION_SETTINGS.past),
     future: clampCount(parsed["future"], DEFAULT_ONION_SETTINGS.future),
     tint: parsed["tint"] === undefined ? DEFAULT_ONION_SETTINGS.tint : parsed["tint"] !== false,
+    resolutionScale: clampResolutionScale(parsed["resolutionScale"], DEFAULT_ONION_SETTINGS.resolutionScale),
+    cacheFrames: clampCacheFrames(parsed["cacheFrames"], DEFAULT_ONION_SETTINGS.cacheFrames),
   };
 }
 
@@ -68,6 +93,8 @@ export function serializeOnionSettings(settings: GnumarusOnionSettings): string 
       past: clampCount(settings.past, DEFAULT_ONION_SETTINGS.past),
       future: clampCount(settings.future, DEFAULT_ONION_SETTINGS.future),
       tint: settings.tint,
+      resolutionScale: clampResolutionScale(settings.resolutionScale, DEFAULT_ONION_SETTINGS.resolutionScale),
+      cacheFrames: clampCacheFrames(settings.cacheFrames, DEFAULT_ONION_SETTINGS.cacheFrames),
     },
     null,
     2,

@@ -15,6 +15,7 @@ import {
   compositeOver,
   createPixelBuffer,
   cropBufferBox,
+  downscalePixelBufferNearest,
   drawBrushLine,
   drawBrushStamp,
   drawCubicBezier,
@@ -48,6 +49,29 @@ describe("GnumarusPixelBuffer", () => {
     const buffer = createPixelBuffer(4, 4);
     expect(buffer.length).toBe(64);
     expect(getPixel(buffer, 4, 4, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  });
+
+  it("downscales to the nearest source texel", () => {
+    const buffer = createPixelBuffer(4, 2);
+    // Left half red, right half blue; alpha ramps per pixel.
+    for (let y = 0; y < 2; y += 1) {
+      for (let x = 0; x < 4; x += 1) {
+        const i = (y * 4 + x) * 4;
+        buffer[i] = x < 2 ? 255 : 0;
+        buffer[i + 2] = x < 2 ? 0 : 255;
+        buffer[i + 3] = (x + y * 4) * 16;
+      }
+    }
+    const half = downscalePixelBufferNearest(buffer, 4, 2, 0.5);
+    expect(half.width).toBe(2);
+    expect(half.height).toBe(1);
+    // (0,0) samples (0,0); (1,0) samples (2,0).
+    expect(Array.from(half.buffer.slice(0, 8))).toEqual([255, 0, 0, 0, 0, 0, 255, 32]);
+    // Invalid scales fall back to full size; tiny canvases floor at 1px.
+    expect(downscalePixelBufferNearest(buffer, 4, 2, 0).width).toBe(4);
+    expect(downscalePixelBufferNearest(buffer, 4, 2, 2).width).toBe(4);
+    const tiny = downscalePixelBufferNearest(createPixelBuffer(1, 1), 1, 1, 0.1);
+    expect([tiny.width, tiny.height]).toEqual([1, 1]);
   });
 
   it("sets and reads a solid pixel", () => {
