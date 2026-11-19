@@ -4878,10 +4878,9 @@ export class GnumarusShell extends LitElement {
       </dialog>
       <dialog id="frameDurationDialog">
         <h3>${tr("dialog.duration")}</h3>
-        <p>${tr("dialog.durationHint")}</p>
         ${this.durationTotal
           ? html`<p>${tr("dialog.durationTotalHint")}</p>`
-          : html``}
+          : html`<p>${tr("dialog.durationHint")}</p>`}
         <label
           >${tr("dialog.durationLabel")}
           <input

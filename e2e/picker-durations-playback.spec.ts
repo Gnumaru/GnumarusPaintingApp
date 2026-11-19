@@ -158,6 +158,9 @@ test("frame menu sets and clears an explicit frame duration", async ({ page }) =
   await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
   await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click({ button: "right" });
   await page.getByRole("button", { name: "Set frame duration…" }).click();
+  const singleDialog = page.locator("gnumarus-shell dialog#frameDurationDialog");
+  await expect(singleDialog).toContainText("How long this frame shows during playback");
+  await expect(singleDialog).not.toContainText("evenly divided");
   await page.locator("gnumarus-shell input#frameDuration").fill("0.25");
   await page.getByRole("button", { name: "Set", exact: true }).click();
   expect(await getFrameDuration(page, 1)).toBe(0.25);

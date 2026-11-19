@@ -503,6 +503,8 @@ test("Set total duration splits evenly across contiguous and scattered frames @r
   const dialog = page.locator("gnumarus-shell dialog#frameDurationDialog");
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText("evenly divided");
+  await expect(dialog).toContainText("every frame will use the project's default frame duration");
+  await expect(dialog).not.toContainText("How long this frame shows");
   await page.locator("gnumarus-shell input#frameDuration").fill("3");
   await page.getByRole("button", { name: "Set", exact: true }).click();
   expect(await getFrameDuration(page, 0)).toBe(1.5);
