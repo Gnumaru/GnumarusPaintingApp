@@ -176,7 +176,11 @@ import {
 import {
   applyNewProjectPreset,
   DEFAULT_NEW_PROJECT_PRESET,
+  fpsToFrametimeSec,
+  frametimeSecToFps,
+  GNUMARUS_NEW_PROJECT_DEFAULT_FPS,
   GNUMARUS_NEW_PROJECT_PRESETS,
+  isPartialDecimal,
 } from "../settings/GnumarusNewProjectPresets";
 import {
   DEFAULT_STORAGE_SETTINGS,
@@ -2018,6 +2022,7 @@ export class GnumarusShell extends LitElement {
     newWidth: { type: Number },
     newHeight: { type: Number },
     newPreset: { type: String },
+    newFps: { type: Number },
     newStorageFormat: { type: String },
     newStorageLossless: { type: Boolean },
     newStorageQuality: { type: Number },
@@ -2262,6 +2267,7 @@ export class GnumarusShell extends LitElement {
   declare newWidth: number;
   declare newHeight: number;
   declare newPreset: string;
+  declare newFps: number;
   declare newStorageFormat: GnumarusStorageFormat;
   declare newStorageLossless: boolean;
   declare newStorageQuality: number;
@@ -2568,6 +2574,7 @@ export class GnumarusShell extends LitElement {
     this.newWidth = 64;
     this.newHeight = 64;
     this.newPreset = "";
+    this.newFps = GNUMARUS_NEW_PROJECT_DEFAULT_FPS;
     this.newStorageFormat = DEFAULT_STORAGE_SETTINGS.format;
     this.newStorageLossless = DEFAULT_STORAGE_SETTINGS.lossless;
     this.newStorageQuality = DEFAULT_STORAGE_SETTINGS.quality;
@@ -4062,6 +4069,26 @@ export class GnumarusShell extends LitElement {
             max="16384"
             .value=${String(this.newHeight)}
             @input=${(): void => this.applyNewDimensionsFromDialog()}
+        /></label>
+        <label title=${tr("dialog.fpsTitle")}
+          >${tr("dialog.fps")}
+          <input
+            type="number"
+            id="newFps"
+            min="0.01"
+            step="any"
+            .value=${String(this.newFps)}
+            @input=${(): void => this.applyNewFpsFromDialog()}
+        /></label>
+        <label title=${tr("dialog.frametimeTitle")}
+          >${tr("dialog.frametime")}
+          <input
+            type="number"
+            id="newFrametime"
+            min="0.001"
+            step="any"
+            .value=${String(fpsToFrametimeSec(this.newFps))}
+            @input=${(): void => this.applyNewFrametimeFromDialog()}
         /></label>
         <label
           >${tr("dialog.textureFormat")}
@@ -8255,6 +8282,9 @@ export class GnumarusShell extends LitElement {
       this.newStorageFormat = applied.format;
       this.newStorageLossless = applied.lossless;
       this.newStorageQuality = applied.quality;
+      this.newFps = applied.fps;
+    } else {
+      this.newFps = GNUMARUS_NEW_PROJECT_DEFAULT_FPS;
     }
     const dialog = this.shadowRoot?.getElementById("newDialog") as HTMLDialogElement | null;
     dialog?.showModal();
@@ -8279,6 +8309,7 @@ export class GnumarusShell extends LitElement {
     this.newStorageFormat = applied.format;
     this.newStorageLossless = applied.lossless;
     this.newStorageQuality = applied.quality;
+    this.newFps = applied.fps;
   }
 
   /** Track manual dimension edits (the preset no longer applies). */
@@ -8311,6 +8342,36 @@ export class GnumarusShell extends LitElement {
     this.newStorageFormat = format;
     this.newStorageLossless = lossless;
     this.newStorageQuality = quality;
+    this.newPreset = "";
+  }
+
+  /** Track manual fps edits (frametime follows as 1/fps; preset no longer applies). */
+  private applyNewFpsFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("newFps") as HTMLInputElement | null;
+    const raw = (input?.value ?? "").trim();
+    if (isPartialDecimal(raw)) {
+      return;
+    }
+    const fps = Number(raw);
+    if (!Number.isFinite(fps) || fps <= 0) {
+      return;
+    }
+    this.newFps = frametimeSecToFps(1 / fps);
+    this.newPreset = "";
+  }
+
+  /** Track manual frametime edits (fps follows as 1/frametime; preset no longer applies). */
+  private applyNewFrametimeFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("newFrametime") as HTMLInputElement | null;
+    const raw = (input?.value ?? "").trim();
+    if (isPartialDecimal(raw)) {
+      return;
+    }
+    const seconds = Number(raw);
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      return;
+    }
+    this.newFps = frametimeSecToFps(seconds);
     this.newPreset = "";
   }
 
@@ -17788,6 +17849,9 @@ export class GnumarusShell extends LitElement {
     this.storageQuality = this.newStorageQuality;
     this.persistStorage();
     this.engine?.newProject(this.newWidth, this.newHeight);
+    const frametimeSec = fpsToFrametimeSec(this.newFps);
+    this.defaultFrameDuration = frametimeSec;
+    this.engine?.setDefaultFrameDuration(frametimeSec);
     this.refreshLayers();
     this.selectSingleFrame(0);
     this.collapseLayerSelectionToActive();

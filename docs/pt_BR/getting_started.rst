@@ -23,8 +23,10 @@ Sua primeira pintura
 Projetos
 --------
 
-* **Arquivo > Novo projeto** cria um projeto em branco (largura, altura
-  e predefinições de armazenamento das texturas).
+* **Arquivo > Novo projeto** cria um projeto em branco (largura, altura,
+  predefinições de armazenamento das texturas e um par ligado FPS /
+  tempo de quadro que define a duração padrão de quadro da nova
+  animação).
 * **Arquivo > Abrir projeto** lê de volta uma pasta de projeto
   (``project.json`` mais um PNG por célula de camada).
 * **Arquivo > Enviar projeto** importa um pacote ``.gpp`` para o

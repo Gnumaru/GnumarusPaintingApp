@@ -22,8 +22,9 @@ Your first painting
 Projects
 --------
 
-* **File > New Project** creates a blank project (width, height and
-  storage presets for textures).
+* **File > New Project** creates a blank project (width, height,
+  storage presets for textures, and a linked FPS / frame-time pair
+  that seeds the new animation's default frame duration).
 * **File > Open Project** reads a project folder back (``project.json``
   plus one PNG per layer cell).
 * **File > Upload Project** imports a packaged ``.gpp`` file into
