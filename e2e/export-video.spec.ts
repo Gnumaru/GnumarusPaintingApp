@@ -290,7 +290,7 @@ test("mkv animation exports a valid matroska @recent", async ({ page }) => {
   expect(text).toContain("matroska");
 });
 
-test("vlc tail frame appends an invisible 1 ms duplicate @recent", async ({ page }) => {
+test("video exports carry an invisible 1 ms tail duplicate @recent", async ({ page }) => {
   await paintRedBlueFrames(page);
   await stubSaveFilePicker(page);
   await page.getByRole("button", { name: "File" }).click();
@@ -299,14 +299,6 @@ test("vlc tail frame appends an invisible 1 ms duplicate @recent", async ({ page
   await expect(dialog).toBeVisible();
   await dialog.getByRole("tab", { name: "Export animation" }).click();
   await dialog.locator("select#exportAnimatedFormat").selectOption("webm-video");
-  const tail = dialog.locator("#exportVideoVlcTail");
-  await expect(tail).toBeVisible();
-  await expect(tail).not.toBeChecked();
-  // Hidden for non-video formats.
-  await dialog.locator("select#exportAnimatedFormat").selectOption("gif");
-  await expect(tail).toBeHidden();
-  await dialog.locator("select#exportAnimatedFormat").selectOption("webm-video");
-  await tail.check();
   await dialog.locator("#exportAnimatedOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("Exported");
   const result = await page.evaluate(() => {
@@ -328,7 +320,6 @@ test("vlc tail frame appends an invisible 1 ms duplicate @recent", async ({ page
   await expect(dialog).toBeVisible();
   await dialog.getByRole("tab", { name: "Export animation" }).click();
   await dialog.locator("select#exportAnimatedFormat").selectOption("mp4-video");
-  await expect(dialog.locator("#exportVideoVlcTail")).toBeChecked();
   await dialog.locator("#exportAnimatedOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("Exported");
   const mp4 = await page.evaluate(() => {

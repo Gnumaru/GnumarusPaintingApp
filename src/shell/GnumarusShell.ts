@@ -264,7 +264,7 @@ import {
   muxMatroska,
   muxWebM,
   parseAvcDecoderConfig,
-  withVlcTailFrame,
+  withTailFrame,
 } from "../export/GnumarusVideoMux";
 import {
   composeSheet,
@@ -2086,7 +2086,6 @@ export class GnumarusShell extends LitElement {
     exportSheetAll: { type: Boolean },
     videoSupportWebm: { type: Boolean },
     videoSupportMp4: { type: Boolean },
-    exportVideoVlcTail: { type: Boolean },
     exportBackground: { type: Boolean },
     exportBackgroundType: { type: String },
     exportSolidColor: { type: String },
@@ -2354,7 +2353,6 @@ export class GnumarusShell extends LitElement {
   declare exportSheetAll: boolean;
   declare videoSupportWebm: boolean;
   declare videoSupportMp4: boolean;
-  declare exportVideoVlcTail: boolean;
   declare exportSheetQuality: number;
   declare exportSheetLossless: boolean;
   declare exportBackground: boolean;
@@ -2644,7 +2642,6 @@ export class GnumarusShell extends LitElement {
     this.exportAnimatedLossless = true;
     this.videoSupportWebm = true;
     this.videoSupportMp4 = true;
-    this.exportVideoVlcTail = false;
     this.exportSheetLayout = "line";
     this.exportSheetFormat = "image/png";
     this.exportSheetCount = 2;
@@ -5309,19 +5306,6 @@ export class GnumarusShell extends LitElement {
                 }}
               />
             </label>`}
-        ${this.isVideoExportFormat(this.exportAnimatedFormat)
-          ? html`<label title=${tr("dialog.animVideoTailTitle")}
-              >${tr("dialog.animVideoTail")}
-              <input
-                type="checkbox"
-                id="exportVideoVlcTail"
-                ?checked=${this.exportVideoVlcTail}
-                @change=${(event: Event): void => {
-                  this.exportVideoVlcTail = (event.target as HTMLInputElement).checked;
-                }}
-              />
-            </label>`
-          : html``}
         ${this.renderExportBackgroundOptions("Animated")}
         <div class="dialog-actions">
           <button @click=${(): void => this.closeExportDialog()}>${tr("btn.cancel")}</button>
@@ -15510,7 +15494,8 @@ export class GnumarusShell extends LitElement {
             durationMs: Math.max(1, Math.round(chunk.durationUs / 1000)),
             key: chunk.key,
           }));
-          const videoSamples = this.exportVideoVlcTail ? withVlcTailFrame(samples) : samples;
+          // Invisible 1 ms tail duplicate so VLC shows the true last frame.
+          const videoSamples = withTailFrame(samples);
           let videoBlob: Blob;
           let videoExt: string;
           let videoLabel: string;

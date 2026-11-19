@@ -7,7 +7,7 @@ import {
   muxWebM,
   parseAvcDecoderConfig,
   splitAnnexBNalus,
-  withVlcTailFrame,
+  withTailFrame,
   type GnumarusMuxedSample,
 } from "../src/export/GnumarusVideoMux";
 import { padFramesToEven, videoBitrateForQuality, videoCodecString, videoTotalDurationMs } from "../src/export/GnumarusVideoEncode";
@@ -196,7 +196,7 @@ describe("GnumarusVideoMux EBML", () => {
 
   it("appends an invisible 1 ms duplicate of the last sample", () => {
     const frames = fakeFrames(3);
-    const tailed = withVlcTailFrame(frames);
+    const tailed = withTailFrame(frames);
     expect(tailed).toHaveLength(4);
     expect(tailed.slice(0, 3)).toEqual(frames);
     const tail = tailed[3] as GnumarusMuxedSample;
@@ -206,7 +206,7 @@ describe("GnumarusVideoMux EBML", () => {
     expect(tail.data).toBe((frames[2] as GnumarusMuxedSample).data);
     // The mode duration ignores the tail frame.
     expect(modalFrameDurationMs(tailed)).toBe(200);
-    expect(() => withVlcTailFrame([])).toThrow(/no frames/);
+    expect(() => withTailFrame([])).toThrow(/no frames/);
   });
 
   it("writes a DefaultDuration matching the average frame duration", () => {

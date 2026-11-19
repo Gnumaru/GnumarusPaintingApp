@@ -273,14 +273,16 @@ export function modalFrameDurationMs(frames: GnumarusMuxedSample[]): number {
 }
 
 /**
- * Append a 1 ms duplicate of the last sample (VLC 3.0 workaround, opt-in).
- * VLC drops a trailing zero-duration SimpleBlock and stops MP4 playback at
- * the last PTS instead of holding it, so the real last frame never shows.
- * A 1 ms tail makes the true last frame non-final (it then carries its full
- * duration everywhere) while the tail itself stays invisible to every
- * player; total length grows by exactly 1 ms.
+ * Append a 1 ms duplicate of the last sample. VLC 3.0 drops a trailing
+ * zero-duration SimpleBlock and stops MP4 playback at the last PTS instead
+ * of holding it, so the real last frame never shows there. The duplicate
+ * makes the true last frame non-final (it then carries its full duration
+ * under every duration-derivation rule) while the tail itself stays
+ * invisible to every player; total length grows by exactly 1 ms. Applied
+ * unconditionally: the pixels match the last frame, so even a player that
+ * held it a vsync longer would show no visual difference.
  */
-export function withVlcTailFrame(frames: GnumarusMuxedSample[]): GnumarusMuxedSample[] {
+export function withTailFrame(frames: GnumarusMuxedSample[]): GnumarusMuxedSample[] {
   if (frames.length === 0) {
     throw new Error("cannot mux an animation with no frames");
   }
