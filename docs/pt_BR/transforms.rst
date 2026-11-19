@@ -17,7 +17,7 @@ variantes destrutivas transformam o conteúdo flutuante. ``Esc``
 cancela, ``Enter`` confirma.
 
 Lupa (Z), pan, girar canvas, conta-gotas, pincel de azulejo
----------------------------------------------------------
+------------------------------------------------------------
 
 A lupa desloca (arrasto com qualquer botão), amplia (roda), gira e
 espelha a vista sem tocar pixels. A ferramenta pan só desloca:
