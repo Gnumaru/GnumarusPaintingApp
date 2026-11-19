@@ -5,6 +5,7 @@ import {
   GNUMARUS_PROJECT_ARCHIVE_FILE,
   GNUMARUS_PROJECT_CONTENT_DIRS,
   GNUMARUS_PROJECT_FILE,
+  parseModel3dExtension,
   parseProject,
   type GnumarusDiscoveredContentKind,
   type GnumarusProjectMeta,
@@ -178,6 +179,31 @@ export function isRasterDropFile(fileName: string, mimeType: string): boolean {
   return GNUMARUS_RASTER_DROP_EXTENSIONS.some((extension) => lower.endsWith(extension));
 }
 
+/** Vector extensions accepted by the SVG file picker (plain or gzipped). */
+export const GNUMARUS_VECTOR_DROP_EXTENSIONS = [".svg", ".svgz"];
+
+/** True for dropped files the app can import as vector graphics. */
+export function isVectorDropFile(fileName: string): boolean {
+  const lower = fileName.toLowerCase();
+  return GNUMARUS_VECTOR_DROP_EXTENSIONS.some((extension) => lower.endsWith(extension));
+}
+
+/** Text extensions imported as rich-text contents. */
+export const GNUMARUS_TEXT_DROP_EXTENSIONS = [".html", ".htm"];
+
+/** True for dropped files the app can import as rich text. */
+export function isTextDropFile(fileName: string, mimeType: string): boolean {
+  if (mimeType.toLowerCase() === "text/html") {
+    return true;
+  }
+  const lower = fileName.toLowerCase();
+  return GNUMARUS_TEXT_DROP_EXTENSIONS.some((extension) => lower.endsWith(extension));
+}
+
+/** True for dropped files the app can import as 3D models. */
+export function isModel3dDropFile(fileName: string): boolean {
+  return parseModel3dExtension(fileName) !== null;
+}
 export type GnumarusProjectDropKind = "psd" | "xcf" | "kra" | "ase";
 
 /** Project-file kind by extension for drag-and-drop imports, if any. */

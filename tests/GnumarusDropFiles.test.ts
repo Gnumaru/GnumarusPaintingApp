@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isRasterDropFile, projectDropKind } from "../src/project/GnumarusFileSystem";
+import { isModel3dDropFile, isRasterDropFile, isTextDropFile, isVectorDropFile, projectDropKind } from "../src/project/GnumarusFileSystem";
 
 describe("isRasterDropFile", () => {
   it("accepts the picker raster types by MIME or extension", () => {
@@ -36,5 +36,32 @@ describe("projectDropKind", () => {
     expect(projectDropKind("photo.png")).toBeNull();
     expect(projectDropKind("notes.txt")).toBeNull();
     expect(projectDropKind("noext")).toBeNull();
+  });
+});
+
+describe("content drop classifiers", () => {
+  it("accepts vector files", () => {
+    expect(isVectorDropFile("icon.svg")).toBe(true);
+    expect(isVectorDropFile("ICON.SVG")).toBe(true);
+    expect(isVectorDropFile("archive.svgz")).toBe(true);
+    expect(isVectorDropFile("photo.png")).toBe(false);
+    expect(isVectorDropFile("model.glb")).toBe(false);
+  });
+
+  it("accepts rich-text files", () => {
+    expect(isTextDropFile("page.html", "")).toBe(true);
+    expect(isTextDropFile("PAGE.HTM", "")).toBe(true);
+    expect(isTextDropFile("noext", "text/html")).toBe(true);
+    expect(isTextDropFile("notes.txt", "text/plain")).toBe(false);
+    expect(isTextDropFile("page.html.svg", "")).toBe(false);
+  });
+
+  it("accepts 3D model files the app can load", () => {
+    for (const ext of ["glb", "gltf", "obj", "stl", "ply", "fbx", "dae", "3mf", "amf", "blend"]) {
+      expect(isModel3dDropFile(`model.${ext}`)).toBe(true);
+    }
+    expect(isModel3dDropFile("MODEL.GLB")).toBe(true);
+    expect(isModel3dDropFile("scene.txt")).toBe(false);
+    expect(isModel3dDropFile("photo.png")).toBe(false);
   });
 });

@@ -50,6 +50,10 @@ tratamento de ocupação, corrupção e cancelamento — importação falha
 nunca toca o projeto atual. Soltar um arquivo de imagem raster em
 qualquer lugar do app importa ele como textura da célula atual (uma
 célula ocupada mostra um erro pedindo uma célula vazia em vez de
-criar camada). Soltar um arquivo de projeto (.psd/.xcf/.kra/.krz/
-.ase/.aseprite) abre uma confirmação: cancelar não faz nada, importar
-descarta o projeto atual e carrega o arquivo.
+criar camada). Soltar um arquivo de vetor (.svg/.svgz), modelo 3D
+(qualquer formato carregável incluindo .blend) ou texto rico
+(.html/.htm) importa ele como conteúdo de vetor, modelo ou texto da
+célula atual, somente se ela estiver vazia. Soltar um arquivo de
+projeto (.psd/.xcf/.kra/.krz/.ase/.aseprite) abre uma confirmação:
+cancelar não faz nada, importar descarta o projeto atual e carrega o
+arquivo.

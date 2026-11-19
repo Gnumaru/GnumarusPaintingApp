@@ -38,6 +38,9 @@ import {
   listEmbeddedProjects,
   openEmbeddedProjectStore,
   isRasterDropFile,
+  isModel3dDropFile,
+  isTextDropFile,
+  isVectorDropFile,
   projectDropKind,
   pickImportFile,
   pickImageFile,
@@ -7321,10 +7324,9 @@ export class GnumarusShell extends LitElement {
   };
 
   /**
-   * Dropped project files ask for confirmation (they replace the project);
-   * otherwise a dropped raster image lands on the current cell. Unlike the
-   * file-picker import this never spills onto a new layer: an occupied
-   * cell reports an error asking for an empty cell instead.
+   * Dropped files land on the current cell when it is empty: projects ask
+   * for confirmation, raster/vector/3D/text imports use the same decoders
+   * as their File menu equivalents but never spill onto a new layer.
    */
   private handleAppDrop = (event: DragEvent): void => {
     // Always swallow drops so the browser never navigates to the file.
@@ -7340,22 +7342,37 @@ export class GnumarusShell extends LitElement {
       });
       return;
     }
-    const dropped = files.find((file) => isRasterDropFile(file.name, file.type));
+    const dropped = files.find(
+      (file) =>
+        isRasterDropFile(file.name, file.type) ||
+        isVectorDropFile(file.name) ||
+        isModel3dDropFile(file.name) ||
+        isTextDropFile(file.name, file.type),
+    );
     if (dropped === undefined) {
       return;
     }
     this.stopPlayback();
     this.exitFlycam();
     void (async (): Promise<void> => {
-      let decoded: { width: number; height: number; buffer: Uint8ClampedArray };
-      try {
-        decoded = await this.decodeRasterBytes(new Uint8Array(await dropped.arrayBuffer()));
-      } catch {
-        this.statusMessage = tr("status.imageInvalid");
-        this.showToast(tr("status.imageInvalid"));
-        return;
+      const bytes = new Uint8Array(await dropped.arrayBuffer());
+      if (isVectorDropFile(dropped.name)) {
+        await this.importDroppedVectorFile(dropped.name, bytes);
+      } else if (isModel3dDropFile(dropped.name)) {
+        await this.importDroppedModel3dFile(dropped.name, bytes);
+      } else if (isTextDropFile(dropped.name, dropped.type)) {
+        await this.importDroppedTextFile(dropped.name, bytes);
+      } else {
+        let decoded: { width: number; height: number; buffer: Uint8ClampedArray };
+        try {
+          decoded = await this.decodeRasterBytes(new Uint8Array(bytes));
+        } catch {
+          this.statusMessage = tr("status.imageInvalid");
+          this.showToast(tr("status.imageInvalid"));
+          return;
+        }
+        await this.placeRasterOnCurrentCell(decoded, dropped.name, true);
       }
-      await this.placeRasterOnCurrentCell(decoded, dropped.name, true);
     })();
   };
 
@@ -18535,6 +18552,144 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.imageImported", { name, layer: layerName });
     this.showToast(this.statusMessage);
     return true;
+  }
+
+  /** True when the current cell can receive a drop (empty, no content). */
+  private isDropCellEmpty(): boolean {
+    if (this.engine === null) {
+      return false;
+    }
+    return this.engine.isCellContentEmpty(this.engine.getActiveLayerId(), this.engine.getCurrentFrame());
+  }
+
+  /** Report an occupied drop target without touching the project. */
+  private warnDropCellOccupied(): void {
+    this.statusMessage = tr("status.dropCellOccupied");
+    this.showToast(tr("status.dropCellOccupied"));
+  }
+
+  /** Import a dropped vector graphic as the current cell's SVG content. */
+  private async importDroppedVectorFile(fileName: string, bytes: Uint8Array): Promise<void> {
+    if (this.engine === null) {
+      return;
+    }
+    if (!this.isDropCellEmpty()) {
+      this.warnDropCellOccupied();
+      return;
+    }
+    let text: string;
+    try {
+      text = fileName.toLowerCase().endsWith(".svgz")
+        ? new TextDecoder().decode(gunzipSync(bytes))
+        : new TextDecoder().decode(bytes);
+    } catch {
+      this.statusMessage = tr("status.svgArchiveInvalid");
+      this.showToast(tr("status.svgArchiveInvalid"));
+      return;
+    }
+    const parsed = new DOMParser().parseFromString(text, "image/svg+xml");
+    if (
+      parsed.getElementsByTagName("parsererror").length > 0 ||
+      parsed.documentElement?.tagName.toLowerCase() !== "svg"
+    ) {
+      this.statusMessage = tr("status.svgInvalid");
+      this.showToast(tr("status.svgInvalid"));
+      return;
+    }
+    const unsupported = detectUnsupportedSvgFeatures(text);
+    const svg = sanitizeSvg(text);
+    const name = fileName.replace(/\.(svg|svgz)$/i, "").slice(0, 64) || "Vector";
+    const created = this.engine.ensureSvgContent(this.engine.getActiveLayerId(), this.engine.getCurrentFrame(), svg, name);
+    if (created === null) {
+      this.warnDropCellOccupied();
+      return;
+    }
+    this.refreshLayers();
+    this.dirty = true;
+    if (unsupported.length > 0) {
+      this.statusMessage = tr("status.svgImportedWithWarnings", { name, features: unsupported.join(", ") });
+    } else {
+      this.statusMessage = tr("status.svgImported", { name });
+    }
+    this.showToast(this.statusMessage);
+  }
+
+  /** Import a dropped 3D model as the current cell's model content. */
+  private async importDroppedModel3dFile(fileName: string, bytes: Uint8Array): Promise<void> {
+    if (this.engine === null) {
+      return;
+    }
+    if (!this.isDropCellEmpty()) {
+      this.warnDropCellOccupied();
+      return;
+    }
+    const ext = parseModel3dExtension(fileName);
+    if (ext === null) {
+      this.statusMessage = tr("status.model3dUnsupported", { name: fileName });
+      this.showToast(tr("status.model3dUnsupported", { name: fileName }));
+      return;
+    }
+    if (bytes.length === 0) {
+      this.statusMessage = tr("status.model3dInvalid");
+      this.showToast(tr("status.model3dInvalid"));
+      return;
+    }
+    if (ext === "blend") {
+      try {
+        const { parseBlendFile } = await import("../project/GnumarusBlend");
+        const doc = parseBlendFile(bytes);
+        if (doc.meshes.length === 0) {
+          this.statusMessage = tr("status.importFailed", { reason: "No meshes found in .blend file" });
+          this.showToast(tr("status.importFailed", { reason: "No meshes found in .blend file" }));
+          return;
+        }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.statusMessage = tr("status.importFailed", { reason });
+        this.showToast(tr("status.importFailed", { reason }));
+        return;
+      }
+    }
+    const name = fileName.replace(/\.[^.]+$/, "").slice(0, 64) || "Model";
+    const created = await this.engine.ensureModel3dContent(this.engine.getActiveLayerId(), this.engine.getCurrentFrame(), name, ext, bytes);
+    if (created === null) {
+      this.statusMessage = tr("status.model3dInvalid");
+      this.showToast(tr("status.model3dInvalid"));
+      return;
+    }
+    this.refreshLayers();
+    this.dirty = true;
+    this.statusMessage = tr("status.model3dImported", { name });
+    this.showToast(this.statusMessage);
+  }
+
+  /** Import a dropped HTML file as the current cell's text content. */
+  private async importDroppedTextFile(fileName: string, bytes: Uint8Array): Promise<void> {
+    if (this.engine === null) {
+      return;
+    }
+    if (!this.isDropCellEmpty()) {
+      this.warnDropCellOccupied();
+      return;
+    }
+    const text = new TextDecoder().decode(bytes);
+    if (text.trim() === "") {
+      this.statusMessage = tr("status.textEmpty");
+      this.showToast(tr("status.textEmpty"));
+      return;
+    }
+    const layerId = this.engine.getActiveLayerId();
+    const frame = this.engine.getCurrentFrame();
+    const created = this.engine.createTextContent(layerId, frame, text);
+    if (created === null) {
+      this.warnDropCellOccupied();
+      return;
+    }
+    const name = fileName.replace(/\.(html?)$/i, "").slice(0, 64) || "Text";
+    this.refreshLayers();
+    this.dirty = true;
+    this.statusMessage = tr("status.textImported", { name });
+    this.showToast(this.statusMessage);
   }
 
   /**
