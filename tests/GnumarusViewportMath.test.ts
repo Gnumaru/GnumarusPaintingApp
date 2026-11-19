@@ -8,6 +8,8 @@ import {
   clipSegmentToRect,
   constrainSquareDrag,
   growTextureBoxForPlacement,
+  hitGrowBoxHandles,
+  normalizeGrowBox,
   imageToScreenPixel,
   layerImageToProject,
   layerLinearMatrix,
@@ -572,5 +574,40 @@ describe("proportionalResizeScale", () => {
     expect(proportionalResizeScale(0, 0, 0, 0, true, true)).toEqual({ scaleX: 0, scaleY: 0 });
     expect(proportionalResizeScale(2, 2, 1, 1, true, false)).toEqual({ scaleX: 2, scaleY: 2 });
     expect(proportionalResizeScale(Number.NaN, 2, 1, 1, true, true)).toEqual({ scaleX: 2, scaleY: 2 });
+  });
+});
+
+describe("grow-or-crop box helpers", () => {
+  it("normalizes drag corners outward with a 1px floor", () => {
+    expect(normalizeGrowBox(10, 10, 20, 30)).toEqual({ left: 10, top: 10, width: 10, height: 20 });
+    // Reversed drags flip; fractional edges snap outward.
+    expect(normalizeGrowBox(20.7, 30.2, 10.2, 10.9)).toEqual({ left: 10, top: 10, width: 11, height: 21 });
+    // Zero-area drags keep one pixel.
+    expect(normalizeGrowBox(5, 5, 5, 5)).toEqual({ left: 5, top: 5, width: 1, height: 1 });
+    // Negative origins (growing past the texture edge) survive.
+    expect(normalizeGrowBox(-3.2, -3.7, 1, 1)).toEqual({ left: -4, top: -4, width: 5, height: 5 });
+  });
+
+  it("hits corners before edges and edges before the interior", () => {
+    const box = { left: 100, top: 100, right: 200, bottom: 200 };
+    const hit = (x: number, y: number): string | null => {
+      const found = hitGrowBoxHandles(box.left, box.top, box.right, box.bottom, x, y);
+      return found === null ? null : (found as string);
+    };
+    expect(hit(100, 100)).toBe("nw");
+    expect(hit(200, 200)).toBe("se");
+    expect(hit(200, 100)).toBe("ne");
+    expect(hit(100, 200)).toBe("sw");
+    // Near-corner points still prefer the corner.
+    expect(hit(108, 106)).toBe("nw");
+    // Edge middles.
+    expect(hit(150, 100)).toBe("n");
+    expect(hit(150, 200)).toBe("s");
+    expect(hit(100, 150)).toBe("w");
+    expect(hit(200, 150)).toBe("e");
+    // Interior and far exterior miss.
+    expect(hit(150, 150)).toBeNull();
+    expect(hit(10, 10)).toBeNull();
+    expect(hit(150, 40)).toBeNull();
   });
 });

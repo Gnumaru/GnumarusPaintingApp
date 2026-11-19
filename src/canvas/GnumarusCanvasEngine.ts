@@ -232,6 +232,8 @@ import {
   canvasVisibleTextureBox,
   clampCropBoxToMin1,
   growTextureBoxForPlacement,
+  hitGrowBoxHandles,
+  normalizeGrowBox,
   GNUMARUS_MAX_LAYER_SKEW,
   IDENTITY_LAYER_TRANSFORM,
   layerImageToProject,
@@ -250,6 +252,7 @@ import {
 } from "./GnumarusViewportMath";
 import type {
   GnumarusCropBox,
+  GnumarusGrowBoxHandle,
   GnumarusLayerTransform,
   GnumarusRect,
   GnumarusViewTransform,
@@ -392,6 +395,7 @@ export type GnumarusCanvasTool =
   | "recolor"
   | "jumble"
   | "crop"
+  | "growcrop"
   | "destransform"
   | "destransform3d";
 
@@ -1141,6 +1145,15 @@ export class GnumarusCanvasEngine {
   private shapePolygon: Array<{ x: number; y: number }> | null = null;
   /** Active crop-box drag in cell image pixels (floats), or null. */
   private cropDrag: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  /** Persistent grow-or-crop box in cell image pixels (floats), or null. */
+  private growBox: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  /** Active grow-box border drag, or a fresh box drag ("new"). */
+  private growDrag: {
+    edge: GnumarusGrowBoxHandle | "new";
+    orig: { x0: number; y0: number; x1: number; y1: number } | null;
+  } | null = null;
+  /** Last grow-box hover handle for the canvas cursor ("" = default). */
+  private growHoverCursor = "";
   /** Shared dab size for the retouch tools (no pressure response). */
   private retouchSize = 8;
   /** Shading dab mode. */
@@ -1227,6 +1240,8 @@ export class GnumarusCanvasEngine {
   /** 3D gizmo visible axis lines per rotation axis. */
   private readonly rot3dAxes: Record<"x" | "y" | "z", SVGLineElement>;
   private readonly previewMarkers: SVGCircleElement[];
+  /** Grow-or-crop corner handles (screen-space squares over the box). */
+  private readonly previewGrowHandles: SVGCircleElement[];
   private drawing = false;
   private panning = false;
   private spaceDown = false;
@@ -1747,6 +1762,19 @@ export class GnumarusCanvasEngine {
       marker.setAttribute("opacity", "0.95");
       this.previewSvg.appendChild(marker);
       this.previewMarkers.push(marker);
+    }
+    this.previewGrowHandles = [];
+    for (let i = 0; i < 4; i += 1) {
+      const handle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      handle.setAttribute("data-testid", `growcrop-corner-${i}`);
+      handle.setAttribute("r", "4.5");
+      handle.setAttribute("fill", "#ffffff");
+      handle.setAttribute("stroke", "#000000");
+      handle.setAttribute("stroke-width", "1.5");
+      handle.setAttribute("opacity", "0.95");
+      handle.style.display = "none";
+      this.previewSvg.appendChild(handle);
+      this.previewGrowHandles.push(handle);
     }
     container.appendChild(this.previewSvg);
 
@@ -2404,6 +2432,8 @@ export class GnumarusCanvasEngine {
     this.stabilizerTarget = null;
     this.stopFollowLoop();
     this.resetPencilPixelPerfect();
+    this.growBox = null;
+    this.growDrag = null;
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
     this.render();
@@ -6717,6 +6747,8 @@ export class GnumarusCanvasEngine {
     this.stabilizerTarget = null;
     this.stopFollowLoop();
     this.resetPencilPixelPerfect();
+    this.growBox = null;
+    this.growDrag = null;
     this.syncWrapTiles();
     this.syncSymmetryOverlay();
     this.updateGrid();
@@ -8091,6 +8123,171 @@ export class GnumarusCanvasEngine {
     return this.applyTextureCropBox(textureId, entry, box) ? "cropped" : "unchanged";
   }
 
+  /**
+   * Grow-or-crop a cell texture to an image-space box (the Grow or Crop
+   * tool path). Unlike the crop tool the box is NOT clamped to the
+   * texture: negative origins and overhangs pad with transparent pixels,
+   * so the result always spans exactly the requested box. Empty cells
+   * report empty, zero-overlap boxes report outside, oversized boxes
+   * report outside, and identical bounds report unchanged (no history).
+   * Successful commits are single undoable fit-history entries.
+   */
+  growCropCellTextureToBox(
+    layerId: string,
+    frame: number,
+    left: number,
+    top: number,
+    width: number,
+    height: number,
+  ): "cropped" | "unchanged" | "outside" | "empty" {
+    if (this.isCellContentEmpty(layerId, frame)) {
+      return "empty";
+    }
+    const contentId = this.cells.get(animationCellKey(layerId, frame));
+    const content = contentId === undefined ? undefined : this.contents.get(contentId);
+    const textureId = content?.textureId ?? null;
+    const entry = textureId === null ? undefined : this.textures.get(textureId);
+    if (entry === undefined || textureId === null || content === undefined) {
+      return "empty";
+    }
+    this.commitFloatingIfHomeTexture(textureId);
+    const normalized = normalizeGrowBox(left, top, left + width, top + height);
+    const boxLeft = normalized.left;
+    const boxTop = normalized.top;
+    const boxWidth = normalized.width;
+    const boxHeight = normalized.height;
+    if (boxWidth > GNUMARUS_MAX_TEXTURE_DIM || boxHeight > GNUMARUS_MAX_TEXTURE_DIM) {
+      return "outside";
+    }
+    if (boxLeft === 0 && boxTop === 0 && boxWidth === entry.width && boxHeight === entry.height) {
+      return "unchanged";
+    }
+    if (boxLeft + boxWidth <= 0 || boxTop + boxHeight <= 0 || boxLeft >= entry.width || boxTop >= entry.height) {
+      return "outside";
+    }
+    const box = { left: boxLeft, top: boxTop, width: boxWidth, height: boxHeight };
+    return this.applyTextureCropBox(textureId, entry, box) ? "cropped" : "unchanged";
+  }
+
+  /**
+   * Commit the pending grow-or-crop box to the current cell texture, then
+   * re-seat the box on the new texture so adjustment can continue.
+   */
+  commitGrowBox(): "cropped" | "unchanged" | "outside" | "empty" | "none" {
+    const box = this.growBox;
+    const layer = this.activeLayer();
+    if (box === null || layer === null) {
+      return "none";
+    }
+    const left = Math.min(box.x0, box.x1);
+    const top = Math.min(box.y0, box.y1);
+    const outcome = this.growCropCellTextureToBox(
+      layer.id,
+      this.currentFrame,
+      left,
+      top,
+      Math.abs(box.x1 - box.x0),
+      Math.abs(box.y1 - box.y0),
+    );
+    if (outcome === "cropped") {
+      const textureId = this.getCellTextureId(layer.id, this.currentFrame);
+      const entry = textureId === null ? undefined : this.textures.get(textureId);
+      if (entry !== undefined) {
+        this.growBox = { x0: 0, y0: 0, x1: entry.width, y1: entry.height };
+      } else {
+        this.growBox = null;
+      }
+      this.growDrag = null;
+    } else if (outcome === "empty") {
+      this.growBox = null;
+      this.growDrag = null;
+    }
+    const textureId = this.getCellTextureId(layer.id, this.currentFrame);
+    const entry = textureId === null ? undefined : this.textures.get(textureId);
+    this.onCropOutcome?.(outcome, entry?.width ?? 0, entry?.height ?? 0);
+    return outcome;
+  }
+
+  /**
+   * Auto-create the grow-or-crop box on the current cell texture, or clear
+   * it when the cell has no texture to reshape.
+   */
+  private initGrowBox(): void {
+    this.growBox = null;
+    this.growDrag = null;
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return;
+    }
+    const textureId = this.getCellTextureId(layer.id, this.currentFrame);
+    const entry = textureId === null ? undefined : this.textures.get(textureId);
+    if (entry === undefined) {
+      this.onCropOutcome?.("empty", 0, 0);
+      return;
+    }
+    this.growBox = { x0: 0, y0: 0, x1: entry.width, y1: entry.height };
+    this.updatePreviews();
+  }
+
+  /** Client-space hit test for the grow-box border (corners win ties). */
+  private hitGrowBox(clientX: number, clientY: number): GnumarusGrowBoxHandle | null {
+    const layer = this.activeLayer();
+    const box = this.growBox;
+    if (layer === null || box === null) {
+      return null;
+    }
+    const rect = this.container.getBoundingClientRect();
+    const toClient = (imageX: number, imageY: number): { x: number; y: number } => {
+      const project = layerImageToProject(imageX, imageY, layer.width, layer.height, layer.transform);
+      const client = projectToScreen(
+        project.x,
+        project.y,
+        { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+        this.viewTransform(),
+      );
+      return { x: client.x - rect.left, y: client.y - rect.top };
+    };
+    const a = toClient(Math.min(box.x0, box.x1), Math.min(box.y0, box.y1));
+    const b = toClient(Math.max(box.x0, box.x1), Math.max(box.y0, box.y1));
+    return hitGrowBoxHandles(a.x, a.y, b.x, b.y, clientX - rect.left, clientY - rect.top);
+  }
+
+  /** Cursor for a grow-box border drag (matches the pending-resize set). */
+  private growBoxCursor(id: GnumarusGrowBoxHandle): string {
+    if (id === "nw" || id === "se") {
+      return "nwse-resize";
+    }
+    if (id === "ne" || id === "sw") {
+      return "nesw-resize";
+    }
+    return id === "n" || id === "s" ? "ns-resize" : "ew-resize";
+  }
+
+  /** Apply a grow-box border/edge drag at the given layer-image point. */
+  private resizeGrowBox(edge: GnumarusGrowBoxHandle | "new", x: number, y: number): void {
+    const box = this.growBox;
+    if (box === null) {
+      return;
+    }
+    if (edge === "new") {
+      box.x1 = x;
+      box.y1 = y;
+      return;
+    }
+    if (edge === "n" || edge === "nw" || edge === "ne") {
+      box.y0 = y;
+    }
+    if (edge === "s" || edge === "sw" || edge === "se") {
+      box.y1 = y;
+    }
+    if (edge === "w" || edge === "nw" || edge === "sw") {
+      box.x0 = x;
+    }
+    if (edge === "e" || edge === "ne" || edge === "se") {
+      box.x1 = x;
+    }
+  }
+
   cropCellTextureToCanvas(layerId: string, frame: number): "cropped" | "unchanged" | "outside" {
     const contentId = this.cells.get(animationCellKey(layerId, frame));
     const content = contentId === undefined ? undefined : this.contents.get(contentId);
@@ -8597,6 +8794,8 @@ export class GnumarusCanvasEngine {
     if (data.layers.length === 0) {
       throw new Error("Project has no layers.");
     }
+    this.growBox = null;
+    this.growDrag = null;
     if (!Number.isInteger(data.frames) || data.frames < 1) {
       throw new Error("Project has an invalid frame count.");
     }
@@ -8985,6 +9184,8 @@ export class GnumarusCanvasEngine {
   }
 
   newProject(width: number, height: number): void {
+    this.growBox = null;
+    this.growDrag = null;
     this.imageWidth = width;
     this.imageHeight = height;
     this.clearAllLayers();
@@ -15579,7 +15780,8 @@ export class GnumarusCanvasEngine {
       this.previewStabilizerLine.style.display !== "block" &&
       this.previewSelectWhite.style.display !== "block" &&
       this.previewSelectMaskWhite.style.display !== "block" &&
-      this.previewTileRubber.style.display !== "block"
+      this.previewTileRubber.style.display !== "block" &&
+      this.previewGrowHandles.every((handle) => handle.style.display !== "block")
     ) {
       this.previewSvg.style.display = "none";
     }
@@ -16056,6 +16258,52 @@ export class GnumarusCanvasEngine {
     for (const marker of this.previewMarkers) {
       marker.style.display = "none";
     }
+    for (const handle of this.previewGrowHandles) {
+      handle.style.display = "none";
+    }
+    if (this.tool === "growcrop" && (this.growBox !== null || this.growDrag !== null)) {
+      const layer = this.activeLayer();
+      const box = this.growBox;
+      if (layer !== null && box !== null) {
+        const view = this.renderer.domElement.getBoundingClientRect();
+        const toClient = (imageX: number, imageY: number): { x: number; y: number } => {
+          const project = layerImageToProject(imageX, imageY, layer.width, layer.height, layer.transform);
+          const client = projectToScreen(
+            project.x,
+            project.y,
+            { left: view.left, top: view.top, width: view.width, height: view.height },
+            this.viewTransform(),
+          );
+          return { x: client.x - view.left, y: client.y - view.top };
+        };
+        const a = toClient(Math.min(box.x0, box.x1), Math.min(box.y0, box.y1));
+        const b = toClient(Math.max(box.x0, box.x1), Math.max(box.y0, box.y1));
+        this.previewSvg.style.display = "block";
+        this.previewShapeRect.style.display = "block";
+        this.previewShapeRect.setAttribute("x", String(Math.min(a.x, b.x)));
+        this.previewShapeRect.setAttribute("y", String(Math.min(a.y, b.y)));
+        this.previewShapeRect.setAttribute("width", String(Math.abs(b.x - a.x)));
+        this.previewShapeRect.setAttribute("height", String(Math.abs(b.y - a.y)));
+        this.previewShapeRect.setAttribute("stroke", "#ffffff");
+        this.previewShapeRect.setAttribute("stroke-width", "1.5");
+        const corners = [
+          { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y) },
+          { x: Math.max(a.x, b.x), y: Math.min(a.y, b.y) },
+          { x: Math.min(a.x, b.x), y: Math.max(a.y, b.y) },
+          { x: Math.max(a.x, b.x), y: Math.max(a.y, b.y) },
+        ];
+        for (let index = 0; index < this.previewGrowHandles.length; index += 1) {
+          const handle = this.previewGrowHandles[index];
+          const corner = corners[index];
+          if (handle === undefined || corner === undefined) {
+            continue;
+          }
+          handle.setAttribute("cx", String(corner.x));
+          handle.setAttribute("cy", String(corner.y));
+          handle.style.display = "block";
+        }
+      }
+    }
     this.updateStabilizerOverlay();
     this.updateSelectionOverlay();
     // Raster shape preview (hides itself when no shape/line/curve gesture is
@@ -16364,6 +16612,9 @@ export class GnumarusCanvasEngine {
     this.hideRot3dGizmo();
     for (const marker of this.previewMarkers) {
       marker.style.display = "none";
+    }
+    for (const handle of this.previewGrowHandles) {
+      handle.style.display = "none";
     }
   }
 
@@ -16768,6 +17019,13 @@ export class GnumarusCanvasEngine {
     this.shapeDrag = null;
     this.shapePolygon = null;
     this.cropDrag = null;
+    if (tool !== "growcrop") {
+      this.growBox = null;
+      this.growDrag = null;
+      this.growHoverCursor = "";
+    } else {
+      this.initGrowBox();
+    }
     if (this.retouchStroke !== null) {
       this.cancelRetouchStroke();
     }
@@ -18107,6 +18365,40 @@ export class GnumarusCanvasEngine {
         this.updatePreviews();
         return;
       }
+      if (this.tool === "growcrop") {
+        // Drag borders to resize the box; draw anywhere else for a new box.
+        if (event.button !== 0) {
+          return;
+        }
+        const layer = this.activeLayer();
+        if (layer === null) {
+          return;
+        }
+        if (this.denyPaintOnDerived()) {
+          return;
+        }
+        const start = this.clientToLayerImageFloat(event.clientX, event.clientY);
+        if (start === null) {
+          return;
+        }
+        const box = this.growBox;
+        const edge = box === null ? null : this.hitGrowBox(event.clientX, event.clientY);
+        if (edge !== null && box !== null) {
+          this.growDrag = { edge, orig: { ...box } };
+        } else {
+          this.growDrag = {
+            edge: "new",
+            orig: box === null ? null : { ...box },
+          };
+          this.growBox = { x0: start.x, y0: start.y, x1: start.x, y1: start.y };
+          this.growHoverCursor = "";
+          canvas.style.cursor = "";
+        }
+        this.lastMouseClient = { x: event.clientX, y: event.clientY };
+        canvas.setPointerCapture(event.pointerId);
+        this.updatePreviews();
+        return;
+      }
       if (this.tool === "tilebrush") {
         // Left button paints (drag stamps every traversed slot), right
         // button erases. Shift+click replays the last stamped cell as a
@@ -18381,6 +18673,25 @@ export class GnumarusCanvasEngine {
         }
       } else if (this.pendingHoverCursor !== "") {
         this.pendingHoverCursor = "";
+        canvas.style.cursor = "";
+      }
+      if (
+        event.buttons === 0 &&
+        !event.shiftKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        this.tool === "growcrop" &&
+        this.growDrag === null
+      ) {
+        const hovered = this.growBox === null ? null : this.hitGrowBox(event.clientX, event.clientY);
+        const cursor = hovered === null ? "" : this.growBoxCursor(hovered);
+        if (cursor !== this.growHoverCursor) {
+          this.growHoverCursor = cursor;
+          canvas.style.cursor = cursor;
+        }
+      } else if (this.growHoverCursor !== "") {
+        this.growHoverCursor = "";
         canvas.style.cursor = "";
       }
       const usePaintMapping =
@@ -18673,6 +18984,15 @@ export class GnumarusCanvasEngine {
         }
         return;
       }
+      if (this.growDrag !== null && this.growBox !== null) {
+        const target = this.clientToLayerImageFloat(event.clientX, event.clientY);
+        if (target !== null) {
+          this.resizeGrowBox(this.growDrag.edge, target.x, target.y);
+          this.lastMouseClient = { x: event.clientX, y: event.clientY };
+          this.updatePreviews();
+        }
+        return;
+      }
       if (this.flyLookDrag !== null) {
         const drag = this.flyLookDrag;
         const dx = event.clientX - drag.x;
@@ -18847,6 +19167,22 @@ export class GnumarusCanvasEngine {
           const entry = this.textures.get(this.getCellTextureId(layer.id, this.currentFrame) ?? "");
           this.onCropOutcome?.(outcome, entry?.width ?? 0, entry?.height ?? 0);
         }
+        return;
+      }
+      if (this.growDrag !== null && event.button === 0) {
+        const drag = this.growDrag;
+        this.growDrag = null;
+        if (this.growBox !== null && drag.edge === "new") {
+          // A plain click without a drag keeps the previous box (if any).
+          const w = Math.abs(this.growBox.x1 - this.growBox.x0);
+          const h = Math.abs(this.growBox.y1 - this.growBox.y0);
+          if (Math.max(w, h) < 1 && drag.orig !== null) {
+            this.growBox = drag.orig;
+          } else if (Math.max(w, h) < 1) {
+            this.growBox = null;
+          }
+        }
+        this.updatePreviews();
         return;
       }
       if (this.shapeDrag !== null && event.button === 0) {
@@ -19369,6 +19705,18 @@ export class GnumarusCanvasEngine {
         }
         if (event.key === "Escape" && this.tool === "crop" && this.cropDrag !== null) {
           this.cropDrag = null;
+          this.updatePreviews();
+          return;
+        }
+        if (event.key === "Enter" && !inField && !event.repeat && this.tool === "growcrop" && this.growBox !== null) {
+          this.commitGrowBox();
+          this.updatePreviews();
+          return;
+        }
+        if (event.key === "Escape" && this.tool === "growcrop" && (this.growBox !== null || this.growDrag !== null)) {
+          this.growBox = null;
+          this.growDrag = null;
+          this.growHoverCursor = "";
           this.updatePreviews();
           return;
         }

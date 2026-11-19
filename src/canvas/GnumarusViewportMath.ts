@@ -539,6 +539,74 @@ export function clampCropBoxToMin1(box: GnumarusCropBox): GnumarusCropBox {
   };
 }
 
+/** Grow-or-crop box corner/edge handle ids (same set as pending selection). */
+export type GnumarusGrowBoxHandle = "nw" | "ne" | "sw" | "se" | "n" | "s" | "e" | "w";
+
+/**
+ * Normalize two image-space corners into an integer box snapped outward
+ * (floor left/top, ceil right/bottom) with a 1px minimum, so a drawn
+ * rectangle always covers at least the touched pixel and negative origins
+ * (growing past the texture edge) survive intact.
+ */
+export function normalizeGrowBox(x0: number, y0: number, x1: number, y1: number): GnumarusCropBox {
+  const left = Math.floor(Math.min(x0, x1));
+  const top = Math.floor(Math.min(y0, y1));
+  const right = Math.ceil(Math.max(x0, x1));
+  const bottom = Math.ceil(Math.max(y0, y1));
+  return { left, top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) };
+}
+
+/**
+ * Nearest grow-box border handle in container pixels (corners win ties),
+ * mirroring the pending-selection grab zones: 14px corner radius, 8px
+ * edge band. Null when the point is nowhere near the outline.
+ */
+export function hitGrowBoxHandles(
+  left: number,
+  top: number,
+  right: number,
+  bottom: number,
+  x: number,
+  y: number,
+  cornerRadius = 14,
+  band = 8,
+): GnumarusGrowBoxHandle | null {
+  const corners: Array<{ id: GnumarusGrowBoxHandle; cx: number; cy: number }> = [
+    { id: "nw", cx: left, cy: top },
+    { id: "ne", cx: right, cy: top },
+    { id: "sw", cx: left, cy: bottom },
+    { id: "se", cx: right, cy: bottom },
+  ];
+  for (const corner of corners) {
+    const dx = corner.cx - x;
+    const dy = corner.cy - y;
+    if (dx * dx + dy * dy <= cornerRadius * cornerRadius) {
+      return corner.id;
+    }
+  }
+  const loX = Math.min(left, right);
+  const hiX = Math.max(left, right);
+  const loY = Math.min(top, bottom);
+  const hiY = Math.max(top, bottom);
+  const withinX = x >= loX - band && x <= hiX + band;
+  const withinY = y >= loY - band && y <= hiY + band;
+  const edges: Array<{ id: GnumarusGrowBoxHandle; dist: number; near: boolean }> = [
+    { id: "n", dist: Math.abs(y - top), near: withinX },
+    { id: "s", dist: Math.abs(y - bottom), near: withinX },
+    { id: "w", dist: Math.abs(x - left), near: withinY },
+    { id: "e", dist: Math.abs(x - right), near: withinY },
+  ];
+  let best: GnumarusGrowBoxHandle | null = null;
+  let bestDist = band;
+  for (const edge of edges) {
+    if (edge.near && edge.dist <= bestDist) {
+      bestDist = edge.dist;
+      best = edge.id;
+    }
+  }
+  return best;
+}
+
 /**
  * Float bounds of the canvas area in texture space, by inverse-mapping the
  * four canvas corners. Null when the transform is degenerate.

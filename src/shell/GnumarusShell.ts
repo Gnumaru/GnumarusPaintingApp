@@ -657,7 +657,7 @@ export const GNUMARUS_TOOL_DRAWERS: GnumarusToolDrawerDef[] = [
   { id: "shape", tools: ["rectangle", "ellipseShape", "polygon", "gradient"] },
   { id: "retouch", tools: ["shading", "blur", "clone", "recolor", "jumble"] },
   { id: "selection", tools: ["rectselect", "ellipse", "lasso", "polylasso", "colorselect"] },
-  { id: "destructive", tools: ["destransform", "destransform3d", "crop"] },
+  { id: "destructive", tools: ["destransform", "destransform3d", "crop", "growcrop"] },
   { id: "transform", tools: ["transform", "transform3d"] },
   { id: "model", tools: ["modeltransform", "flycam"] },
   { id: "view", tools: ["loupe", "pan", "rotatecanvas"] },
@@ -5672,6 +5672,9 @@ export class GnumarusShell extends LitElement {
     if (tool === "crop") {
       return tr("toolname.crop");
     }
+    if (tool === "growcrop") {
+      return tr("toolname.growcrop");
+    }
     return tr("toolname.curve");
   }
 
@@ -5877,6 +5880,9 @@ export class GnumarusShell extends LitElement {
     if (tool === "crop") {
       return tr("tool.crop");
     }
+    if (tool === "growcrop") {
+      return tr("tool.growcrop");
+    }
     if (tool === "curve") {
       return tr("tool.curve");
     }
@@ -5968,6 +5974,9 @@ export class GnumarusShell extends LitElement {
     }
     if (tool === "crop") {
       return tr("tool.cropHint");
+    }
+    if (tool === "growcrop") {
+      return tr("tool.growcropHint");
     }
     if (tool === "curve") {
       return tr("tool.curveHint");
@@ -6077,6 +6086,9 @@ export class GnumarusShell extends LitElement {
     }
     if (tool === "crop") {
       return "◫";
+    }
+    if (tool === "growcrop") {
+      return "◩";
     }
     if (tool === "curve") {
       return "〜";
@@ -6891,6 +6903,13 @@ export class GnumarusShell extends LitElement {
       return html`
         <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
           <span class="tool-options-empty">${tr("opt.cropHint")}</span>
+        </div>
+      `;
+    }
+    if (this.tool === "growcrop") {
+      return html`
+        <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
+          <span class="tool-options-empty">${tr("opt.growcropHint")}</span>
         </div>
       `;
     }

@@ -818,6 +818,7 @@ export const DRAWER_FOR_TOOL: Record<string, string> = {
   Recolor: "retouch",
   Jumble: "retouch",
   Crop: "destructive",
+  "Grow or Crop": "destructive",
   "Rectangular selection": "selection",
   "Elliptical selection": "selection",
   "Freehand lasso": "selection",
