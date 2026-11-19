@@ -24,7 +24,7 @@ test("tools menu sits right of edit with standalone items @recent", async ({ pag
   expect(order.map((label) => label.trim())).toEqual(["File", "Edit", "Tools", "Filters", "Help"]);
   await page.getByRole("button", { name: "Tools", exact: true }).click();
   const menu = toolsMenu(page);
-  for (const name of ["Loupe", "Pan", "Bucket fill", "Eyedropper", "Text", "Tile brush"]) {
+  for (const name of ["Bucket fill", "Eyedropper", "Text", "Tile brush"]) {
     await expect(menu.getByRole("button", { name, exact: true })).toBeVisible();
   }
   // Every dropdown entry carries a tooltip.
@@ -50,6 +50,7 @@ test("drawer submenus list every tool with tooltips @recent", async ({ page }) =
     ["Destructive", ["Destructive selection transform", "Destructive selection 3D rotation", "Crop"]],
     ["Transform", ["Non-destructive cell transform", "Non-destructive cell 3D rotation"]],
     ["3D models", ["3D model transform", "Fly camera"]],
+    ["View", ["Loupe", "Pan", "Rotate canvas"]],
   ];
   const rows = menu.locator(".submenu-row");
   await expect(rows).toHaveCount(expected.length);
@@ -87,6 +88,7 @@ test("every tool runs from the action palette @recent", async ({ page }) => {
   const cases: Array<[string, string]> = [
     ["tool-loupe", "loupe"],
     ["tool-pan", "pan"],
+    ["tool-rotatecanvas", "rotatecanvas"],
     ["tool-bucket", "bucket"],
     ["tool-eyedropper", "eyedropper"],
     ["tool-text", "text"],

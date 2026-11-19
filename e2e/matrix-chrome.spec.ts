@@ -103,7 +103,7 @@ test("browser context menu is suppressed on toolbar buttons and menus @recent", 
     });
   });
   // Plain toolbar button without a drawer flyout.
-  await page.locator('gnumarus-shell [aria-label="Loupe"]').click({ button: "right" });
+  await page.locator('gnumarus-shell [aria-label="Bucket fill"]').click({ button: "right" });
   // Menubar button.
   await page.getByRole("button", { name: "File" }).click({ button: "right" });
   // Layer context-menu item (menu stays open: right-click never activates).

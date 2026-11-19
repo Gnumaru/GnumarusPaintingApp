@@ -367,6 +367,7 @@ export type GnumarusCanvasTool =
   | "curve"
   | "loupe"
   | "pan"
+  | "rotatecanvas"
   | "transform"
   | "transform3d"
   | "eyedropper"
@@ -17398,6 +17399,20 @@ export class GnumarusCanvasEngine {
         canvas.setPointerCapture(event.pointerId);
         return;
       }
+      if (this.tool === "rotatecanvas" && (event.button === 0 || event.button === 1 || event.button === 2)) {
+        // The rotate-canvas tool turns the canvas view with any mouse
+        // button, like Shift+Space+left-drag, ignoring every modifier and
+        // the space bar.
+        const angle = this.pointerAngle(event.clientX, event.clientY);
+        if (angle === null) {
+          return;
+        }
+        event.preventDefault();
+        this.rotating = true;
+        this.lastPointerAngle = angle;
+        canvas.setPointerCapture(event.pointerId);
+        return;
+      }
       if (event.button === 1 && (this.tool === "loupe" || this.tool === "transform")) {
         event.preventDefault();
         if (event.altKey) {
@@ -18935,7 +18950,8 @@ export class GnumarusCanvasEngine {
           this.tool !== "colorselect" &&
           this.tool !== "tilebrush" &&
           this.tool !== "flycam" &&
-          this.tool !== "pan"
+          this.tool !== "pan" &&
+          this.tool !== "rotatecanvas"
         ) {
           this.beginTempEyedropper();
         }

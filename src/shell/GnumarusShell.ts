@@ -551,6 +551,7 @@ function gnumarusShortcuts(): GnumarusShortcutSection[] {
         { keys: "Q", action: tr("sc.toolRecolor") },
         { keys: "Z", action: tr("sc.toolLoupe") },
         { keys: "Toolbar, palette", keysPt: "Barra de ferramentas, paleta", action: tr("sc.toolPan") },
+        { keys: "Toolbar, palette", keysPt: "Barra de ferramentas, paleta", action: tr("sc.toolRotate") },
         { keys: "T", action: tr("sc.toolTransform") },
         { keys: "Y", action: tr("sc.toolRot3d") },
         { keys: "R", action: tr("sc.toolRectselect") },
@@ -627,6 +628,7 @@ export const GNUMARUS_TOOL_DRAWERS: GnumarusToolDrawerDef[] = [
   { id: "destructive", tools: ["destransform", "destransform3d", "crop"] },
   { id: "transform", tools: ["transform", "transform3d"] },
   { id: "model", tools: ["modeltransform", "flycam"] },
+  { id: "view", tools: ["loupe", "pan", "rotatecanvas"] },
 ];
 
 export class GnumarusShell extends LitElement {
@@ -2470,6 +2472,7 @@ export class GnumarusShell extends LitElement {
     this.tool = "pencil";
     this.drawerFront = {
       paint: "pencil",
+      view: "loupe",
       selection: "rectselect",
       destructive: "destransform",
       transform: "transform",
@@ -2955,42 +2958,7 @@ export class GnumarusShell extends LitElement {
           }}
         >
           ${this.renderToolDrawer("paint")}
-          <button
-            class=${this.tool === "loupe" ? "active" : ""}
-            title=${tr("tool.loupeHint")}
-            aria-label=${tr("tool.loupe")}
-            @click=${(): void => {
-              this.tool = "loupe";
-              this.engine?.setTool("loupe");
-            }}
-          >
-            <span class="tool-icon">⌕</span>
-          </button>
-          <button
-            class=${this.tool === "pan" ? "active" : ""}
-            title=${tr("tool.panHint")}
-            aria-label=${tr("tool.pan")}
-            @click=${(): void => {
-              this.tool = "pan";
-              this.engine?.setTool("pan");
-            }}
-          >
-            <span class="tool-icon"
-              ><svg
-                viewBox="0 0 16 16"
-                width="13"
-                height="13"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M5.5 7.5V3.4a1 1 0 0 1 2 0v3.4m0-4.6a1 1 0 0 1 2 0v4.6m0-3.6a1 1 0 0 1 2 0V8m0-1.2a1 1 0 0 1 2 0v3.4a4.5 4.5 0 0 1-4.5 4.5h-.9a4.5 4.5 0 0 1-3.5-1.7l-1.9-2.5a1 1 0 0 1 1.6-1.2l1.1 1.4" />
-              </svg>
-            </span>
-          </button>
+          ${this.renderToolDrawer("view")}
           <button
             class=${this.tool === "bucket" ? "active" : ""}
             title=${tr("tool.bucketHint")}
@@ -5480,6 +5448,9 @@ export class GnumarusShell extends LitElement {
     if (tool === "pan") {
       return tr("toolname.pan");
     }
+    if (tool === "rotatecanvas") {
+      return tr("toolname.rotatecanvas");
+    }
     if (tool === "bucket") {
       return tr("toolname.bucket");
     }
@@ -5525,7 +5496,7 @@ export class GnumarusShell extends LitElement {
   /** Drawer helpers: the front tool doubles as the drawer button. */
   /** Tools without a drawer, in toolbar order (menu items before the drawer submenus). */
   private standaloneTools(): GnumarusCanvasTool[] {
-    return ["loupe", "pan", "bucket", "eyedropper", "text", "tilebrush"];
+    return ["bucket", "eyedropper", "text", "tilebrush"];
   }
 
   /** Every tool reachable from the Tools menu, standalone first, then drawer order. */
@@ -5757,6 +5728,12 @@ export class GnumarusShell extends LitElement {
     if (tool === "loupe") {
       return tr("tool.loupe");
     }
+    if (tool === "pan") {
+      return tr("tool.pan");
+    }
+    if (tool === "rotatecanvas") {
+      return tr("tool.rotatecanvas");
+    }
     return tr("tool.pencil");
   }
 
@@ -5834,6 +5811,15 @@ export class GnumarusShell extends LitElement {
     if (tool === "flycam") {
       return tr("tool.flycamHint");
     }
+    if (tool === "loupe") {
+      return tr("tool.loupeHint");
+    }
+    if (tool === "pan") {
+      return tr("tool.panHint");
+    }
+    if (tool === "rotatecanvas") {
+      return tr("tool.rotatecanvasHint");
+    }
     return tr("tool.pencilHint");
   }
 
@@ -5841,7 +5827,30 @@ export class GnumarusShell extends LitElement {
     return `${this.drawerToolHint(this.drawerFrontTool(id))} (${tr("tool.drawerHint")})`;
   }
 
-  private drawerToolGlyph(tool: GnumarusCanvasTool): string {
+  private drawerToolGlyph(tool: GnumarusCanvasTool): unknown {
+    if (tool === "loupe") {
+      return "⌕";
+    }
+    if (tool === "pan") {
+      return html`<svg
+        viewBox="0 0 16 16"
+        width="13"
+        height="13"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path
+          d="M5.5 7.5V3.4a1 1 0 0 1 2 0v3.4m0-4.6a1 1 0 0 1 2 0v4.6m0-3.6a1 1 0 0 1 2 0V8m0-1.2a1 1 0 0 1 2 0v3.4a4.5 4.5 0 0 1-4.5 4.5h-.9a4.5 4.5 0 0 1-3.5-1.7l-1.9-2.5a1 1 0 0 1 1.6-1.2l1.1 1.4"
+        />
+      </svg>`;
+    }
+    if (tool === "rotatecanvas") {
+      return "⟳";
+    }
     if (tool === "ellipse") {
       return "◯";
     }

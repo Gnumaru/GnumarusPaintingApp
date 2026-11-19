@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { canvasCenter, loadBlankProject, paintedPixelCount } from "./e2e-helpers";
+import { canvasCenter, loadBlankProject, paintedPixelCount, selectTool } from "./e2e-helpers";
 
 async function canvasPan(page: import("@playwright/test").Page): Promise<{ x: number; y: number }> {
   return page.evaluate(() => {
@@ -26,7 +26,7 @@ test("pan tool drags the canvas with the left button and paints nothing", async 
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await page.getByRole("button", { name: "Pan", exact: true }).click();
+  await selectTool(page, "Pan");
   await expect(page.locator("gnumarus-shell")).toContainText("pan");
   await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toHaveAttribute("aria-label", "pan options");
   await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toContainText("does not have any setting");
@@ -39,7 +39,7 @@ test("pan tool pans with modifiers held and keeps the tool", async ({ page }) =>
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await page.getByRole("button", { name: "Pan", exact: true }).click();
+  await selectTool(page, "Pan");
   let x = 0;
   let y = 0;
   for (const modifier of ["Shift", "Control", "Alt"] as const) {
@@ -59,7 +59,7 @@ test("pan tool pans with the right and middle buttons", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await page.getByRole("button", { name: "Pan", exact: true }).click();
+  await selectTool(page, "Pan");
   await dragCenter(page, 30, 20, "right");
   expect(await canvasPan(page)).toEqual({ x: 30, y: 20 });
   await dragCenter(page, -10, 15, "middle");
@@ -67,10 +67,15 @@ test("pan tool pans with the right and middle buttons", async ({ page }) => {
   expect(await paintedPixelCount(page)).toBe(0);
 });
 
-test("pan toolbar button carries the hand tooltip", async ({ page }) => {
+test("pan flyout button carries the hand tooltip", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  const button = page.getByRole("button", { name: "Pan", exact: true });
-  await expect(button).toHaveAttribute("title", /^Pan \(/);
+  await page.locator('gnumarus-shell [data-testid="view-drawer"] > button').click({ button: "right" });
+  const flyout = page.locator('gnumarus-shell [data-testid="view-flyout"]');
+  await expect(flyout.getByRole("button", { name: "Pan", exact: true })).toHaveAttribute("title", /^Pan \(/);
+  await expect(flyout.getByRole("button", { name: "Rotate canvas", exact: true })).toHaveAttribute(
+    "title",
+    /^Rotate canvas \(/,
+  );
 });

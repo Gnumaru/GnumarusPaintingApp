@@ -805,6 +805,9 @@ export async function paintDot(
 export const DRAWER_FOR_TOOL: Record<string, string> = {
   Line: "paint",
   Curve: "paint",
+  Loupe: "view",
+  Pan: "view",
+  "Rotate canvas": "view",
   Rectangle: "shape",
   Ellipse: "shape",
   Polygon: "shape",
