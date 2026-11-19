@@ -53,7 +53,14 @@ test("painted neighbor frames still build ghosts @recent", async ({ page }) => {
   await selectFrame(page, 1);
   expect(await onionFlattenCount(page)).toBe(built);
   expect(await onionVisible(page)).toEqual({ past: false, future: false });
-  // Back to frame 0: the painted neighbor rebuilds again.
+  // Back to frame 0: the flat is cached, so no new composite — same ghost.
+  await selectFrame(page, 0);
+  expect(await onionFlattenCount(page)).toBe(built);
+  expect(await onionVisible(page)).toEqual({ past: false, future: true });
+  // Painting different pixels busts the cache: the next visit recomposites.
+  await selectFrame(page, 1);
+  await setPencil(page, "#0000ff");
+  await paintCenter(page);
   await selectFrame(page, 0);
   expect(await onionFlattenCount(page)).toBeGreaterThan(built);
   expect(await onionVisible(page)).toEqual({ past: false, future: true });

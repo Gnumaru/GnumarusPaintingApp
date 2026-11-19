@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { compositeFinalImage, compositeLayersAt } from "../preview/GnumarusFinalRender";
+import { compositeFinalImage, compositeLayersAt, type GnumarusFlattenLayerInput } from "../preview/GnumarusFinalRender";
 import {
   GNUMARUS_TEXT_MAX_RASTER_DIMENSION,
   GNUMARUS_TEXT_RASTER_SCALE,
@@ -8963,6 +8963,7 @@ export class GnumarusCanvasEngine {
     this.textures.clear();
     this.contents.clear();
     this.cells.clear();
+    this.onionFlatCache.clear();
     this.flycam = null;
     this.flyLookDrag = null;
     this.stopFlyHold();
@@ -10461,6 +10462,10 @@ export class GnumarusCanvasEngine {
       return;
     }
     this.onionEnabled = next;
+    if (!next) {
+      // Free the cached flats while the feature is off.
+      this.onionFlatCache.clear();
+    }
     this.refreshOnionSkins();
     this.render();
     this.onLayersChanged?.();
@@ -10502,6 +10507,11 @@ export class GnumarusCanvasEngine {
     this.onLayersChanged?.();
   }
 
+  /** Onion flatten cache (LRU): raw neighbor flats keyed by frame + size + content. */
+  private onionFlatCache = new Map<string, { width: number; height: number; flat: Uint8ClampedArray }>();
+  /** Max cached flats (whole canvases; 4 ~= 33 MB at 1080p). */
+  private readonly onionFlatCacheSize = 4;
+
   /** Onion ghost visibility for tests and the matrix toggle. */
   onionGhostVisible(which: "past" | "future"): boolean {
     const plane = this.onionPlanes[which === "past" ? 0 : 1];
@@ -10542,6 +10552,78 @@ export class GnumarusCanvasEngine {
       }
     }
     return false;
+  }
+
+  /**
+   * Flat-cache key for a neighbor frame: byte changes ride on
+   * pixelsVersion (trusted by the raster caches already); structural and
+   * content-assignment changes ride on the per-layer snapshot (order,
+   * visibility, opacity, blend, exact transform, parent, mask flag and
+   * every content id slot). Cheap string build, no pixel reads.
+   */
+  private onionFlatCacheKey(frame: number, width: number, height: number): string {
+    const parts: Array<string | number> = [frame, width, height, this.pixelsVersion];
+    for (const layer of this.layers) {
+      const t = layer.transform;
+      let content = "";
+      const contentId = this.cells.get(animationCellKey(layer.id, frame));
+      if (contentId !== undefined) {
+        const entry = this.contents.get(contentId);
+        if (entry !== undefined) {
+          content = `${entry.textureId ?? ""}|${entry.textId ?? ""}|${entry.svgId ?? ""}|${entry.model3dId ?? ""}|${entry.tilemapId ?? ""}`;
+        }
+      }
+      parts.push(
+        layer.id,
+        layer.visible ? 1 : 0,
+        layer.opacity,
+        layer.blend,
+        layer.parentId ?? "",
+        layer.isMask ? 1 : 0,
+        t.x,
+        t.y,
+        t.rotation,
+        t.flipX ? 1 : 0,
+        t.flipY ? 1 : 0,
+        t.scaleX,
+        t.scaleY,
+        t.skewX,
+        t.skewY,
+        t.rotationX,
+        t.rotationY,
+        content,
+      );
+    }
+    return parts.join(";");
+  }
+
+  /**
+   * Raw flattened neighbor frame, served from the LRU flat-cache when the
+   * key matches (counts only real composites for the test hook).
+   */
+  private onionCachedFlat(
+    frame: number,
+    width: number,
+    height: number,
+    inputs: GnumarusFlattenLayerInput[],
+  ): Uint8ClampedArray {
+    const key = this.onionFlatCacheKey(frame, width, height);
+    const hit = this.onionFlatCache.get(key);
+    if (hit !== undefined && hit.width === width && hit.height === height) {
+      this.onionFlatCache.delete(key);
+      this.onionFlatCache.set(key, hit);
+      return hit.flat;
+    }
+    const flat = compositeFinalImage(width, height, inputs);
+    this.onionFlattenCount += 1;
+    if (this.onionFlatCache.size >= this.onionFlatCacheSize) {
+      const oldest = this.onionFlatCache.keys().next();
+      if (!oldest.done) {
+        this.onionFlatCache.delete(oldest.value);
+      }
+    }
+    this.onionFlatCache.set(key, { width, height, flat });
+    return flat;
   }
 
   /**
@@ -10605,8 +10687,7 @@ export class GnumarusCanvasEngine {
         if (inputs === null) {
           continue;
         }
-        const flat = compositeFinalImage(width, height, inputs);
-        this.onionFlattenCount += 1;
+        const flat = this.onionCachedFlat(frame, width, height, inputs);
         const alpha = 0.6 / i;
         for (let p = 0; p < width * height; p += 1) {
           const a = (flat[p * 4 + 3] as number) / 255;
