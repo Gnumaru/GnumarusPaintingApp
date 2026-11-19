@@ -4981,6 +4981,7 @@ export class GnumarusShell extends LitElement {
         @close=${(): void => this.closeNewAnimationDialog()}
       >
         <h3>${tr("action.newAnimation")}</h3>
+        <p data-testid="animation-create-frames">${tr("dialog.animFrames", { frames: formatFrameRanges(this.animationCreateFrames ?? []) })}</p>
         <label
           >${tr("dialog.animName")}
           <input

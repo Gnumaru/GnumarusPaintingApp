@@ -128,6 +128,55 @@ test("adding layers and frames creates no textures or contents @recent", async (
   await expect(dialog.locator('[data-testid="content-manager-section"]')).toHaveText(["Textures (1)", "Cell contents (1)"]);
 });
 
+test("new animation dialog lists the selected frames @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await page.getByRole("button", { name: "Add frame", exact: true }).click();
+  await page.getByRole("button", { name: "Add frame", exact: true }).click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="2"]').click({ modifiers: ["Control"] });
+  await matrix.locator('[data-testid="anim-frame"][data-frame="2"]').click({ button: "right" });
+  await page.getByRole("button", { name: "New animation" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#animationCreateDialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('[data-testid="animation-create-frames"]')).toHaveText(
+    "The animation will use the following frames: 1,3",
+  );
+  await dialog.locator('[data-testid="animation-create-cancel"]').click();
+  await expect(dialog).toBeHidden();
+  // A contiguous run collapses to a hyphen range.
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="2"]').click({ modifiers: ["Shift"] });
+  await matrix.locator('[data-testid="anim-frame"][data-frame="2"]').click({ button: "right" });
+  await page.getByRole("button", { name: "New animation" }).click();
+  await expect(dialog.locator('[data-testid="animation-create-frames"]')).toHaveText(
+    "The animation will use the following frames: 1-3",
+  );
+  await dialog.locator('[data-testid="animation-create-cancel"]').click();
+});
+
+test("new animation dialog lists the selected frames in Brazilian Portuguese @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const settings = page.locator("gnumarus-shell dialog#settingsDialog");
+  await settings.locator("select#localeSelect").selectOption("pt-BR");
+  await settings.getByRole("button", { name: "Fechar" }).click();
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await page.getByRole("button", { name: "Adicionar quadro", exact: true }).click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="0"]').click();
+  await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click({ modifiers: ["Control"] });
+  await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click({ button: "right" });
+  await page.getByRole("button", { name: "Nova animação" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#animationCreateDialog");
+  await expect(dialog.locator('[data-testid="animation-create-frames"]')).toHaveText(
+    "A animação usará os seguintes quadros: 1,2",
+  );
+  await dialog.locator('[data-testid="animation-create-cancel"]').click();
+});
+
 test("new animation from a single frame menu @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
