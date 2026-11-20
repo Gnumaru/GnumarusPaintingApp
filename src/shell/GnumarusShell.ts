@@ -675,6 +675,7 @@ export class GnumarusShell extends LitElement {
       display: flex;
       flex-direction: column;
       height: 100vh;
+      height: 100dvh;
       width: 100vw;
       background: #1e1e1e;
       color: #e6e6e6;
@@ -2012,6 +2013,8 @@ export class GnumarusShell extends LitElement {
       display: flex;
       flex-direction: column;
       height: 100%;
+      height: 100dvh;
+      overflow: hidden;
       background: #1e1e1e;
       color: #e6e6e6;
       overscroll-behavior: none;
@@ -2048,6 +2051,7 @@ export class GnumarusShell extends LitElement {
       flex: 1 1 auto;
       position: relative;
       min-height: 0;
+      overflow: hidden;
       background: #333333;
       touch-action: none;
     }
