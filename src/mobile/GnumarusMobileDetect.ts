@@ -166,3 +166,48 @@ function readNavigatorSignals(): GnumarusUiModeSignals {
 export function detectUiMode(): GnumarusUiMode {
   return resolveUiMode(readNavigatorSignals());
 }
+
+/** Long side cap (px) for the mobile boot canvas: bounds memory on 3x screens. */
+export const MOBILE_PROJECT_MAX_SIDE = 4096;
+
+/** Viewport-derived canvas size for the mobile boot project. */
+export interface GnumarusMobileProjectSize {
+  width: number;
+  height: number;
+}
+
+/**
+ * Pure rule: physical viewport pixels (CSS px × DPR), rounded, aspect
+ * preserved, long side capped at `MOBILE_PROJECT_MAX_SIDE`, minimum 1 px
+ * per side. Non-finite/non-positive inputs fall back to 1 px.
+ */
+export function resolveMobileProjectSize(
+  viewportWidth: number | null | undefined,
+  viewportHeight: number | null | undefined,
+  devicePixelRatio: number | null | undefined,
+): GnumarusMobileProjectSize {
+  const cssW = Number.isFinite(viewportWidth) && (viewportWidth as number) > 0 ? (viewportWidth as number) : 1;
+  const cssH =
+    Number.isFinite(viewportHeight) && (viewportHeight as number) > 0 ? (viewportHeight as number) : 1;
+  const dpr = Number.isFinite(devicePixelRatio) && (devicePixelRatio as number) > 0 ? (devicePixelRatio as number) : 1;
+  let width = Math.max(1, Math.round(cssW * dpr));
+  let height = Math.max(1, Math.round(cssH * dpr));
+  const longSide = Math.max(width, height);
+  if (longSide > MOBILE_PROJECT_MAX_SIDE) {
+    const scale = MOBILE_PROJECT_MAX_SIDE / longSide;
+    width = Math.max(1, Math.round(width * scale));
+    height = Math.max(1, Math.round(height * scale));
+  }
+  return { width, height };
+}
+
+/**
+ * Read the live screen size for the mobile boot project (null outside a
+ * browser window, e.g. unit tests: the caller then keeps the preset).
+ */
+export function detectMobileProjectSize(): GnumarusMobileProjectSize | null {
+  if (typeof window === "undefined" || typeof window.innerWidth !== "number") {
+    return null;
+  }
+  return resolveMobileProjectSize(window.innerWidth, window.innerHeight, window.devicePixelRatio);
+}

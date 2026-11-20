@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { loadBlankProject, readPixel } from "./e2e-helpers";
+import { getLayers, loadBlankProject, readPixel } from "./e2e-helpers";
 
 const IPHONE_UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1";
@@ -11,6 +11,10 @@ test("desktop UA boots the desktop shell (no mobile chrome)", async ({ page }) =
   await page.waitForSelector("gnumarus-shell canvas");
   await expect(page.locator('gnumarus-shell [data-testid="mobile-shell"]')).toHaveCount(0);
   await expect(page.locator("gnumarus-shell .menubar")).toBeVisible();
+  // Desktop keeps the default new-project preset size regardless of window.
+  const { layers } = await getLayers(page);
+  expect(layers.length).toBeGreaterThan(0);
+  expect({ width: layers[0].width, height: layers[0].height }).toEqual({ width: 1920, height: 1080 });
 });
 
 test.describe("mobile shell", () => {
@@ -37,6 +41,15 @@ test.describe("mobile shell", () => {
       await expect(page.locator(`gnumarus-shell [data-testid="${id}"]`)).toBeVisible();
     }
     await expect(page.locator('gnumarus-shell [data-testid="mobile-pencil"]')).toHaveClass(/active/);
+  });
+
+  test("mobile boots a portrait project at the screen resolution", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector('gnumarus-shell [data-testid="mobile-shell"]');
+    // Viewport is 390x844 at DPR 1, so the boot project matches the screen.
+    const { layers } = await getLayers(page);
+    expect(layers.length).toBeGreaterThan(0);
+    expect({ width: layers[0].width, height: layers[0].height }).toEqual({ width: 390, height: 844 });
   });
 
   test("touch tap paints and the undo button clears it", async ({ page }) => {

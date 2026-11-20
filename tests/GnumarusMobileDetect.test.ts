@@ -3,6 +3,7 @@ import {
   isPhoneUserAgent,
   isTabletUserAgent,
   loadUiModeOverride,
+  resolveMobileProjectSize,
   resolveUiMode,
   saveUiModeOverride,
 } from "../src/mobile/GnumarusMobileDetect";
@@ -64,6 +65,23 @@ describe("resolveUiMode", () => {
   });
 });
 
+describe("resolveMobileProjectSize", () => {
+  it("uses physical viewport pixels (CSS px times DPR)", () => {
+    expect(resolveMobileProjectSize(390, 844, 1)).toEqual({ width: 390, height: 844 });
+    expect(resolveMobileProjectSize(390, 844, 3)).toEqual({ width: 1170, height: 2532 });
+    expect(resolveMobileProjectSize(390.4, 844.4, 2)).toEqual({ width: 781, height: 1689 });
+  });
+
+  it("caps the long side preserving aspect", () => {
+    expect(resolveMobileProjectSize(1440, 3200, 3)).toEqual({ width: 1843, height: 4096 });
+    expect(resolveMobileProjectSize(5000, 100, 1)).toEqual({ width: 4096, height: 82 });
+  });
+
+  it("falls back to 1 px on invalid inputs", () => {
+    expect(resolveMobileProjectSize(0, -10, 1)).toEqual({ width: 1, height: 1 });
+    expect(resolveMobileProjectSize(null, undefined, NaN)).toEqual({ width: 1, height: 1 });
+  });
+});
 describe("ui mode override storage", () => {
   function memoryStorage(): Storage {
     const data = new Map<string, string>();

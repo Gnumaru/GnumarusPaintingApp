@@ -6,6 +6,7 @@ import {
   type GnumarusLayerInfo,
 } from "../canvas/GnumarusCanvasEngine";
 import {
+  detectMobileProjectSize,
   detectUiMode,
   saveUiModeOverride,
   type GnumarusUiMode,
@@ -7816,6 +7817,9 @@ export class GnumarusShell extends LitElement {
         gridOpacityPercent: storedGrid.opacityPercent,
         viewMinZoom: storedZoom.minZoomPercent / 100,
         background: storedBackground,
+        // Mobile boots with a portrait project at the physical screen
+        // resolution; desktop keeps the default new-project preset size.
+        initialProjectSize: this.uiMode === "mobile" ? (detectMobileProjectSize() ?? undefined) : undefined,
         onStats: (stats): void => {
           this.zoomText = `${Math.round(stats.zoom * 100)}%`;
           this.canUndo = stats.canUndo;

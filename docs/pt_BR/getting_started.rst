@@ -23,7 +23,9 @@ Interface móvel
   é de camada única, sem animação.
 * **Ajuda > Versão móvel** alterna entre as interfaces de desktop e
   móvel. A escolha é lembrada; a troca nunca recarrega a página e
-  nunca perde trabalho.
+  nunca perde trabalho. O projeto inicial no móvel já nasce no tamanho
+  da tela (pixels da viewport vezes devicePixelRatio, lado maior
+  limitado a 4096 px).
 
 Sua primeira pintura
 --------------------

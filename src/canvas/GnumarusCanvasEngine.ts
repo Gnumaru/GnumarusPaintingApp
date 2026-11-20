@@ -823,6 +823,11 @@ export interface GnumarusEngineOptions {
   gridOpacityPercent?: number;
   viewMinZoom?: number;
   background?: GnumarusBackgroundSettings;
+  /**
+   * Boot project size override (mobile: physical screen pixels). When absent
+   * or invalid the default new-project preset dimensions apply.
+   */
+  initialProjectSize?: { width: number; height: number };
 }
 
 /** Screen pixels of horizontal drag per tool-size unit for shift-drag resizing. */
@@ -877,6 +882,14 @@ function modelViewKey(view: GnumarusModel3dView, lighting: GnumarusModelLighting
 interface GnumarusModelOrbit {
   modelId: string;
   view: GnumarusModel3dView;
+}
+
+/** Boot project side override: finite integers >= 1 win, otherwise the preset. */
+function sanitizeInitialProjectSide(value: number | undefined, preset: number): number {
+  if (value === undefined || !Number.isFinite(value)) {
+    return preset;
+  }
+  return Math.max(1, Math.floor(value));
 }
 
 export class GnumarusCanvasEngine {
@@ -1459,8 +1472,11 @@ export class GnumarusCanvasEngine {
     // the app already applies it (dimensions included); empty cells track
     // these dims in syncLayerRender, so both must come from the preset.
     const initial = applyNewProjectPreset(DEFAULT_NEW_PROJECT_PRESET);
-    this.imageWidth = initial?.width ?? 64;
-    this.imageHeight = initial?.height ?? 64;
+    // A mobile boot may override the size with the physical screen pixels
+    // instead (also reflected in the initial layer below and in every
+    // empty-cell sync, which all track these project dims).
+    this.imageWidth = sanitizeInitialProjectSide(options.initialProjectSize?.width, initial?.width ?? 64);
+    this.imageHeight = sanitizeInitialProjectSide(options.initialProjectSize?.height, initial?.height ?? 64);
     this.zoom = 8;
 
     let renderer: THREE.WebGLRenderer;
@@ -1924,9 +1940,10 @@ export class GnumarusCanvasEngine {
       this.symmetryLines.push(line);
     }
     // Fresh projects start from the default new-project preset, so opening
-    // the app already applies it (dimensions included).
-    const initialWidth = initial?.width ?? 64;
-    const initialHeight = initial?.height ?? 64;
+    // the app already applies it (dimensions included). A mobile boot may
+    // override the size with the physical screen pixels instead.
+    const initialWidth = sanitizeInitialProjectSide(options.initialProjectSize?.width, initial?.width ?? 64);
+    const initialHeight = sanitizeInitialProjectSide(options.initialProjectSize?.height, initial?.height ?? 64);
     const first = this.createLayerInternal("layer0", "L1", true, 1, createPixelBuffer(initialWidth, initialHeight), initialWidth, initialHeight, {
       ...IDENTITY_LAYER_TRANSFORM,
     });

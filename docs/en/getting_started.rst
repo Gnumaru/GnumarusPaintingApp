@@ -21,7 +21,9 @@ Mobile interface
   single-layer with no animation.
 * **Help > Mobile version** switches the desktop interface to mobile
   and back. The choice is remembered; switching never reloads the page
-  and never loses work.
+  and never loses work. The mobile boot project already matches the
+  screen size (viewport pixels times devicePixelRatio, long side
+  capped at 4096 px).
 
 Your first painting
 -------------------
