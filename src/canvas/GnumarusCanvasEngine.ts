@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { eventInTextField } from "../focus/GnumarusFocus";
 import { compositeFinalImage, compositeLayersAt, type GnumarusFlattenLayerInput } from "../preview/GnumarusFinalRender";
 import {
   GNUMARUS_TEXT_MAX_RASTER_DIMENSION,
@@ -17832,6 +17833,30 @@ export class GnumarusCanvasEngine {
   private attachEvents(): void {
     const canvas = this.renderer.domElement;
     canvas.addEventListener("pointerdown", (event: PointerEvent) => {
+      // The canvas is not focusable, so painting with the mouse never moves
+      // focus away from the last touched panel control — and a focused
+      // number/text input would then swallow the next Ctrl+Z (native field
+      // undo instead of canvas undo). Starting canvas work means text entry
+      // is done, so release form-control focus here. Focus inside shadow DOM
+      // reports the host as document.activeElement, so pierce the canvas's
+      // own root as well. Content-editable text (text-editor dialog) is
+      // modal and unreachable behind the canvas, so it is left alone.
+      const focusCandidates: Array<Element | null> = [document.activeElement];
+      const canvasRoot = canvas.getRootNode();
+      if (canvasRoot instanceof ShadowRoot) {
+        focusCandidates.push(canvasRoot.activeElement);
+      }
+      for (const candidate of focusCandidates) {
+        if (
+          candidate instanceof HTMLInputElement ||
+          candidate instanceof HTMLTextAreaElement ||
+          candidate instanceof HTMLSelectElement ||
+          candidate instanceof HTMLButtonElement
+        ) {
+          candidate.blur();
+          break;
+        }
+      }
       if (this.tool === "flycam") {
         // Every mouse button/gesture belongs to the fly camera: left-drag
         // looks around, everything else is swallowed.
@@ -19465,6 +19490,12 @@ export class GnumarusCanvasEngine {
           target instanceof HTMLSelectElement
         );
       })();
+      // Narrow gate for undo/redo: only genuine text-editing targets keep
+      // native undo. Sliders, dropdowns, checkboxes, buttons and color wells
+      // have no text undo, so Ctrl+Z must reach the canvas while focused.
+      // (The canvas is not focusable, so focus otherwise stays on the last
+      // touched panel control even while painting with the mouse.)
+      const inTextField = eventInTextField(event);
       if (event.key === "Shift" || event.key === "Control" || event.key === "Meta") {
         this.tileModShift = event.shiftKey;
         this.tileModCtrl = event.ctrlKey || event.metaKey;
@@ -19758,7 +19789,7 @@ export class GnumarusCanvasEngine {
           return;
         }
       }
-      if ((event.ctrlKey || event.metaKey) && !event.altKey && !inField) {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && !inTextField) {
         const key = event.key.toLowerCase();
         if (key === "z" && !event.shiftKey) {
           event.preventDefault();
