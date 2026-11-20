@@ -1722,6 +1722,10 @@ export const EN_STRINGS = {
   "color.ratio": "Ratio",
   "color.diagonal": "Diagonal",
   "anim.framesMany": "frames",
+  "mobile.switchToDesktop": "Desktop version",
+  "mobile.switchToMobile": "Mobile version",
+  "mobile.color": "Color",
+  "mobile.brushSize": "Brush size",
 } as const;
 
 export type GnumarusMessageKey = keyof typeof EN_STRINGS;
@@ -3416,6 +3420,10 @@ export const PT_BR_STRINGS: Record<GnumarusMessageKey, string> = {
   "color.ratio": "Proporção",
   "color.diagonal": "Diagonal",
   "anim.framesMany": "quadros",
+  "mobile.switchToDesktop": "Versão desktop",
+  "mobile.switchToMobile": "Versão móvel",
+  "mobile.color": "Cor",
+  "mobile.brushSize": "Tamanho do pincel",
 };
 
 const CATALOG: Record<GnumarusLocale, Record<GnumarusMessageKey, string>> = {

@@ -880,7 +880,7 @@ interface GnumarusModelOrbit {
 }
 
 export class GnumarusCanvasEngine {
-  private readonly container: HTMLElement;
+  private container: HTMLElement;
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene: THREE.Scene;
   private readonly camera: THREE.OrthographicCamera;
@@ -16899,6 +16899,87 @@ export class GnumarusCanvasEngine {
 
   zoomBy(factor: number): void {
     this.setZoom(this.zoom * factor);
+  }
+
+  /** Pan the view by CSS pixels (used by the mobile two-finger gesture). */
+  panBy(dx: number, dy: number): void {
+    if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) {
+      return;
+    }
+    this.panX += dx;
+    this.panY += dy;
+    this.layoutScene();
+    this.render();
+    this.updatePreviews();
+    this.emitStats();
+  }
+
+  /**
+   * Discard the in-progress paint stroke without committing: restores the
+   * stroke-base buffer (e.g. the dot stamped on pointerdown) and clears all
+   * stroke state, pushing no history entry. Used when a second finger lands
+   * mid-stroke to start a pinch gesture instead. No-op when no paint stroke
+   * is active (bucket/eyedropper commit synchronously on pointerdown and are
+   * unaffected).
+   */
+  cancelStroke(): void {
+    if (this.strokeBase !== null && this.strokeLayerId !== null) {
+      const tex = this.textures.get(this.strokeLayerId);
+      if (tex !== undefined && tex.buffer.length === this.strokeBase.length) {
+        tex.buffer.set(this.strokeBase);
+        this.scheduleStrokeRender(tex.id);
+        this.onPixelsChanged();
+      }
+      this.strokeBase = null;
+      this.strokeLayerId = null;
+      this.strokeMask = null;
+    }
+    this.drawing = false;
+    this.panning = false;
+    this.rotating = false;
+    this.loupeZooming = false;
+    this.transforming = false;
+    this.transformRotating = false;
+    this.lastPointerAngle = null;
+    this.transformLastAngle = null;
+    this.transformStart = null;
+    this.loupeAnchor = null;
+    this.lastPixel = null;
+    this.sizeDrag = null;
+    this.clearTransformDrags();
+    this.resetPencilPixelPerfect();
+    this.stopAirbrush();
+    this.flushStrokeRender();
+    if (this.stabilizerNeedsLoop()) {
+      this.ensureFollowLoop();
+    }
+    this.updatePreviews();
+  }
+
+  /**
+   * Move the renderer and all engine overlays into a new host element
+   * (used when switching between the desktop and mobile shells, which own
+   * separate canvas hosts but share one engine). Shell-owned children of
+   * the old host are left in place.
+   */
+  reparentContainer(container: HTMLElement): void {
+    if (container === this.container) {
+      return;
+    }
+    this.container = container;
+    container.appendChild(this.renderer.domElement);
+    container.appendChild(this.previewTip);
+    container.appendChild(this.tileTip);
+    container.appendChild(this.cloneTip);
+    container.appendChild(this.previewStabilizer);
+    container.appendChild(this.previewSvg);
+    container.appendChild(this.symmetrySvg);
+    this.resizeObserver.disconnect();
+    this.resizeObserver.observe(container);
+    this.layoutScene();
+    this.render();
+    this.updatePreviews();
+    this.emitStats();
   }
 
   /** Zoom keeping the image pixel under the client point stable. */

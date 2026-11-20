@@ -5,6 +5,11 @@ import {
   type GnumarusCanvasTool,
   type GnumarusLayerInfo,
 } from "../canvas/GnumarusCanvasEngine";
+import {
+  detectUiMode,
+  saveUiModeOverride,
+  type GnumarusUiMode,
+} from "../mobile/GnumarusMobileDetect";
 import { sanitizeTextHtml } from "../text/GnumarusTextSanitize";
 import {
   cellRectCells,
@@ -2001,6 +2006,122 @@ export class GnumarusShell extends LitElement {
     .error {
       color: #ffb3b3;
     }
+    /* ---- Mobile interface (touch-first bar layout) ---- */
+    .mobile-shell {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      background: #1e1e1e;
+      color: #e6e6e6;
+      overscroll-behavior: none;
+    }
+    .mobile-topbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: calc(4px + env(safe-area-inset-top)) 10px 4px;
+      background: #252526;
+      border-bottom: 1px solid #111;
+      flex: 0 0 auto;
+      font-size: 14px;
+    }
+    .mobile-topbar .mobile-title {
+      flex: 1 1 auto;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 600;
+    }
+    .mobile-topbar button {
+      background: #0e639c;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 14px;
+    }
+    .mobile-topbar button.ghost {
+      background: #3a3d41;
+    }
+    .mobile-canvas-host {
+      flex: 1 1 auto;
+      position: relative;
+      min-height: 0;
+      background: #333333;
+      touch-action: none;
+    }
+    .mobile-canvas-host > canvas {
+      position: absolute;
+      inset: 0;
+    }
+    .mobile-sheet {
+      flex: 0 0 auto;
+      background: #252526;
+      border-top: 1px solid #111;
+      padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .mobile-sheet label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+    }
+    .mobile-sheet input[type="range"] {
+      width: 150px;
+      accent-color: #0e639c;
+    }
+    .mobile-sheet input[type="color"] {
+      width: 44px;
+      height: 34px;
+      padding: 0;
+      border: 1px solid #111;
+      background: #1e1e1e;
+    }
+    .mobile-sheet .mobile-size-value {
+      min-width: 44px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .mobile-toolbar {
+      display: flex;
+      align-items: stretch;
+      justify-content: space-around;
+      gap: 2px;
+      padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+      background: #252526;
+      border-top: 1px solid #111;
+      flex: 0 0 auto;
+    }
+    .mobile-toolbar button {
+      flex: 1 1 0;
+      background: #3a3d41;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 4px;
+      font-size: 13px;
+      min-height: 48px;
+    }
+    .mobile-toolbar button.active {
+      background: #0e639c;
+    }
+    .mobile-toolbar button:disabled {
+      opacity: 0.4;
+    }
+    .mobile-toolbar button.mobile-swatch {
+      padding: 6px 4px;
+    }
+    .mobile-toolbar .mobile-swatch-dot {
+      display: block;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      border: 2px solid #fff;
+      margin: 0 auto 2px;
+    }
   `;
 
   static properties = {
@@ -2143,6 +2264,8 @@ export class GnumarusShell extends LitElement {
     exportSheetLossless: { type: Boolean },
     playing: { type: Boolean },
     uiHidden: { type: Boolean },
+    uiMode: { type: String },
+    mobileSheetOpen: { type: Boolean },
     matrixHeightPx: { type: Number },
     toastMessage: { type: String },
     updateStatus: { type: String },
@@ -2413,6 +2536,10 @@ export class GnumarusShell extends LitElement {
   declare exportCheckerColorB: string;
   declare playing: boolean;
   declare uiHidden: boolean;
+  /** Active interface: full desktop chrome or the touch-optimized mobile bar. */
+  declare uiMode: GnumarusUiMode;
+  /** Mobile bottom-sheet (color/size) visibility. */
+  declare mobileSheetOpen: boolean;
   /** Explicit animation-matrix height in px (null = automatic). */
   declare matrixHeightPx: number | null;
   declare toastMessage: string;
@@ -2556,6 +2683,8 @@ export class GnumarusShell extends LitElement {
   constructor() {
     super();
     this.tool = "pencil";
+    this.uiMode = detectUiMode();
+    this.mobileSheetOpen = false;
     this.drawerFront = {
       paint: "pencil",
       view: "loupe",
@@ -2819,7 +2948,144 @@ export class GnumarusShell extends LitElement {
     this.curveAntialias = false;
   }
 
+  /**
+   * Activate an MVP mobile tool: pencil (normal or eraser blend), bucket or
+   * eyedropper. Same engine path as the desktop menus, minus the drawers.
+   */
+  private setMobileTool(tool: "pencil" | "bucket" | "eyedropper", eraser: boolean): void {
+    this.tool = tool;
+    this.engine?.setTool(tool);
+    this.setBlendMode(eraser ? "eraser" : "normal");
+  }
+
+  /** Touch-optimized shell: full-bleed canvas, top mini-bar, bottom tool bar. */
+  private renderMobileShell(): unknown {
+    const eraserActive = this.tool === "pencil" && this.blendMode === "eraser";
+    const pencilActive = this.tool === "pencil" && !eraserActive;
+    return html`
+      <div class="mobile-shell" data-testid="mobile-shell">
+        <div class="mobile-topbar">
+          <span class="mobile-title">Gnumaru's Painting App${this.dirty ? tr("app.modified") : ""}</span>
+          <button
+            data-testid="mobile-save"
+            title=${tr("menu.saveTitle")}
+            @click=${(): void => void this.runAction(this.fsSupported ? "save-project" : "save-embedded-project")}
+          >
+            ${tr("menu.saveProject")}
+          </button>
+          <button
+            class="ghost"
+            data-testid="mobile-desktop"
+            title=${tr("mobile.switchToDesktop")}
+            @click=${(): void => this.setUiMode("desktop")}
+          >
+            ${tr("mobile.switchToDesktop")}
+          </button>
+        </div>
+        <div class="mobile-canvas-host" id="mobileCanvasHost"></div>
+        ${this.mobileSheetOpen
+          ? html`
+              <div class="mobile-sheet" data-testid="mobile-sheet">
+                <label
+                  >${tr("mobile.color")}
+                  <input
+                    type="color"
+                    data-testid="mobile-color"
+                    .value=${this.colorValue}
+                    @input=${(event: Event): void => {
+                      const target = event.target as HTMLInputElement | null;
+                      if (target !== null) {
+                        this.setPencilColor(target.value);
+                      }
+                    }}
+                  />
+                </label>
+                <label
+                  >${tr("mobile.brushSize")}
+                  <input
+                    type="range"
+                    data-testid="mobile-size"
+                    min="0.1"
+                    max=${String(this.maxBrushSize)}
+                    step="0.1"
+                    .value=${String(this.brushSize)}
+                    @input=${(event: Event): void => {
+                      const target = event.target as HTMLInputElement | null;
+                      if (target !== null) {
+                        this.setBrushSize(Number(target.value));
+                      }
+                    }}
+                  />
+                  <span class="mobile-size-value">${Math.round(this.brushSize * 10) / 10}</span>
+                </label>
+              </div>
+            `
+          : html``}
+        <div class="mobile-toolbar" data-testid="mobile-toolbar">
+          <button
+            data-testid="mobile-pencil"
+            class=${pencilActive ? "active" : ""}
+            @click=${(): void => this.setMobileTool("pencil", false)}
+          >
+            ${tr("tool.pencil")}
+          </button>
+          <button
+            data-testid="mobile-eraser"
+            class=${eraserActive ? "active" : ""}
+            @click=${(): void => this.setMobileTool("pencil", true)}
+          >
+            ${tr("val.eraser")}
+          </button>
+          <button
+            data-testid="mobile-bucket"
+            class=${this.tool === "bucket" ? "active" : ""}
+            @click=${(): void => this.setMobileTool("bucket", false)}
+          >
+            ${tr("tool.bucket")}
+          </button>
+          <button
+            data-testid="mobile-eyedropper"
+            class=${this.tool === "eyedropper" ? "active" : ""}
+            @click=${(): void => this.setMobileTool("eyedropper", false)}
+          >
+            ${tr("tool.eyedropper")}
+          </button>
+          <button
+            class="mobile-swatch"
+            data-testid="mobile-settings"
+            title=${`${tr("mobile.color")} / ${tr("mobile.brushSize")}`}
+            @click=${(): void => {
+              this.mobileSheetOpen = !this.mobileSheetOpen;
+            }}
+          >
+            <span class="mobile-swatch-dot" style="background: ${this.colorValue}"></span>
+            ${Math.round(this.brushSize * 10) / 10}
+          </button>
+          <button
+            data-testid="mobile-undo"
+            title=${tr("menu.undoTitle")}
+            ?disabled=${!this.canUndo}
+            @click=${(): void => void this.runAction("undo")}
+          >
+            ${tr("menu.undo")}
+          </button>
+          <button
+            data-testid="mobile-redo"
+            title=${tr("menu.redoTitle")}
+            ?disabled=${!this.canRedo}
+            @click=${(): void => void this.runAction("redo")}
+          >
+            ${tr("menu.redo")}
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
   render() {
+    if (this.uiMode === "mobile") {
+      return this.renderMobileShell();
+    }
     return html`
       <input
         type="file"
@@ -3022,6 +3288,14 @@ export class GnumarusShell extends LitElement {
                   <button title=${tr("menu.shortcutsTitle")} @click=${(): void => void this.runAction("shortcuts")}>${tr("menu.shortcuts")}</button>
                   <button title=${tr("menu.licensesTitle")} @click=${(): void => void this.runAction("licenses")}>${tr("menu.licenses")}</button>
                   <button title=${tr("menu.sourceCodeTitle")} @click=${(): void => void this.runAction("source-code")}>${tr("menu.sourceCode")}</button>
+                  <button
+                    data-testid="menu-mobile-version"
+                    title=${tr("mobile.switchToMobile")}
+                    @click=${(): void => {
+                      this.closeAllMenus();
+                      this.setUiMode("mobile");
+                    }}
+                  >${tr("mobile.switchToMobile")}</button>
                   ${!this.isGitHubPagesDeploy()
                     ? html`<button
                         title=${tr("menu.githubPagesDeployTitle")}
@@ -7450,6 +7724,12 @@ export class GnumarusShell extends LitElement {
     }
     window.addEventListener("keydown", this.onGlobalKeyDown);
     window.addEventListener("pointerdown", this.onGlobalPointerDown);
+    // Mobile pinch gesture interception (capture: runs before the engine's
+    // canvas listeners so multi-touch can be swallowed or rerouted).
+    window.addEventListener("pointerdown", this.onGesturePointerDown, true);
+    window.addEventListener("pointermove", this.onGesturePointerMove, true);
+    window.addEventListener("pointerup", this.onGesturePointerUp, true);
+    window.addEventListener("pointercancel", this.onGesturePointerUp, true);
     // Desktop-like chrome: no native browser menu on our own buttons and
     // menus (toolbar, menubar, dropdowns, context menus, flyouts). Text
     // fields keep theirs so copy/paste still works.
@@ -7513,7 +7793,8 @@ export class GnumarusShell extends LitElement {
     this.expandStep = storedExpand.step;
     this.maxBrushSize = this.loadBrushSettings().maxBrushSize;
     this.brushPresets = this.loadBrushPresets();
-    const host = this.shadowRoot?.getElementById("canvasHost") ?? null;
+    const host =
+      this.shadowRoot?.getElementById(this.uiMode === "mobile" ? "mobileCanvasHost" : "canvasHost") ?? null;
     if (host === null) {
       this.webglError = tr("status.webglHostMissing");
       return;
@@ -7732,6 +8013,124 @@ export class GnumarusShell extends LitElement {
     this.toolsSubmenu = null;
     this.closeDrawerFlyout();
   }
+
+  /**
+   * Switch the interface mode live (no reload, no project loss): persists
+   * the override and reseats the shared engine canvas into the other mode's
+   * host once Lit rendered it.
+   */
+  setUiMode(mode: GnumarusUiMode): void {
+    saveUiModeOverride(mode);
+    if (this.uiMode === mode) {
+      return;
+    }
+    this.uiMode = mode;
+    this.mobileSheetOpen = false;
+    this.gesturePointers.clear();
+    this.gesturePrev = null;
+    void this.updateComplete.then(() => {
+      const hostId = mode === "mobile" ? "mobileCanvasHost" : "canvasHost";
+      const host = this.shadowRoot?.getElementById(hostId) ?? null;
+      if (host !== null) {
+        this.engine?.reparentContainer(host);
+      }
+    });
+  }
+
+  /** The engine canvas currently in the DOM (desktop or mobile host). */
+  private currentCanvas(): HTMLCanvasElement | null {
+    const root = this.shadowRoot;
+    if (root === null) {
+      return null;
+    }
+    return root.querySelector("#canvasHost > canvas, #mobileCanvasHost > canvas");
+  }
+
+  /** Live non-mouse pointers over the canvas (mobile gesture tracking). */
+  private gesturePointers = new Map<number, { x: number; y: number }>();
+  private gesturePrev: { dist: number; midX: number; midY: number } | null = null;
+
+  private gestureSnapshot(): { dist: number; midX: number; midY: number } | null {
+    const points = [...this.gesturePointers.values()];
+    if (points.length < 2) {
+      return null;
+    }
+    const [a, b] = points;
+    return {
+      dist: Math.hypot(a.x - b.x, a.y - b.y),
+      midX: (a.x + b.x) / 2,
+      midY: (a.y + b.y) / 2,
+    };
+  }
+
+  /**
+   * Mobile two-finger gesture gate (capture phase, before the engine):
+   * a second concurrent touch starts pinch-zoom/pan instead of painting —
+   * the in-progress pencil dot is discarded via `cancelStroke()` — and all
+   * gesture events are swallowed so the engine never sees a partial stroke.
+   * Mouse pointers and desktop mode are never intercepted.
+   */
+  private onGesturePointerDown = (event: PointerEvent): void => {
+    if (this.uiMode !== "mobile" || this.engine === null || event.pointerType === "mouse") {
+      return;
+    }
+    const canvas = this.currentCanvas();
+    if (canvas === null || !event.composedPath().includes(canvas)) {
+      return;
+    }
+    this.gesturePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (this.gesturePointers.size === 2) {
+      event.stopPropagation();
+      event.preventDefault();
+      if (this.tool === "pencil") {
+        this.engine.cancelStroke();
+      }
+      this.gesturePrev = this.gestureSnapshot();
+    } else if (this.gesturePointers.size > 2) {
+      event.stopPropagation();
+      event.preventDefault();
+    }
+  };
+
+  private onGesturePointerMove = (event: PointerEvent): void => {
+    if (
+      this.uiMode !== "mobile" ||
+      this.engine === null ||
+      event.pointerType === "mouse" ||
+      this.gesturePointers.size < 2 ||
+      !this.gesturePointers.has(event.pointerId)
+    ) {
+      return;
+    }
+    event.stopPropagation();
+    event.preventDefault();
+    this.gesturePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const prev = this.gesturePrev;
+    const next = this.gestureSnapshot();
+    if (prev === null || next === null || prev.dist <= 0) {
+      this.gesturePrev = next;
+      return;
+    }
+    const factor = Math.min(2, Math.max(0.5, next.dist / prev.dist));
+    this.engine.zoomAtPoint(next.midX, next.midY, factor);
+    this.engine.panBy(next.midX - prev.midX, next.midY - prev.midY);
+    this.gesturePrev = next;
+  };
+
+  private onGesturePointerUp = (event: PointerEvent): void => {
+    if (!this.gesturePointers.has(event.pointerId)) {
+      return;
+    }
+    this.gesturePointers.delete(event.pointerId);
+    if (this.gesturePrev !== null) {
+      // Swallow gesture releases so the engine never commits a partial stroke.
+      event.stopPropagation();
+      event.preventDefault();
+    }
+    if (this.gesturePointers.size === 0) {
+      this.gesturePrev = null;
+    }
+  };
 
   /** Whether a live adjust floating window is open (keyboard behaves as with a modal dialog). */
   private isAdjustWindowOpen(): boolean {

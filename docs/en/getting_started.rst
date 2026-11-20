@@ -10,6 +10,19 @@ Requirements
 * A GPU with WebGL2. The app refuses to start without it and shows an
   explicit message instead of a broken canvas.
 
+Mobile interface
+----------------
+
+* On phones (tablets keep the desktop interface), the app boots a
+  touch-optimized shell: full-screen canvas, a bottom toolbar (pencil,
+  eraser, bucket, eyedropper, color/size sheet, undo, redo) and a top
+  mini-bar with Save and a Desktop version button.
+* One finger paints; two fingers pinch-zoom and pan. The mobile MVP is
+  single-layer with no animation.
+* **Help > Mobile version** switches the desktop interface to mobile
+  and back. The choice is remembered; switching never reloads the page
+  and never loses work.
+
 Your first painting
 -------------------
 
