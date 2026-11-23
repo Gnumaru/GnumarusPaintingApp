@@ -112,3 +112,63 @@ test("clicking the curve adds a node, right-click removes it", async ({ page }) 
   await page.mouse.click(mid.x, mid.y, { button: "right" });
   expect(await count()).toBe(2);
 });
+
+test("filter dialog drag starts from its current position without jumping", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await paintCenter(page);
+  const dialog = await openCurves(page);
+  const header = dialog.locator(".preview-header");
+  const hbox = await header.boundingBox();
+  if (hbox === null) {
+    throw new Error("filter header has no bounding box");
+  }
+  const before = await dialog.boundingBox();
+  if (before === null) {
+    throw new Error("filter dialog has no bounding box");
+  }
+  const startX = hbox.x + 40;
+  const startY = hbox.y + hbox.height / 2;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + 60, startY + 40, { steps: 5 });
+  await page.mouse.up();
+  const after = await dialog.boundingBox();
+  if (after === null) {
+    throw new Error("filter dialog has no bounding box after drag");
+  }
+  expect(Math.abs(after.x - before.x - 60)).toBeLessThanOrEqual(2);
+  expect(Math.abs(after.y - before.y - 40)).toBeLessThanOrEqual(2);
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+});
+
+test("dragging a handle reshapes the curve like a vector editor", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await paintLayerRect(page, "#ff0000", 24, 24, 39, 39);
+  const dialog = await openCurves(page);
+  const editor = dialog.locator('[data-testid="curve-editor"]');
+  const box = await editor.boundingBox();
+  if (box === null) {
+    throw new Error("curve editor has no bounding box");
+  }
+  // In-handle of the white endpoint: visible diamond up-left of the corner.
+  const hx = box.x + box.width * (2 / 3);
+  const hy = box.y + box.height * (1 / 3);
+  await page.mouse.move(hx, hy);
+  await page.mouse.down();
+  await page.mouse.move(hx - 30, hy + 30, { steps: 5 });
+  await page.mouse.up();
+  const handles = await page.evaluate(() => {
+    const host = document.querySelector("gnumarus-shell")?.shadowRoot?.querySelector("gnumarus-curve-editor") as unknown as {
+      nodes?: Array<{ hx1: number; hy1: number }>;
+    } | null;
+    return host?.nodes?.[1];
+  });
+  expect(handles).not.toBeNull();
+  // The out-handle moved away from its smooth diagonal spot.
+  expect(Math.abs((handles?.hx1 ?? 0) - 2 / 3) + Math.abs((handles?.hy1 ?? 0) - 2 / 3)).toBeGreaterThan(0.05);
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+});

@@ -419,6 +419,7 @@ import {
 } from "../canvas/GnumarusBrushPresets";
 import { parseHexToRgbaBytes, rgbaBytesToHex } from "../color/GnumarusColorModels";
 import {
+  EN_STRINGS,
   getActiveLocale,
   resolveLocale,
   setActiveLocale,
@@ -8367,8 +8368,8 @@ export class GnumarusShell extends LitElement {
       which,
       startX: event.clientX,
       startY: event.clientY,
-      originX: which === "bc" ? this.bcWindowX : this.hsWindowX,
-      originY: which === "bc" ? this.bcWindowY : this.hsWindowY,
+      originX: which === "bc" ? this.bcWindowX : which === "hs" ? this.hsWindowX : this.filterWindowX,
+      originY: which === "bc" ? this.bcWindowY : which === "hs" ? this.hsWindowY : this.filterWindowY,
     };
     const move = (moveEvent: PointerEvent): void => {
       const state = this.adjustWindowDragState;
@@ -18308,12 +18309,23 @@ export class GnumarusShell extends LitElement {
     filters: GnumarusFilterDef[];
   }> {
     const order: GnumarusFilterTheme[] = ["blur", "enhance", "artistic", "edge", "noise", "colors", "decor", "distort"];
-    return order.map((id) => ({
-      id,
-      label: tr(`filter.theme.${id}` as GnumarusMessageKey),
-      hint: tr("menu.filtersTitle"),
-      filters: GNUMARUS_FILTERS.filter((def) => def.theme === id),
-    }));
+    // Menus sort by the English names (stable lowercase compare, no locale
+    // variance); the visible labels still follow the active locale.
+    const byEnglish = (a: string, b: string): number => {
+      const al = a.toLowerCase();
+      const bl = b.toLowerCase();
+      return al < bl ? -1 : al > bl ? 1 : 0;
+    };
+    const englishThemeName = (id: GnumarusFilterTheme): string =>
+      EN_STRINGS[`filter.theme.${id}` as GnumarusMessageKey] ?? id;
+    return order
+      .map((id) => ({
+        id,
+        label: tr(`filter.theme.${id}` as GnumarusMessageKey),
+        hint: tr("menu.filtersTitle"),
+        filters: GNUMARUS_FILTERS.filter((def) => def.theme === id).sort((x, y) => byEnglish(x.title, y.title)),
+      }))
+      .sort((a, b) => byEnglish(englishThemeName(a.id), englishThemeName(b.id)));
   }
 
   /** Active filter definition, or null when no filter dialog is open. */

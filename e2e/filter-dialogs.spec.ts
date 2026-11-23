@@ -60,6 +60,26 @@ test("filters menu lists themes and opens a dialog @recent", async ({ page }) =>
   await expect(popup).toBeHidden();
 });
 
+test("filter submenus and items sort alphabetically by English name", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Filters", exact: true }).click();
+  const rows = page.locator("gnumarus-shell .submenu-row > button");
+  const labels = await rows.allTextContents();
+  const names = labels.map((text) => text.replace(/▸/g, "").trim());
+  const sorted = [...names].sort((a, b) => (a.toLowerCase() < b.toLowerCase() ? -1 : 1));
+  expect(names.length).toBeGreaterThan(0);
+  expect(names).toEqual(sorted);
+  await page.locator("gnumarus-shell .submenu-row").filter({ hasText: "Colors" }).hover();
+  const flyout = page.locator("gnumarus-shell .submenu-flyout");
+  const items = await flyout.getByRole("button").allTextContents();
+  const trimmed = items.map((text) => text.trim());
+  const sortedItems = [...trimmed].sort((a, b) => (a.toLowerCase() < b.toLowerCase() ? -1 : 1));
+  expect(trimmed).toContain("Curves");
+  expect(trimmed).toEqual(sortedItems);
+  await page.keyboard.press("Escape");
+});
+
 test("invert applies, undoes and cancels cleanly @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

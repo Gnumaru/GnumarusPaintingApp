@@ -8,6 +8,7 @@ import {
   normalizeColorCurve,
   removeCurveNode,
   type GnumarusColorCurve,
+  type GnumarusCurveNode,
 } from "./GnumarusColorCurves";
 
 /**
@@ -45,6 +46,12 @@ export class GnumarusCurveEditor extends LitElement {
   /** Square edge in CSS pixels (viewBox units match 1:1). */
   static readonly SIZE = 256;
 
+  /** Node hit radius in normalized units (generous grab area). */
+  static readonly NODE_HIT = 11 / 256;
+
+  /** Handle hit radius in normalized units. */
+  static readonly HANDLE_HIT = 10 / 256;
+
   private toValue(event: PointerEvent): { x: number; y: number } {
     const svg = this.shadowRoot?.querySelector("svg");
     const rect = svg?.getBoundingClientRect() ?? new DOMRect();
@@ -68,10 +75,36 @@ export class GnumarusCurveEditor extends LitElement {
     const nodes = normalizeColorCurve(this.nodes);
     const point = this.toValue(event);
     const size = GnumarusCurveEditor.SIZE;
-    const hit = 10 / size;
-    // Nearest grab target wins (ties go to the node): nodes are the
-    // primary target when handles coincide with them (e.g. a fresh
-    // endpoint whose handle sits exactly on the node).
+    const hit = this.hitTest(nodes, point);
+    if (event.button === 0 && hit !== null && (hit.kind === "node" || hit.kind === "handle")) {
+      this.drag = hit.kind === "node" ? { kind: "node", index: hit.index } : { kind: "handle", index: hit.index, which: hit.which };
+      this.hover = null;
+      (event.currentTarget as Element | null)?.setPointerCapture?.(event.pointerId);
+      this.requestUpdate();
+      event.preventDefault();
+      return;
+    }
+    if (event.button === 2) {
+      return;
+    }
+    // Left-click near the curve adds a node on it.
+    {
+      const near = nearestCurvePoint(nodes, point.x, point.y);
+      if (near.dist <= 14 / size) {
+        const next = addCurveNode(nodes, near.x, curveValueAt(nodes, near.x));
+        if (next !== nodes) {
+          this.emit(next);
+        }
+        event.preventDefault();
+      }
+    }
+  }
+
+  /** Nearest grab target (ties go to the node): nodes stay primary when a handle coincides with them. */
+  private hitTest(
+    nodes: GnumarusCurveNode[],
+    point: { x: number; y: number },
+  ): { kind: "node"; index: number } | { kind: "handle"; index: number; which: 0 | 1 } | null {
     let bestNode = -1;
     let bestNodeDist = Number.POSITIVE_INFINITY;
     for (let index = 0; index < nodes.length; index += 1) {
@@ -103,58 +136,67 @@ export class GnumarusCurveEditor extends LitElement {
       }
     }
     if (
-      event.button === 0 &&
       bestHandle !== null &&
-      bestHandleDist <= hit &&
-      bestHandleDist < bestNodeDist - 1 / size
+      bestHandleDist <= GnumarusCurveEditor.HANDLE_HIT &&
+      bestHandleDist < bestNodeDist - 1 / GnumarusCurveEditor.SIZE
     ) {
-      this.drag = { kind: "handle", index: bestHandle.index, which: bestHandle.which };
-      (event.currentTarget as Element | null)?.setPointerCapture?.(event.pointerId);
-      event.preventDefault();
-      return;
+      return { kind: "handle", index: bestHandle.index, which: bestHandle.which };
     }
-    if (event.button === 0 && bestNode >= 0 && bestNodeDist <= hit) {
-      this.drag = { kind: "node", index: bestNode };
-      (event.currentTarget as Element | null)?.setPointerCapture?.(event.pointerId);
-      event.preventDefault();
-      return;
+    if (bestNode >= 0 && bestNodeDist <= GnumarusCurveEditor.NODE_HIT) {
+      return { kind: "node", index: bestNode };
     }
-    if (event.button === 2) {
-      return;
-    }
-    // Left-click near the curve adds a node on it.
-    {
-      const near = nearestCurvePoint(nodes, point.x, point.y);
-      if (near.dist <= 14 / size) {
-        const next = addCurveNode(nodes, near.x, curveValueAt(nodes, near.x));
-        if (next !== nodes) {
-          this.emit(next);
-        }
-        event.preventDefault();
-      }
-    }
+    return null;
   }
+
+  /** Hover highlight target (drives node/handle emphasis and cursors). */
+  private hover:
+    | { kind: "node"; index: number }
+    | { kind: "handle"; index: number; which: 0 | 1 }
+    | null = null;
 
   private onPointerMove(event: PointerEvent): void {
     const drag = this.drag;
-    if (drag === null) {
+    if (drag !== null) {
+      const point = this.toValue(event);
+      const nodes = normalizeColorCurve(this.nodes);
+      const next =
+        drag.kind === "node"
+          ? moveCurveNode(nodes, drag.index, point.x, point.y)
+          : moveCurveHandle(nodes, drag.index, drag.which, point.x, point.y);
+      if (next !== nodes) {
+        this.emit(next);
+      }
+      event.preventDefault();
       return;
     }
-    const point = this.toValue(event);
-    const nodes = normalizeColorCurve(this.nodes);
-    const next =
-      drag.kind === "node"
-        ? moveCurveNode(nodes, drag.index, point.x, point.y)
-        : moveCurveHandle(nodes, drag.index, drag.which, point.x, point.y);
-    if (next !== nodes) {
-      this.emit(next);
+    const hit = this.hitTest(normalizeColorCurve(this.nodes), this.toValue(event));
+    const changed =
+      (hit === null) !== (this.hover === null) ||
+      (hit !== null &&
+        this.hover !== null &&
+        (hit.kind !== this.hover.kind ||
+          hit.index !== this.hover.index ||
+          (hit.kind === "handle" &&
+            this.hover.kind === "handle" &&
+            hit.which !== this.hover.which)));
+    if (changed) {
+      this.hover = hit;
+      this.requestUpdate();
     }
-    event.preventDefault();
+  }
+
+  private onPointerLeave(): void {
+    if (this.hover !== null) {
+      this.hover = null;
+      this.requestUpdate();
+    }
   }
 
   private onPointerUp(event: PointerEvent): void {
     if (this.drag !== null) {
       this.drag = null;
+      this.hover = null;
+      this.requestUpdate();
       try {
         (event.currentTarget as Element | null)?.releasePointerCapture?.(event.pointerId);
       } catch {
@@ -166,16 +208,11 @@ export class GnumarusCurveEditor extends LitElement {
   private onContextMenu(event: MouseEvent): void {
     event.preventDefault();
     const nodes = normalizeColorCurve(this.nodes);
-    const point = this.toValue(event as unknown as PointerEvent);
-    const hit = 10 / GnumarusCurveEditor.SIZE;
-    for (let index = 0; index < nodes.length; index += 1) {
-      const node = nodes[index];
-      if (node !== undefined && Math.hypot(node.x - point.x, node.y - point.y) <= hit) {
-        const next = removeCurveNode(nodes, index);
-        if (next !== nodes) {
-          this.emit(next);
-        }
-        return;
+    const hit = this.hitTest(nodes, this.toValue(event as unknown as PointerEvent));
+    if (hit !== null && hit.kind === "node") {
+      const next = removeCurveNode(nodes, hit.index);
+      if (next !== nodes) {
+        this.emit(next);
       }
     }
   }
@@ -202,16 +239,33 @@ export class GnumarusCurveEditor extends LitElement {
       grid.push({ x1: at, y1: 0, x2: at, y2: size });
       grid.push({ x1: 0, y1: at, x2: size, y2: at });
     }
+    const active = this.drag ?? this.hover;
+    const isActiveNode = (index: number): boolean =>
+      active !== null && active.kind === "node" && active.index === index;
+    const isActiveHandle = (index: number, which: 0 | 1): boolean =>
+      active !== null && active.kind === "handle" && active.index === index && active.which === which;
+    const cursor =
+      this.drag !== null
+        ? this.drag.kind === "node"
+          ? "grabbing"
+          : "move"
+        : this.hover !== null
+          ? this.hover.kind === "node"
+            ? "grab"
+            : "move"
+          : "crosshair";
     return html`
       <svg
         width=${size}
         height=${size}
         viewBox="0 0 ${size} ${size}"
+        style="cursor: ${cursor}"
         data-testid="curve-editor"
         @pointerdown=${(event: PointerEvent): void => this.onPointerDown(event)}
         @pointermove=${(event: PointerEvent): void => this.onPointerMove(event)}
         @pointerup=${(event: PointerEvent): void => this.onPointerUp(event)}
         @pointercancel=${(event: PointerEvent): void => this.onPointerUp(event)}
+        @pointerleave=${(): void => this.onPointerLeave()}
         @contextmenu=${(event: MouseEvent): void => this.onContextMenu(event)}
       >
         ${grid.map(
@@ -227,58 +281,57 @@ export class GnumarusCurveEditor extends LitElement {
         )}
         <line x1="0" y1=${size} x2=${size} y2="0" stroke="#555" stroke-width="1" stroke-dasharray="5 4" />
         <path d=${this.pathFor(nodes)} fill="none" stroke="#ffffff" stroke-width="2" data-testid="curve-path" />
-        ${nodes.flatMap((node, index) => [
-          html`<line
-            x1=${toX(node.x)}
-            y1=${toY(node.y)}
-            x2=${toX(node.hx0)}
-            y2=${toY(node.hy0)}
-            stroke="#0e639c"
-            stroke-width="1"
-          />`,
-          html`<line
-            x1=${toX(node.x)}
-            y1=${toY(node.y)}
-            x2=${toX(node.hx1)}
-            y2=${toY(node.hy1)}
-            stroke="#0e639c"
-            stroke-width="1"
-          />`,
-          html`<rect
-            x=${toX(node.hx0) - 4}
-            y=${toY(node.hy0) - 4}
-            width="8"
-            height="8"
-            fill="#0e639c"
-            stroke="#ffffff"
-            stroke-width="1"
-            data-testid="curve-handle"
-            data-index=${index}
-            data-which="0"
-          />`,
-          html`<rect
-            x=${toX(node.hx1) - 4}
-            y=${toY(node.hy1) - 4}
-            width="8"
-            height="8"
-            fill="#0e639c"
-            stroke="#ffffff"
-            stroke-width="1"
-            data-testid="curve-handle"
-            data-index=${index}
-            data-which="1"
-          />`,
-          html`<circle
-            cx=${toX(node.x)}
-            cy=${toY(node.y)}
-            r="6"
-            fill="#ffffff"
-            stroke="#111111"
-            stroke-width="2"
-            data-testid="curve-node"
-            data-index=${index}
-          />`,
-        ])}
+        ${nodes.flatMap((node, index) => {
+          const emphasized = isActiveNode(index) || isActiveHandle(index, 0) || isActiveHandle(index, 1);
+          const half = emphasized ? 6 : 5;
+          return [
+            // Single tangent bar through the node, like vector editors.
+            html`<line
+              x1=${toX(node.hx0)}
+              y1=${toY(node.hy0)}
+              x2=${toX(node.hx1)}
+              y2=${toY(node.hy1)}
+              stroke="#0e639c"
+              stroke-width=${emphasized ? 2.5 : 1.5}
+            />`,
+            html`<rect
+              x=${toX(node.hx0) - half}
+              y=${toY(node.hy0) - half}
+              width=${half * 2}
+              height=${half * 2}
+              transform=${`rotate(45 ${toX(node.hx0)} ${toY(node.hy0)})`}
+              fill="#0e639c"
+              stroke="#ffffff"
+              stroke-width="1.5"
+              data-testid="curve-handle"
+              data-index=${index}
+              data-which="0"
+            />`,
+            html`<rect
+              x=${toX(node.hx1) - half}
+              y=${toY(node.hy1) - half}
+              width=${half * 2}
+              height=${half * 2}
+              transform=${`rotate(45 ${toX(node.hx1)} ${toY(node.hy1)})`}
+              fill="#0e639c"
+              stroke="#ffffff"
+              stroke-width="1.5"
+              data-testid="curve-handle"
+              data-index=${index}
+              data-which="1"
+            />`,
+            html`<circle
+              cx=${toX(node.x)}
+              cy=${toY(node.y)}
+              r=${isActiveNode(index) ? 8.5 : 7}
+              fill="#ffffff"
+              stroke=${isActiveNode(index) ? "#0e639c" : "#111111"}
+              stroke-width="2.5"
+              data-testid="curve-node"
+              data-index=${index}
+            />`,
+          ];
+        })}
       </svg>
     `;
   }
