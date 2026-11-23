@@ -9,8 +9,15 @@
  * paints its spinner over one yielded frame before running a kernel.
  */
 
+import {
+  colorCurveLookup,
+  defaultColorCurve,
+  normalizeColorCurve,
+  type GnumarusColorCurve,
+} from "../color/GnumarusColorCurves";
+
 /** Filter parameter kinds the generic dialog can render. */
-export type GnumarusFilterParamKind = "number" | "boolean" | "enum" | "text";
+export type GnumarusFilterParamKind = "number" | "boolean" | "enum" | "text" | "curve";
 
 export interface GnumarusFilterParamOption {
   value: string;
@@ -25,7 +32,7 @@ export interface GnumarusFilterParamDef {
   min?: number;
   max?: number;
   step?: number;
-  def: number | boolean | string;
+  def: number | boolean | string | GnumarusColorCurve;
   options?: GnumarusFilterParamOption[];
 }
 
@@ -39,7 +46,7 @@ export interface GnumarusFilterDef {
   params: GnumarusFilterParamDef[];
 }
 
-export type GnumarusFilterValues = Record<string, number | boolean | string>;
+export type GnumarusFilterValues = Record<string, number | boolean | string | GnumarusColorCurve>;
 
 /** Deterministic LCG (seeded noise must replay identically). */
 export function filterRandom(seed: number): () => number {
@@ -84,6 +91,8 @@ export function normalizeFilterValues(
     }
     if (param.kind === "boolean") {
       out[param.key] = value === true;
+    } else if (param.kind === "curve") {
+      out[param.key] = normalizeColorCurve(value);
     } else if (param.kind === "enum") {
       const allowed = new Set((param.options ?? []).map((option) => option.value));
       out[param.key] = typeof value === "string" && allowed.has(value) ? value : (param.def as string);
@@ -1303,6 +1312,22 @@ function hsvToRgb255(h: number, s: number, v: number): [number, number, number] 
   return [clampByte((r + m) * 255), clampByte((g + m) * 255), clampByte((b + m) * 255)];
 }
 
+function kernelColorCurves(src: Uint8ClampedArray, _width: number, _height: number, v: GnumarusFilterValues): Uint8ClampedArray {
+  const channel = v["channel"];
+  const lut = colorCurveLookup(normalizeColorCurve(v["curve"]));
+  const useR = channel === "all-channels" || channel === "red";
+  const useG = channel === "all-channels" || channel === "green";
+  const useB = channel === "all-channels" || channel === "blue";
+  const dst = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    dst[i] = useR ? (lut[src[i] ?? 0] ?? 0) : (src[i] ?? 0);
+    dst[i + 1] = useG ? (lut[src[i + 1] ?? 0] ?? 0) : (src[i + 1] ?? 0);
+    dst[i + 2] = useB ? (lut[src[i + 2] ?? 0] ?? 0) : (src[i + 2] ?? 0);
+    dst[i + 3] = src[i + 3] ?? 0;
+  }
+  return dst;
+}
+
 function kernelLevels(src: Uint8ClampedArray, _width: number, _height: number, v: GnumarusFilterValues): Uint8ClampedArray {
   const channel = v["channel"];
   const lo = clampInt(v["low"], 0, 255, 0);
@@ -2520,6 +2545,34 @@ export const GNUMARUS_FILTERS: GnumarusFilterDef[] = [
     ],
   },
   {
+    id: "curves",
+    title: "Curves",
+    hint: "Remaps tones through an editable Bézier curve.",
+    theme: "colors",
+    params: [
+      {
+        key: "channel",
+        kind: "enum",
+        label: "Channel",
+        hint: "Channel to remap.",
+        def: "all-channels",
+        options: [
+          { value: "all-channels", label: "All channels" },
+          { value: "red", label: "Red" },
+          { value: "green", label: "Green" },
+          { value: "blue", label: "Blue" },
+        ],
+      },
+      {
+        key: "curve",
+        kind: "curve",
+        label: "Curve",
+        hint: "Click the line to add a node, right-click a node to remove it, drag nodes and handles to shape tones.",
+        def: defaultColorCurve(),
+      },
+    ],
+  },
+  {
     id: "hsv-adjust",
     title: "HSV Adjust",
     hint: "Shifts hue, saturation and value, with an optional colorize.",
@@ -2911,6 +2964,8 @@ export function runFilterKernel(
       return kernelVideoDegradation(src, width, height, v);
     case "levels":
       return kernelLevels(src, width, height, v);
+    case "curves":
+      return kernelColorCurves(src, width, height, v);
     case "hsv-adjust":
       return kernelHsvAdjust(src, width, height, v);
     case "palettize":

@@ -135,6 +135,9 @@ Colors (23)
   full white.
 * **Levels** (channel, low, high, gamma) — remaps brightness with
   black/white sliders and a midtone control.
+* **Curves** (channel, curve) — remaps tones through an editable Bézier
+  curve: click the line to add nodes, right-click a node to remove it,
+  drag nodes and handles to shape the response.
 * **HSV Adjust** (hue, saturation, value, colorize) — shifts all
   colors' hue, vividness and brightness at once.
 * **Palettize** (colors, dither) — reduces the image to a hand-picked

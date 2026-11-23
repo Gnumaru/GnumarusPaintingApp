@@ -404,6 +404,7 @@ import {
   type GnumarusFilterDef,
   type GnumarusFilterParamDef,
   type GnumarusFilterTheme,
+  type GnumarusFilterValues,
 } from "../canvas/GnumarusFilters";
 import {
   BRUSH_PRESET_STORAGE_KEY,
@@ -458,6 +459,11 @@ import {
   GNUMARUS_DEFAULT_FRAME_DURATION_SEC as DEFAULT_ANIMATION_FRAME_DURATION,
 } from "../animation/GnumarusAnimationModel";
 import "../color/GnumarusColorPicker";
+import "../color/GnumarusCurveEditor";
+import {
+  normalizeColorCurve,
+  type GnumarusColorCurve,
+} from "../color/GnumarusColorCurves";
 import type { GnumarusColorPicker } from "../color/GnumarusColorPicker";
 
 /** Decode a base64 string into raw bytes (chunked, no dependency). */
@@ -1446,6 +1452,17 @@ export class GnumarusShell extends LitElement {
       flex: 1 1 auto;
       min-width: 0;
     }
+    .filter-param-row.filter-param-curve {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .filter-param-curve {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex: 1 1 auto;
+      min-width: 0;
+    }
     .adjust-body label > .adjust-name {
       flex: 0 0 96px;
     }
@@ -2431,7 +2448,7 @@ export class GnumarusShell extends LitElement {
   declare toolsSubmenu: string | null;
   declare filterOpen: boolean;
   declare filterId: string | null;
-  declare filterValues: Record<string, number | boolean | string>;
+  declare filterValues: GnumarusFilterValues;
   declare filterWorking: boolean;
   declare filterWindowX: number;
   declare filterWindowY: number;
@@ -18393,6 +18410,24 @@ export class GnumarusShell extends LitElement {
         />
         ${tr(key)}</label
       >${reset}`;
+    }
+    if (param.kind === "curve") {
+      const nodes = normalizeColorCurve(value);
+      return html`<div class="filter-param-curve" title=${tr(hintKey)}>
+        <span class="adjust-name">${tr(key)}</span>
+        <gnumarus-curve-editor
+          data-testid="filter-param-${param.key}"
+          .nodes=${nodes}
+          @gnumarus-curve-change=${(event: Event): void => {
+            const detail = (event as CustomEvent<{ nodes?: GnumarusColorCurve }>).detail;
+            if (detail !== undefined) {
+              this.filterValues = { ...this.filterValues, [param.key]: normalizeColorCurve(detail.nodes) };
+              void this.previewFilter();
+            }
+          }}
+        ></gnumarus-curve-editor>
+        ${reset}
+      </div>`;
     }
     if (param.kind === "enum") {
       return html`<label title=${tr(hintKey)}

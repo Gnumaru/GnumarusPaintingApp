@@ -142,6 +142,10 @@ Cores (23)
   branco total.
 * **Níveis** (canal, baixo, alto, gama) — remapeia o brilho com
   controles de preto/branco e meios-tons.
+* **Curvas** (canal, curva) — remapeia tons através de uma curva Bézier
+  editável: clique na linha para adicionar nós, clique com o botão
+  direito num nó para removê-lo, arraste nós e alças para moldar a
+  resposta.
 * **Ajuste HSV** (matiz, saturação, valor, colorir) — muda de uma vez
   o matiz, a vivacidade e o brilho de todas as cores.
 * **Paletizar** (cores, dithering) — reduz a imagem a uma lista de

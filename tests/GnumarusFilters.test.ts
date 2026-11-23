@@ -35,8 +35,8 @@ function gradient(width: number, height: number): Uint8ClampedArray {
 }
 
 describe("GnumarusFilters", () => {
-  it("registers 65 filters across 8 themes with unique ids", () => {
-    expect(GNUMARUS_FILTERS.length).toBe(65);
+  it("registers 66 filters across 8 themes with unique ids", () => {
+    expect(GNUMARUS_FILTERS.length).toBe(66);
     const ids = GNUMARUS_FILTERS.map((def) => def.id);
     expect(new Set(ids).size).toBe(ids.length);
     const themes = new Set(GNUMARUS_FILTERS.map((def) => def.theme));
