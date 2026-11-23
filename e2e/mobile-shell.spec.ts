@@ -25,22 +25,37 @@ test.describe("mobile shell", () => {
     viewport: { width: 390, height: 844 },
   });
 
-  test("boots the mobile shell with bottom toolbar", async ({ page }) => {
+  test("boots the mobile shell with a single scrollable bar", async ({ page }) => {
     await page.goto("/");
     await page.waitForSelector('gnumarus-shell [data-testid="mobile-shell"]');
     await expect(page.locator("gnumarus-shell .menubar")).toHaveCount(0);
     for (const id of [
       "mobile-pencil",
       "mobile-eraser",
-      "mobile-bucket",
-      "mobile-eyedropper",
-      "mobile-settings",
       "mobile-undo",
       "mobile-redo",
+      "mobile-settings",
+      "mobile-bucket",
+      "mobile-eyedropper",
+      "mobile-menu",
     ]) {
       await expect(page.locator(`gnumarus-shell [data-testid="${id}"]`)).toBeVisible();
     }
     await expect(page.locator('gnumarus-shell [data-testid="mobile-pencil"]')).toHaveClass(/active/);
+    // Save and the desktop switch live inside the hamburger menu.
+    await expect(page.locator('gnumarus-shell [data-testid="mobile-menu-sheet"]')).toHaveCount(0);
+  });
+
+  test("hamburger menu holds save and the desktop switch", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector('gnumarus-shell [data-testid="mobile-shell"]');
+    await page.locator('gnumarus-shell [data-testid="mobile-menu"]').click();
+    const sheet = page.locator('gnumarus-shell [data-testid="mobile-menu-sheet"]');
+    await expect(sheet).toBeVisible();
+    await expect(sheet.locator('[data-testid="mobile-save"]')).toBeVisible();
+    await expect(sheet.locator('[data-testid="mobile-desktop"]')).toBeVisible();
+    await page.locator('gnumarus-shell [data-testid="mobile-menu"]').click();
+    await expect(sheet).toHaveCount(0);
   });
 
   test("mobile boots a portrait project at the screen resolution", async ({ page }) => {
@@ -184,6 +199,7 @@ test.describe("mobile shell", () => {
   test("override switches mobile to desktop and back", async ({ page }) => {
     await page.goto("/");
     await page.waitForSelector('gnumarus-shell [data-testid="mobile-shell"]');
+    await page.locator('gnumarus-shell [data-testid="mobile-menu"]').click();
     await page.locator('gnumarus-shell [data-testid="mobile-desktop"]').click();
     await expect(page.locator("gnumarus-shell .menubar")).toBeVisible();
     await expect(page.locator('gnumarus-shell [data-testid="mobile-shell"]')).toHaveCount(0);

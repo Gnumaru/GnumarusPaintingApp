@@ -15,10 +15,10 @@ Interface móvel
 ---------------
 
 * Em celulares (tablets mantêm a interface de desktop), o aplicativo
-  abre um shell otimizado para toque: canvas em tela cheia, barra de
-  ferramentas inferior (lápis, borracha, balde, conta-gotas, painel de
-  cor/tamanho, desfazer, refazer) e mini-barra superior com Salvar e
-  um botão de versão desktop.
+  abre um shell otimizado para toque: canvas em tela cheia e uma única
+  barra inferior (ferramentas roláveis — lápis, borracha, desfazer,
+  refazer, painel de cor/tamanho, balde, conta-gotas — mais um botão
+  de menu fixo com Salvar e a troca para versão desktop).
 * Um dedo pinta; dois dedos aproximam (pinça) e arrastam. O MVP móvel
   é de camada única, sem animação.
 * **Ajuda > Versão móvel** alterna entre as interfaces de desktop e

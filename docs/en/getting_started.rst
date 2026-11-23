@@ -14,9 +14,10 @@ Mobile interface
 ----------------
 
 * On phones (tablets keep the desktop interface), the app boots a
-  touch-optimized shell: full-screen canvas, a bottom toolbar (pencil,
-  eraser, bucket, eyedropper, color/size sheet, undo, redo) and a top
-  mini-bar with Save and a Desktop version button.
+  touch-optimized shell: full-screen canvas and a single bottom bar
+  (scrollable tools — pencil, eraser, undo, redo, color/size sheet,
+  bucket, eyedropper — plus a fixed menu button holding Save and the
+  Desktop version switch).
 * One finger paints; two fingers pinch-zoom and pan. The mobile MVP is
   single-layer with no animation.
 * **Help > Mobile version** switches the desktop interface to mobile

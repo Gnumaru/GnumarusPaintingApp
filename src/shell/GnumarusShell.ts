@@ -1921,34 +1921,6 @@ export class GnumarusShell extends LitElement {
       color: #e6e6e6;
       overscroll-behavior: none;
     }
-    .mobile-topbar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: calc(4px + env(safe-area-inset-top)) 10px 4px;
-      background: #252526;
-      border-bottom: 1px solid #111;
-      flex: 0 0 auto;
-      font-size: 14px;
-    }
-    .mobile-topbar .mobile-title {
-      flex: 1 1 auto;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      font-weight: 600;
-    }
-    .mobile-topbar button {
-      background: #0e639c;
-      color: #fff;
-      border: none;
-      border-radius: 6px;
-      padding: 8px 12px;
-      font-size: 14px;
-    }
-    .mobile-topbar button.ghost {
-      background: #3a3d41;
-    }
     .mobile-canvas-host {
       flex: 1 1 auto;
       position: relative;
@@ -1995,31 +1967,83 @@ export class GnumarusShell extends LitElement {
     .mobile-toolbar {
       display: flex;
       align-items: stretch;
-      justify-content: space-around;
       gap: 2px;
       padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
       background: #252526;
       border-top: 1px solid #111;
       flex: 0 0 auto;
     }
-    .mobile-toolbar button {
-      flex: 1 1 0;
+    .mobile-tools {
+      flex: 1 1 auto;
+      display: flex;
+      align-items: stretch;
+      gap: 2px;
+      min-width: 0;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+      mask-image: linear-gradient(to right, black 88%, transparent 100%);
+      -webkit-mask-image: linear-gradient(to right, black 88%, transparent 100%);
+    }
+    .mobile-tools::-webkit-scrollbar {
+      display: none;
+    }
+    .mobile-tools button {
+      flex: 0 0 auto;
+      min-width: 56px;
       background: #3a3d41;
       color: #fff;
       border: none;
       border-radius: 8px;
-      padding: 10px 4px;
+      padding: 10px 8px;
       font-size: 13px;
       min-height: 48px;
     }
-    .mobile-toolbar button.active {
+    .mobile-tools button.active {
       background: #0e639c;
     }
-    .mobile-toolbar button:disabled {
+    .mobile-tools button:disabled {
       opacity: 0.4;
     }
-    .mobile-toolbar button.mobile-swatch {
-      padding: 6px 4px;
+    .mobile-tools button.mobile-swatch {
+      padding: 6px 10px;
+    }
+    .mobile-hamburger {
+      flex: 0 0 auto;
+      min-width: 52px;
+      background: #3a3d41;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 20px;
+      min-height: 48px;
+    }
+    .mobile-menu-sheet {
+      flex: 0 0 auto;
+      background: #252526;
+      border-top: 1px solid #111;
+      padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .mobile-menu-sheet .mobile-menu-title {
+      font-weight: 600;
+      font-size: 14px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .mobile-menu-sheet button {
+      background: #0e639c;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 14px;
+      min-height: 48px;
+      text-align: left;
     }
     .mobile-toolbar .mobile-swatch-dot {
       display: block;
@@ -2182,6 +2206,7 @@ export class GnumarusShell extends LitElement {
     uiHidden: { type: Boolean },
     uiMode: { type: String },
     mobileSheetOpen: { type: Boolean },
+    mobileMenuOpen: { type: Boolean },
     matrixHeightPx: { type: Number },
     layersPanelWidthPx: { type: Number },
     toastMessage: { type: String },
@@ -2466,6 +2491,8 @@ export class GnumarusShell extends LitElement {
   declare uiMode: GnumarusUiMode;
   /** Mobile bottom-sheet (color/size) visibility. */
   declare mobileSheetOpen: boolean;
+  /** Mobile hamburger menu visibility. */
+  declare mobileMenuOpen: boolean;
   /** Explicit animation-matrix height in px (null = automatic). */
   declare matrixHeightPx: number | null;
   /** Layers panel width in px (null = 220px stylesheet default). */
@@ -2621,6 +2648,7 @@ export class GnumarusShell extends LitElement {
     this.tool = "pencil";
     this.uiMode = detectUiMode();
     this.mobileSheetOpen = false;
+    this.mobileMenuOpen = false;
     this.drawerFront = {
       paint: "pencil",
       view: "loupe",
@@ -2904,30 +2932,12 @@ export class GnumarusShell extends LitElement {
     this.setBlendMode(eraser ? "eraser" : "normal");
   }
 
-  /** Touch-optimized shell: full-bleed canvas, top mini-bar, bottom tool bar. */
+  /** Touch-optimized shell: full-bleed canvas, single bottom tool bar. */
   private renderMobileShell(): unknown {
     const eraserActive = this.tool === "pencil" && this.blendMode === "eraser";
     const pencilActive = this.tool === "pencil" && !eraserActive;
     return html`
       <div class="mobile-shell" data-testid="mobile-shell">
-        <div class="mobile-topbar">
-          <span class="mobile-title">Gnumaru's Painting App${this.dirty ? tr("app.modified") : ""}</span>
-          <button
-            data-testid="mobile-save"
-            title=${tr("menu.saveTitle")}
-            @click=${(): void => void this.runAction(this.fsSupported ? "save-project" : "save-embedded-project")}
-          >
-            ${tr("menu.saveProject")}
-          </button>
-          <button
-            class="ghost"
-            data-testid="mobile-desktop"
-            title=${tr("mobile.switchToDesktop")}
-            @click=${(): void => this.setUiMode("desktop")}
-          >
-            ${tr("mobile.switchToDesktop")}
-          </button>
-        </div>
         <div class="mobile-canvas-host" id="mobileCanvasHost"></div>
         ${this.mobileSheetOpen
           ? html`
@@ -2968,62 +2978,100 @@ export class GnumarusShell extends LitElement {
             `
           : html``}
         <div class="mobile-toolbar" data-testid="mobile-toolbar">
+          <div class="mobile-tools" data-testid="mobile-tools">
+            <button
+              data-testid="mobile-pencil"
+              class=${pencilActive ? "active" : ""}
+              @click=${(): void => this.setMobileTool("pencil", false)}
+            >
+              ${tr("tool.pencil")}
+            </button>
+            <button
+              data-testid="mobile-eraser"
+              class=${eraserActive ? "active" : ""}
+              @click=${(): void => this.setMobileTool("pencil", true)}
+            >
+              ${tr("val.eraser")}
+            </button>
+            <button
+              data-testid="mobile-undo"
+              title=${tr("menu.undoTitle")}
+              ?disabled=${!this.canUndo}
+              @click=${(): void => void this.runAction("undo")}
+            >
+              ${tr("menu.undo")}
+            </button>
+            <button
+              data-testid="mobile-redo"
+              title=${tr("menu.redoTitle")}
+              ?disabled=${!this.canRedo}
+              @click=${(): void => void this.runAction("redo")}
+            >
+              ${tr("menu.redo")}
+            </button>
+            <button
+              class="mobile-swatch"
+              data-testid="mobile-settings"
+              title=${`${tr("mobile.color")} / ${tr("mobile.brushSize")}`}
+              @click=${(): void => {
+                this.mobileSheetOpen = !this.mobileSheetOpen;
+              }}
+            >
+              <span class="mobile-swatch-dot" style="background: ${this.colorValue}"></span>
+              ${Math.round(this.brushSize * 10) / 10}
+            </button>
+            <button
+              data-testid="mobile-bucket"
+              class=${this.tool === "bucket" ? "active" : ""}
+              @click=${(): void => this.setMobileTool("bucket", false)}
+            >
+              ${tr("tool.bucket")}
+            </button>
+            <button
+              data-testid="mobile-eyedropper"
+              class=${this.tool === "eyedropper" ? "active" : ""}
+              @click=${(): void => this.setMobileTool("eyedropper", false)}
+            >
+              ${tr("tool.eyedropper")}
+            </button>
+          </div>
           <button
-            data-testid="mobile-pencil"
-            class=${pencilActive ? "active" : ""}
-            @click=${(): void => this.setMobileTool("pencil", false)}
-          >
-            ${tr("tool.pencil")}
-          </button>
-          <button
-            data-testid="mobile-eraser"
-            class=${eraserActive ? "active" : ""}
-            @click=${(): void => this.setMobileTool("pencil", true)}
-          >
-            ${tr("val.eraser")}
-          </button>
-          <button
-            data-testid="mobile-bucket"
-            class=${this.tool === "bucket" ? "active" : ""}
-            @click=${(): void => this.setMobileTool("bucket", false)}
-          >
-            ${tr("tool.bucket")}
-          </button>
-          <button
-            data-testid="mobile-eyedropper"
-            class=${this.tool === "eyedropper" ? "active" : ""}
-            @click=${(): void => this.setMobileTool("eyedropper", false)}
-          >
-            ${tr("tool.eyedropper")}
-          </button>
-          <button
-            class="mobile-swatch"
-            data-testid="mobile-settings"
-            title=${`${tr("mobile.color")} / ${tr("mobile.brushSize")}`}
+            class="mobile-hamburger"
+            data-testid="mobile-menu"
+            title=${tr("mobile.menu")}
+            aria-label=${tr("mobile.menu")}
+            aria-expanded=${this.mobileMenuOpen ? "true" : "false"}
             @click=${(): void => {
-              this.mobileSheetOpen = !this.mobileSheetOpen;
+              this.mobileMenuOpen = !this.mobileMenuOpen;
             }}
           >
-            <span class="mobile-swatch-dot" style="background: ${this.colorValue}"></span>
-            ${Math.round(this.brushSize * 10) / 10}
-          </button>
-          <button
-            data-testid="mobile-undo"
-            title=${tr("menu.undoTitle")}
-            ?disabled=${!this.canUndo}
-            @click=${(): void => void this.runAction("undo")}
-          >
-            ${tr("menu.undo")}
-          </button>
-          <button
-            data-testid="mobile-redo"
-            title=${tr("menu.redoTitle")}
-            ?disabled=${!this.canRedo}
-            @click=${(): void => void this.runAction("redo")}
-          >
-            ${tr("menu.redo")}
+            ☰
           </button>
         </div>
+        ${this.mobileMenuOpen
+          ? html`
+              <div class="mobile-menu-sheet" data-testid="mobile-menu-sheet">
+                <div class="mobile-menu-title">Gnumaru's Painting App${this.dirty ? tr("app.modified") : ""}</div>
+                <button
+                  data-testid="mobile-save"
+                  title=${tr("menu.saveTitle")}
+                  @click=${(): void => {
+                    this.mobileMenuOpen = false;
+                    void this.runAction(this.fsSupported ? "save-project" : "save-embedded-project");
+                  }}
+                >
+                  ${tr("menu.saveProject")}
+                </button>
+                <button
+                  data-testid="mobile-desktop"
+                  title=${tr("mobile.switchToDesktop")}
+                  @click=${(): void => this.setUiMode("desktop")}
+                >
+                  ${tr("mobile.switchToDesktop")}
+                </button>
+              </div>
+            `
+          : html``}
       </div>
     `;
   }
@@ -8149,6 +8197,7 @@ export class GnumarusShell extends LitElement {
     }
     this.uiMode = mode;
     this.mobileSheetOpen = false;
+    this.mobileMenuOpen = false;
     this.gesturePointers.clear();
     this.gesturePrev = null;
     void this.updateComplete.then(() => {

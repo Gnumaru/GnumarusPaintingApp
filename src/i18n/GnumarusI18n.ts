@@ -1744,6 +1744,7 @@ export const EN_STRINGS = {
   "anim.framesMany": "frames",
   "mobile.switchToDesktop": "Desktop version",
   "mobile.switchToMobile": "Mobile version",
+  "mobile.menu": "Menu",
   "mobile.color": "Color",
   "mobile.brushSize": "Brush size",
 } as const;
@@ -3462,6 +3463,7 @@ export const PT_BR_STRINGS: Record<GnumarusMessageKey, string> = {
   "anim.framesMany": "quadros",
   "mobile.switchToDesktop": "Versão desktop",
   "mobile.switchToMobile": "Versão móvel",
+  "mobile.menu": "Menu",
   "mobile.color": "Cor",
   "mobile.brushSize": "Tamanho do pincel",
 };
