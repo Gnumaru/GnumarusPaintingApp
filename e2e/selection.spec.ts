@@ -162,9 +162,9 @@ test("paint drawer swaps line and curve through the flyout", async ({ page }) =>
   await page.locator('gnumarus-shell [data-testid="paint-flyout"]').getByRole("button", { name: "Curve" }).click();
   await expect(page.locator('gnumarus-shell [data-testid="paint-flyout"]')).toBeHidden();
   await expect(drawer.getByRole("button", { name: "Curve" })).toBeVisible();
-  await expect(page.locator("gnumarus-shell")).toContainText("Curve tool");
+  await expect(page.locator("gnumarus-shell")).toContainText("Curve");
   await drawer.getByRole("button", { name: "Curve" }).click();
-  await expect(page.locator("gnumarus-shell")).toContainText("Curve tool");
+  await expect(page.locator("gnumarus-shell")).toContainText("Curve");
 });
 
 test("destructive and transform drawers swap their front tools", async ({ page }) => {
@@ -181,7 +181,7 @@ test("destructive and transform drawers swap their front tools", async ({ page }
   await transform.getByRole("button", { name: "Non-destructive cell transform" }).click({ button: "right" });
   await page.locator('gnumarus-shell [data-testid="transform-flyout"]').getByRole("button", { name: "Non-destructive cell 3D rotation" }).click();
   await expect(transform.getByRole("button", { name: "Non-destructive cell 3D rotation" })).toBeVisible();
-  await expect(page.locator("gnumarus-shell")).toContainText("Non-destructive cell 3D rotation tool");
+  await expect(page.locator("gnumarus-shell")).toContainText("Non-destructive cell 3D rotation");
 });
 
 test("elliptical selection cuts an ellipse", async ({ page }) => {

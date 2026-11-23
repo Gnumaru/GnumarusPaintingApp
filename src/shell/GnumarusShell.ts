@@ -223,6 +223,21 @@ import {
   type GnumarusImportCleanup,
 } from "../settings/GnumarusImportSettings";
 import {
+  GNUMARUS_DEFAULT_SHORTCUT_MAP,
+  GNUMARUS_SHORTCUT_PRESETS,
+  applyShortcutPreset,
+  findShortcutConflicts,
+  loadShortcutStore,
+  normalizeShortcutKey,
+  resolveEffectiveShortcuts,
+  saveShortcutStore,
+  shortcutMatchesEvent,
+  shortcutToString,
+  type GnumarusShortcutEffective,
+  type GnumarusShortcutKeyboard,
+  type GnumarusShortcutPresetId,
+} from "../settings/GnumarusShortcuts";
+import {
   DEFAULT_EXPAND_SETTINGS,
   EXPAND_SETTINGS_STORAGE_KEY,
   clampExpandStep,
@@ -445,18 +460,6 @@ import {
 import "../color/GnumarusColorPicker";
 import type { GnumarusColorPicker } from "../color/GnumarusColorPicker";
 
-interface GnumarusShortcutEntry {
-  keys: string;
-  /** Brazilian Portuguese key label (shown when the locale is pt-BR). */
-  keysPt?: string;
-  action: string;
-}
-
-interface GnumarusShortcutSection {
-  title: string;
-  entries: GnumarusShortcutEntry[];
-}
-
 /** Decode a base64 string into raw bytes (chunked, no dependency). */
 function decodeBase64Bytes(data: string): Uint8Array {
   const text = atob(data);
@@ -514,143 +517,6 @@ function hasDroppedFiles(event: DragEvent): boolean {
 
 /** Public source repository opened by Help > Source code. */
 export const GNUMARUS_SOURCE_URL = "https://github.com/Gnumaru/GnumarusPaintingApp";
-
-function gnumarusShortcuts(): GnumarusShortcutSection[] {
-  return [
-    {
-      title: tr("sc.file"),
-      entries: [
-        { keys: "Ctrl+S (Cmd+S on macOS)", keysPt: "Ctrl+S (Cmd+S no macOS)", action: tr("sc.saveFolder") },
-      ],
-    },
-    {
-      title: tr("sc.history"),
-      entries: [
-        { keys: "Ctrl+Z (Cmd+Z on macOS)", keysPt: "Ctrl+Z (Cmd+Z no macOS)", action: tr("sc.undo") },
-        { keys: "Ctrl+Y or Shift+Ctrl+Z (Cmd+Y or Shift+Cmd+Z on macOS)", keysPt: "Ctrl+Y ou Shift+Ctrl+Z (Cmd+Y ou Shift+Cmd+Z no macOS)", action: tr("sc.redo") },
-      ],
-    },
-    {
-      title: tr("sc.edit"),
-      entries: [
-        { keys: "Ctrl+X (Cmd+X on macOS)", keysPt: "Ctrl+X (Cmd+X no macOS)", action: tr("sc.cut") },
-        { keys: "Ctrl+C (Cmd+C on macOS)", keysPt: "Ctrl+C (Cmd+C no macOS)", action: tr("sc.copySelection") },
-        { keys: "Ctrl+Shift+C (Cmd+Shift+C on macOS)", keysPt: "Ctrl+Shift+C (Cmd+Shift+C no macOS)", action: tr("sc.copyMerged") },
-        { keys: "Ctrl+V (Cmd+V on macOS)", keysPt: "Ctrl+V (Cmd+V no macOS)", action: tr("sc.paste") },
-      ],
-    },
-    {
-      title: tr("sc.layers"),
-      entries: [
-        { keys: "Ctrl+E (Cmd+E on macOS)", keysPt: "Ctrl+E (Cmd+E no macOS)", action: tr("sc.mergeDown") },
-        { keys: "PageUp", action: tr("sc.layerAbove") },
-        { keys: "PageDown", action: tr("sc.layerBelow") },
-        { keys: "ArrowUp", action: tr("sc.layerAbove") },
-        { keys: "ArrowDown", action: tr("sc.layerBelow") },
-        { keys: "Shift+ArrowUp", action: tr("sc.moveLayerUp") },
-        { keys: "Shift+ArrowDown", action: tr("sc.moveLayerDown") },
-        { keys: "Alt+ArrowLeft", action: tr("sc.nestOut") },
-        { keys: "Alt+ArrowRight", action: tr("sc.nestIn") },
-        { keys: "Insert", action: tr("sc.insertLayer") },
-        { keys: "Delete", action: tr("sc.deleteCell") },
-        { keys: "Ctrl+Shift+ArrowUp (Cmd+Shift+ArrowUp on macOS)", keysPt: "Ctrl+Shift+ArrowUp (Cmd+Shift+ArrowUp no macOS)", action: tr("sc.newLayerAbove") },
-        { keys: "Ctrl+Shift+ArrowDown (Cmd+Shift+ArrowDown on macOS)", keysPt: "Ctrl+Shift+ArrowDown (Cmd+Shift+ArrowDown no macOS)", action: tr("sc.newLayerBelow") },
-        { keys: "Ctrl+Alt+ArrowUp", action: tr("sc.expandUp") },
-        { keys: "Ctrl+Alt+ArrowDown", action: tr("sc.expandDown") },
-        { keys: "Ctrl+Alt+ArrowLeft", action: tr("sc.expandLeft") },
-        { keys: "Ctrl+Alt+ArrowRight", action: tr("sc.expandRight") },
-      ],
-    },
-    {
-      title: tr("sc.frames"),
-      entries: [
-        { keys: "ArrowLeft", action: tr("sc.prevFrame") },
-        { keys: "ArrowRight", action: tr("sc.nextFrame") },
-        { keys: "Shift+ArrowLeft", action: tr("sc.moveFrameLeft") },
-        { keys: "Shift+ArrowRight", action: tr("sc.moveFrameRight") },
-        { keys: "Ctrl+Shift+ArrowLeft (Cmd+Shift+ArrowLeft on macOS)", keysPt: "Ctrl+Shift+ArrowLeft (Cmd+Shift+ArrowLeft no macOS)", action: tr("sc.newFrameLeft") },
-        { keys: "Ctrl+Shift+ArrowRight (Cmd+Shift+ArrowRight on macOS)", keysPt: "Ctrl+Shift+ArrowRight (Cmd+Shift+ArrowRight no macOS)", action: tr("sc.newFrameRight") },
-      ],
-    },
-    {
-      title: tr("sc.tools"),
-      entries: [
-        { keys: "B", action: tr("sc.toolPencil") },
-        { keys: "G or F", keysPt: "G ou F", action: tr("sc.toolBucket") },
-        { keys: "N", action: tr("sc.toolLine") },
-        { keys: "C", action: tr("sc.toolCurve") },
-        { keys: "D", action: tr("sc.toolRectangle") },
-        { keys: "H", action: tr("sc.toolEllipseShape") },
-        { keys: "J", action: tr("sc.toolPolygon") },
-        { keys: "K", action: tr("sc.toolGradient") },
-        { keys: "S", action: tr("sc.toolShading") },
-        { keys: "I", action: tr("sc.toolBlur") },
-        { keys: "A", action: tr("sc.toolClone") },
-        { keys: "Q", action: tr("sc.toolRecolor") },
-        { keys: "Z", action: tr("sc.toolLoupe") },
-        { keys: "Toolbar, palette", keysPt: "Barra de ferramentas, paleta", action: tr("sc.toolPan") },
-        { keys: "Toolbar, palette", keysPt: "Barra de ferramentas, paleta", action: tr("sc.toolRotate") },
-        { keys: "T", action: tr("sc.toolTransform") },
-        { keys: "Y", action: tr("sc.toolRot3d") },
-        { keys: "R", action: tr("sc.toolRectselect") },
-        { keys: "O", action: tr("sc.toolEllipse") },
-        { keys: "L", action: tr("sc.toolLasso") },
-        { keys: "P", action: tr("sc.toolPolylasso") },
-        { keys: "W", action: tr("sc.toolColorselect") },
-        { keys: "X", action: tr("sc.swapColors") },
-        { keys: "Toolbar, palette", keysPt: "Barra de ferramentas, paleta", action: tr("sc.toolText") },
-        { keys: "R (tile brush)", keysPt: "R (pincel de tiles)", action: tr("sc.tileRotate") },
-        { keys: "H (tile brush)", keysPt: "H (pincel de tiles)", action: tr("sc.tileFlipH") },
-        { keys: "V (tile brush)", keysPt: "V (pincel de tiles)", action: tr("sc.tileFlipV") },
-        { keys: "Shift / Ctrl+Shift / Alt+Shift + drag", keysPt: "Shift / Ctrl+Shift / Alt+Shift + arrastar", action: tr("sc.rectselectModifiers") },
-        { keys: "Alt + drag a transform resize handle", keysPt: "Alt + arraste uma âncora de redimensionamento", action: tr("sc.transformProportional") },
-        { keys: "Right-click a drawer button", keysPt: "Botão direito numa gaveta de ferramentas", action: tr("sc.drawerFlyout") },
-        { keys: "V", action: tr("sc.toolDestransform") },
-        { keys: "U", action: tr("sc.toolDestransform3d") },
-        { keys: "E", action: tr("sc.toggleEraser") },
-        { keys: "Hold Ctrl", keysPt: "Segurar Ctrl", action: tr("sc.tempEyedropper") },
-        { keys: "Enter, Return or Esc", keysPt: "Enter, Return ou Esc", action: tr("sc.mergeFloating") },
-        { keys: "Escape", action: tr("sc.cancelStroke") },
-      ],
-    },
-    {
-      title: tr("sc.view"),
-      entries: [
-        { keys: "1 (main keyboard)", keysPt: "1 (teclado principal)", action: tr("sc.zoom100") },
-        { keys: "2 (main keyboard)", keysPt: "2 (teclado principal)", action: tr("sc.fitRotated") },
-        { keys: "0 (main keyboard)", keysPt: "0 (teclado principal)", action: tr("sc.resetTransform") },
-        { keys: "4 (main and numpad)", keysPt: "4 (teclado principal e numérico)", action: tr("sc.rotateCcw") },
-        { keys: "6 (main and numpad)", keysPt: "6 (teclado principal e numérico)", action: tr("sc.rotateCw") },
-        { keys: "5 (main and numpad)", keysPt: "5 (teclado principal e numérico)", action: tr("sc.resetRotation") },
-        { keys: "M", action: tr("sc.flipH") },
-        { keys: "Shift+M", action: tr("sc.flipV") },
-        { keys: "Ctrl+Alt+=", action: tr("sc.zoomIn") },
-        { keys: "Ctrl+Alt+-", action: tr("sc.zoomOut") },
-        { keys: "Hold Space and drag, or middle-drag", keysPt: "Segurar Espaço e arrastar, ou botão do meio", action: tr("sc.pan") },
-        { keys: "Mouse wheel", keysPt: "Roda do mouse", action: tr("sc.zoomAtCursor") },
-        { keys: "Hold Ctrl+Space, left-drag up/down", keysPt: "Segurar Ctrl+Espaço, arrastar com botão esquerdo para cima/baixo", action: tr("sc.loupeZoom") },
-        { keys: "Hold Shift+Space and left-drag", keysPt: "Segurar Shift+Espaço e arrastar com botão esquerdo", action: tr("sc.loupeRotate") },
-        { keys: "Alt+middle-click (loupe or cell transform tool)", keysPt: "Alt+clique do meio (lupa ou ferramenta de transformação de célula)", action: tr("sc.loupeReset") },
-        { keys: "Middle-click (loupe or cell transform tool)", keysPt: "Clique do meio (lupa ou ferramenta de transformação de célula)", action: tr("sc.loupeFlip") },
-        { keys: "Right-drag (loupe or cell transform tool)", keysPt: "Arrastar com botão direito (lupa ou ferramenta de transformação de célula)", action: tr("sc.loupeRotateDrag") },
-        { keys: "Shift+Left-drag (pencil, line, curve)", keysPt: "Shift+arrastar com botão esquerdo (lápis, linha, curva)", action: tr("sc.liveResize") },
-      ],
-    },
-    {
-      title: tr("sc.actions"),
-      entries: [
-        {
-          keys: "Ctrl+Shift+P (Cmd+Shift+P on macOS)", keysPt: "Ctrl+Shift+P (Cmd+Shift+P no macOS)",
-          action: tr("sc.quickSearch"),
-        },
-      ],
-    },
-    {
-      title: tr("sc.interface"),
-      entries: [{ keys: "Tab", action: tr("sc.hideChrome") }],
-    },
-  ];
-}
 
 /** Toolbar drawers: tool groups sharing one button with a flyout. */
 export interface GnumarusToolDrawerDef {
@@ -1757,6 +1623,21 @@ export class GnumarusShell extends LitElement {
       padding: 1px 6px;
       white-space: nowrap;
     }
+    .shortcuts-editor-list tr.shortcut-conflict td {
+      color: #ff6b6b;
+    }
+    .shortcuts-editor-list tr.shortcut-conflict kbd {
+      color: #ff6b6b;
+      border-color: #ff6b6b;
+    }
+    .shortcut-modifiers {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .shortcut-mouse-note {
+      opacity: 0.85;
+    }
     .licenses-list {
       max-height: min(60vh, 420px);
       min-width: min(480px, 80vw);
@@ -2176,6 +2057,15 @@ export class GnumarusShell extends LitElement {
     gridOpacity: { type: Number },
     actionPaletteQuery: { type: String },
     actionPaletteIndex: { type: Number },
+    shortcutPreset: { type: String },
+    shortcutSearch: { type: String },
+    shortcutEditingId: { type: String },
+    shortcutEditCtrl: { type: Boolean },
+    shortcutEditAlt: { type: Boolean },
+    shortcutEditShift: { type: Boolean },
+    shortcutEditSuper: { type: Boolean },
+    shortcutEditSpace: { type: Boolean },
+    shortcutEditKey: { type: String },
     rotationStepDeg: { type: Number },
     zoomMinPercent: { type: Number },
     floatingActive: { type: Boolean },
@@ -2390,6 +2280,15 @@ export class GnumarusShell extends LitElement {
   declare colorContiguous: boolean;
   declare actionPaletteQuery: string;
   declare actionPaletteIndex: number;
+  declare shortcutPreset: GnumarusShortcutPresetId;
+  declare shortcutSearch: string;
+  declare shortcutEditingId: string | null;
+  declare shortcutEditCtrl: boolean;
+  declare shortcutEditAlt: boolean;
+  declare shortcutEditShift: boolean;
+  declare shortcutEditSuper: boolean;
+  declare shortcutEditSpace: boolean;
+  declare shortcutEditKey: string;
   declare rotText: string;
   declare flipText: string;
   declare colorValue: string;
@@ -2684,6 +2583,14 @@ export class GnumarusShell extends LitElement {
   private actionRegistry = new GnumarusActionRegistry();
   /** Discovered files already imported this session (stay hidden from discovery). */
   private importedDiscoveredFiles = new Set<string>();
+  /** User shortcut overrides (keyboard part only; mouse suffixes stay factory). */
+  private shortcutOverrides: Record<string, GnumarusShortcutKeyboard> = {};
+  /** Ids whose shortcut currently conflicts (red, disabled). Recomputed live. */
+  private shortcutConflicts = new Set<string>();
+  /** Tracked Space-bar state for shortcut matching (mirrors the engine). */
+  private shortcutSpaceDown = false;
+  /** Currently held main keys (lowercased key or code) for drag-gesture matching. */
+  private shortcutHeldKeys = new Set<string>();
 
   constructor() {
     super();
@@ -2704,6 +2611,15 @@ export class GnumarusShell extends LitElement {
     this.colorContiguous = true;
     this.actionPaletteQuery = "";
     this.actionPaletteIndex = 0;
+    this.shortcutPreset = "gnumarus";
+    this.shortcutSearch = "";
+    this.shortcutEditingId = null;
+    this.shortcutEditCtrl = false;
+    this.shortcutEditAlt = false;
+    this.shortcutEditShift = false;
+    this.shortcutEditSuper = false;
+    this.shortcutEditSpace = false;
+    this.shortcutEditKey = "";
     this.registerActions();
     this.colorValue = "#000000";
     this.secondaryColorValue = "#ffffff";
@@ -3165,6 +3081,7 @@ export class GnumarusShell extends LitElement {
                   >
                     ${tr("menu.resetCanvasTransform")}
                   </button>
+                  <button title=${tr("menu.editShortcutsTitle")} @click=${(): void => void this.runAction("edit-shortcuts")}>${tr("menu.editShortcuts")}</button>
                 </div>
               `
             : html``}
@@ -4506,27 +4423,124 @@ export class GnumarusShell extends LitElement {
           <button @click=${(): void => this.closeLicensesDialog()}>${tr("btn.close")}</button>
         </div>
       </dialog>
-      <dialog id="shortcutsDialog">
+      <dialog id="shortcutsDialog" @close=${(): void => this.closeShortcutsEditor()} @click=${(event: MouseEvent): void => {
+        const dialog = event.currentTarget as HTMLDialogElement | null;
+        if (dialog !== null && event.target === dialog) {
+          this.closeShortcutsEditor();
+        }
+      }}>
         <h3>${tr("dialog.shortcuts")}</h3>
-        <div class="shortcuts-list">
-          ${gnumarusShortcuts().map(
-            (section) => html`
-              <h4>${section.title}</h4>
-              <table>
-                ${section.entries.map(
-                  (entry) => html`
-                    <tr>
-                      <td><kbd>${entry.keysPt !== undefined && getActiveLocale() === "pt-BR" ? entry.keysPt : entry.keys}</kbd></td>
-                      <td>${entry.action}</td>
-                    </tr>
-                  `,
-                )}
-              </table>
-            `,
-          )}
+        <div class="setting-row">
+          <label>${tr("shortcut.preset")}
+            <select
+              id="shortcutPreset"
+              data-testid="shortcut-preset"
+              .value=${this.shortcutPreset}
+              @change=${(event: Event): void => {
+                const value = (event.target as HTMLSelectElement).value as GnumarusShortcutPresetId;
+                this.applyShortcutPreset(value);
+              }}
+            >
+              ${GNUMARUS_SHORTCUT_PRESETS.map(
+                (preset) => html`<option value=${preset.id}>${preset.label}</option>`,
+              )}
+            </select>
+          </label>
+          <button data-testid="shortcut-reset-all" @click=${(): void => this.resetShortcutsToDefault()}>${tr("shortcut.resetAll")}</button>
+        </div>
+        <div class="setting-row">
+          <input
+            type="text"
+            id="shortcutSearch"
+            data-testid="shortcut-search"
+            placeholder=${tr("shortcut.searchPlaceholder")}
+            aria-label=${tr("shortcut.searchLabel")}
+            autocomplete="off"
+            spellcheck="false"
+            .value=${this.shortcutSearch}
+            @input=${(event: Event): void => {
+              this.shortcutSearch = (event.target as HTMLInputElement).value;
+            }}
+          />
+        </div>
+        <div class="shortcuts-list shortcuts-editor-list" data-testid="shortcut-list">
+          ${((): unknown => {
+            const rows = this.shortcutList();
+            if (rows.length === 0) {
+              return html`<p data-testid="shortcut-empty">${tr("shortcut.empty")}</p>`;
+            }
+            return html`<table>
+              ${rows.map(
+                (row) => html`
+                  <tr class=${row.conflict ? "shortcut-conflict" : ""} data-shortcut-id=${row.id} data-testid="shortcut-row">
+                    <td>${row.name}</td>
+                    <td><kbd data-testid="shortcut-keys">${row.display}</kbd>${row.conflict
+                      ? html` <span class="shortcut-conflict-flag" title=${tr("shortcut.conflictHint")}>⚠</span>`
+                      : html``}</td>
+                    <td>
+                      <button data-testid="shortcut-change" data-change-for=${row.id} @click=${(): void => this.startShortcutEdit(row.id)}>
+                        ${tr("shortcut.change")}
+                      </button>
+                    </td>
+                  </tr>
+                `,
+              )}
+            </table>`;
+          })()}
         </div>
         <div class="dialog-actions">
-          <button @click=${(): void => this.closeShortcutsDialog()}>${tr("btn.close")}</button>
+          <button data-testid="shortcut-close" @click=${(): void => this.closeShortcutsEditor()}>${tr("btn.close")}</button>
+        </div>
+      </dialog>
+      <dialog id="shortcutEditDialog">
+        <h3>${tr("shortcut.editTitle")}${this.shortcutEditingId !== null ? `: ${this.shortcutDisplayName(this.shortcutEditingId)}` : html``}</h3>
+        <div class="setting-row shortcut-modifiers">
+          <label><input type="checkbox" data-testid="shortcut-mod-ctrl" .checked=${this.shortcutEditCtrl} @change=${(event: Event): void => {
+            this.shortcutEditCtrl = (event.target as HTMLInputElement).checked;
+          }} />${tr("shortcut.modCtrl")}</label>
+          <label><input type="checkbox" data-testid="shortcut-mod-alt" .checked=${this.shortcutEditAlt} @change=${(event: Event): void => {
+            this.shortcutEditAlt = (event.target as HTMLInputElement).checked;
+          }} />${tr("shortcut.modAlt")}</label>
+          <label><input type="checkbox" data-testid="shortcut-mod-shift" .checked=${this.shortcutEditShift} @change=${(event: Event): void => {
+            this.shortcutEditShift = (event.target as HTMLInputElement).checked;
+          }} />${tr("shortcut.modShift")}</label>
+          <label><input type="checkbox" data-testid="shortcut-mod-super" .checked=${this.shortcutEditSuper} @change=${(event: Event): void => {
+            this.shortcutEditSuper = (event.target as HTMLInputElement).checked;
+          }} />${tr("shortcut.modSuper")}</label>
+          <label><input type="checkbox" data-testid="shortcut-mod-space" .checked=${this.shortcutEditSpace} @change=${(event: Event): void => {
+            this.shortcutEditSpace = (event.target as HTMLInputElement).checked;
+          }} />${tr("shortcut.modSpace")}</label>
+        </div>
+        <div class="setting-row">
+          <label>${tr("shortcut.symbol")}
+            <input
+              type="text"
+              id="shortcutEditKey"
+              data-testid="shortcut-key-input"
+              autocomplete="off"
+              spellcheck="false"
+              title=${tr("shortcut.symbolHint")}
+              placeholder=${tr("shortcut.symbolHint")}
+              .value=${this.shortcutEditKey}
+              @input=${(event: Event): void => {
+                this.shortcutEditKey = (event.target as HTMLInputElement).value;
+              }}
+            />
+          </label>
+        </div>
+        ${this.shortcutEditingId !== null
+          ? (() => {
+              const effective = this.effectiveShortcuts()[this.shortcutEditingId];
+              const mouse = effective?.mouse ?? "";
+              return mouse !== ""
+                ? html`<p class="shortcut-mouse-note">${tr("shortcut.fixedMouse")}: <kbd>${mouse}</kbd></p>`
+                : html``;
+            })()
+          : html``}
+        <div class="dialog-actions">
+          <button data-testid="shortcut-edit-ok" @click=${(): void => this.confirmShortcutEdit()}>${tr("btn.ok")}</button>
+          <button data-testid="shortcut-edit-cancel" @click=${(): void => this.cancelShortcutEdit()}>${tr("btn.cancel")}</button>
+          <button data-testid="shortcut-edit-default" @click=${(): void => this.defaultShortcutEdit()}>${tr("shortcut.default")}</button>
         </div>
       </dialog>
       <dialog id="actionPaletteDialog" @close=${(): void => this.closeActionPalette()}>
@@ -6483,31 +6497,37 @@ export class GnumarusShell extends LitElement {
     }
     // Movement keys go through the hold tracker: one discrete step on the
     // initial keydown (repeats are no-ops) plus a rAF loop while held.
-    // KeyJ/KeyL turn left/right, KeyI/KeyK pitch up/down (±89° clamp).
-    switch (event.code) {
-      case "KeyW":
-      case "KeyA":
-      case "KeyS":
-      case "KeyD":
-      case "KeyQ":
-      case "KeyE":
-      case "KeyZ":
-      case "KeyC":
-      case "KeyJ":
-      case "KeyL":
-      case "KeyI":
-      case "KeyK":
-        this.engine.flyPressKey(event.code);
-        break;
-      case "KeyR":
-        this.engine.flyResetView();
-        this.statusMessage = tr("status.flycamReset");
-        break;
-      case "Escape":
-        this.exitFlycam();
-        break;
-      default:
-        break;
+    // Bindings are configurable (flycam-* ids); the canonical engine code
+    // drives the direction regardless of the remapped key.
+    if (this.matchesShortcut("flycam-forward", event)) {
+      this.engine.flyPressKey("KeyW");
+    } else if (this.matchesShortcut("flycam-back", event)) {
+      this.engine.flyPressKey("KeyS");
+    } else if (this.matchesShortcut("flycam-left", event)) {
+      this.engine.flyPressKey("KeyA");
+    } else if (this.matchesShortcut("flycam-right", event)) {
+      this.engine.flyPressKey("KeyD");
+    } else if (this.matchesShortcut("flycam-up", event)) {
+      this.engine.flyPressKey("KeyE");
+    } else if (this.matchesShortcut("flycam-down", event)) {
+      this.engine.flyPressKey("KeyQ");
+    } else if (this.matchesShortcut("flycam-orbit-left", event)) {
+      this.engine.flyPressKey("KeyZ");
+    } else if (this.matchesShortcut("flycam-orbit-right", event)) {
+      this.engine.flyPressKey("KeyC");
+    } else if (this.matchesShortcut("flycam-turn-left", event)) {
+      this.engine.flyPressKey("KeyJ");
+    } else if (this.matchesShortcut("flycam-turn-right", event)) {
+      this.engine.flyPressKey("KeyL");
+    } else if (this.matchesShortcut("flycam-pitch-up", event)) {
+      this.engine.flyPressKey("KeyI");
+    } else if (this.matchesShortcut("flycam-pitch-down", event)) {
+      this.engine.flyPressKey("KeyK");
+    } else if (this.matchesShortcut("flycam-reset", event)) {
+      this.engine.flyResetView();
+      this.statusMessage = tr("status.flycamReset");
+    } else if (this.matchesShortcut("flycam-exit", event)) {
+      this.exitFlycam();
     }
     this.refreshLayers();
   }
@@ -7748,6 +7768,7 @@ export class GnumarusShell extends LitElement {
       installNumberInputHelpers(this.shadowRoot);
     }
     window.addEventListener("keydown", this.onGlobalKeyDown);
+    window.addEventListener("keyup", this.onGlobalKeyUp);
     window.addEventListener("pointerdown", this.onGlobalPointerDown);
     // Mobile pinch gesture interception (capture: runs before the engine's
     // canvas listeners so multi-touch can be swallowed or rerouted).
@@ -7818,6 +7839,10 @@ export class GnumarusShell extends LitElement {
     this.expandStep = storedExpand.step;
     this.maxBrushSize = this.loadBrushSettings().maxBrushSize;
     this.brushPresets = this.loadBrushPresets();
+    const storedShortcuts = loadShortcutStore();
+    this.shortcutPreset = storedShortcuts.preset;
+    this.shortcutOverrides = { ...storedShortcuts.overrides };
+    this.refreshShortcutConflicts();
     const host =
       this.shadowRoot?.getElementById(this.uiMode === "mobile" ? "mobileCanvasHost" : "canvasHost") ?? null;
     if (host === null) {
@@ -7963,6 +7988,7 @@ export class GnumarusShell extends LitElement {
       this.refreshShadingPalette();
       this.engine.setEmptyCellHold(this.emptyCellMode === "hold");
       this.refreshLayers();
+      this.syncShortcutsToEngine();
       // The engine fits the zoom during construction, before the animation
       // matrix above the status bar takes part in the layout. Re-fit once the
       // first update (matrix included) is painted so the initial zoom matches
@@ -8381,117 +8407,140 @@ export class GnumarusShell extends LitElement {
   }
 
   private onGlobalKeyDown = (event: KeyboardEvent): void => {
-    const key = event.key.toLowerCase();
-    if ((event.ctrlKey || event.metaKey) && !event.altKey && key === "s") {
+    if (event.code === "Space") {
+      this.shortcutSpaceDown = true;
+    }
+    this.shortcutHeldKeys.add(event.key.length === 1 ? event.key.toLowerCase() : event.key);
+    this.shortcutHeldKeys.add(event.code);
+    const dialogOpen = this.shadowRoot?.querySelector("dialog[open]") !== null;
+    const adjustOpen = this.isAdjustWindowOpen();
+    const inField = this.eventInField(event);
+    const inPicker = this.eventInColorPicker(event);
+    if (this.matchesShortcut("file-save", event)) {
       event.preventDefault();
       void this.runAction(this.fsSupported ? "save-project" : "save-embedded-project");
       return;
     }
-    if ((event.ctrlKey || event.metaKey) && !event.altKey && key === "e") {
+    if (this.matchesShortcut("edit-merge-down", event)) {
       event.preventDefault();
       this.mergeActiveLayerDown();
       return;
     }
-    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && (key === "c" || key === "v" || key === "x")) {
-      if (
-        this.eventInField(event) ||
-        this.eventInColorPicker(event) ||
-        this.shadowRoot?.querySelector("dialog[open]") !== null ||
-        this.isAdjustWindowOpen()
-      ) {
+    if (this.matchesShortcut("edit-cut", event)) {
+      if (inField || inPicker || dialogOpen || adjustOpen) {
         return;
       }
       event.preventDefault();
-      void this.runAction(key === "c" ? "copy-selection" : key === "v" ? "paste" : "cut");
+      void this.runAction("cut");
       return;
     }
-    if ((event.ctrlKey || event.metaKey) && !event.altKey && event.shiftKey && key === "c") {
-      if (
-        this.eventInField(event) ||
-        this.eventInColorPicker(event) ||
-        this.shadowRoot?.querySelector("dialog[open]") !== null ||
-        this.isAdjustWindowOpen()
-      ) {
+    if (this.matchesShortcut("edit-copy", event)) {
+      if (inField || inPicker || dialogOpen || adjustOpen) {
+        return;
+      }
+      event.preventDefault();
+      void this.runAction("copy-selection");
+      return;
+    }
+    if (this.matchesShortcut("edit-paste", event)) {
+      if (inField || inPicker || dialogOpen || adjustOpen) {
+        return;
+      }
+      event.preventDefault();
+      void this.runAction("paste");
+      return;
+    }
+    if (this.matchesShortcut("edit-copy-merged", event)) {
+      if (inField || inPicker || dialogOpen || adjustOpen) {
         return;
       }
       event.preventDefault();
       void this.runAction("copy-merged");
       return;
     }
-    if ((event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey) {
-      if (
-        this.eventInField(event) ||
-        this.eventInColorPicker(event) ||
-        this.shadowRoot?.querySelector("dialog[open]") !== null ||
-        this.isAdjustWindowOpen()
-      ) {
+    if (this.matchesShortcut("layer-new-above", event)) {
+      if (inField || inPicker || dialogOpen || adjustOpen) {
         return;
       }
-      if (
-        event.key === "ArrowUp" ||
-        event.key === "ArrowDown" ||
-        event.key === "ArrowLeft" ||
-        event.key === "ArrowRight"
-      ) {
-        event.preventDefault();
-        if (this.engine !== null) {
-          if (event.key === "ArrowUp") {
-            this.insertLayerAboveActive();
-          } else if (event.key === "ArrowDown") {
-            this.insertLayerBelowActive();
-          } else if (event.key === "ArrowLeft") {
-            this.onAddFrameBefore(this.engine.getCurrentFrame());
-          } else {
-            this.onAddFrameAfter(this.engine.getCurrentFrame());
-          }
-        }
-        return;
-      }
+      event.preventDefault();
+      this.insertLayerAboveActive();
+      return;
     }
-    if ((event.ctrlKey || event.metaKey) && event.altKey && !event.shiftKey) {
-      if (
-        this.eventInField(event) ||
-        this.eventInColorPicker(event) ||
-        this.shadowRoot?.querySelector("dialog[open]") !== null ||
-        this.isAdjustWindowOpen()
-      ) {
+    if (this.matchesShortcut("layer-new-below", event)) {
+      if (inField || inPicker || dialogOpen || adjustOpen) {
         return;
       }
-      if (
-        event.key === "ArrowUp" ||
-        event.key === "ArrowDown" ||
-        event.key === "ArrowLeft" ||
-        event.key === "ArrowRight"
-      ) {
-        event.preventDefault();
-        this.expandCurrentCellTexture(
-          event.key === "ArrowUp" ? "up" : event.key === "ArrowDown" ? "down" : event.key === "ArrowLeft" ? "left" : "right",
-        );
-        return;
-      }
+      event.preventDefault();
+      this.insertLayerBelowActive();
+      return;
     }
-    if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
-      if (
-        this.eventInField(event) ||
-        this.eventInColorPicker(event) ||
-        this.shadowRoot?.querySelector("dialog[open]") !== null ||
-        this.isAdjustWindowOpen()
-      ) {
+    if (this.matchesShortcut("frame-new-left", event)) {
+      if (inField || inPicker || dialogOpen || adjustOpen || this.engine === null) {
         return;
       }
-      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-        event.preventDefault();
-        if (event.key === "ArrowLeft") {
-          this.outdentActiveLayer();
-        } else {
-          this.indentActiveLayer();
-        }
-        return;
-      }
+      event.preventDefault();
+      this.onAddFrameBefore(this.engine.getCurrentFrame());
+      return;
     }
-    if ((event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey && key === "p") {
+    if (this.matchesShortcut("frame-new-right", event)) {
+      if (inField || inPicker || dialogOpen || adjustOpen || this.engine === null) {
+        return;
+      }
+      event.preventDefault();
+      this.onAddFrameAfter(this.engine.getCurrentFrame());
+      return;
+    }
+    if (this.matchesShortcut("layer-expand-up", event)) {
+      if (inField || inPicker || dialogOpen || adjustOpen) {
+        return;
+      }
+      event.preventDefault();
+      this.expandCurrentCellTexture("up");
+      return;
+    }
+    if (this.matchesShortcut("layer-expand-down", event)) {
+      if (inField || inPicker || dialogOpen || adjustOpen) {
+        return;
+      }
+      event.preventDefault();
+      this.expandCurrentCellTexture("down");
+      return;
+    }
+    if (this.matchesShortcut("layer-expand-left", event)) {
+      if (inField || inPicker || dialogOpen || adjustOpen) {
+        return;
+      }
+      event.preventDefault();
+      this.expandCurrentCellTexture("left");
+      return;
+    }
+    if (this.matchesShortcut("layer-expand-right", event)) {
+      if (inField || inPicker || dialogOpen || adjustOpen) {
+        return;
+      }
+      event.preventDefault();
+      this.expandCurrentCellTexture("right");
+      return;
+    }
+    if (this.matchesShortcut("layer-nest-out", event)) {
+      if (inField || inPicker || dialogOpen || adjustOpen) {
+        return;
+      }
+      event.preventDefault();
+      this.outdentActiveLayer();
+      return;
+    }
+    if (this.matchesShortcut("layer-nest-in", event)) {
+      if (inField || inPicker || dialogOpen || adjustOpen) {
+        return;
+      }
+      event.preventDefault();
+      this.indentActiveLayer();
+      return;
+    }
+    if (this.matchesShortcut("edit-quick-search", event)) {
       const palette = this.shadowRoot?.getElementById("actionPaletteDialog") as HTMLDialogElement | null;
-      if (palette?.open === true || (!this.eventInField(event) && !this.eventInColorPicker(event))) {
+      if (palette?.open === true || (!inField && !inPicker)) {
         event.preventDefault();
         this.toggleActionPalette();
       }
@@ -8499,10 +8548,10 @@ export class GnumarusShell extends LitElement {
     }
     if (
       this.tool === "flycam" &&
-      !this.eventInField(event) &&
-      !this.eventInColorPicker(event) &&
-      this.shadowRoot?.querySelector("dialog[open]") === null &&
-      !this.isAdjustWindowOpen()
+      !inField &&
+      !inPicker &&
+      !dialogOpen &&
+      !adjustOpen
     ) {
       // Fly-camera mode owns every plain key: WASDQE fly, ZC orbit, JL
       // turn, IK pitch, R resets, Esc exits. Dialogs and text fields keep working above it.
@@ -8513,34 +8562,26 @@ export class GnumarusShell extends LitElement {
       event.stopImmediatePropagation();
       return;
     }
-    if ((event.key === "x" || event.key === "X") && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    if (this.matchesShortcut("edit-swap-colors", event)) {
       // X swaps the foreground/background paint colors everywhere except
       // while flying (suppressed like every other editor shortcut), in
       // text fields and color pickers, and with dialogs open.
-      if (
-        !this.eventInField(event) &&
-        !this.eventInColorPicker(event) &&
-        this.shadowRoot?.querySelector("dialog[open]") === null &&
-        !this.isAdjustWindowOpen()
-      ) {
+      if (!inField && !inPicker && !dialogOpen && !adjustOpen) {
         this.swapPaintColors();
         event.preventDefault();
         event.stopImmediatePropagation();
         return;
       }
     }
-    if (event.key === "Tab") {
-      if (
-        this.shadowRoot?.querySelector("dialog[open]") !== null ||
-        this.isAdjustWindowOpen() ||
-        this.eventInField(event)
-      ) {
+    if (this.matchesShortcut("edit-hide-chrome", event)) {
+      if (dialogOpen || adjustOpen || inField) {
         return;
       }
       event.preventDefault();
       this.uiHidden = !this.uiHidden;
       return;
-    }    if (event.key === "Escape") {
+    }
+    if (this.matchesShortcut("edit-cancel", event)) {
       this.closeAllMenus();
       if (this.matrixMenu !== null) {
         this.matrixMenu = null;
@@ -8556,75 +8597,81 @@ export class GnumarusShell extends LitElement {
       }
       // Floating adjust windows have no native Esc handling: revert them
       // here when no modal dialog is open (a modal consumes Esc itself).
-      if (this.shadowRoot?.querySelector("dialog[open]") === null) {
+      if (!dialogOpen) {
         this.cancelBrightnessContrast();
         this.cancelHslAdjust();
       }
       return;
     }
-    if (event.ctrlKey || event.altKey || event.metaKey) {
+    if (dialogOpen || adjustOpen) {
       return;
     }
-    if (this.shadowRoot?.querySelector("dialog[open]") !== null || this.isAdjustWindowOpen()) {
+    if (inField) {
       return;
     }
-    if (this.eventInField(event)) {
-      return;
-    }
-    if (event.key === "PageUp") {
+    if (this.matchesShortcut("layer-above", event)) {
+      if (inPicker) {
+        return;
+      }
       event.preventDefault();
       this.selectLayerRelative(1);
       return;
     }
-    if (event.key === "PageDown") {
+    if (this.matchesShortcut("layer-below", event)) {
+      if (inPicker) {
+        return;
+      }
       event.preventDefault();
       this.selectLayerRelative(-1);
       return;
     }
-    if (event.key === "Insert") {
+    if (this.matchesShortcut("layer-insert", event)) {
+      if (inPicker) {
+        return;
+      }
       event.preventDefault();
       this.insertLayerAboveActive();
       return;
     }
-    if (event.code === "Digit0") {
+    if (this.matchesShortcut("edit-reset-transform", event)) {
       event.preventDefault();
       this.runAction("reset-canvas-transform");
       return;
     }
     if (
-      event.key === "ArrowLeft" ||
-      event.key === "ArrowRight" ||
-      event.key === "ArrowUp" ||
-      event.key === "ArrowDown"
+      this.matchesShortcut("frame-prev", event) ||
+      this.matchesShortcut("frame-next", event) ||
+      this.matchesShortcut("layer-above", event) ||
+      this.matchesShortcut("layer-below", event) ||
+      this.matchesShortcut("frame-move-left", event) ||
+      this.matchesShortcut("frame-move-right", event) ||
+      this.matchesShortcut("layer-move-up", event) ||
+      this.matchesShortcut("layer-move-down", event)
     ) {
-      if (this.eventInColorPicker(event)) {
+      if (inPicker) {
         return;
       }
       event.preventDefault();
-      if (event.shiftKey) {
-        if (event.key === "ArrowLeft") {
-          this.moveCurrentFrame(-1);
-        } else if (event.key === "ArrowRight") {
-          this.moveCurrentFrame(1);
-        } else if (event.key === "ArrowUp") {
-          this.moveActiveLayer("up");
-        } else {
-          this.moveActiveLayer("down");
-        }
-        return;
-      }
-      if (event.key === "ArrowLeft") {
+      if (this.matchesShortcut("frame-move-left", event)) {
+        this.moveCurrentFrame(-1);
+      } else if (this.matchesShortcut("frame-move-right", event)) {
+        this.moveCurrentFrame(1);
+      } else if (this.matchesShortcut("layer-move-up", event)) {
+        this.moveActiveLayer("up");
+      } else if (this.matchesShortcut("layer-move-down", event)) {
+        this.moveActiveLayer("down");
+      } else if (this.matchesShortcut("frame-prev", event)) {
         this.selectFrameRelative(-1);
-      } else if (event.key === "ArrowRight") {
+      } else if (this.matchesShortcut("frame-next", event)) {
         this.selectFrameRelative(1);
-      } else if (event.key === "ArrowUp") {
+      } else if (this.matchesShortcut("layer-above", event)) {
         this.selectLayerRelative(1);
       } else {
         this.selectLayerRelative(-1);
       }
       return;
     }
-    if (event.key === "e" || event.key === "E") {
+    if (this.matchesShortcut("edit-toggle-eraser", event)) {
       event.preventDefault();
       this.toggleEraserBlend();
     }
@@ -9159,7 +9206,15 @@ export class GnumarusShell extends LitElement {
       name: tr("menu.shortcuts"),
       requirements: [],
       run: (): void => {
-        this.openShortcutsDialog();
+        this.openShortcutsEditor();
+      },
+    });
+    this.actionRegistry.register({
+      id: "edit-shortcuts",
+      name: tr("action.editShortcuts"),
+      requirements: [],
+      run: (): void => {
+        this.openShortcutsEditor();
       },
     });
     this.actionRegistry.register({
@@ -9407,6 +9462,437 @@ export class GnumarusShell extends LitElement {
     this.closeActionPalette();
     this.runAction(selected.id);
   }
+
+  // ------------------------------------------------------------------
+  // Configurable keyboard shortcuts (Edit > Shortcuts, run action).
+  // ------------------------------------------------------------------
+
+  /** All shortcut ids: factory defs plus uncovered run actions (no duplicates). */
+  private allShortcutIds(): string[] {
+    const ids = new Set<string>(Object.keys(GNUMARUS_DEFAULT_SHORTCUT_MAP));
+    const covered = new Set<string>();
+    for (const id of ids) {
+      const target = this.shortcutActionTarget(id);
+      if (target !== null) {
+        covered.add(target);
+      }
+    }
+    for (const action of this.actionRegistry.actions()) {
+      if (!covered.has(action.id)) {
+        ids.add(action.id);
+      }
+    }
+    // Tool switch actions registered as tool-<name>.
+    for (const tool of this.allMenuTools()) {
+      ids.add(`tool-${tool}`);
+    }
+    return [...ids];
+  }
+
+  /** Effective shortcuts (defaults merged with user overrides). */
+  private effectiveShortcuts(): Record<string, GnumarusShortcutEffective> {
+    const extra = this.allShortcutIds().filter((id) => GNUMARUS_DEFAULT_SHORTCUT_MAP[id] === undefined);
+    return resolveEffectiveShortcuts(this.shortcutOverrides, extra);
+  }
+
+  private refreshShortcutConflicts(): void {
+    this.shortcutConflicts = findShortcutConflicts(this.effectiveShortcuts());
+  }
+
+  private persistShortcuts(): void {
+    saveShortcutStore({ preset: this.shortcutPreset, overrides: this.shortcutOverrides });
+    this.refreshShortcutConflicts();
+    this.syncShortcutsToEngine();
+    this.requestUpdate();
+  }
+
+  private syncShortcutsToEngine(): void {
+    this.engine?.setShortcuts(this.shortcutOverrides, this.shortcutConflicts);
+  }
+
+  /** Registry action covered by a factory shortcut id (same feature, different id). */
+  private shortcutActionTarget(id: string): string | null {
+    const map: Record<string, string> = {
+      "file-new": "new-project",
+      "file-open": "open-project",
+      "file-save": "save-project",
+      "file-save-as": "save-project-as",
+      "file-upload": "upload-project",
+      "file-open-embedded": "open-embedded-project",
+      "file-save-embedded": "save-embedded-project",
+      "file-save-embedded-as": "save-embedded-project-as",
+      "file-import": "import",
+      "file-import-svg": "import-svg",
+      "file-import-3d": "import-3d-model",
+      "file-import-image": "import-image",
+      "file-content-manager": "content-manager",
+      "file-export": "export",
+      "edit-undo": "undo",
+      "edit-redo": "redo",
+      "edit-cut": "cut",
+      "edit-copy": "copy-selection",
+      "edit-copy-merged": "copy-merged",
+      "edit-paste": "paste",
+      "edit-create-brush": "create-brush-from-selection",
+      "edit-settings": "settings",
+      "edit-adjust-bc": "adjust-brightness-contrast",
+      "edit-adjust-hs": "adjust-hue-saturation",
+      "edit-adjust-invert": "adjust-invert",
+      "edit-adjust-colors": "adjust-colors",
+      "edit-reset-transform": "reset-canvas-transform",
+      "edit-merge-down": "merge-down",
+      "action-fit-all": "fit-all-textures-to-size",
+      "action-crop-all": "crop-all-cells-to-canvas",
+      "action-new-animation": "new-animation",
+      "action-total-duration": "set-total-duration",
+      "action-unlink-cells": "unlink-cell-content",
+      "action-relink-cells": "relink-cell-content",
+      "action-make-root": "make-root-layer",
+      "action-toggle-mask": "toggle-layer-mask",
+      "action-reload-contents": "reload-all-contents",
+      "action-reload-textures": "reload-all-textures",
+    };
+    return map[id] ?? null;
+  }
+
+  /** Display name for a shortcut id (action, tool or sc label). */
+  private shortcutDisplayName(id: string): string {
+    const direct = this.actionRegistry.get(id);
+    if (direct !== undefined) {
+      return direct.name;
+    }
+    const target = this.shortcutActionTarget(id);
+    if (target !== null) {
+      const action = this.actionRegistry.get(target);
+      if (action !== undefined) {
+        return action.name;
+      }
+    }
+    if (id.startsWith("tool-")) {
+      const tool = id.slice("tool-".length) as GnumarusCanvasTool;
+      try {
+        return this.toolMenuLabel(tool);
+      } catch {
+        return id;
+      }
+    }
+    const scMap: Record<string, GnumarusMessageKey> = {
+      "edit-undo": "sc.undo",
+      "edit-redo": "sc.redo",
+      "edit-cut": "sc.cut",
+      "edit-copy": "sc.copySelection",
+      "edit-copy-merged": "sc.copyMerged",
+      "edit-paste": "sc.paste",
+      "edit-merge-down": "sc.mergeDown",
+      "edit-swap-colors": "sc.swapColors",
+      "edit-toggle-eraser": "sc.toggleEraser",
+      "edit-temp-eyedropper": "sc.tempEyedropper",
+      "edit-confirm": "sc.mergeFloating",
+      "edit-merge-floating": "sc.mergeFloating",
+      "edit-cancel": "sc.cancelStroke",
+      "edit-delete-cell": "sc.deleteCell",
+      "edit-quick-search": "sc.quickSearch",
+      "edit-hide-chrome": "sc.hideChrome",
+      "edit-shortcuts": "action.editShortcuts",
+      "edit-settings": "menu.settings",
+      "edit-create-brush": "menu.createBrushFromSelection",
+      "edit-reset-transform": "menu.resetCanvasTransform",
+      "layer-above": "sc.layerAbove",
+      "layer-below": "sc.layerBelow",
+      "layer-move-up": "sc.moveLayerUp",
+      "layer-move-down": "sc.moveLayerDown",
+      "layer-nest-out": "sc.nestOut",
+      "layer-nest-in": "sc.nestIn",
+      "layer-insert": "sc.insertLayer",
+      "layer-new-above": "sc.newLayerAbove",
+      "layer-new-below": "sc.newLayerBelow",
+      "layer-expand-up": "sc.expandUp",
+      "layer-expand-down": "sc.expandDown",
+      "layer-expand-left": "sc.expandLeft",
+      "layer-expand-right": "sc.expandRight",
+      "frame-prev": "sc.prevFrame",
+      "frame-next": "sc.nextFrame",
+      "frame-move-left": "sc.moveFrameLeft",
+      "frame-move-right": "sc.moveFrameRight",
+      "frame-new-left": "sc.newFrameLeft",
+      "frame-new-right": "sc.newFrameRight",
+      "tool-pencil": "sc.toolPencil",
+      "tool-bucket": "sc.toolBucket",
+      "tool-line": "sc.toolLine",
+      "tool-curve": "sc.toolCurve",
+      "tool-rectangle": "sc.toolRectangle",
+      "tool-ellipseShape": "sc.toolEllipseShape",
+      "tool-polygon": "sc.toolPolygon",
+      "tool-gradient": "sc.toolGradient",
+      "tool-shading": "sc.toolShading",
+      "tool-blur": "sc.toolBlur",
+      "tool-clone": "sc.toolClone",
+      "tool-recolor": "sc.toolRecolor",
+      "tool-loupe": "sc.toolLoupe",
+      "tool-pan": "sc.toolPan",
+      "tool-rotatecanvas": "sc.toolRotate",
+      "tool-transform": "sc.toolTransform",
+      "tool-transform3d": "sc.toolRot3d",
+      "tool-rectselect": "sc.toolRectselect",
+      "tool-ellipse": "sc.toolEllipse",
+      "tool-lasso": "sc.toolLasso",
+      "tool-polylasso": "sc.toolPolylasso",
+      "tool-colorselect": "sc.toolColorselect",
+      "tool-text": "sc.toolText",
+      "tool-destransform": "sc.toolDestransform",
+      "tool-destransform3d": "sc.toolDestransform3d",
+      "tile-rotate": "sc.tileRotate",
+      "tile-fliph": "sc.tileFlipH",
+      "tile-flipv": "sc.tileFlipV",
+      "view-zoom-100": "sc.zoom100",
+      "view-fit": "sc.fitRotated",
+      "view-reset": "sc.resetTransform",
+      "view-rotate-ccw": "sc.rotateCcw",
+      "view-rotate-cw": "sc.rotateCw",
+      "view-reset-rotation": "sc.resetRotation",
+      "view-flip-h": "sc.flipH",
+      "view-flip-v": "sc.flipV",
+      "view-zoom-in": "sc.zoomIn",
+      "view-zoom-out": "sc.zoomOut",
+      "view-pan": "sc.pan",
+      "view-zoom-wheel": "sc.zoomAtCursor",
+      "view-loupe-zoom": "sc.loupeZoom",
+      "view-loupe-rotate": "sc.loupeRotate",
+      "view-loupe-reset": "sc.loupeReset",
+      "view-loupe-flip": "sc.loupeFlip",
+      "view-loupe-rotate-drag": "sc.loupeRotateDrag",
+      "view-live-resize": "sc.liveResize",
+      "view-transform-proportional": "sc.transformProportional",
+      "view-drawer-flyout": "sc.drawerFlyout",
+    };
+    const scKey = scMap[id];
+    if (scKey !== undefined) {
+      return tr(scKey);
+    }
+    // Humanized fallback (flycam keys, wheel/resize gestures without sc labels).
+    return id
+      .split("-")
+      .map((part) => (part.length > 0 ? part[0].toUpperCase() + part.slice(1) : part))
+      .join(" ");
+  }
+
+  /** Filtered shortcut list for the editor (name similarity, case-insensitive). */
+  private shortcutList(): Array<{ id: string; name: string; display: string; conflict: boolean }> {
+    const effective = this.effectiveShortcuts();
+    const query = this.shortcutSearch.trim().toLowerCase();
+    const rows: Array<{ id: string; name: string; display: string; conflict: boolean }> = [];
+    for (const id of this.allShortcutIds().sort()) {
+      const entry = effective[id];
+      if (entry === undefined) {
+        continue;
+      }
+      const name = this.shortcutDisplayName(id);
+      if (query !== "" && !name.toLowerCase().includes(query) && !id.toLowerCase().includes(query)) {
+        continue;
+      }
+      rows.push({
+        id,
+        name,
+        display: shortcutToString(entry.keyboard, entry.mouse),
+        conflict: this.shortcutConflicts.has(id),
+      });
+    }
+    return rows;
+  }
+
+  /** True when a shortcut id matches the given key event (disabled conflicts never match). */
+  private matchesShortcut(id: string, event: KeyboardEvent): boolean {
+    if (this.shortcutConflicts.has(id)) {
+      return false;
+    }
+    const effective = this.effectiveShortcuts()[id];
+    if (effective === undefined) {
+      return false;
+    }
+    if (shortcutMatchesEvent(event, this.shortcutSpaceDown, effective.keyboard)) {
+      return true;
+    }
+    // Legacy aliases preserved while the binding stays factory-default.
+    if (!effective.isDefault) {
+      return false;
+    }
+    return this.matchesLegacyAlias(id, event);
+  }
+
+  /** Historic secondary bindings kept while factory defaults are untouched. */
+  private matchesLegacyAlias(id: string, event: KeyboardEvent): boolean {
+    const key = event.key.toLowerCase();
+    const hasMod = event.ctrlKey || event.metaKey;
+    switch (id) {
+      case "tool-bucket":
+        return !hasMod && !event.altKey && key === "f";
+      case "edit-redo":
+        return (event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey && key === "z";
+      case "layer-above":
+        return !hasMod && !event.altKey && !event.shiftKey && event.key === "ArrowUp";
+      case "layer-below":
+        return !hasMod && !event.altKey && !event.shiftKey && event.key === "ArrowDown";
+      case "edit-confirm":
+        return !hasMod && !event.altKey && !event.shiftKey && event.key === "Return";
+      default:
+        return false;
+    }
+  }
+
+  private openShortcutsEditor(): void {
+    this.closeAllMenus();
+    this.shortcutSearch = "";
+    this.shortcutEditingId = null;
+    this.refreshShortcutConflicts();
+    this.requestUpdate();
+    const dialog = this.shadowRoot?.getElementById("shortcutsDialog") as HTMLDialogElement | null;
+    dialog?.showModal();
+  }
+
+  private closeShortcutsEditor(): void {
+    // Closing with conflicts disables those shortcuts until changed.
+    this.refreshShortcutConflicts();
+    this.persistShortcuts();
+    this.shortcutEditingId = null;
+    const edit = this.shadowRoot?.getElementById("shortcutEditDialog") as HTMLDialogElement | null;
+    edit?.close();
+    const dialog = this.shadowRoot?.getElementById("shortcutsDialog") as HTMLDialogElement | null;
+    dialog?.close();
+  }
+
+  private resetShortcutsToDefault(): void {
+    this.shortcutPreset = "gnumarus";
+    this.shortcutOverrides = {};
+    this.persistShortcuts();
+  }
+
+  private applyShortcutPreset(preset: GnumarusShortcutPresetId): void {
+    this.shortcutPreset = preset;
+    this.shortcutOverrides = applyShortcutPreset(preset);
+    this.persistShortcuts();
+  }
+
+  private startShortcutEdit(id: string): void {
+    const effective = this.effectiveShortcuts()[id];
+    if (effective === undefined) {
+      return;
+    }
+    this.shortcutEditingId = id;
+    this.shortcutEditCtrl = effective.keyboard.ctrl;
+    this.shortcutEditAlt = effective.keyboard.alt;
+    this.shortcutEditShift = effective.keyboard.shift;
+    this.shortcutEditSuper = effective.keyboard.super;
+    this.shortcutEditSpace = effective.keyboard.space;
+    this.shortcutEditKey = effective.keyboard.key === " " ? "Space" : effective.keyboard.key;
+    this.requestUpdate();
+    void this.updateComplete.then(() => {
+      const dialog = this.shadowRoot?.getElementById("shortcutEditDialog") as HTMLDialogElement | null;
+      dialog?.showModal();
+      const input = this.shadowRoot?.getElementById("shortcutEditKey") as HTMLInputElement | null;
+      input?.focus();
+      input?.select();
+    });
+  }
+
+  private cancelShortcutEdit(): void {
+    this.shortcutEditingId = null;
+    const dialog = this.shadowRoot?.getElementById("shortcutEditDialog") as HTMLDialogElement | null;
+    dialog?.close();
+  }
+
+  private defaultShortcutEdit(): void {
+    if (this.shortcutEditingId === null) {
+      return;
+    }
+    const def = GNUMARUS_DEFAULT_SHORTCUT_MAP[this.shortcutEditingId];
+    const fallback: GnumarusShortcutKeyboard = { ctrl: false, alt: false, shift: false, super: false, space: false, key: "" };
+    const kb = def === undefined ? fallback : def.keyboard;
+    this.shortcutEditCtrl = kb.ctrl;
+    this.shortcutEditAlt = kb.alt;
+    this.shortcutEditShift = kb.shift;
+    this.shortcutEditSuper = kb.super;
+    this.shortcutEditSpace = kb.space;
+    this.shortcutEditKey = kb.key === " " ? "Space" : kb.key;
+    this.requestUpdate();
+  }
+
+  private confirmShortcutEdit(): void {
+    if (this.shortcutEditingId === null) {
+      return;
+    }
+    const raw = this.shortcutEditKey.trim();
+    const normalized = normalizeShortcutKey(raw === "Space" || raw === "spacebar" ? " " : raw);
+    // A lone " " means the Space modifier (space bar is a modifier, never a main key).
+    const key = normalized === " " ? "" : normalized;
+    const space = this.shortcutEditSpace || normalized === " ";
+    const next: GnumarusShortcutKeyboard = {
+      ctrl: this.shortcutEditCtrl,
+      alt: this.shortcutEditAlt,
+      shift: this.shortcutEditShift,
+      super: this.shortcutEditSuper,
+      space,
+      key,
+    };
+    const def = GNUMARUS_DEFAULT_SHORTCUT_MAP[this.shortcutEditingId];
+    if (def !== undefined && def.keyboard.ctrl === next.ctrl && def.keyboard.alt === next.alt && def.keyboard.shift === next.shift && def.keyboard.super === next.super && def.keyboard.space === next.space && def.keyboard.key === next.key) {
+      const { [this.shortcutEditingId]: _removed, ...rest } = this.shortcutOverrides;
+      void _removed;
+      this.shortcutOverrides = rest;
+    } else {
+      this.shortcutOverrides = { ...this.shortcutOverrides, [this.shortcutEditingId]: next };
+    }
+    this.shortcutPreset = "gnumarus";
+    // Live conflict highlighting without closing.
+    this.refreshShortcutConflicts();
+    this.syncShortcutsToEngine();
+    try {
+      saveShortcutStore({ preset: this.shortcutPreset, overrides: this.shortcutOverrides });
+    } catch {
+      // Ignore storage failures; in-memory shortcuts still apply.
+    }
+    this.shortcutEditingId = null;
+    const dialog = this.shadowRoot?.getElementById("shortcutEditDialog") as HTMLDialogElement | null;
+    dialog?.close();
+  }
+
+  private onGlobalKeyUp = (event: KeyboardEvent): void => {
+    if (event.code === "Space") {
+      this.shortcutSpaceDown = false;
+    }
+    const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+    this.shortcutHeldKeys.delete(key);
+    this.shortcutHeldKeys.delete(event.code);
+    if (this.tool === "flycam" && this.engine !== null) {
+      // Release remapped flycam holds via canonical codes.
+      if (this.matchesShortcut("flycam-forward", event)) {
+        this.engine.flyReleaseKey("KeyW");
+      } else if (this.matchesShortcut("flycam-back", event)) {
+        this.engine.flyReleaseKey("KeyS");
+      } else if (this.matchesShortcut("flycam-left", event)) {
+        this.engine.flyReleaseKey("KeyA");
+      } else if (this.matchesShortcut("flycam-right", event)) {
+        this.engine.flyReleaseKey("KeyD");
+      } else if (this.matchesShortcut("flycam-up", event)) {
+        this.engine.flyReleaseKey("KeyE");
+      } else if (this.matchesShortcut("flycam-down", event)) {
+        this.engine.flyReleaseKey("KeyQ");
+      } else if (this.matchesShortcut("flycam-orbit-left", event)) {
+        this.engine.flyReleaseKey("KeyZ");
+      } else if (this.matchesShortcut("flycam-orbit-right", event)) {
+        this.engine.flyReleaseKey("KeyC");
+      } else if (this.matchesShortcut("flycam-turn-left", event)) {
+        this.engine.flyReleaseKey("KeyJ");
+      } else if (this.matchesShortcut("flycam-turn-right", event)) {
+        this.engine.flyReleaseKey("KeyL");
+      } else if (this.matchesShortcut("flycam-pitch-up", event)) {
+        this.engine.flyReleaseKey("KeyI");
+      } else if (this.matchesShortcut("flycam-pitch-down", event)) {
+        this.engine.flyReleaseKey("KeyK");
+      } else {
+        this.engine.flyReleaseKey(event.code);
+      }
+    }
+  };
 
   private scrollPaletteSelectionIntoView(): void {
     void this.updateComplete.then(() => {
@@ -18390,18 +18876,6 @@ export class GnumarusShell extends LitElement {
     } else {
       this.statusMessage = tr("status.expandNoTexture");
     }
-  }
-
-  private openShortcutsDialog(): void {
-    this.helpMenuOpen = false;
-    this.requestUpdate();
-    const dialog = this.shadowRoot?.getElementById("shortcutsDialog") as HTMLDialogElement | null;
-    dialog?.showModal();
-  }
-
-  private closeShortcutsDialog(): void {
-    const dialog = this.shadowRoot?.getElementById("shortcutsDialog") as HTMLDialogElement | null;
-    dialog?.close();
   }
 
   private openLicensesDialog(): void {

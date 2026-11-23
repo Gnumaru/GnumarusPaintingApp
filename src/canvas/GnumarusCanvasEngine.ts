@@ -1,5 +1,12 @@
 import * as THREE from "three";
 import { eventInTextField } from "../focus/GnumarusFocus";
+import {
+  resolveEffectiveShortcuts,
+  shortcutMatchesEvent,
+  shortcutModifiersSatisfied,
+  type GnumarusShortcutEffective,
+  type GnumarusShortcutKeyboard,
+} from "../settings/GnumarusShortcuts";
 import { compositeFinalImage, compositeLayersAt, type GnumarusFlattenLayerInput } from "../preview/GnumarusFinalRender";
 import {
   GNUMARUS_TEXT_MAX_RASTER_DIMENSION,
@@ -1259,6 +1266,12 @@ export class GnumarusCanvasEngine {
   private drawing = false;
   private panning = false;
   private spaceDown = false;
+  /** User shortcut overrides (keyboard part only; pushed by the shell). */
+  private shortcutOverrides: Record<string, GnumarusShortcutKeyboard> = {};
+  /** Ids with conflicting shortcuts (disabled until changed). */
+  private shortcutConflicts = new Set<string>();
+  /** Held main keys for drag-gesture matching (lowercased key or code). */
+  private shortcutHeldKeys = new Set<string>();
   /** Shift+Left-drag tool-size gesture state (pencil/line/curve only). */
   private sizeDrag: { tool: GnumarusSizedTool; startClientX: number; startSize: number } | null = null;
   private strokeBase: Uint8ClampedArray | null = null;
@@ -17094,6 +17107,67 @@ export class GnumarusCanvasEngine {
     this.emitStats();
   }
 
+  /** Push configurable shortcuts from the shell (overrides + disabled conflicts). */
+  setShortcuts(
+    overrides: Record<string, GnumarusShortcutKeyboard>,
+    conflicts: Set<string>,
+  ): void {
+    this.shortcutOverrides = { ...overrides };
+    this.shortcutConflicts = new Set(conflicts);
+  }
+
+  private effectiveShortcuts(): Record<string, GnumarusShortcutEffective> {
+    return resolveEffectiveShortcuts(this.shortcutOverrides);
+  }
+
+  private matchesShortcut(id: string, event: KeyboardEvent): boolean {
+    if (this.shortcutConflicts.has(id)) {
+      return false;
+    }
+    const entry = this.effectiveShortcuts()[id];
+    if (entry === undefined) {
+      return false;
+    }
+    if (shortcutMatchesEvent(event, this.spaceDown, entry.keyboard)) {
+      return true;
+    }
+    if (!entry.isDefault) {
+      return false;
+    }
+    return this.matchesLegacyAlias(id, event);
+  }
+
+  private matchesLegacyAlias(id: string, event: KeyboardEvent): boolean {
+    const key = event.key.toLowerCase();
+    const hasMod = event.ctrlKey || event.metaKey;
+    switch (id) {
+      case "tool-bucket":
+        return !hasMod && !event.altKey && key === "f";
+      case "edit-redo":
+        return (event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey && key === "z";
+      case "edit-confirm":
+        return !hasMod && !event.altKey && !event.shiftKey && event.key === "Return";
+      default:
+        return false;
+    }
+  }
+
+  /** Keyboard-part check for pointer/wheel gestures (fixed mouse part implied by the caller). */
+  private gestureModifiersSatisfied(id: string, event: { ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }): boolean {
+    if (this.shortcutConflicts.has(id)) {
+      return false;
+    }
+    const entry = this.effectiveShortcuts()[id];
+    if (entry === undefined) {
+      return false;
+    }
+    return shortcutModifiersSatisfied(
+      { ctrl: event.ctrlKey, alt: event.altKey, shift: event.shiftKey, meta: event.metaKey, space: this.spaceDown },
+      entry.keyboard,
+      this.shortcutHeldKeys,
+    );
+  }
+
   setTool(tool: GnumarusCanvasTool): void {
     if (this.tool === "modeltransform" && tool !== "modeltransform") {
       this.commitModelOrbit();
@@ -18008,8 +18082,8 @@ export class GnumarusCanvasEngine {
       }
       if (event.button === 1 && (this.tool === "loupe" || this.tool === "transform")) {
         event.preventDefault();
-        if (event.altKey) {
-          // Alt+middle-click resets the transform.
+        if (this.gestureModifiersSatisfied("view-loupe-reset", event)) {
+          // Alt+middle-click resets the transform (keyboard part configurable).
           if (this.tool === "loupe") {
             this.resetViewTransform();
           } else {
@@ -18038,44 +18112,47 @@ export class GnumarusCanvasEngine {
         }
         return;
       }
-      if (this.spaceDown && event.button === 0 && (event.ctrlKey || event.shiftKey)) {
-        // Ctrl+Space+left-drag zooms like the loupe; Shift+Space+left-drag
-        // rotates like the loupe. Plain Space+left-drag still pans below.
-        if (event.ctrlKey) {
-          this.loupeZooming = true;
-          this.loupeAnchor = { x: event.clientX, y: event.clientY };
-        } else {
-          const angle = this.pointerAngle(event.clientX, event.clientY);
-          if (angle === null) {
-            return;
-          }
-          this.rotating = true;
-          this.lastPointerAngle = angle;
-        }
+      if (event.button === 0 && this.gestureModifiersSatisfied("view-loupe-zoom", event)) {
+        // Ctrl+Space+left-drag zooms like the loupe (keyboard part configurable).
+        this.loupeZooming = true;
+        this.loupeAnchor = { x: event.clientX, y: event.clientY };
         canvas.setPointerCapture(event.pointerId);
         return;
       }
-      if (event.button === 1 || this.spaceDown) {
+      if (event.button === 0 && this.gestureModifiersSatisfied("view-loupe-rotate", event)) {
+        // Shift+Space+left-drag rotates like the loupe (keyboard part configurable).
+        const angle = this.pointerAngle(event.clientX, event.clientY);
+        if (angle === null) {
+          return;
+        }
+        this.rotating = true;
+        this.lastPointerAngle = angle;
+        canvas.setPointerCapture(event.pointerId);
+        return;
+      }
+      if (event.button === 1 || (this.spaceDown && this.gestureModifiersSatisfied("view-pan", event))) {
         this.panning = true;
         canvas.setPointerCapture(event.pointerId);
         return;
       }
-      if (event.button === 2 && (this.tool === "loupe" || this.tool === "transform")) {
+      if (event.button === 2 && this.tool === "loupe" && this.gestureModifiersSatisfied("view-loupe-rotate-drag", event)) {
         // Right-drag rotates around the viewport (loupe) or layer (transform) center.
-        const angle =
-          this.tool === "loupe"
-            ? this.pointerAngle(event.clientX, event.clientY)
-            : this.layerPointerAngle(event.clientX, event.clientY);
+        const angle = this.pointerAngle(event.clientX, event.clientY);
         if (angle === null) {
           return;
         }
-        if (this.tool === "loupe") {
-          this.rotating = true;
-          this.lastPointerAngle = angle;
-        } else {
-          this.transformRotating = true;
-          this.transformLastAngle = angle;
+        this.rotating = true;
+        this.lastPointerAngle = angle;
+        canvas.setPointerCapture(event.pointerId);
+        return;
+      }
+      if (event.button === 2 && this.tool === "transform") {
+        const angle = this.layerPointerAngle(event.clientX, event.clientY);
+        if (angle === null) {
+          return;
         }
+        this.transformRotating = true;
+        this.transformLastAngle = angle;
         canvas.setPointerCapture(event.pointerId);
         return;
       }
@@ -18100,8 +18177,9 @@ export class GnumarusCanvasEngine {
         return;
       }
       if (
-        event.shiftKey &&
-        (this.tool === "pencil" || this.tool === "line" || this.tool === "curve")
+        event.button === 0 &&
+        (this.tool === "pencil" || this.tool === "line" || this.tool === "curve") &&
+        this.gestureModifiersSatisfied("view-live-resize", event)
       ) {
         // Shift+Left-drag resizes the active size tool from horizontal
         // movement only; no painting starts. (Pointer lock was tried here
@@ -18880,7 +18958,7 @@ export class GnumarusCanvasEngine {
         return;
       }
       if (this.layerResizeDrag !== null || this.layerRotateDrag !== null || this.layerSkewDrag !== null) {
-        this.updateLayerGesture(event.clientX, event.clientY, event.altKey);
+        this.updateLayerGesture(event.clientX, event.clientY, this.gestureModifiersSatisfied("view-transform-proportional", event));
         return;
       }
       if (this.layerCenterTap !== null) {
@@ -19032,7 +19110,7 @@ export class GnumarusCanvasEngine {
         return;
       }
       if (this.resizeDrag !== null || this.rotateDrag !== null || this.skewDrag !== null) {
-        this.updateTransformGesture(event.clientX, event.clientY, event.altKey);
+        this.updateTransformGesture(event.clientX, event.clientY, this.gestureModifiersSatisfied("view-transform-proportional", event));
         return;
       }
       if (this.centerTap !== null) {
@@ -19547,15 +19625,18 @@ export class GnumarusCanvasEngine {
         if (this.tool === "flycam") {
           return;
         }
-        if (event.ctrlKey || event.altKey || event.shiftKey || event.metaKey) {
-          // Ctrl+wheel (alone) resizes the pencil brush in whole units.
-          if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey) {
-            const next = this.brushSize + (event.deltaY < 0 ? 1 : -1);
-            if (this.setBrushSize(next)) {
-              this.onToolSizeChanged?.("brush", this.brushSize);
-            }
+        if (this.gestureModifiersSatisfied("tool-brush-resize-wheel", event)) {
+          const next = this.brushSize + (event.deltaY < 0 ? 1 : -1);
+          if (this.setBrushSize(next)) {
+            this.onToolSizeChanged?.("brush", this.brushSize);
           }
           return;
+        }
+        if (!this.gestureModifiersSatisfied("view-zoom-wheel", event)) {
+          // Any other keyboard combination on the wheel does nothing.
+          if (event.ctrlKey || event.altKey || event.shiftKey || event.metaKey || this.spaceDown) {
+            return;
+          }
         }
         if (this.tool === "modeltransform") {
           const layer = this.activeLayer();
@@ -19575,8 +19656,9 @@ export class GnumarusCanvasEngine {
     window.addEventListener("keydown", (event: KeyboardEvent) => {
       if (event.code === "Space") {
         this.spaceDown = true;
-        return;
       }
+      this.shortcutHeldKeys.add(event.key.length === 1 ? event.key.toLowerCase() : event.key);
+      this.shortcutHeldKeys.add(event.code);
       // Keyboard events from inside shadow DOM retarget `target` to the host,
       // so inspect the composed path to reliably detect text fields.
       const inField = ((): boolean => {
@@ -19614,7 +19696,8 @@ export class GnumarusCanvasEngine {
           this.updatePreviews();
         }
       }
-      if (event.key === "Control" && !event.repeat && !event.altKey && !event.metaKey && !inField) {
+      const modifierKey = event.key === "Control" || event.key === "Alt" || event.key === "Shift" || event.key === "Meta" || event.code === "Space" || event.key === " ";
+      if (!event.repeat && !inField && modifierKey && this.gestureModifiersSatisfied("edit-temp-eyedropper", event)) {
         // The Ctrl selection modifiers belong to the selection tools;
         // summoning the eyedropper there would steal their drags. The
         // tile brush owns Ctrl+Shift for rectangles, and the fly camera
@@ -19635,12 +19718,12 @@ export class GnumarusCanvasEngine {
         return;
       }
       if (!event.ctrlKey && !event.altKey && !event.metaKey && !inField) {
-        if ((event.key === "Enter" || event.key === "Return" || event.key === "Escape") && this.hasFloatingSelection()) {
+        if (this.hasFloatingSelection() && (this.matchesShortcut("edit-merge-floating", event) || this.matchesShortcut("edit-confirm", event) || this.matchesShortcut("edit-cancel", event))) {
           this.commitFloating();
           return;
         }
         if (
-          (event.key === "Enter" || event.key === "Return") &&
+          this.matchesShortcut("edit-confirm", event) &&
           this.tool === "polylasso" &&
           this.polyLassoPath !== null
         ) {
@@ -19648,179 +19731,172 @@ export class GnumarusCanvasEngine {
           return;
         }
         if (this.tool === "tilebrush") {
-          // Tile-brush transform keys (plain key, no modifiers) take
-          // precedence over the tool shortcuts below.
-          if (!event.ctrlKey && !event.metaKey && !event.altKey) {
-            if (event.key === "r" || event.key === "R") {
-              if (!this.rotateTileBrush()) {
-                this.onNotice?.("tile-rot-needs-square");
-              }
-              return;
+          // Tile-brush transform keys take precedence over the tool
+          // shortcuts below (configurable, context-exclusive).
+          if (this.matchesShortcut("tile-rotate", event)) {
+            if (!this.rotateTileBrush()) {
+              this.onNotice?.("tile-rot-needs-square");
             }
-            if (event.key === "h" || event.key === "H") {
-              this.flipTileBrush("h");
-              return;
-            }
-            if (event.key === "v" || event.key === "V") {
-              this.flipTileBrush("v");
-              return;
-            }
+            return;
+          }
+          if (this.matchesShortcut("tile-fliph", event)) {
+            this.flipTileBrush("h");
+            return;
+          }
+          if (this.matchesShortcut("tile-flipv", event)) {
+            this.flipTileBrush("v");
+            return;
           }
         }
-        if (this.tool === "modeltransform" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        if (this.tool === "modeltransform") {
           // R resets the orbit view; it takes precedence over the
-          // rectselect tool shortcut below.
-          if (event.key === "r" || event.key === "R") {
+          // rectselect tool shortcut below (configurable).
+          if (this.matchesShortcut("model-reset-view", event)) {
             this.resetModelView();
             this.updatePreviews();
             this.onLayersChanged?.();
             return;
           }
         }
-        if (event.key === "b" || event.key === "B") {
+        if (this.matchesShortcut("tool-pencil", event)) {
           this.setTool("pencil");
           return;
         }
-        if (event.key === "g" || event.key === "G") {
+        if (this.matchesShortcut("tool-bucket", event)) {
           this.setTool("bucket");
           return;
         }
-        if (event.key === "f" || event.key === "F") {
-          this.setTool("bucket");
-          return;
-        }
-        if (event.key === "n" || event.key === "N") {
+        if (this.matchesShortcut("tool-line", event)) {
           this.setTool("line");
           return;
         }
-        if (event.key === "c" || event.key === "C") {
+        if (this.matchesShortcut("tool-curve", event)) {
           this.setTool("curve");
           return;
         }
-        if (event.key === "z" || event.key === "Z") {
+        if (this.matchesShortcut("tool-loupe", event)) {
           this.setTool("loupe");
           return;
         }
-        if (event.key === "r" || event.key === "R") {
+        if (this.matchesShortcut("tool-rectselect", event)) {
           this.setTool("rectselect");
           return;
         }
-        if (event.key === "v" || event.key === "V") {
+        if (this.matchesShortcut("tool-destransform", event)) {
           this.setTool("destransform");
           return;
         }
-        if (event.key === "t" || event.key === "T") {
+        if (this.matchesShortcut("tool-transform", event)) {
           this.setTool("transform");
           return;
         }
-        if (event.key === "y" || event.key === "Y") {
+        if (this.matchesShortcut("tool-transform3d", event)) {
           this.setTool("transform3d");
           return;
         }
-        if (event.key === "u" || event.key === "U") {
+        if (this.matchesShortcut("tool-destransform3d", event)) {
           this.setTool("destransform3d");
           return;
         }
-        if (event.key === "o" || event.key === "O") {
+        if (this.matchesShortcut("tool-ellipse", event)) {
           this.setTool("ellipse");
           return;
         }
-        if (event.key === "l" || event.key === "L") {
+        if (this.matchesShortcut("tool-lasso", event)) {
           this.setTool("lasso");
           return;
         }
-        if (event.key === "w" || event.key === "W") {
+        if (this.matchesShortcut("tool-colorselect", event)) {
           this.setTool("colorselect");
           return;
         }
-        if (event.key === "p" || event.key === "P") {
+        if (this.matchesShortcut("tool-polylasso", event)) {
           this.setTool("polylasso");
           return;
         }
-        if (event.key === "d" || event.key === "D") {
+        if (this.matchesShortcut("tool-rectangle", event)) {
           this.setTool("rectangle");
           return;
         }
-        if (event.key === "h" || event.key === "H") {
+        if (this.matchesShortcut("tool-ellipseShape", event)) {
           this.setTool("ellipseShape");
           return;
         }
-        if (event.key === "j" || event.key === "J") {
+        if (this.matchesShortcut("tool-polygon", event)) {
           this.setTool("polygon");
           return;
         }
-        if (event.key === "k" || event.key === "K") {
+        if (this.matchesShortcut("tool-gradient", event)) {
           this.setTool("gradient");
           return;
         }
-        if (event.key === "s" || event.key === "S") {
+        if (this.matchesShortcut("tool-shading", event)) {
           this.setTool("shading");
           return;
         }
-        if (event.key === "i" || event.key === "I") {
+        if (this.matchesShortcut("tool-blur", event)) {
           this.setTool("blur");
           return;
         }
-        if (event.key === "a" || event.key === "A") {
+        if (this.matchesShortcut("tool-clone", event)) {
           this.setTool("clone");
           return;
         }
-        if (event.key === "q" || event.key === "Q") {
+        if (this.matchesShortcut("tool-recolor", event)) {
           this.setTool("recolor");
           return;
         }
         // X swaps the paint colors (handled by the shell); the text tool
         // lives in the toolbar and the action palette, with no letter key.
-        if (event.key === "m" || event.key === "M") {
-          // M flips the canvas view horizontally, Shift+M vertically —
-          // the same setFlip toggles the loupe middle-click gestures use.
-          if (event.shiftKey) {
-            this.setFlip(this.flipX, !this.flipY);
-          } else {
-            this.setFlip(!this.flipX, this.flipY);
-          }
+        if (this.matchesShortcut("view-flip-h", event)) {
+          this.setFlip(!this.flipX, this.flipY);
           return;
         }
-        if (event.code === "Digit4" || event.code === "Numpad4") {
+        if (this.matchesShortcut("view-flip-v", event)) {
+          this.setFlip(this.flipX, !this.flipY);
+          return;
+        }
+        if (this.matchesShortcut("view-rotate-ccw", event)) {
           this.rotateByDegrees(-this.rotationStepDeg);
           return;
         }
-        if (event.code === "Digit6" || event.code === "Numpad6") {
+        if (this.matchesShortcut("view-rotate-cw", event)) {
           this.rotateByDegrees(this.rotationStepDeg);
           return;
         }
-        if (event.code === "Digit5" || event.code === "Numpad5") {
+        if (this.matchesShortcut("view-reset-rotation", event)) {
           this.resetRotation();
           return;
         }
-        if (event.code === "Digit1") {
+        if (this.matchesShortcut("view-zoom-100", event)) {
           this.setZoom(1);
           return;
         }
-        if (event.code === "Digit2") {
+        if (this.matchesShortcut("view-fit", event)) {
           this.zoomToFit();
           return;
         }
-        if (event.key === "Escape" && this.tool === "line" && this.lineAnchor !== null) {
+        if (this.matchesShortcut("edit-cancel", event) && this.tool === "line" && this.lineAnchor !== null) {
           this.lineAnchor = null;
           this.updatePreviews();
           return;
         }
-        if (event.key === "Escape" && this.tool === "curve" && this.curvePhase !== "idle") {
+        if (this.matchesShortcut("edit-cancel", event) && this.tool === "curve" && this.curvePhase !== "idle") {
           this.resetCurveState();
           this.updatePreviews();
           return;
         }
-        if (event.key === "Escape" && this.tool === "modeltransform" && this.hasUncommittedModelView()) {
+        if (this.matchesShortcut("edit-cancel", event) && this.tool === "modeltransform" && this.hasUncommittedModelView()) {
           this.cancelModelOrbit();
           this.updatePreviews();
           return;
         }
         if (
-          (event.key === "Escape" && this.tool === "rectselect" && this.rectDrag !== null) ||
-          (event.key === "Escape" && this.tool === "ellipse" && this.ellipseDrag !== null) ||
-          (event.key === "Escape" && this.tool === "lasso" && this.lassoPath !== null) ||
-          (event.key === "Escape" && this.tool === "polylasso" && this.polyLassoPath !== null)
+          this.matchesShortcut("edit-cancel", event) &&
+          ((this.tool === "rectselect" && this.rectDrag !== null) ||
+            (this.tool === "ellipse" && this.ellipseDrag !== null) ||
+            (this.tool === "lasso" && this.lassoPath !== null) ||
+            (this.tool === "polylasso" && this.polyLassoPath !== null))
         ) {
           this.rectDrag = null;
           this.ellipseDrag = null;
@@ -19830,32 +19906,32 @@ export class GnumarusCanvasEngine {
           return;
         }
         if (
-          (event.key === "Escape" &&
-            (this.tool === "rectangle" || this.tool === "ellipseShape" || this.tool === "gradient") &&
+          this.matchesShortcut("edit-cancel", event) &&
+          (((this.tool === "rectangle" || this.tool === "ellipseShape" || this.tool === "gradient") &&
             this.shapeDrag !== null) ||
-          (event.key === "Escape" && this.tool === "polygon" && this.shapePolygon !== null)
+            (this.tool === "polygon" && this.shapePolygon !== null))
         ) {
           this.shapeDrag = null;
           this.shapePolygon = null;
           this.updatePreviews();
           return;
         }
-        if (event.key === "Escape" && this.retouchStroke !== null) {
+        if (this.matchesShortcut("edit-cancel", event) && this.retouchStroke !== null) {
           this.cancelRetouchStroke();
           this.updatePreviews();
           return;
         }
-        if (event.key === "Escape" && this.tool === "crop" && this.cropDrag !== null) {
+        if (this.matchesShortcut("edit-cancel", event) && this.tool === "crop" && this.cropDrag !== null) {
           this.cropDrag = null;
           this.updatePreviews();
           return;
         }
-        if (event.key === "Enter" && !inField && !event.repeat && this.tool === "growcrop" && this.growBox !== null) {
+        if (this.matchesShortcut("edit-confirm", event) && !event.repeat && this.tool === "growcrop" && this.growBox !== null) {
           this.commitGrowBox();
           this.updatePreviews();
           return;
         }
-        if (event.key === "Escape" && this.tool === "growcrop" && (this.growBox !== null || this.growDrag !== null)) {
+        if (this.matchesShortcut("edit-cancel", event) && this.tool === "growcrop" && (this.growBox !== null || this.growDrag !== null)) {
           this.growBox = null;
           this.growDrag = null;
           this.growHoverCursor = "";
@@ -19863,7 +19939,7 @@ export class GnumarusCanvasEngine {
           return;
         }
         if (
-          event.key === "Escape" &&
+          this.matchesShortcut("edit-cancel", event) &&
           this.tool === "tilebrush" &&
           (this.tileDrag !== null || this.tileAnchor !== null)
         ) {
@@ -19873,7 +19949,7 @@ export class GnumarusCanvasEngine {
           return;
         }
         if (
-          (event.key === "Enter" || event.key === "Return") &&
+          this.matchesShortcut("edit-confirm", event) &&
           this.tool === "polygon" &&
           this.shapePolygon !== null &&
           this.shapePolygon.length >= 2
@@ -19885,13 +19961,13 @@ export class GnumarusCanvasEngine {
           this.commitShapePolygon(finished);
           return;
         }
-        if ((event.key === "Enter" || event.key === "Return") && this.tool === "modeltransform" && this.hasUncommittedModelView()) {
+        if (this.matchesShortcut("edit-confirm", event) && this.tool === "modeltransform" && this.hasUncommittedModelView()) {
           event.preventDefault();
           this.commitModelOrbit();
           this.updatePreviews();
           return;
         }
-        if (event.key === "Delete") {
+        if (this.matchesShortcut("edit-delete-cell", event)) {
           event.preventDefault();
           if (this.denyPaintOnDerived()) {
             return;
@@ -19900,30 +19976,25 @@ export class GnumarusCanvasEngine {
           return;
         }
       }
-      if ((event.ctrlKey || event.metaKey) && !event.altKey && !inTextField) {
-        const key = event.key.toLowerCase();
-        if (key === "z" && !event.shiftKey) {
-          event.preventDefault();
-          this.undo();
-          return;
-        }
-        if (key === "y" || (key === "z" && event.shiftKey)) {
-          event.preventDefault();
-          this.redo();
-          return;
-        }
+      if (!inTextField && this.matchesShortcut("edit-undo", event)) {
+        event.preventDefault();
+        this.undo();
+        return;
       }
-      if (event.ctrlKey && event.altKey && !event.metaKey) {
-        if (inField) {
-          return;
-        }
-        if (event.key === "+" || event.key === "=" || event.code === "Equal" || event.code === "NumpadAdd") {
-          event.preventDefault();
-          this.zoomBy(1.25);
-        } else if (event.key === "-" || event.code === "Minus" || event.code === "NumpadSubtract") {
-          event.preventDefault();
-          this.zoomBy(0.8);
-        }
+      if (!inTextField && this.matchesShortcut("edit-redo", event)) {
+        event.preventDefault();
+        this.redo();
+        return;
+      }
+      if (!inField && this.matchesShortcut("view-zoom-in", event)) {
+        event.preventDefault();
+        this.zoomBy(1.25);
+        return;
+      }
+      if (!inField && this.matchesShortcut("view-zoom-out", event)) {
+        event.preventDefault();
+        this.zoomBy(0.8);
+        return;
       }
     });
     window.addEventListener("keyup", (event: KeyboardEvent) => {
@@ -19931,7 +20002,9 @@ export class GnumarusCanvasEngine {
         this.spaceDown = false;
         this.panning = false;
       }
-      if (event.key === "Control") {
+      this.shortcutHeldKeys.delete(event.key.length === 1 ? event.key.toLowerCase() : event.key);
+      this.shortcutHeldKeys.delete(event.code);
+      if (!this.gestureModifiersSatisfied("edit-temp-eyedropper", event)) {
         this.endTempEyedropper();
       }
       if (event.key === "Shift" || event.key === "Control" || event.key === "Meta") {

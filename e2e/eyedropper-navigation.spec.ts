@@ -381,24 +381,23 @@ test("Help menu lists every keyboard shortcut in a modal", async ({ page }) => {
   const dialog = page.locator("gnumarus-shell dialog#shortcutsDialog");
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText("Keyboard shortcuts");
-  for (const heading of ["File", "History", "Layers", "Frames", "Tools", "View", "Actions", "Interface"]) {
-    await expect(dialog.getByRole("heading", { name: heading })).toBeVisible();
-  }
+  // Configurable editor: presets, search, reset and per-row change buttons.
+  await expect(dialog.locator('[data-testid="shortcut-preset"]')).toBeVisible();
+  await expect(dialog.locator('[data-testid="shortcut-search"]')).toBeVisible();
+  await expect(dialog.locator('[data-testid="shortcut-reset-all"]')).toBeVisible();
   await expect(dialog).toContainText("Merge active layer down");
-  await expect(dialog).toContainText("Non-destructive cell transform tool");
+  await expect(dialog).toContainText("Transform");
   await expect(dialog).toContainText("Temporary eyedropper");
   await expect(dialog).toContainText("Merge floating selection into the cell");
-  await expect(dialog).toContainText("Cancel line/curve/rectangular selection in progress");
   await expect(dialog).toContainText("Reset current cell texture to transparent");
   await expect(dialog).toContainText("Resize tool live");
-  await expect(dialog).toContainText("Mouse wheel");
+  await expect(dialog).toContainText("wheel");
   await expect(dialog).toContainText("Zoom canvas at cursor");
-  await expect(dialog).toContainText("Alt+middle-click");
-  await expect(dialog).toContainText("Middle-click");
-  await expect(dialog).toContainText("Right-drag");
-  await expect(dialog).toContainText("Cmd+Z");
+  await expect(dialog).toContainText("middle-click");
+  await expect(dialog).toContainText("right-drag");
+  await expect(dialog).toContainText("ctrl+Z");
   await expect(dialog).toContainText("Quick action search");
-  await expect(dialog).toContainText("Reset canvas transform (zoom, pan and rotation)");
+  await expect(dialog).toContainText("Reset Canvas Transform");
   await expect(dialog).toContainText("Hide/show all interface chrome");
   await dialog.getByRole("button", { name: "Close" }).click();
   await expect(dialog).toBeHidden();

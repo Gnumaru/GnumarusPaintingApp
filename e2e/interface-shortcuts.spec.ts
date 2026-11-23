@@ -13,12 +13,12 @@ test("shortcuts dialog shows translated key labels in Brazilian Portuguese @rece
   await page.getByRole("button", { name: "Atalhos", exact: true }).click();
   const dialog = page.locator("gnumarus-shell dialog#shortcutsDialog");
   await expect(dialog).toBeVisible();
-  // Qualifiers and gestures are translated; bare key names stay universal.
-  const labels = (await dialog.locator("kbd").allTextContents()).join("\n");
-  expect(labels).toContain("teclado principal e numérico");
-  expect(labels).toContain("arraste uma âncora de redimensionamento");
-  expect(labels).not.toContain("main and numpad");
-  expect(labels).not.toContain("drag a transform resize handle");
+  // Editor chrome and action names are translated; key symbols stay universal.
+  await expect(dialog).toContainText("Predefinições");
+  await expect(dialog).toContainText("Redefinir tudo para o padrão");
+  await expect(dialog).toContainText("Desfazer");
+  await dialog.locator('[data-testid="shortcut-search"]').fill("Desfazer");
+  await expect(dialog.locator('[data-testid="shortcut-row"]').first().locator("kbd")).toContainText("ctrl");
   await page.keyboard.press("Escape");
 });
 

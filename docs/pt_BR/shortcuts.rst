@@ -34,4 +34,15 @@ Ações
   redefinir transformação, ``Tab`` ocultar interface, ``F`` balde,
   ``Z`` lupa
 
-A lista completa está em **Ajuda > Atalhos** no aplicativo.
+Todas as combinações acima são o padrão de fábrica: abra **Editar >
+Atalhos** (ou execute a ação ``edit shortcuts``) para remapear a parte do
+teclado de qualquer entrada. O editor lista todos os atalhos de
+menu/ferramenta/ação com filtro de busca dinâmico, menu de predefinições
+(Gnumaru's Paint, Photoshop, Krita, Gimp, MyPaint, Aseprite, Procreate,
+MediBang Paint, ibis Paint X, Paint Tool SAI, FireAlpaca), diálogos de
+**Alterar** por linha (caixas Ctrl/Alt/Shift/Super/Espaço mais um símbolo
+de tecla; botões do mouse, direção da roda e interpretação do arrasto
+permanecem fixos e são apenas descritos), botão **Redefinir tudo para o
+padrão**, destaque vermelho para duplicatas conflitantes e desativação
+automática de atalhos conflitantes até serem alterados. A lista completa
+está em **Ajuda > Atalhos** no aplicativo.

@@ -30,4 +30,14 @@ Actions
 * ``Ctrl+S`` save, ``Ctrl+Shift+P`` action palette, ``0`` reset canvas
   transform, ``Tab`` hide interface, ``F`` bucket, ``Z`` loupe
 
-The full list lives in **Help > Shortcuts** inside the app.
+Every binding above is a factory default: open **Edit > Shortcuts**
+(or run the ``edit shortcuts`` action) to remap the keyboard part of any
+entry. The editor lists every menu/tool/run-action shortcut with a live
+search filter, a presets dropdown (Gnumaru's Paint, Photoshop, Krita, Gimp,
+MyPaint, Aseprite, Procreate, MediBang Paint, ibis Paint X, Paint Tool SAI,
+FireAlpaca), per-row **Change** dialogs (Ctrl/Alt/Shift/Super/Space
+checkboxes plus a key symbol; mouse buttons, wheel direction and drag
+interpretation stay fixed and are only described), a **Reset all to
+default** button, red highlighting for conflicting duplicates, and
+automatic disabling of conflicting shortcuts until they are changed. The
+full list lives in **Help > Shortcuts** inside the app.
