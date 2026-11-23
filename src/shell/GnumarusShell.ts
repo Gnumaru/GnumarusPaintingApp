@@ -3966,6 +3966,21 @@ export class GnumarusShell extends LitElement {
               const moveUpDisabled = siblingPos <= 0;
               const moveDownDisabled = siblingPos < 0 || siblingPos >= siblings.length - 1;
               void displayIndex;
+              // Honest cell status for the current frame (never materializes
+              // anything): no content, content without texture, or the real
+              // texture resolution.
+              const cellFrame = this.engine?.getCurrentFrame() ?? 0;
+              const cellContentId = this.engine?.getCellContentId(layer.id, cellFrame) ?? null;
+              const cellTextureSize =
+                cellContentId === null || this.engine === null
+                  ? null
+                  : this.engine.getCellTextureSize(layer.id, cellFrame);
+              const cellSizeText =
+                cellContentId === null
+                  ? tr("layer.noCellContent")
+                  : cellTextureSize === null
+                    ? tr("layer.noTexture")
+                    : `${cellTextureSize.width}×${cellTextureSize.height}`;
               return html`
                 <div
                   class="layer-row ${layer.id === this.activeLayerId ? "active" : ""} ${this.selectedLayerSet().has(layer.id) ? "selected" : ""} ${this.dropTargetLayerId === layer.id ? "drop-target" : ""}"
@@ -4161,7 +4176,7 @@ export class GnumarusShell extends LitElement {
                     </button>
                   </div>
                   <div class="layer-resize">
-                    <span>${tr("layer.size")}</span>
+                    <span class="layer-cell-status">${cellSizeText}</span>
                     <button
                       aria-label=${tr("layer.resize")}
                       title=${tr("layer.resizeHint")}
@@ -4170,7 +4185,7 @@ export class GnumarusShell extends LitElement {
                         this.openResizeDialog(layer.id);
                       }}
                     >
-                      ${tr("layer.resizeButton", { dims: `${layer.width}×${layer.height}` })}
+                      ${tr("layer.resize")}
                     </button>
                   </div>
                 </div>
@@ -15629,11 +15644,21 @@ export class GnumarusShell extends LitElement {
       return;
     }
     const value = (event.target as HTMLSelectElement).value;
+    const wasPlaying = this.playing;
+    const restartPlayback = (): void => {
+      // Switching scope mid-playback restarts on the new animation (or
+      // stops when the new scope has nothing to play).
+      if (wasPlaying) {
+        this.stopPlayback();
+        this.togglePlayback();
+      }
+    };
     if (value === "") {
       if (this.engine.setActiveAnimation(null)) {
         this.refreshLayers();
         this.dirty = true;
         this.statusMessage = tr("status.playingAll");
+        restartPlayback();
       }
       return;
     }
@@ -15641,6 +15666,7 @@ export class GnumarusShell extends LitElement {
       this.refreshLayers();
       this.dirty = true;
       this.statusMessage = tr("status.animSelected", { value });
+      restartPlayback();
     }
   }
 

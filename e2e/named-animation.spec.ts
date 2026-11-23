@@ -301,3 +301,38 @@ test("animation duration overrides win over the project default", async ({ page 
   await expect.poll(async () => getMatrixFrame(page), { timeout: 1500 }).toBe(1);
   await matrix.getByRole("button", { name: "Stop animation", exact: true }).click();
 });
+
+test("switching animation mid-playback restarts on the new animation", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await addFrames(page, 3);
+  await addAnimation(page, "walk,forward,1,2");
+  await addAnimation(page, "run,forward,3,4");
+  await selectAnimation(page, "walk");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Play animation", exact: true }).click();
+  await expect(matrix.getByRole("button", { name: "Stop animation", exact: true })).toBeVisible();
+  // Switch scope while playing: the old animation stops and the new one starts.
+  await page.locator('gnumarus-shell [data-testid="animation-select"]').selectOption("run");
+  await expect(matrix.getByRole("button", { name: "Stop animation", exact: true })).toBeVisible();
+  await expect.poll(async () => getMatrixFrame(page), { timeout: 10000 }).toBe(2);
+  // Back to all frames keeps playing the full timeline.
+  await page.locator('gnumarus-shell [data-testid="animation-select"]').selectOption("");
+  await expect(matrix.getByRole("button", { name: "Stop animation", exact: true })).toBeVisible();
+  await matrix.getByRole("button", { name: "Stop animation", exact: true }).click();
+  await expect(matrix.getByRole("button", { name: "Play animation", exact: true })).toBeVisible();
+});
+
+test("switching animation while stopped does not start playback", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await addFrames(page, 3);
+  await addAnimation(page, "walk,forward,1,2");
+  await addAnimation(page, "run,forward,3,4");
+  await selectAnimation(page, "walk");
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await expect(matrix.getByRole("button", { name: "Play animation", exact: true })).toBeVisible();
+  await page.locator('gnumarus-shell [data-testid="animation-select"]').selectOption("run");
+  await expect(page.locator("gnumarus-shell")).toContainText("Animation run selected");
+  await expect(matrix.getByRole("button", { name: "Play animation", exact: true })).toBeVisible();
+});

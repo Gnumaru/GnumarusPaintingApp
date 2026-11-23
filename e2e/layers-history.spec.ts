@@ -677,6 +677,8 @@ test("layer resize reaches 1920x1080 canvas sizes @recent", async ({ page }) => 
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 1920, 1080);
   const row0 = page.locator('gnumarus-shell [data-layer-id="layer0"]');
+  await expect(row0).toContainText("no cell content");
+  await paintCenter(page);
   await expect(row0).toContainText("1920×1080");
   const dimsOf = (): Promise<{ width: number; height: number } | null> =>
     page.evaluate(() => {

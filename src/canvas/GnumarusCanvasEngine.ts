@@ -2809,6 +2809,19 @@ export class GnumarusCanvasEngine {
     return this.textures.has(content.textureId) ? content.textureId : null;
   }
 
+  /** Width/height of a cell's texture, or null when the cell has no texture (read-only: never creates anything). */
+  getCellTextureSize(layerId: string, frame: number): { width: number; height: number } | null {
+    const textureId = this.getCellTextureId(layerId, frame);
+    if (textureId === null) {
+      return null;
+    }
+    const texture = this.textures.get(textureId);
+    if (texture === undefined) {
+      return null;
+    }
+    return { width: texture.width, height: texture.height };
+  }
+
   /** Text id of a cell's content, or null (read-only: never creates anything). */
   getCellTextId(layerId: string, frame: number): string | null {
     const contentId = this.cells.get(animationCellKey(layerId, frame));
