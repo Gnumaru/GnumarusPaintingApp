@@ -208,3 +208,46 @@ test("dragging a handle reshapes the curve like a vector editor", async ({ page 
   expect(Math.abs((handles?.hx1 ?? 0) - 2 / 3) + Math.abs((handles?.hy1 ?? 0) - 2 / 3)).toBeGreaterThan(0.05);
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
 });
+
+test("dragging a node carries its in/out handles along", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await paintLayerRect(page, "#ff0000", 24, 24, 39, 39);
+  const dialog = await openCurves(page);
+  const editor = dialog.locator('[data-testid="curve-editor"]');
+  const box = await editor.boundingBox();
+  if (box === null) {
+    throw new Error("curve editor has no bounding box");
+  }
+  // Add a node at the curve middle, then read its handle offsets.
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  const readNode = (): Promise<{ x: number; y: number; hx0: number; hy0: number; hx1: number; hy1: number } | null> =>
+    page.evaluate(() => {
+      const host = document.querySelector("gnumarus-shell")?.shadowRoot?.querySelector("gnumarus-curve-editor") as unknown as {
+        nodes?: Array<{ x: number; y: number; hx0: number; hy0: number; hx1: number; hy1: number }>;
+      } | null;
+      const node = host?.nodes?.[1];
+      return node === undefined
+        ? null
+        : { x: node.x, y: node.y, hx0: node.hx0, hy0: node.hy0, hx1: node.hx1, hy1: node.hy1 };
+    });
+  const before = await readNode();
+  expect(before).not.toBeNull();
+  // Drag the node itself down-right by ~0.1 in both axes.
+  await page.mouse.move(box.x + box.width * (before?.x ?? 0.5), box.y + box.height * (1 - (before?.y ?? 0.5)));
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * (before?.x ?? 0.5) + 26, box.y + box.height * (1 - (before?.y ?? 0.5)) + 26, { steps: 5 });
+  await page.mouse.up();
+  const after = await readNode();
+  expect(after).not.toBeNull();
+  const dx = (after?.x ?? 0) - (before?.x ?? 0);
+  const dy = (after?.y ?? 0) - (before?.y ?? 0);
+  expect(Math.hypot(dx, dy)).toBeGreaterThan(0.05);
+  // Both handles translated by (approximately) the same delta.
+  expect((after?.hx0 ?? 0) - (before?.hx0 ?? 0)).toBeCloseTo(dx, 1);
+  expect((after?.hy0 ?? 0) - (before?.hy0 ?? 0)).toBeCloseTo(dy, 1);
+  expect((after?.hx1 ?? 0) - (before?.hx1 ?? 0)).toBeCloseTo(dx, 1);
+  expect((after?.hy1 ?? 0) - (before?.hy1 ?? 0)).toBeCloseTo(dy, 1);
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+});

@@ -86,6 +86,32 @@ describe("curve editing ops", () => {
     const clamped = moveCurveHandle(curve, 1, 1, 9, -9);
     expect(clamped[1]).toMatchObject({ hx1: 1, hy1: 0 });
   });
+
+  it("carries the in/out handles along when a node moves", () => {
+    const curve = addCurveNode(defaultColorCurve(), 0.5, 0.5);
+    const before = curve[1]!;
+    const moved = moveCurveNode(curve, 1, 0.6, 0.7);
+    const after = moved[1]!;
+    expect(after.x).toBeCloseTo(0.6, 6);
+    expect(after.y).toBeCloseTo(0.7, 6);
+    // Same delta (+0.1, +0.2) applied to both handles: local shape survives.
+    expect(after.hx0).toBeCloseTo(before.hx0 + 0.1, 6);
+    expect(after.hy0).toBeCloseTo(before.hy0 + 0.2, 6);
+    expect(after.hx1).toBeCloseTo(before.hx1 + 0.1, 6);
+    expect(after.hy1).toBeCloseTo(before.hy1 + 0.2, 6);
+    // Endpoints keep x but still carry handles vertically.
+    const end = moveCurveNode(defaultColorCurve(), 1, 1, 0.5);
+    expect(end[1]?.x).toBe(1);
+    expect(end[1]?.hy0).toBeCloseTo(2 / 3 - 0.5, 6);
+    expect(end[1]?.hx1).toBe(1);
+    // Handles never leave the unit box.
+    const corner = moveCurveNode(curve, 1, 0.05, 0.95);
+    const node = corner[1]!;
+    for (const value of [node.hx0, node.hy0, node.hx1, node.hy1]) {
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThanOrEqual(1);
+    }
+  });
 });
 
 describe("curve evaluation", () => {

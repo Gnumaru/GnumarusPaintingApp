@@ -238,6 +238,8 @@ export function moveCurveNode(curve: GnumarusColorCurve, index: number, x: numbe
   }
   const next = curve.map(cloneNode);
   const node = next[index]!;
+  const fromX = node.x;
+  const fromY = node.y;
   if (index === 0) {
     node.x = 0;
   } else if (index === next.length - 1) {
@@ -246,6 +248,14 @@ export function moveCurveNode(curve: GnumarusColorCurve, index: number, x: numbe
     node.x = Math.min(next[index + 1]!.x - GNUMARUS_CURVE_EPS, Math.max(next[index - 1]!.x + GNUMARUS_CURVE_EPS, x));
   }
   node.y = clamp01(y);
+  // Carry the in/out handles along so the node's local shape survives the
+  // move (offsets preserved, clamped to the unit box).
+  const dx = node.x - fromX;
+  const dy = node.y - fromY;
+  node.hx0 = clamp01(node.hx0 + dx);
+  node.hy0 = clamp01(node.hy0 + dy);
+  node.hx1 = clamp01(node.hx1 + dx);
+  node.hy1 = clamp01(node.hy1 + dy);
   return next;
 }
 
