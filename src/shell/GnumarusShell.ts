@@ -4063,8 +4063,8 @@ export class GnumarusShell extends LitElement {
               const moveDownDisabled = siblingPos < 0 || siblingPos >= siblings.length - 1;
               void displayIndex;
               // Honest cell status for the current frame (never materializes
-              // anything): no content, content without texture, or the real
-              // texture resolution.
+              // anything): no content, the content kind when it has no
+              // texture (text/vector/3D/tilemap), or the real texture resolution.
               const cellFrame = this.engine?.getCurrentFrame() ?? 0;
               const cellContentId = this.engine?.getCellContentId(layer.id, cellFrame) ?? null;
               const cellTextureSize =
@@ -4075,7 +4075,7 @@ export class GnumarusShell extends LitElement {
                 cellContentId === null
                   ? tr("layer.noCellContent")
                   : cellTextureSize === null
-                    ? tr("layer.noTexture")
+                    ? this.cellKindText(layer.id, cellFrame)
                     : `${cellTextureSize.width}×${cellTextureSize.height}`;
               return html`
                 <div
@@ -18257,6 +18257,31 @@ export class GnumarusShell extends LitElement {
 
   private collapsedLayerSet(): Set<string> {
     return new Set(this.collapsedLayers ?? []);
+  }
+
+  /**
+   * Status label for a cell whose content has no texture (read-only: never
+   * materializes anything): the content kind (text/vector/3D/tilemap), or
+   * "no texture" for texture contents without one yet.
+   */
+  private cellKindText(layerId: string, frame: number): string {
+    const engine = this.engine;
+    if (engine === null) {
+      return tr("layer.noTexture");
+    }
+    if (engine.getCellTextId(layerId, frame) !== null) {
+      return tr("layer.kindText");
+    }
+    if (engine.getCellSvgId(layerId, frame) !== null) {
+      return tr("layer.kindVector");
+    }
+    if (engine.getCellModel3dId(layerId, frame) !== null) {
+      return tr("layer.kindModel3d");
+    }
+    if (engine.getCellTilemapId(layerId, frame) !== null) {
+      return tr("layer.kindTilemap");
+    }
+    return tr("layer.noTexture");
   }
 
   private hasLayerChildren(id: string): boolean {

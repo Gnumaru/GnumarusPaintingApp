@@ -58,6 +58,16 @@ describe("GnumarusShortcuts", () => {
     expect([...findShortcutConflicts(effective)]).toEqual([]);
   });
 
+  test("new/open project default to Ctrl+N and Ctrl+O", () => {
+    const byId = new Map(GNUMARUS_DEFAULT_SHORTCUTS.map((entry) => [entry.id, entry.keyboard]));
+    expect(byId.get("file-new")).toMatchObject({ key: "n", ctrl: true });
+    expect(byId.get("file-open")).toMatchObject({ key: "o", ctrl: true });
+    const effective = resolveEffectiveShortcuts({});
+    expect(effective["file-new"]?.keyboard).toMatchObject({ key: "n", ctrl: true });
+    expect(effective["file-open"]?.keyboard).toMatchObject({ key: "o", ctrl: true });
+    expect([...findShortcutConflicts(effective)]).toEqual([]);
+  });
+
   test("display strings match the requested examples", () => {
     expect(shortcutToString(kb({ key: "f" }), "")).toBe("F");
     expect(

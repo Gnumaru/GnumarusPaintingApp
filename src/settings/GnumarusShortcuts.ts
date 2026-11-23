@@ -80,9 +80,9 @@ const NONE = k("");
 
 /** Factory defaults mirroring the historic hard-coded behavior. */
 export const GNUMARUS_DEFAULT_SHORTCUTS: GnumarusShortcutDef[] = [
-  // File (mostly unbound; save keeps Ctrl+S).
-  { id: "file-new", keyboard: NONE, mouse: "" },
-  { id: "file-open", keyboard: NONE, mouse: "" },
+  // File (save keeps Ctrl+S; new/open keep Ctrl+N/Ctrl+O).
+  { id: "file-new", keyboard: k("n", { ctrl: true }), mouse: "" },
+  { id: "file-open", keyboard: k("o", { ctrl: true }), mouse: "" },
   { id: "file-save", keyboard: k("s", { ctrl: true }), mouse: "" },
   { id: "file-save-as", keyboard: NONE, mouse: "" },
   { id: "file-upload", keyboard: NONE, mouse: "" },

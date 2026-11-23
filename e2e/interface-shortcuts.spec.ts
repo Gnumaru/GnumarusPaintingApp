@@ -22,6 +22,28 @@ test("shortcuts dialog shows translated key labels in Brazilian Portuguese @rece
   await page.keyboard.press("Escape");
 });
 
+test("new/open project default to Ctrl+N and Ctrl+O in the shortcuts editor", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Help", exact: true }).click();
+  await page.getByRole("button", { name: "Shortcuts", exact: true }).click();
+  const dialog = page.locator("gnumarus-shell dialog#shortcutsDialog");
+  await expect(dialog).toBeVisible();
+  await expect(
+    dialog.locator('[data-testid="shortcut-row"][data-shortcut-id="file-new"] kbd'),
+  ).toContainText("ctrl");
+  await expect(
+    dialog.locator('[data-testid="shortcut-row"][data-shortcut-id="file-new"] kbd'),
+  ).toContainText("N");
+  await expect(
+    dialog.locator('[data-testid="shortcut-row"][data-shortcut-id="file-open"] kbd'),
+  ).toContainText("ctrl");
+  await expect(
+    dialog.locator('[data-testid="shortcut-row"][data-shortcut-id="file-open"] kbd'),
+  ).toContainText("O");
+  await page.keyboard.press("Escape");
+});
+
 test("Tab hides and shows the interface, toast still works", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
