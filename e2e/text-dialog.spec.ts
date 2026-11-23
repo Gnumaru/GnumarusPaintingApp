@@ -226,3 +226,20 @@ test("HTML tab refreshes after styling and editing resumes on return", async ({ 
     })
     .toContain("!");
 });
+
+test("right-clicking the HTML source copies it with a toast", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await createDefaultText(page);
+  await openTextEditor(page);
+  const dialog = page.locator('gnumarus-shell [data-testid="text-editor-dialog"]');
+  const source = page.locator('gnumarus-shell [data-testid="text-editor-html"]');
+  await dialog.getByTestId("text-tab-html").click();
+  await expect(source).toBeVisible();
+  await source.click({ button: "right" });
+  await expect(page.locator('gnumarus-shell [data-testid="toast"]')).toContainText(
+    "copied to the clipboard",
+  );
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("<div>Text</div>");
+});

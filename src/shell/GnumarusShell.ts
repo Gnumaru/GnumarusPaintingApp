@@ -15669,6 +15669,9 @@ export class GnumarusShell extends LitElement {
           data-testid="text-editor-html"
           title=${tr("dialog.textHtmlTitle")}
           ?hidden=${this.textEditorTab !== "html"}
+          @contextmenu=${(event: MouseEvent): void => {
+            void this.copyTextHtml(event);
+          }}
         >${this.textEditorHtml}</pre>
         ${document === null
           ? html`<p class="text-editor-empty">${tr("status.contentCreateFailed")}</p>`
@@ -15945,6 +15948,40 @@ export class GnumarusShell extends LitElement {
       // Clipboard insertion unsupported: leave the DOM untouched.
     }
     this.onTextEditorInput();
+  }
+
+  /** Right-click on the HTML tab copies the shown source; toasts the result. */
+  private async copyTextHtml(event: MouseEvent): Promise<void> {
+    event.preventDefault();
+    if (this.textEditor === null) {
+      return;
+    }
+    const code = this.textEditorHtml;
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(code);
+      copied = true;
+    } catch {
+      // Clipboard API unavailable (permissions): legacy fallback below.
+    }
+    if (!copied) {
+      try {
+        const field = document.createElement("textarea");
+        field.value = code;
+        field.setAttribute("readonly", "");
+        field.style.position = "fixed";
+        field.style.opacity = "0";
+        document.body.appendChild(field);
+        field.select();
+        copied = document.execCommand("copy");
+        field.remove();
+      } catch {
+        copied = false;
+      }
+    }
+    const message = copied ? tr("status.textHtmlCopied") : tr("status.textHtmlCopyFailed");
+    this.statusMessage = message;
+    this.showToast(message);
   }
 
   private confirmTextEditor(): void {
