@@ -405,13 +405,13 @@ test("empty cells hold the last non-empty frame by default and respect the setti
     /empty/,
   );
   // Switch the setting to nothing: the empty frame renders transparent.
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await page.locator("gnumarus-shell select#emptyCellMode").selectOption("nothing");
   await page.keyboard.press("Escape");
   expect(await readPixel(page, 32, 32)).toBeNull();
   // Back to hold: the dot renders again.
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await page.locator("gnumarus-shell select#emptyCellMode").selectOption("hold");
   await page.keyboard.press("Escape");

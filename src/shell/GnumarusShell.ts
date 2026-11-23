@@ -433,7 +433,7 @@ import {
   parseLocaleSettings,
   serializeLocaleSettings,
 } from "../settings/GnumarusLocaleSettings";
-import { type GnumarusTexturePixels } from "../animation/GnumarusAnimationModel";
+import { type GnumarusTexturePixels, sharedCellContentIds } from "../animation/GnumarusAnimationModel";
 import {
   countAnimationFrames,
   describeNamedAnimation,
@@ -854,6 +854,21 @@ export class GnumarusShell extends LitElement {
       flex-direction: column;
       flex: 0 0 auto;
       min-height: 0;
+      position: relative;
+    }
+    .layers-resize-handle {
+      position: absolute;
+      left: -5px;
+      top: 0;
+      bottom: 0;
+      width: 9px;
+      cursor: ew-resize;
+      touch-action: none;
+      z-index: 5;
+    }
+    .layers-resize-handle:hover,
+    .layers-resize-handle:active {
+      background: rgba(14, 99, 156, 0.45);
     }
     .layers-header {
       display: flex;
@@ -1184,6 +1199,12 @@ export class GnumarusShell extends LitElement {
     }
     .anim-cell.selected {
       box-shadow: inset 0 0 0 2px #4da3ff;
+    }
+    .anim-cell.shared-content {
+      background: rgba(45, 168, 134, 0.4);
+    }
+    .anim-cell.shared-content .cell-name {
+      font-weight: 700;
     }
     .anim-cell .cell-name {
       overflow: hidden;
@@ -2162,6 +2183,7 @@ export class GnumarusShell extends LitElement {
     uiMode: { type: String },
     mobileSheetOpen: { type: Boolean },
     matrixHeightPx: { type: Number },
+    layersPanelWidthPx: { type: Number },
     toastMessage: { type: String },
     updateStatus: { type: String },
     toastDurationSec: { type: Number },
@@ -2446,6 +2468,8 @@ export class GnumarusShell extends LitElement {
   declare mobileSheetOpen: boolean;
   /** Explicit animation-matrix height in px (null = automatic). */
   declare matrixHeightPx: number | null;
+  /** Layers panel width in px (null = 220px stylesheet default). */
+  declare layersPanelWidthPx: number | null;
   declare toastMessage: string;
   /** Update-check status (banner shows only when outdated). */
   declare updateStatus: GnumarusUpdateStatus;
@@ -2759,6 +2783,7 @@ export class GnumarusShell extends LitElement {
     this.playTimer = null;
     this.uiHidden = false;
     this.matrixHeightPx = null;
+    this.layersPanelWidthPx = null;
     this.toastMessage = "";
     this.updateStatus = "unknown";
     this.toastDurationSec = DEFAULT_TOAST_SETTINGS.durationSec;
@@ -3863,7 +3888,17 @@ export class GnumarusShell extends LitElement {
             ? html`<div class="toast" data-testid="toast">${this.toastMessage}</div>`
             : html``}
         </div>
-        <aside class="layers-panel" aria-label=${tr("layer.layers")} ?hidden=${this.uiHidden}>
+        <aside class="layers-panel" aria-label=${tr("layer.layers")} ?hidden=${this.uiHidden}
+          style=${this.layersPanelWidthPx === null ? "" : `width: ${this.layersPanelWidthPx}px;`}
+        >
+          <div
+            class="layers-resize-handle"
+            data-testid="layers-resize"
+            role="separator"
+            aria-label=${tr("matrix.resizeHint")}
+            title=${tr("matrix.resizeHint")}
+            @pointerdown=${(event: PointerEvent): void => this.onLayersResizeStart(event)}
+          ></div>
           <div class="layers-header">
             <span>${tr("layer.layers")}</span>
             <button aria-label=${tr("layer.add")} title=${tr("layer.add")} @click=${(): void => this.onAddLayer()}>+</button>
@@ -7280,8 +7315,29 @@ export class GnumarusShell extends LitElement {
   private readonly minMatrixHeightPx = 56;
 
   /** Resize the animation matrix by dragging its top edge. */
-  private onMatrixResizeStart(event: PointerEvent): void {
+  /** Drag the layers panel's left border to resize its width (140..560px). */
+  private onLayersResizeStart(event: PointerEvent): void {
     if (this.engine === null) {
+      return;
+    }
+    event.preventDefault();
+    const startX = event.clientX;
+    const panel = this.shadowRoot?.querySelector(".layers-panel") as HTMLElement | null;
+    const startW = panel?.getBoundingClientRect().width ?? 220;
+    const move = (moveEvent: PointerEvent): void => {
+      this.layersPanelWidthPx = Math.min(560, Math.max(140, Math.round(startW + (startX - moveEvent.clientX))));
+    };
+    const up = (): void => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  }
+
+  private onMatrixResizeStart(event: PointerEvent): void {    if (this.engine === null) {
       return;
     }
     event.preventDefault();
@@ -7319,6 +7375,17 @@ export class GnumarusShell extends LitElement {
     const animationFrameCounts = countAnimationFrames(this.engine.getNamedAnimations());
     const selectedCellKeys = new Set(
       this.validSelectedCells().map((cell) => this.cellSelectionKey(cell.layerId, cell.frame)),
+    );
+    // Contents linked to the selection: every other cell using the same
+    // content id gets highlighted so shared cells are visible at a glance.
+    const sharedContentIds = sharedCellContentIds(
+      matrix.rows.flatMap((row) =>
+        row.cells.map((cell) => ({
+          key: this.cellSelectionKey(cell.layerId, cell.frame),
+          contentId: cell.contentId,
+        })),
+      ),
+      selectedCellKeys,
     );
     return html`
       <div class="anim-matrix ${this.matrixHeightPx === null ? "" : "sized"}" data-testid="animation-matrix" aria-label=${tr("matrix.matrixAria")} ?hidden=${this.uiHidden}
@@ -7472,9 +7539,11 @@ export class GnumarusShell extends LitElement {
                   const inAnimation = activeFrames !== null && activeFrames.has(cell.frame);
                   const label = cell.contentName ?? tr("matrix.emptyCell");
                   const cellSelected = selectedCellKeys.has(this.cellSelectionKey(cell.layerId, cell.frame));
+                  const cellShared =
+                    cell.contentId !== null && sharedContentIds.has(cell.contentId);
                   return html`
                     <div
-                      class="anim-cell ${cell.contentId !== null ? "filled" : ""} ${isCurrent ? "current-frame" : ""} ${isActive ? "active-cell" : ""} ${inAnimation ? "in-animation" : ""} ${cellSelected ? "selected" : ""}"
+                      class="anim-cell ${cell.contentId !== null ? "filled" : ""} ${isCurrent ? "current-frame" : ""} ${isActive ? "active-cell" : ""} ${inAnimation ? "in-animation" : ""} ${cellSelected ? "selected" : ""} ${cellShared ? "shared-content" : ""}"
                       data-testid="anim-cell"
                       data-matrix-layer=${cell.layerId}
                       data-matrix-frame=${cell.frame}
@@ -8102,9 +8171,9 @@ export class GnumarusShell extends LitElement {
 
   /** Live non-mouse pointers over the canvas (mobile gesture tracking). */
   private gesturePointers = new Map<number, { x: number; y: number }>();
-  private gesturePrev: { dist: number; midX: number; midY: number } | null = null;
+  private gesturePrev: { dist: number; midX: number; midY: number; angle: number } | null = null;
 
-  private gestureSnapshot(): { dist: number; midX: number; midY: number } | null {
+  private gestureSnapshot(): { dist: number; midX: number; midY: number; angle: number } | null {
     const points = [...this.gesturePointers.values()];
     if (points.length < 2) {
       return null;
@@ -8114,6 +8183,9 @@ export class GnumarusShell extends LitElement {
       dist: Math.hypot(a.x - b.x, a.y - b.y),
       midX: (a.x + b.x) / 2,
       midY: (a.y + b.y) / 2,
+      // Screen coords (y down): clockwise finger motion increases the angle,
+      // matching rotateByDegrees' clockwise-positive convention.
+      angle: Math.atan2(b.y - a.y, b.x - a.x),
     };
   }
 
@@ -8168,6 +8240,17 @@ export class GnumarusShell extends LitElement {
     const factor = Math.min(2, Math.max(0.5, next.dist / prev.dist));
     this.engine.zoomAtPoint(next.midX, next.midY, factor);
     this.engine.panBy(next.midX - prev.midX, next.midY - prev.midY);
+    let angleDelta = next.angle - prev.angle;
+    while (angleDelta > Math.PI) {
+      angleDelta -= 2 * Math.PI;
+    }
+    while (angleDelta < -Math.PI) {
+      angleDelta += 2 * Math.PI;
+    }
+    const angleDeg = (angleDelta * 180) / Math.PI;
+    if (Math.abs(angleDeg) >= 0.5) {
+      this.engine.rotateByDegrees(angleDeg);
+    }
     this.gesturePrev = next;
   };
 
@@ -14945,10 +15028,10 @@ export class GnumarusShell extends LitElement {
   }
 
   /**
-   * Drag the text editor dialog by its title bar so the canvas stays
-   * visible while editing. The native modal dialog is centered by
-   * default; the first drag pins it to fixed coordinates, later drags
-   * move it from there.
+   * Drag the text editor dialog from any free area (everything except
+   * buttons and form fields) so the canvas stays visible while editing.
+   * The native modal dialog is centered by default; the first drag pins
+   * it to fixed coordinates, later drags move it from there.
    */
   private startTextDialogDrag(event: PointerEvent): void {
     const dialog = this.shadowRoot?.getElementById("textEditorDialog") as HTMLDialogElement | null;
@@ -14961,6 +15044,7 @@ export class GnumarusShell extends LitElement {
     dialog.style.margin = "0";
     dialog.style.left = `${rect.left}px`;
     dialog.style.top = `${rect.top}px`;
+    dialog.style.touchAction = "none";
     const startX = event.clientX;
     const startY = event.clientY;
     const baseLeft = rect.left;
@@ -14981,10 +15065,30 @@ export class GnumarusShell extends LitElement {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
+      dialog.style.touchAction = "";
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
+  }
+
+  /**
+   * Dialog-wide drag gate: starts a dialog drag from any free area but
+   * never from buttons, form fields, labels, editable text or the color
+   * picker (those keep their native click/focus/selection behavior).
+   */
+  private onTextDialogPointerDown(event: PointerEvent): void {
+    if (event.button !== 0) {
+      return;
+    }
+    const target = event.target;
+    if (
+      target instanceof Element &&
+      target.closest("button, input, select, textarea, label, [contenteditable], gnumarus-color-picker, a")
+    ) {
+      return;
+    }
+    this.startTextDialogDrag(event);
   }
 
   /** System font families offered by the text editor (matches the sanitizer allowlist). */
@@ -15010,6 +15114,36 @@ export class GnumarusShell extends LitElement {
     ];
   }
 
+  /**
+   * Park the open text dialog just above the text it edits (falling back
+   * below the text when there is no room, and to the centered default when
+   * the text has no on-screen box), so the live canvas preview stays
+   * visible while typing and styling.
+   */
+  private placeTextDialogAbove(layerId: string, frame: number): void {
+    const dialog = this.shadowRoot?.getElementById("textEditorDialog") as HTMLDialogElement | null;
+    if (dialog === null || !dialog.open || this.engine === null) {
+      return;
+    }
+    const content = this.engine.getCellContentScreenRect(layerId, frame);
+    const rect = dialog.getBoundingClientRect();
+    if (content === null || rect.width <= 0 || rect.height <= 0) {
+      return;
+    }
+    dialog.style.position = "fixed";
+    dialog.style.margin = "0";
+    const gap = 12;
+    let top = content.top - rect.height - gap;
+    if (top < 8) {
+      top = content.top + content.height + gap;
+    }
+    top = Math.min(top, Math.max(8, window.innerHeight - rect.height - 8));
+    top = Math.max(8, top);
+    const left = Math.min(Math.max(content.left, 8), Math.max(8, window.innerWidth - rect.width - 8));
+    dialog.style.left = `${Math.round(left)}px`;
+    dialog.style.top = `${Math.round(top)}px`;
+  }
+
   /** Open the rich text editor for a cell's text entry (live preview, single history entry on OK). */
   private async openTextEditor(layerId: string, frame: number, contentId: string, textId: string): Promise<void> {
     if (this.engine === null) {
@@ -15030,6 +15164,7 @@ export class GnumarusShell extends LitElement {
     }
     const dialog = this.shadowRoot?.getElementById("textEditorDialog") as HTMLDialogElement | null;
     dialog?.showModal();
+    this.placeTextDialogAbove(layerId, frame);
   }
 
   private renderTextEditorDialog() {
@@ -15039,13 +15174,14 @@ export class GnumarusShell extends LitElement {
     }
     const document = this.engine.getTextDocument(editor.textId);
     return html`
-      <dialog id="textEditorDialog" data-testid="text-editor-dialog" @close=${(): void => this.onTextEditorClosed()}>
+      <dialog id="textEditorDialog" data-testid="text-editor-dialog" @close=${(): void => this.onTextEditorClosed()}
+        @pointerdown=${(event: PointerEvent): void => this.onTextDialogPointerDown(event)}>
         <h3
           class="text-editor-title"
           data-testid="text-editor-title"
-          @pointerdown=${(event: PointerEvent): void => this.startTextDialogDrag(event)}
         >${tr("dialog.editText")}</h3>
-        <div class="text-toolbar" role="toolbar" aria-label=${tr("dialog.editText")}>
+        <div class="text-toolbar" role="toolbar" aria-label=${tr("dialog.editText")}
+          @mousedown=${(): void => this.saveTextSelection()}>
           <button data-testid="text-bold" title=${tr("dialog.textBold")} @mousedown=${(event: MouseEvent): void => event.preventDefault()} @click=${(): void => this.applyTextCommand("bold")}>
             <b>B</b>
           </button>
@@ -15073,6 +15209,12 @@ export class GnumarusShell extends LitElement {
               max="500"
               step="1"
               value="32"
+              @keydown=${(event: KeyboardEvent): void => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  this.applyTextSizeFromDialog();
+                }
+              }}
             />
           </label>
           <span class="text-color-row" title=${tr("dialog.textColor")}>
@@ -15170,8 +15312,11 @@ export class GnumarusShell extends LitElement {
   }
 
   /**
-   * Snapshot the editor selection (called on area blur/keys/mouse, i.e.
-   * right before a toolbar control steals focus).
+   * Snapshot the editor selection (called on area blur/keys/mouse and on
+   * toolbar mousedown, i.e. right before a toolbar control steals focus).
+   * A live non-collapsed range always wins; a collapsed live caret never
+   * clobbers a still-valid non-collapsed snapshot (clicking a size input
+   * would otherwise silently discard the selection the style applies to).
    */
   private saveTextSelection(): void {
     const area = this.shadowRoot?.getElementById("textEditorArea");
@@ -15179,12 +15324,35 @@ export class GnumarusShell extends LitElement {
       return;
     }
     const selection = this.editorSelection();
-    if (selection !== null && selection.rangeCount > 0 && area.contains(selection.anchorNode)) {
+    if (selection === null || selection.rangeCount === 0 || !area.contains(selection.anchorNode)) {
+      return;
+    }
+    if (!selection.isCollapsed) {
       try {
         this.savedTextRange = selection.getRangeAt(0).cloneRange();
       } catch {
         this.savedTextRange = null;
       }
+      return;
+    }
+    if (this.savedTextRange !== null) {
+      try {
+        const probe = this.savedTextRange.cloneRange();
+        if (
+          !probe.collapsed &&
+          area.contains(this.savedTextRange.startContainer) &&
+          area.contains(this.savedTextRange.endContainer)
+        ) {
+          return;
+        }
+      } catch {
+        // Stale snapshot below: replace it with the live caret.
+      }
+    }
+    try {
+      this.savedTextRange = selection.getRangeAt(0).cloneRange();
+    } catch {
+      this.savedTextRange = null;
     }
   }
 

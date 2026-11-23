@@ -2894,6 +2894,46 @@ export class GnumarusCanvasEngine {
   }
 
   /**
+   * Client-space bounding box of a cell's rendered content (viewport CSS
+   * pixels), or null when the cell renders nothing. Uses the same
+   * content-transform plus view mapping as the layer planes, so dialogs
+   * and overlays line up with what is painted. Read-only.
+   */
+  getCellContentScreenRect(layerId: string, frame: number): { left: number; top: number; width: number; height: number } | null {
+    const resolved = this.resolveFrameAt(frame).get(layerId);
+    if (resolved === undefined || resolved.buffer === null || resolved.width < 1 || resolved.height < 1) {
+      return null;
+    }
+    const rect = this.container.getBoundingClientRect();
+    const local: GnumarusRect = {
+      left: 0,
+      top: 0,
+      width: Math.max(1, rect.width),
+      height: Math.max(1, rect.height),
+    };
+    const view = this.viewTransform();
+    const corners = [
+      { x: 0, y: 0 },
+      { x: resolved.width, y: 0 },
+      { x: 0, y: resolved.height },
+      { x: resolved.width, y: resolved.height },
+    ].map((corner) => {
+      const projected = layerImageToProject(corner.x, corner.y, resolved.width, resolved.height, resolved.transform);
+      return projectToScreen(projected.x, projected.y, local, view);
+    });
+    const xs = corners.map((corner) => corner.x + rect.left);
+    const ys = corners.map((corner) => corner.y + rect.top);
+    const left = Math.min(...xs);
+    const top = Math.min(...ys);
+    return {
+      left,
+      top,
+      width: Math.max(...xs) - left,
+      height: Math.max(...ys) - top,
+    };
+  }
+
+  /**
    * Paint-guard for derived cells: pixel tools cannot paint rasterized
    * text or vector graphics (rasters are derived and re-generated from
    * the source document). Notifies the shell once per blocked gesture

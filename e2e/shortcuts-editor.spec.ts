@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 async function openEditor(page: import("@playwright/test").Page): Promise<import("@playwright/test").Locator> {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Edit shortcuts" }).click();
   const dialog = page.locator("gnumarus-shell dialog#shortcutsDialog");
   await expect(dialog).toBeVisible();
@@ -32,12 +32,12 @@ test("Edit menu and run action open the same shortcuts editor", async ({ page })
   // Close button, outside click and Escape all close.
   await dialog.locator('[data-testid="shortcut-close"]').click();
   await expect(dialog).toBeHidden();
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Edit shortcuts" }).click();
   await expect(dialog).toBeVisible();
   await page.mouse.click(5, 5);
   await expect(dialog).toBeHidden();
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Edit shortcuts" }).click();
   await expect(dialog).toBeVisible();
   await page.keyboard.press("Escape");
@@ -85,7 +85,7 @@ test("change applies, cancel discards and default restores", async ({ page }) =>
   await page.keyboard.press("F8");
   await expect(page.locator("gnumarus-shell")).toContainText("pencil");
   // Default restores the factory key.
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Edit shortcuts" }).click();
   await expect(dialog).toBeVisible();
   await dialog.locator('[data-testid="shortcut-search"]').fill("Pencil");
@@ -115,7 +115,7 @@ test("conflicting shortcuts turn red and stay disabled until changed", async ({ 
   await expect(page.locator("gnumarus-shell")).not.toContainText("pencil");
   await expect(page.locator("gnumarus-shell")).not.toContainText("bucket");
   // Resolve the conflict: bucket back to G re-enables both.
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Edit shortcuts" }).click();
   await expect(dialog).toBeVisible();
   await rowFor(dialog, "tool-bucket").locator('[data-testid="shortcut-change"]').click();
@@ -170,7 +170,7 @@ test("presets list every program and reshape the bindings", async ({ page }) => 
   // … and survive a reload.
   await page.reload();
   await page.waitForSelector("gnumarus-shell canvas");
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Edit shortcuts" }).click();
   const dialog2 = page.locator("gnumarus-shell dialog#shortcutsDialog");
   await expect(dialog2).toBeVisible();

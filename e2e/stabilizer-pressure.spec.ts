@@ -166,7 +166,7 @@ test("4 and 6 rotate the canvas by the step and 5 resets rotation", async ({ pag
 test("canvas rotation step is configurable in Settings", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Canvas rotation step");
   expect(await page.getByRole("button", { name: "Reset canvas rotation step to default" }).count()).toBe(0);
@@ -178,7 +178,7 @@ test("canvas rotation step is configurable in Settings", async ({ page }) => {
   await page.keyboard.press("6");
   expect((await getViewState(page)).rotation).toBeCloseTo(Math.PI / 6, 5);
   await page.keyboard.press("5");
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await page.getByRole("button", { name: "Reset canvas rotation step to default" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Canvas rotation step reset to default");

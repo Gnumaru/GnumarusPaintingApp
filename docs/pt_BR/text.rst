@@ -4,7 +4,10 @@ Texto
 A ferramenta **texto** solta um conteúdo rico editável na célula
 ativa: família, tamanho, negrito/itálico/sublinhado, alinhamento e
 cor, com desfazer/refazer por edição. O editor reabre pelo menu da
-célula (**Editar texto**) para conteúdos existentes.
+célula (**Editar texto**) para conteúdos existentes. O diálogo abre
+logo acima do texto que edita (mantendo a pré-visualização visível),
+arrasta por qualquer área livre, e o campo de tamanho aplica no texto
+selecionado com Enter.
 
 Pintar sobre o texto, ou **Rasterizar texto**, consolida os glifos em
 pixels comuns (ainda uma entrada de desfazer). Conteúdos de texto

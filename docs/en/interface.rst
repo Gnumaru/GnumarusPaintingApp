@@ -41,11 +41,14 @@ Layers panel and animation matrix
 ---------------------------------
 
 The right panel lists layers (visibility, opacity, blend mode, R/G/B/A
-channel locks, rename, resize, reorder, merge, masks). Under it, the
+channel locks, rename, resize, reorder, merge, masks) and resizes by
+dragging its left border (140..560 px). Under it, the
 animation matrix shows layers against frames with per-cell content
 pickers, frame headers (rename, duration, add/remove) and the onion
 skin, playback and content-manager controls. Right-click layer names,
-frame headers and cells for context menus.
+frame headers and cells for context menus. Selecting a cell highlights
+every other cell sharing its content, so linked cells are visible at a
+glance.
 
 Status bar and dialogs
 ----------------------

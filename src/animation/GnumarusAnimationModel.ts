@@ -387,3 +387,33 @@ export function holdEmptyCellsForward(
   }
   return resolved;
 }
+
+/**
+ * Content ids shared with the selection: for every selected cell key, the
+ * cell's content id — but only when that content is used by more than one
+ * cell. Lets the matrix highlight every cell linked to the selection.
+ * Keys are opaque (callers use their own key format for both lists).
+ */
+export function sharedCellContentIds(
+  cells: ReadonlyArray<{ key: string; contentId: string | null }>,
+  selectedKeys: ReadonlySet<string> | ReadonlyArray<string>,
+): Set<string> {
+  const selected = selectedKeys instanceof Set ? selectedKeys : new Set(selectedKeys);
+  const counts = new Map<string, number>();
+  const byKey = new Map<string, string>();
+  for (const cell of cells) {
+    if (cell.contentId === null) {
+      continue;
+    }
+    byKey.set(cell.key, cell.contentId);
+    counts.set(cell.contentId, (counts.get(cell.contentId) ?? 0) + 1);
+  }
+  const shared = new Set<string>();
+  for (const key of selected) {
+    const contentId = byKey.get(key);
+    if (contentId !== undefined && (counts.get(contentId) ?? 0) > 1) {
+      shared.add(contentId);
+    }
+  }
+  return shared;
+}

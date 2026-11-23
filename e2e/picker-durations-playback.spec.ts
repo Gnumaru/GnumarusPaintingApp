@@ -179,7 +179,7 @@ test("project default frame duration is configurable with a reset", async ({ pag
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   expect(await getDefaultFrameDuration(page)).toBe(0.25);
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Default frame duration");
   const input = page.locator("gnumarus-shell input#defaultFrameDuration");
@@ -217,12 +217,12 @@ test("menubar switches menus on hover while open", async ({ page }) => {
   const editItem = menubar.getByRole("button", { name: "Settings", exact: true });
   const helpItem = menubar.getByRole("button", { name: "Shortcuts", exact: true });
   // Hovering with no menu open opens nothing.
-  await menubar.getByRole("button", { name: "Edit" }).hover();
+  await menubar.getByRole("button", { name: "Edit", exact: true }).hover();
   await expect(fileItem).toBeHidden();
   await expect(editItem).toBeHidden();
   await page.getByRole("button", { name: "File" }).click();
   await expect(fileItem).toBeVisible();
-  await menubar.getByRole("button", { name: "Edit" }).hover();
+  await menubar.getByRole("button", { name: "Edit", exact: true }).hover();
   await expect(fileItem).toBeHidden();
   await expect(editItem).toBeVisible();
   await menubar.getByRole("button", { name: "Help" }).hover();
@@ -379,7 +379,7 @@ test("black switch can be disabled in settings @recent", async ({ page }) => {
   await page.evaluate(() => window.localStorage.setItem("gnumarus.settings.blackSwitch.v1", '{"switchOutOfBlack":false}'));
   await page.reload();
   await page.waitForSelector("gnumarus-shell canvas");
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.locator("gnumarus-shell input#blackSwitchOutOfBlack")).not.toBeChecked();
   await page.keyboard.press("Escape");
@@ -393,7 +393,7 @@ test("black switch can be disabled in settings @recent", async ({ page }) => {
   await expect(picker.getByLabel("Lightness", { exact: true })).toHaveValue("0.0");
   await expect(hexInput).toHaveValue("#000000");
   // Re-enabling restores the switch and persists it.
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await page.locator("gnumarus-shell input#blackSwitchOutOfBlack").check();
   const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.blackSwitch.v1"));

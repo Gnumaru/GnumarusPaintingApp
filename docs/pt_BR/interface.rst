@@ -48,12 +48,14 @@ Painel de camadas e matriz de animação
 
 O painel direito lista as camadas (visibilidade, opacidade, modo de
 mesclagem, travas de canal V/V/A/A, renomear, redimensionar,
-reordenar, fundir, máscaras). Abaixo, a matriz de animação mostra
+reordenar, fundir, máscaras) e redimensiona arrastando sua borda
+esquerda (140..560 px). Abaixo, a matriz de animação mostra
 camadas contra quadros com seletores de conteúdo por célula,
 cabeçalhos de quadro (renomear, duração, adicionar/remover) e os
 controles de onion skin, reprodução e gerenciador de conteúdo. Clique
 com o botão direito nos nomes de camada, cabeçalhos e células para
-menus de contexto.
+menus de contexto. Selecionar uma célula destaca todas as outras que
+compartilham seu conteúdo, mostrando as células ligadas de relance.
 
 Barra de status e diálogos
 --------------------------

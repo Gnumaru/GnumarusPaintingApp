@@ -109,7 +109,7 @@ test("project texture lossy setting is honored and persists", async ({ page }) =
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Project texture format");
   const dialog = page.locator("gnumarus-shell dialog#settingsDialog");
@@ -136,7 +136,7 @@ test("project texture lossy setting is honored and persists", async ({ page }) =
   expect(center[3]).toBeGreaterThan(0);
   expect(center[1]).toBeGreaterThan(center[0]);
   expect(center[1]).toBeGreaterThan(center[2]);
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await page.locator('gnumarus-shell [aria-label="Reset project texture format to default"]').click();
   await expect(page.locator("gnumarus-shell select#storageFormat")).toHaveValue("jxl");
@@ -152,7 +152,7 @@ test("project textures save as PNG with a compression level and reopen", async (
   });
   await setPencil(page, "#ff0000");
   await paintCenter(page);
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   const dialog = page.locator("gnumarus-shell dialog#settingsDialog");
   await dialog.locator("select#storageFormat").selectOption("png");
@@ -188,7 +188,7 @@ test("project textures save as JPEG with a grayscale alpha companion", async ({ 
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   const dialog = page.locator("gnumarus-shell dialog#settingsDialog");
   await dialog.locator("select#storageFormat").selectOption("jpg");
@@ -265,7 +265,7 @@ test("project meta plain mode writes project.json and removes project.gpa", asyn
   await page.getByRole("button", { name: "Save Project", exact: true }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   expect(Object.keys(await project.writtenBlobs()).sort()).toEqual(["project.gpa", "textures/t1.jxl"]);
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   const dialog = page.locator("gnumarus-shell dialog#settingsDialog");
   await expect(dialog.locator("select#storageProjectFile")).toHaveValue("gpa");
@@ -278,7 +278,7 @@ test("project meta plain mode writes project.json and removes project.gpa", asyn
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   expect(Object.keys(await project.writtenBlobs()).sort()).toEqual(["project.json", "textures/t1.jxl"]);
   expect(await project.writtenProject()).toContain('"textures/t1.jxl"');
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await page.locator("gnumarus-shell dialog#settingsDialog select#storageProjectFile").selectOption("gpa");
   await page.locator("gnumarus-shell dialog#settingsDialog").getByRole("button", { name: "Close" }).click();
@@ -309,7 +309,7 @@ test("changing texture storage removes stale texture files", async ({ page }) =>
     await expect(page.locator("gnumarus-shell")).toContainText("Saved to MockProject");
   };
   const setFormat = async (format: string): Promise<void> => {
-    await page.getByRole("button", { name: "Edit" }).click();
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
     await page.getByRole("button", { name: "Settings" }).click();
     await page.locator("gnumarus-shell dialog#settingsDialog select#storageFormat").selectOption(format);
     await page.locator("gnumarus-shell dialog#settingsDialog").getByRole("button", { name: "Close" }).click();

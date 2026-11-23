@@ -145,6 +145,42 @@ test.describe("mobile shell", () => {
     expect(undoDepth).toBe(0);
   });
 
+  test("two-finger twist rotates without committing a paint dot", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector('gnumarus-shell [data-testid="mobile-shell"]');
+    await loadBlankProject(page, 64);
+    const box = await page.locator("gnumarus-shell canvas").boundingBox();
+    if (box === null) {
+      throw new Error("canvas has no bounding box");
+    }
+    const cx = box.x + box.width / 2;
+    const cy = box.y + box.height / 2;
+    const cdp = await page.context().newCDPSession(page);
+    // Start horizontal, end vertical: a 90-degree clockwise twist.
+    const twist = (angleDeg: number): Array<{ x: number; y: number; id: number }> => {
+      const angle = (angleDeg * Math.PI) / 180;
+      const radius = 45;
+      return [
+        { x: cx - radius * Math.cos(angle), y: cy - radius * Math.sin(angle), id: 1 },
+        { x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle), id: 2 },
+      ];
+    };
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: twist(0) });
+    for (const angle of [20, 45, 70, 90]) {
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: twist(angle) });
+    }
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await expect
+      .poll(async () => {
+        return page.evaluate(() => {
+          const root = window as unknown as { __gnumarus?: { shell?: { rotText: string } } };
+          return root.__gnumarus?.shell?.rotText ?? null;
+        });
+      })
+      .toBe("90°");
+    expect(await readPixel(page, 32, 32)).toEqual(BLANK);
+  });
+
   test("override switches mobile to desktop and back", async ({ page }) => {
     await page.goto("/");
     await page.waitForSelector('gnumarus-shell [data-testid="mobile-shell"]');

@@ -17,6 +17,7 @@ import {
   removeFramesDurations,
   removeFramesNames,
   resolveAnimationFrame,
+  sharedCellContentIds,
   swapFrameCells,
   swapFrameDurations,
   swapFrameNames,
@@ -302,5 +303,26 @@ describe("holdEmptyCellsForward", () => {
     holdEmptyCellsForward(["layer1"], textures, contents, cells, 5, resolved);
     // Frame 4 holds a content without texture: still renders nothing.
     expect(resolved.get("layer1")?.buffer).toBeNull();
+  });
+});
+
+describe("sharedCellContentIds", () => {
+  const cells = [
+    { key: "layer0:0", contentId: "content1" },
+    { key: "layer0:1", contentId: "content1" },
+    { key: "layer0:2", contentId: "content2" },
+    { key: "layer1:0", contentId: null },
+  ];
+
+  it("returns selected contents used by more than one cell", () => {
+    expect(sharedCellContentIds(cells, ["layer0:0"])).toEqual(new Set(["content1"]));
+    expect(sharedCellContentIds(cells, new Set(["layer0:1", "layer0:2"]))).toEqual(new Set(["content1"]));
+  });
+
+  it("ignores single-use, empty and unknown selections", () => {
+    expect(sharedCellContentIds(cells, ["layer0:2"])).toEqual(new Set());
+    expect(sharedCellContentIds(cells, ["layer1:0"])).toEqual(new Set());
+    expect(sharedCellContentIds(cells, ["nope:9"])).toEqual(new Set());
+    expect(sharedCellContentIds(cells, [])).toEqual(new Set());
   });
 });

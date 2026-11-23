@@ -91,7 +91,7 @@ test("Ctrl+Alt+Arrow expands the current cell texture by the configured step", a
   await page.keyboard.press("Control+z");
   expect((await getLayers(page)).layers[0]?.width).toBe(80);
   // The step setting changes the growth: 8px down from 64px height.
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await page.locator("gnumarus-shell input#expandStep").fill("8");
   const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.expand.v1"));
@@ -125,7 +125,7 @@ test("fit alpha threshold default flows into the dialog and persists", async ({ 
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await paintCenter(page);
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   const setting = page.locator("gnumarus-shell input#fitDefaultThreshold");
   await expect(setting).toHaveValue("0");
@@ -137,7 +137,7 @@ test("fit alpha threshold default flows into the dialog and persists", async ({ 
   await page.getByRole("button", { name: "Fit texture to size" }).click();
   await expect(page.locator("gnumarus-shell dialog#fitTextureDialog input#fitThreshold")).toHaveValue("10");
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await page.getByRole("button", { name: "Reset fit alpha threshold to default" }).click();
   await expect(page.locator("gnumarus-shell input#fitDefaultThreshold")).toHaveValue("0");

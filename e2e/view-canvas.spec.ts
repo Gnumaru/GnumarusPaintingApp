@@ -44,7 +44,7 @@ test("keyboard shortcuts zoom in and out", async ({ page }) => {
 test("Edit > Settings changes the checkerboard", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("Checkerboard mode");
   await page.locator("gnumarus-shell select#checkerMode").selectOption("screen");
@@ -230,7 +230,7 @@ test("Shift+Space drag rotates like the loupe", async ({ page }) => {
 test("minimum zoom is configurable and floors zoom-out", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   const dialog = page.locator("gnumarus-shell dialog#settingsDialog");
   await expect(dialog.locator("input#zoomMinZoom")).toHaveValue("1");
@@ -247,7 +247,7 @@ test("minimum zoom is configurable and floors zoom-out", async ({ page }) => {
   const zoom = (await getViewState(page)).zoom;
   expect(zoom).toBeLessThan(0.5);
   expect(zoom).toBeGreaterThanOrEqual(0.1);
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await page.locator('gnumarus-shell [aria-label="Reset minimum zoom to default"]').click();
   await expect(dialog.locator("input#zoomMinZoom")).toHaveValue("1");
@@ -334,7 +334,7 @@ test("Edit > Reset Canvas Transform restores the default view", async ({ page })
   const transformed = await getViewState(page);
   expect(transformed.rotation).toBeCloseTo(1, 5);
   expect(transformed).toMatchObject({ flipX: true, flipY: true });
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Reset Canvas Transform" }).click();
   expect(await getViewState(page)).toEqual({ zoom: fit, rotation: 0, flipX: false, flipY: false });
 });
