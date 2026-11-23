@@ -133,7 +133,7 @@ test("brush preset names translate to Brazilian Portuguese @recent", async ({ pa
   const settings = page.locator("gnumarus-shell dialog#settingsDialog");
   await settings.locator("select#localeSelect").selectOption("pt-BR");
   await settings.getByRole("button", { name: "Fechar" }).click();
-  const options = page.locator('gnumarus-shell [aria-label="Opções do lápis"]');
+  const options = page.locator('gnumarus-shell [aria-label="Opções do pincel"]');
   await expect(options.locator("select#brushPreset")).toContainText("Giz");
   // Values stay the stable English identity names.
   await expect(options.locator("select#brushPreset")).toHaveValue("Pixel Hard");

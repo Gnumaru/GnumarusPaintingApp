@@ -141,7 +141,7 @@ test("new animation dialog lists the selected frames @recent", async ({ page }) 
   const dialog = page.locator("gnumarus-shell dialog#animationCreateDialog");
   await expect(dialog).toBeVisible();
   await expect(dialog.locator('[data-testid="animation-create-frames"]')).toHaveText(
-    "The animation will use the following frames: 1,3",
+    "The animation will use the following frames: 1, 3",
   );
   await dialog.locator('[data-testid="animation-create-cancel"]').click();
   await expect(dialog).toBeHidden();
@@ -172,7 +172,7 @@ test("new animation dialog lists the selected frames in Brazilian Portuguese @re
   await page.getByRole("button", { name: "Nova animação" }).click();
   const dialog = page.locator("gnumarus-shell dialog#animationCreateDialog");
   await expect(dialog.locator('[data-testid="animation-create-frames"]')).toHaveText(
-    "A animação usará os seguintes quadros: 1,2",
+    "A animação usará os seguintes quadros: 1-2",
   );
   await dialog.locator('[data-testid="animation-create-cancel"]').click();
 });
