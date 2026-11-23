@@ -177,3 +177,52 @@ test("font size survives hostile blur timing that collapses the live caret", asy
     })
     .toContain("font-size:48px\">Text<");
 });
+
+test("text editor HTML tab shows the read-only source", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await createDefaultText(page);
+  await openTextEditor(page);
+  const dialog = page.locator('gnumarus-shell [data-testid="text-editor-dialog"]');
+  const area = page.locator('gnumarus-shell [data-testid="text-editor-area"]');
+  const source = page.locator('gnumarus-shell [data-testid="text-editor-html"]');
+  await expect(dialog.getByTestId("text-tab-edit")).toHaveAttribute("aria-selected", "true");
+  await expect(area).toBeVisible();
+  await expect(source).toBeHidden();
+  await dialog.getByTestId("text-tab-html").click();
+  await expect(dialog.getByTestId("text-tab-html")).toHaveAttribute("aria-selected", "true");
+  await expect(area).toBeHidden();
+  await expect(source).toBeVisible();
+  await expect
+    .poll(async () => source.textContent())
+    .toContain("<div>Text</div>");
+  // Read-only: a pre element, not an editable field.
+  expect(await source.evaluate((element) => element.tagName)).toBe("PRE");
+  expect(await source.evaluate((element) => (element as HTMLElement).getAttribute("contenteditable"))).toBeNull();
+});
+
+test("HTML tab refreshes after styling and editing resumes on return", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await createDefaultText(page);
+  await openTextEditor(page);
+  const dialog = page.locator('gnumarus-shell [data-testid="text-editor-dialog"]');
+  const area = page.locator('gnumarus-shell [data-testid="text-editor-area"]');
+  const source = page.locator('gnumarus-shell [data-testid="text-editor-html"]');
+  await area.click();
+  await page.keyboard.press("Control+a");
+  await dialog.getByTestId("text-bold").click();
+  await dialog.getByTestId("text-tab-html").click();
+  await expect.poll(async () => source.textContent()).toContain("<b>");
+  await dialog.getByTestId("text-tab-edit").click();
+  await expect(area).toBeVisible();
+  await expect(source).toBeHidden();
+  await area.click();
+  await page.keyboard.press("End");
+  await page.keyboard.type("!");
+  await expect
+    .poll(async () => {
+      return area.evaluate((element) => (element as HTMLElement).innerHTML);
+    })
+    .toContain("!");
+});

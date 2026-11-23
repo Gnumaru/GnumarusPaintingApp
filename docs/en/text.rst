@@ -3,7 +3,7 @@ Text
 
 The **text** tool drops an editable rich-text content onto the active
 cell: family, size, bold/italic/underline, alignment and color, with
-undo/redo for every edit. The editor dialog reopens from the cell menu
+undo/redo for every edit. The editor has Edit and HTML tabs in its title row: the HTML tab shows the read-only source of the WYSIWYG pane and refreshes on every edit. The editor dialog reopens from the cell menu
 (**Edit text**) for existing contents. The dialog opens just above the
 text it edits (so the live preview stays visible), drags from any free
 area, and the size field commits to the selected text on Enter, the Set button, or when it loses focus.

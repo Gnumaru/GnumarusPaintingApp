@@ -1933,8 +1933,53 @@ export class GnumarusShell extends LitElement {
       user-select: none;
       touch-action: none;
     }
+    .text-editor-head {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .text-editor-head .text-editor-title {
+      margin: 0;
+    }
     .text-editor-area:focus {
       outline: 2px solid #0e639c;
+    }
+    .text-tabs {
+      display: flex;
+      gap: 4px;
+      margin: 0;
+      font-size: 12px;
+    }
+    .text-tabs button {
+      min-width: 90px;
+      border: 1px solid #555;
+      border-bottom: none;
+      border-radius: 4px 4px 0 0;
+      background: #2b2b2b;
+      color: #cccccc;
+      padding: 4px 10px;
+      cursor: pointer;
+    }
+    .text-tabs button[aria-selected="true"] {
+      background: #ffffff;
+      color: #000000;
+    }
+    .text-editor-html {
+      min-width: min(480px, 80vw);
+      min-height: 120px;
+      max-height: 320px;
+      overflow: auto;
+      background: #1e1e1e;
+      color: #d7d7d7;
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 8px;
+      font-size: 12px;
+      font-family: ui-monospace, Consolas, monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin: 0;
     }
     .text-editor-empty {
       color: #ffb3b3;
@@ -2176,6 +2221,8 @@ export class GnumarusShell extends LitElement {
     textPickerTarget: { type: Object },
     textEditor: { type: Object },
     textEditorColor: { type: String },
+    textEditorTab: { type: String },
+    textEditorHtml: { type: String },
     fitTextureTarget: { type: Object },
     fitThreshold: { type: Number },
     adjustBrightness: { type: Number },
@@ -2451,6 +2498,8 @@ export class GnumarusShell extends LitElement {
     beforeHtml: string;
   } | null;
   declare textEditorColor: string;
+  declare textEditorTab: "edit" | "html";
+  declare textEditorHtml: string;
   declare fitTextureTarget: { kind: "single"; textureId: string } | { kind: "all" } | null;
   declare fitThreshold: number;
   declare adjustBrightness: number;
@@ -2777,6 +2826,8 @@ export class GnumarusShell extends LitElement {
     this.savedTextRange = null;
     this.suppressSizeChangeOnce = false;
     this.textEditorColor = "#000000";
+    this.textEditorTab = "edit";
+    this.textEditorHtml = "";
     this.tileWindowOpen = false;
     this.tileWindowX = 280;
     this.tileWindowY = 120;
@@ -15488,6 +15539,8 @@ export class GnumarusShell extends LitElement {
     this.closeMatrixMenu();
     this.textEditor = { layerId, frame, contentId, textId, beforeHtml: document.html };
     this.textEditorColor = "#000000";
+    this.textEditorTab = "edit";
+    this.textEditorHtml = document.html;
     await this.updateComplete;
     const area = this.shadowRoot?.getElementById("textEditorArea");
     if (area !== null && area !== undefined) {
@@ -15508,10 +15561,31 @@ export class GnumarusShell extends LitElement {
     return html`
       <dialog id="textEditorDialog" data-testid="text-editor-dialog" @close=${(): void => this.onTextEditorClosed()}
         @pointerdown=${(event: PointerEvent): void => this.onTextDialogPointerDown(event)}>
-        <h3
-          class="text-editor-title"
-          data-testid="text-editor-title"
-        >${tr("dialog.editText")}</h3>
+        <div class="text-editor-head">
+          <h3
+            class="text-editor-title"
+            data-testid="text-editor-title"
+          >${tr("dialog.editText")}</h3>
+          <div
+            class="text-tabs"
+            role="tablist"
+            aria-label=${tr("dialog.editText")}
+            @mousedown=${(): void => this.saveTextSelection()}
+          >
+            <button
+              role="tab"
+              data-testid="text-tab-edit"
+              aria-selected=${this.textEditorTab === "edit" ? "true" : "false"}
+              @click=${(): void => this.switchTextTab("edit")}
+            >${tr("dialog.textTabEdit")}</button>
+            <button
+              role="tab"
+              data-testid="text-tab-html"
+              aria-selected=${this.textEditorTab === "html" ? "true" : "false"}
+              @click=${(): void => this.switchTextTab("html")}
+            >${tr("dialog.textTabHtml")}</button>
+          </div>
+        </div>
         <div class="text-toolbar" role="toolbar" aria-label=${tr("dialog.editText")}
           @mousedown=${(): void => this.saveTextSelection()}>
           <button data-testid="text-bold" title=${tr("dialog.textBold")} @mousedown=${(event: MouseEvent): void => event.preventDefault()} @click=${(): void => this.applyTextCommand("bold")}>
@@ -15579,6 +15653,7 @@ export class GnumarusShell extends LitElement {
           class="text-editor-area"
           data-testid="text-editor-area"
           contenteditable="true"
+          ?hidden=${this.textEditorTab !== "edit"}
           @input=${(): void => {
             this.saveTextSelection();
             this.onTextEditorInput();
@@ -15588,6 +15663,13 @@ export class GnumarusShell extends LitElement {
           @mouseup=${(): void => this.saveTextSelection()}
           @paste=${(event: ClipboardEvent): void => this.onTextEditorPaste(event)}
         ></div>
+        <pre
+          id="textEditorHtml"
+          class="text-editor-html"
+          data-testid="text-editor-html"
+          title=${tr("dialog.textHtmlTitle")}
+          ?hidden=${this.textEditorTab !== "html"}
+        >${this.textEditorHtml}</pre>
         ${document === null
           ? html`<p class="text-editor-empty">${tr("status.contentCreateFailed")}</p>`
           : html``}
@@ -15811,9 +15893,34 @@ export class GnumarusShell extends LitElement {
     if (editor === null || this.engine === null || !(area instanceof HTMLElement)) {
       return;
     }
+    if (area.innerHTML !== this.textEditorHtml) {
+      this.textEditorHtml = area.innerHTML;
+    }
     if (this.engine.previewTextEdit(editor.textId, area.innerHTML)) {
       this.refreshLayers();
       this.dirty = true;
+    }
+  }
+
+  /** Switch the text dialog between WYSIWYG editing and the read-only HTML source. */
+  private switchTextTab(tab: "edit" | "html"): void {
+    if (this.textEditor === null || tab === this.textEditorTab) {
+      return;
+    }
+    this.saveTextSelection();
+    const area = this.shadowRoot?.getElementById("textEditorArea");
+    if (area instanceof HTMLElement && area.innerHTML !== this.textEditorHtml) {
+      this.textEditorHtml = area.innerHTML;
+    }
+    this.textEditorTab = tab;
+    if (tab === "edit") {
+      void this.updateComplete.then(() => {
+        const live = this.shadowRoot?.getElementById("textEditorArea");
+        if (live instanceof HTMLElement && this.textEditor !== null) {
+          live.focus();
+          this.restoreTextSelection();
+        }
+      });
     }
   }
 
@@ -15859,6 +15966,8 @@ export class GnumarusShell extends LitElement {
     this.textEditor = null;
     this.savedTextRange = null;
     this.suppressSizeChangeOnce = false;
+    this.textEditorTab = "edit";
+    this.textEditorHtml = "";
     const dialog = this.shadowRoot?.getElementById("textEditorDialog") as HTMLDialogElement | null;
     dialog?.close();
     if (this.engine.commitTextEdit(textId, beforeHtml)) {
@@ -15876,6 +15985,8 @@ export class GnumarusShell extends LitElement {
     this.textEditor = null;
     this.savedTextRange = null;
     this.suppressSizeChangeOnce = false;
+    this.textEditorTab = "edit";
+    this.textEditorHtml = "";
     const dialog = this.shadowRoot?.getElementById("textEditorDialog") as HTMLDialogElement | null;
     dialog?.close();
     if (editor !== null && this.engine !== null) {
@@ -15890,6 +16001,8 @@ export class GnumarusShell extends LitElement {
     this.textEditor = null;
     this.savedTextRange = null;
     this.suppressSizeChangeOnce = false;
+    this.textEditorTab = "edit";
+    this.textEditorHtml = "";
     if (editor !== null && this.engine !== null) {
       this.engine.previewTextEdit(editor.textId, editor.beforeHtml);
       this.refreshLayers();
