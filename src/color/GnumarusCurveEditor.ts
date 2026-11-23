@@ -1,4 +1,4 @@
-import { LitElement, css, html } from "lit";
+import { LitElement, css, html, svg } from "lit";
 import {
   addCurveNode,
   curveValueAt,
@@ -30,6 +30,8 @@ export class GnumarusCurveEditor extends LitElement {
       touch-action: none;
       user-select: none;
       cursor: crosshair;
+      /* Endpoint nodes sit exactly on the corners; keep them fully painted. */
+      overflow: visible;
     }
   `;
 
@@ -270,7 +272,7 @@ export class GnumarusCurveEditor extends LitElement {
       >
         ${grid.map(
           (line) =>
-            html`<line
+            svg`<line
               x1=${line.x1}
               y1=${line.y1}
               x2=${line.x2}
@@ -286,7 +288,7 @@ export class GnumarusCurveEditor extends LitElement {
           const half = emphasized ? 6 : 5;
           return [
             // Single tangent bar through the node, like vector editors.
-            html`<line
+            svg`<line
               x1=${toX(node.hx0)}
               y1=${toY(node.hy0)}
               x2=${toX(node.hx1)}
@@ -294,7 +296,7 @@ export class GnumarusCurveEditor extends LitElement {
               stroke="#0e639c"
               stroke-width=${emphasized ? 2.5 : 1.5}
             />`,
-            html`<rect
+            svg`<rect
               x=${toX(node.hx0) - half}
               y=${toY(node.hy0) - half}
               width=${half * 2}
@@ -307,7 +309,7 @@ export class GnumarusCurveEditor extends LitElement {
               data-index=${index}
               data-which="0"
             />`,
-            html`<rect
+            svg`<rect
               x=${toX(node.hx1) - half}
               y=${toY(node.hy1) - half}
               width=${half * 2}
@@ -320,7 +322,7 @@ export class GnumarusCurveEditor extends LitElement {
               data-index=${index}
               data-which="1"
             />`,
-            html`<circle
+            svg`<circle
               cx=${toX(node.x)}
               cy=${toY(node.y)}
               r=${isActiveNode(index) ? 8.5 : 7}

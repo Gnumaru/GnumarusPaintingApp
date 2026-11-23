@@ -24,6 +24,42 @@ test("curves filter opens under Colors with an identity preview", async ({ page 
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
 });
 
+test("curve nodes and vector-style handles render as painted SVG", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await paintCenter(page);
+  const dialog = await openCurves(page);
+  // Regression: nested `html` templates created the shapes in the HTML
+  // namespace (invisible, zero-size) — they must be real SVG elements.
+  const shapes = await dialog.locator('[data-testid="filter-param-curve"]').evaluate((editor) => {
+    const svg = editor.shadowRoot?.querySelector("svg");
+    if (svg === null || svg === undefined) {
+      return null;
+    }
+    const SVG_NS = "http://www.w3.org/2000/svg";
+    const describe = (el: Element | null | undefined): string | null => {
+      if (el === null || el === undefined) {
+        return null;
+      }
+      return el.namespaceURI === SVG_NS ? getComputedStyle(el).fill : `wrong-ns:${el.namespaceURI}`;
+    };
+    return {
+      nodes: [...svg.querySelectorAll('[data-testid="curve-node"]')].map(describe),
+      handles: [...svg.querySelectorAll('[data-testid="curve-handle"]')].map(describe),
+    };
+  });
+  expect(shapes?.nodes).toHaveLength(2);
+  expect(shapes?.handles).toHaveLength(4);
+  for (const fill of shapes?.nodes ?? []) {
+    expect(fill).toBe("rgb(255, 255, 255)");
+  }
+  for (const fill of shapes?.handles ?? []) {
+    expect(fill).toBe("rgb(14, 99, 156)");
+  }
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+});
+
 test("dragging the white endpoint darkens and undo restores", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
