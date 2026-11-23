@@ -17,7 +17,11 @@ Exportar grava PNG, JPEG, WebP e spritesheets (linhas/colunas,
 pintura por quadro). Marque **Exportar fundo** para assar um fundo
 sob a imagem (igual ao projeto, cor sólida ou quadriculado
 personalizado); desmarcado mantém a transparência onde o formato
-suporta. As ações em massa de ajustar/cortar normalizam
+suporta. As animações do spritesheet são escolhidas numa lista de
+seleção múltipla (mais um checkbox de todos os quadros e listas
+extras de quadros); o layout packed segue a configuração
+"Pacotes largos de spritesheet" (colunas arredondadas para cima em
+pacotes largos, para baixo nos altos). As ações em massa de ajustar/cortar normalizam
 antes; recarregar texturas restaura edições externas, pulando
 texturas novas (desfazível).
 

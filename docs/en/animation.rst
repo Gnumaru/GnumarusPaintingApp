@@ -22,7 +22,10 @@ Playback and duration
 ---------------------
 
 Transport plays from the current frame, advancing by each frame's
-duration (default duration setting + reset included). Frame headers
+duration (default duration setting + reset included). While playing,
+the status bar turns red; unless the "Allow changes while playing"
+setting is on, painting, edits, undo and new projects are blocked with
+a toast explaining why. Frame headers
 show tooltips naming every animation that includes the frame.
 
 Named animations

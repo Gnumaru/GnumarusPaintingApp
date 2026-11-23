@@ -164,6 +164,18 @@ import {
   serializeToastSettings,
 } from "../settings/GnumarusToastSettings";
 import {
+  DEFAULT_PLAYBACK_SETTINGS,
+  PLAYBACK_SETTINGS_STORAGE_KEY,
+  parsePlaybackSettings,
+  serializePlaybackSettings,
+} from "../settings/GnumarusPlaybackSettings";
+import {
+  DEFAULT_SHEET_PACK_SETTINGS,
+  SHEET_PACK_SETTINGS_STORAGE_KEY,
+  parseSheetPackSettings,
+  serializeSheetPackSettings,
+} from "../settings/GnumarusSheetPackSettings";
+import {
   DEFAULT_FIT_SETTINGS,
   FIT_SETTINGS_STORAGE_KEY,
   clampFitAlphaThreshold,
@@ -1273,6 +1285,9 @@ export class GnumarusShell extends LitElement {
     .statusbar .spacer {
       flex: 1 1 auto;
     }
+    .statusbar.playing {
+      background: #7a1f1f;
+    }
     dialog {
       background: #2b2b2b;
       color: #e6e6e6;
@@ -2230,6 +2245,8 @@ export class GnumarusShell extends LitElement {
     toastMessage: { type: String },
     updateStatus: { type: String },
     toastDurationSec: { type: Number },
+    allowChangesWhilePlaying: { type: Boolean },
+    wideSpritesheetPacks: { type: Boolean },
     swatches: { attribute: false },
     recentColors: { attribute: false },
     onionEnabled: { type: Boolean },
@@ -2519,6 +2536,10 @@ export class GnumarusShell extends LitElement {
   /** Update-check status (banner shows only when outdated). */
   declare updateStatus: GnumarusUpdateStatus;
   declare toastDurationSec: number;
+  /** Project edits stay enabled while an animation plays (default locked). */
+  declare allowChangesWhilePlaying: boolean;
+  /** Packed spritesheets round the column count up (wide) instead of down. */
+  declare wideSpritesheetPacks: boolean;
   declare onionEnabled: boolean;
   declare onionResolutionScale: number;
   declare onionCacheFrames: number;
@@ -2825,6 +2846,8 @@ export class GnumarusShell extends LitElement {
     this.exportCheckerColorB = DEFAULT_CHECKER_SETTINGS.colorB;
     this.exportSheetQuality = GNUMARUS_DEFAULT_STILL_QUALITY;
     this.exportSheetLossless = true;
+    this.allowChangesWhilePlaying = DEFAULT_PLAYBACK_SETTINGS.allowChangesWhilePlaying;
+    this.wideSpritesheetPacks = DEFAULT_SHEET_PACK_SETTINGS.wideSpritesheetPacks;
     this.playing = false;
     this.playTimer = null;
     this.uiHidden = false;
@@ -4352,7 +4375,7 @@ export class GnumarusShell extends LitElement {
       </div>
       ${this.renderAnimationMatrix()}
       ${this.renderMatrixMenu()}
-      <div class="statusbar" ?hidden=${this.uiHidden}>
+      <div class="statusbar ${this.playing ? "playing" : ""}" ?hidden=${this.uiHidden}>
         <span>${this.statusToolName()}</span>
         <span>${this.colorValue}</span>
         <span>${this.cursorText}</span>
@@ -4999,6 +5022,48 @@ export class GnumarusShell extends LitElement {
                 aria-label=${tr("a11y.resetEmptyCells")}
                 title=${tr("a11y.resetToDefault")}
                 @click=${(): void => this.resetEmptyCellsToDefault()}
+              >
+                ↻
+              </button>`
+            : html``}
+        </div>
+        <div class="setting-row">
+          <label title=${tr("setting.allowChangesWhilePlayingHint")}
+            ><input
+              type="checkbox"
+              id="allowChangesWhilePlaying"
+              .checked=${this.allowChangesWhilePlaying}
+              @change=${(): void => this.applyPlaybackFromDialog()}
+            />
+            ${tr("setting.allowChangesWhilePlaying")}
+          </label>
+          ${this.allowChangesWhilePlaying !== DEFAULT_PLAYBACK_SETTINGS.allowChangesWhilePlaying
+            ? html`<button
+                class="reset-btn"
+                aria-label=${tr("a11y.resetAllowChanges")}
+                title=${tr("a11y.resetToDefault")}
+                @click=${(): void => this.resetPlaybackToDefault()}
+              >
+                ↻
+              </button>`
+            : html``}
+        </div>
+        <div class="setting-row">
+          <label title=${tr("setting.wideSpritesheetPacksHint")}
+            ><input
+              type="checkbox"
+              id="wideSpritesheetPacks"
+              .checked=${this.wideSpritesheetPacks}
+              @change=${(): void => this.applySheetPackFromDialog()}
+            />
+            ${tr("setting.wideSpritesheetPacks")}
+          </label>
+          ${this.wideSpritesheetPacks !== DEFAULT_SHEET_PACK_SETTINGS.wideSpritesheetPacks
+            ? html`<button
+                class="reset-btn"
+                aria-label=${tr("a11y.resetWidePacks")}
+                title=${tr("a11y.resetToDefault")}
+                @click=${(): void => this.resetSheetPackToDefault()}
               >
                 ↻
               </button>`
@@ -5835,12 +5900,21 @@ export class GnumarusShell extends LitElement {
               }}
             />${tr("matrix.allFrames")}</label
           >
-          ${this.engine?.getNamedAnimations().map(
-            (animation) =>
-              html`<label
-                ><input type="checkbox" data-export-sheet-anim="${animation.name}" />${animation.name}</label
-              >`,
-          ) ?? html``}
+          <label
+            >${tr("dialog.sheetAnimations")}
+            <select
+              id="exportSheetAnimations"
+              data-testid="export-sheet-animations"
+              multiple
+              size=${Math.min(6, Math.max(3, (this.engine?.getNamedAnimations().length ?? 0) + 1))}
+              title=${tr("dialog.sheetAnimationsHint")}
+              ?disabled=${this.exportSheetAll}
+            >
+              ${this.engine?.getNamedAnimations().map(
+                (animation) => html`<option value=${animation.name}>${animation.name}</option>`,
+              ) ?? html``}
+            </select>
+          </label>
         </div>
         <label
           title=${tr("dialog.extraFramesTitle")}
@@ -7946,6 +8020,10 @@ export class GnumarusShell extends LitElement {
     this.backgroundColor = storedBackground.color;
     const storedToast = this.loadToastSettings();
     this.toastDurationSec = storedToast.durationSec;
+    const storedPlayback = this.loadPlaybackSettings();
+    this.allowChangesWhilePlaying = storedPlayback.allowChangesWhilePlaying;
+    const storedSheetPack = this.loadSheetPackSettings();
+    this.wideSpritesheetPacks = storedSheetPack.wideSpritesheetPacks;
     const storedSwatches = this.loadSwatchSettings();
     this.swatches = storedSwatches.swatches;
     this.recentColors = storedSwatches.recent;
@@ -8075,6 +8153,9 @@ export class GnumarusShell extends LitElement {
         onNotice: (kind): void => {
           if (kind === "text-paint-blocked") {
             this.statusMessage = tr("status.textPaintBlocked");
+          } else if (kind === "edits-locked") {
+            this.statusMessage = tr("status.editsLockedWhilePlaying");
+            this.showToast(tr("status.editsLockedWhilePlaying"));
           } else if (kind === "vector-paint-blocked") {
             this.statusMessage = tr("status.vectorPaintBlocked");
           } else if (kind === "model3d-paint-blocked") {
@@ -8910,6 +8991,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private insertLayerAboveActive(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -8922,6 +9006,9 @@ export class GnumarusShell extends LitElement {
 
   /** Insert a new layer immediately below the active layer and select it. */
   private insertLayerBelowActive(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -8951,6 +9038,9 @@ export class GnumarusShell extends LitElement {
 
   /** Move the current frame left/right with wraparound; selection follows. */
   private moveCurrentFrame(direction: 1 | -1): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -8965,6 +9055,9 @@ export class GnumarusShell extends LitElement {
 
   /** Move the active layer up/down with wraparound. */
   private moveActiveLayer(direction: "up" | "down"): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -8977,6 +9070,9 @@ export class GnumarusShell extends LitElement {
 
   /** Alt+Left: lift the active layer out below its old parent. */
   private outdentActiveLayer(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -8996,6 +9092,9 @@ export class GnumarusShell extends LitElement {
 
   /** Alt+Right: nest the active layer into the sibling above it. */
   private indentActiveLayer(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -9012,6 +9111,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private mergeActiveLayerDown(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -9152,6 +9254,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private confirmResize(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     const targetId = this.resizingLayerId;
     if (targetId === null || this.engine === null) {
       this.closeResizeDialog();
@@ -10083,12 +10188,18 @@ export class GnumarusShell extends LitElement {
   }
 
   private doUndo(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     this.editMenuOpen = false;
     this.fileMenuOpen = false;
     this.statusMessage = this.engine?.undo() === true ? tr("status.undo") : tr("status.nothingToUndo");
   }
 
   private doRedo(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     this.editMenuOpen = false;
     this.fileMenuOpen = false;
     this.statusMessage = this.engine?.redo() === true ? tr("status.redo") : tr("status.nothingToRedo");
@@ -10096,6 +10207,9 @@ export class GnumarusShell extends LitElement {
 
   /** Cut the active floating selection into memory and discard it. */
   private cutSelectionToMemory(): boolean {
+    if (this.denyEditWhilePlaying()) {
+      return false;
+    }
     this.editMenuOpen = false;
     this.fileMenuOpen = false;
     if (this.engine?.cutFloatingSelection() !== true) {
@@ -10132,6 +10246,9 @@ export class GnumarusShell extends LitElement {
 
   /** Paste copy memory as a floating selection in the current cell. */
   private pasteFromMemory(): boolean {
+    if (this.denyEditWhilePlaying()) {
+      return false;
+    }
     this.editMenuOpen = false;
     this.fileMenuOpen = false;
     if (this.engine?.pasteClipboard() !== true) {
@@ -10328,6 +10445,85 @@ export class GnumarusShell extends LitElement {
     } catch {
       // Storage failures must not break the settings flow.
     }
+  }
+
+  private loadPlaybackSettings(): { allowChangesWhilePlaying: boolean } {
+    try {
+      const stored = window.localStorage.getItem(PLAYBACK_SETTINGS_STORAGE_KEY);
+      if (stored !== null) {
+        return parsePlaybackSettings(stored);
+      }
+    } catch {
+      // Corrupt or unavailable storage falls back to defaults.
+    }
+    return { ...DEFAULT_PLAYBACK_SETTINGS };
+  }
+
+  private persistPlayback(): void {
+    try {
+      window.localStorage.setItem(
+        PLAYBACK_SETTINGS_STORAGE_KEY,
+        serializePlaybackSettings({ allowChangesWhilePlaying: this.allowChangesWhilePlaying }),
+      );
+    } catch {
+      // Storage failures must not break the settings flow.
+    }
+  }
+
+  /** Test hook: set whether edits stay enabled while an animation plays. */
+  setAllowChangesWhilePlaying(enabled: boolean): void {
+    this.allowChangesWhilePlaying = enabled === true;
+    this.persistPlayback();
+    this.syncEditsLocked();
+  }
+
+  private applyPlaybackFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("allowChangesWhilePlaying") as HTMLInputElement | null;
+    this.setAllowChangesWhilePlaying(input?.checked === true);
+  }
+
+  private resetPlaybackToDefault(): void {
+    this.setAllowChangesWhilePlaying(DEFAULT_PLAYBACK_SETTINGS.allowChangesWhilePlaying);
+    this.statusMessage = tr("status.playbackReset");
+  }
+
+  private loadSheetPackSettings(): { wideSpritesheetPacks: boolean } {
+    try {
+      const stored = window.localStorage.getItem(SHEET_PACK_SETTINGS_STORAGE_KEY);
+      if (stored !== null) {
+        return parseSheetPackSettings(stored);
+      }
+    } catch {
+      // Corrupt or unavailable storage falls back to defaults.
+    }
+    return { ...DEFAULT_SHEET_PACK_SETTINGS };
+  }
+
+  private persistSheetPack(): void {
+    try {
+      window.localStorage.setItem(
+        SHEET_PACK_SETTINGS_STORAGE_KEY,
+        serializeSheetPackSettings({ wideSpritesheetPacks: this.wideSpritesheetPacks }),
+      );
+    } catch {
+      // Storage failures must not break the settings flow.
+    }
+  }
+
+  /** Test hook: set the packed spritesheet column rounding (up = wide). */
+  setWideSpritesheetPacks(wide: boolean): void {
+    this.wideSpritesheetPacks = wide === true;
+    this.persistSheetPack();
+  }
+
+  private applySheetPackFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("wideSpritesheetPacks") as HTMLInputElement | null;
+    this.setWideSpritesheetPacks(input?.checked === true);
+  }
+
+  private resetSheetPackToDefault(): void {
+    this.setWideSpritesheetPacks(DEFAULT_SHEET_PACK_SETTINGS.wideSpritesheetPacks);
+    this.statusMessage = tr("status.widePacksReset");
   }
 
   private loadBlackSwitchSettings(): { switchOutOfBlack: boolean } {
@@ -11039,6 +11235,9 @@ export class GnumarusShell extends LitElement {
    * Returns a status suffix ("" when nothing changed).
    */
   private applyImportCleanup(): string {
+    if (this.denyEditWhilePlaying()) {
+      return "";
+    }
     if (this.engine === null || this.importCleanup === "none") {
       return "";
     }
@@ -11156,6 +11355,9 @@ export class GnumarusShell extends LitElement {
 
   /** Test hook: rename a frame (trimmed 1..64 chars). */
   renameFrame(frame: number, name: string): boolean {
+    if (this.denyEditWhilePlaying()) {
+      return false;
+    }
     if (this.engine?.renameFrame(frame, name) === true) {
       this.dirty = true;
       this.statusMessage = tr("status.frameRenamed");
@@ -13779,6 +13981,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onAddFrame(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -13790,6 +13995,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onAddFrameBefore(frame: number): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     this.closeMatrixMenu();
     if (this.engine === null) {
       return;
@@ -13804,6 +14012,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onAddFrameAfter(frame: number): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     this.closeMatrixMenu();
     if (this.engine === null) {
       return;
@@ -13818,6 +14029,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onRemoveFrame(frame: number): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     this.closeMatrixMenu();
     if (this.engine === null) {
       return;
@@ -14191,6 +14405,9 @@ export class GnumarusShell extends LitElement {
 
   /** Import one discovered file into the project pool (no cell is linked). */
   private async importDiscoveredFile(file: string): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null || this.directoryHandle === null) {
       return;
     }
@@ -14694,6 +14911,9 @@ export class GnumarusShell extends LitElement {
    * the run-action palette share this). Single empty cell: error toast.
    */
   private unlinkCellContent(targets: Array<{ layerId: string; frame: number }>): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     this.closeMatrixMenu();
     if (this.engine === null || targets.length === 0) {
       this.showToast(tr("status.cellEmpty"));
@@ -14762,6 +14982,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onContentPickerSelect(contentId: string): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.contentPickerMode === "relink") {
       this.onRelinkPickerSelect(contentId);
       return;
@@ -14827,6 +15050,9 @@ export class GnumarusShell extends LitElement {
    * the rest to the created entry.
    */
   private onRelinkPickerSelect(contentId: string): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     const targets = this.relinkTargets ?? [];
     if (targets.length === 0 || this.engine === null) {
       this.closeContentPicker();
@@ -14900,6 +15126,9 @@ export class GnumarusShell extends LitElement {
 
   /** Tileset picker assignment: tool staging plus the active tilemap cell (kept in sync). */
   private onTilesetPickerSelect(textureId: string): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       this.closeTexturePicker();
       return;
@@ -14934,6 +15163,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onTexturePickerSelect(textureId: string): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.texturePickerTileset) {
       this.onTilesetPickerSelect(textureId);
       return;
@@ -15036,6 +15268,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onTextPickerSelect(textId: string): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     const target = this.textPickerTarget;
     if (target === null || this.engine === null) {
       this.closeTextPicker();
@@ -15088,6 +15323,9 @@ export class GnumarusShell extends LitElement {
 
   /** Cell menu: bake the cell's text into a texture content (explicit rasterize). */
   private onRasterizeTextFromCell(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     const target = this.matrixCellTarget();
     this.closeMatrixMenu();
     if (target === null || this.engine === null) {
@@ -15221,6 +15459,9 @@ export class GnumarusShell extends LitElement {
 
   /** Open the rich text editor for a cell's text entry (live preview, single history entry on OK). */
   private async openTextEditor(layerId: string, frame: number, contentId: string, textId: string): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -15555,6 +15796,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private confirmTextEditor(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     const editor = this.textEditor;
     if (editor === null || this.engine === null) {
       return;
@@ -15658,6 +15902,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private applyTileSizeFromDialog(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -16006,6 +16253,9 @@ export class GnumarusShell extends LitElement {
 
   /** Options-bar model view action: reset to the classic view, commit, or cancel. */
   private commitModelViewEdit(action: "reset" | "commit" | "cancel"): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -16020,6 +16270,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private applyDefaultFrameDurationFromDialog(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     const input = this.shadowRoot?.getElementById("defaultFrameDuration") as HTMLInputElement | null;
     const raw = (input?.value ?? "").trim();
     if (raw === "") {
@@ -16040,6 +16293,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private commitDefaultFrameDurationFromDialog(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     const input = this.shadowRoot?.getElementById("defaultFrameDuration") as HTMLInputElement | null;
     const raw = (input?.value ?? "").trim();
     if (raw === "") {
@@ -16057,6 +16313,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private resetDefaultFrameDuration(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     this.defaultFrameDuration = DEFAULT_ANIMATION_FRAME_DURATION;
     this.engine?.setDefaultFrameDuration(DEFAULT_ANIMATION_FRAME_DURATION);
     this.refreshLayers();
@@ -16141,6 +16400,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private confirmAddAnimation(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       this.closeAnimationDialog();
       return;
@@ -16203,6 +16465,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private confirmNewAnimation(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     const targets = this.animationCreateFrames;
     if (targets === null || targets.length === 0 || this.engine === null) {
       this.closeNewAnimationDialog();
@@ -16250,6 +16515,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private confirmDeleteAnimation(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     const name = this.animationDeleteTarget;
     const dialog = this.shadowRoot?.getElementById("animationDeleteDialog") as HTMLDialogElement | null;
     dialog?.close();
@@ -16286,6 +16554,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private confirmDeleteFrames(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     const target = this.deleteFramesTarget === null ? [] : [...this.deleteFramesTarget];
     const dialog = this.shadowRoot?.getElementById("deleteFramesDialog") as HTMLDialogElement | null;
     dialog?.close();
@@ -17174,16 +17445,15 @@ export class GnumarusShell extends LitElement {
       throw new Error("Export failed: no project is open");
     }
     const strips: Array<{ frames: number[] }> = [];
-    const boxes = this.shadowRoot?.querySelectorAll("[data-export-sheet-anim]") ?? [];
+    const select = this.shadowRoot?.getElementById("exportSheetAnimations") as HTMLSelectElement | null;
     const names = new Set<string>();
-    boxes.forEach((box) => {
-      if (box instanceof HTMLInputElement && box.checked) {
-        const name = box.getAttribute("data-export-sheet-anim") ?? "";
-        if (name !== "") {
-          names.add(name);
+    if (select !== null) {
+      for (const option of Array.from(select.selectedOptions)) {
+        if (option.value !== "") {
+          names.add(option.value);
         }
       }
-    });
+    }
     for (const animation of this.engine.getNamedAnimations()) {
       if (names.has(animation.name)) {
         strips.push({ frames: resolveExportSequence(animation).map((entry) => entry.frame) });
@@ -17290,7 +17560,7 @@ export class GnumarusShell extends LitElement {
         await this.saveStillSequence(blobs, `${base}-sheet`, format);
         return;
       }
-      const geometry = computeSheetGeometry(strips, layoutValue as GnumarusSheetLayout, this.exportSheetCount);
+      const geometry = computeSheetGeometry(strips, layoutValue as GnumarusSheetLayout, this.exportSheetCount, this.wideSpritesheetPacks);
       const needed = new Set<number>();
       for (const cell of geometry.cells) {
         needed.add(cell.frame);
@@ -17418,6 +17688,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onFrameRenameCommit(frame: number): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.renamingFrame !== frame) {
       return;
     }
@@ -17462,6 +17735,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private confirmFrameRename(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     const target = this.frameRenameTarget;
     if (target === null || this.engine === null) {
       this.closeFrameRenameDialog();
@@ -17517,6 +17793,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private confirmLayerRename(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     const target = this.layerRenameTarget;
     if (target === null || this.engine === null) {
       this.closeLayerRenameDialog();
@@ -17535,6 +17814,24 @@ export class GnumarusShell extends LitElement {
     }
     this.refreshLayers();
     this.closeLayerRenameDialog();
+  }
+
+  /** Mirror the playback edit lock into the engine (call on play/stop/setting change). */
+  private syncEditsLocked(): void {
+    this.engine?.setEditsLocked(this.playing && !this.allowChangesWhilePlaying);
+  }
+
+  /**
+   * Block a discrete project edit while playback locks edits (toast
+   * explains why). Returns true when the caller must bail out.
+   */
+  private denyEditWhilePlaying(): boolean {
+    if (!this.playing || this.allowChangesWhilePlaying) {
+      return false;
+    }
+    this.statusMessage = tr("status.editsLockedWhilePlaying");
+    this.showToast(tr("status.editsLockedWhilePlaying"));
+    return true;
   }
 
   private togglePlayback(): void {
@@ -17556,6 +17853,7 @@ export class GnumarusShell extends LitElement {
     }
     this.playing = true;
     this.playbackAnimation = animation;
+    this.syncEditsLocked();
     // Reverse loops start at the last entry: backwards walks down with
     // direction -1, the backward-starting ping-pong turns around from
     // the end with direction +1.
@@ -17608,6 +17906,7 @@ export class GnumarusShell extends LitElement {
     }
     if (this.playing) {
       this.playing = false;
+      this.syncEditsLocked();
       if (message !== "") {
         this.statusMessage = message;
       }
@@ -17669,6 +17968,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onAddLayer(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -17679,6 +17981,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onRemoveLayer(id: string): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -17709,18 +18014,27 @@ export class GnumarusShell extends LitElement {
   }
 
   private onToggleVisible(id: string, visible: boolean): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     this.engine?.setLayerVisible(id, visible);
     this.refreshLayers();
     this.dirty = true;
   }
 
   private onOpacityInput(id: string, opacity: number): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     this.engine?.setLayerOpacity(id, opacity);
     this.refreshLayers();
     this.dirty = true;
   }
 
   private onBlendInput(id: string, blend: string): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine?.setLayerBlendMode(id, parseLayerBlendMode(blend)) === true) {
       this.refreshLayers();
       this.dirty = true;
@@ -17728,6 +18042,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onToggleChannelLock(id: string, channel: "r" | "g" | "b" | "a"): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -17746,6 +18063,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onMoveLayer(id: string, direction: "up" | "down"): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine?.moveLayer(id, direction) === true) {
       this.statusMessage = direction === "up" ? tr("status.layerMovedUp") : tr("status.layerMovedDown");
       this.dirty = true;
@@ -17828,6 +18148,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onLayerDrop(event: DragEvent, id: string): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     event.preventDefault();
     const dragged = this.dragLayerId ?? event.dataTransfer?.getData("text/plain") ?? null;
     this.dragLayerId = null;
@@ -17858,6 +18181,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onMakeRootLayer(id: string): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     this.closeLayerMenu();
     if (this.engine === null) {
       return;
@@ -17872,6 +18198,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private makeActiveLayerRoot(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -17905,6 +18234,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onMergeDown(id: string): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     this.closeLayerMenu();
     const index = this.layers.findIndex((entry) => entry.id === id);
     const upper = index < 0 ? undefined : this.layers[index];
@@ -17926,6 +18258,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onToggleLayerMask(id: string): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     this.closeLayerMenu();
     if (this.engine === null) {
       return;
@@ -17950,6 +18285,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private toggleActiveLayerMask(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -17974,6 +18312,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onAddLayerAbove(id: string): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     this.closeLayerMenu();
     if (this.engine === null) {
       return;
@@ -17988,6 +18329,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onAddLayerBelow(id: string): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     this.closeLayerMenu();
     if (this.engine === null) {
       return;
@@ -18036,6 +18380,9 @@ export class GnumarusShell extends LitElement {
 
   /** Delete every layer in a multi-selection (structural, like single delete). */
   private onDeleteLayers(ids: string[]): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     this.closeLayerMenu();
     if (this.engine === null || ids.length === 0) {
       return;
@@ -18053,6 +18400,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onResetLayerTransform(id: string): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     this.closeLayerMenu();
     if (this.engine?.resetLayerTransform(id) === true) {
       this.refreshLayers();
@@ -18065,6 +18415,9 @@ export class GnumarusShell extends LitElement {
 
   /** Merge the floating selection into its home cell, if one is active. */
   private commitFloatingSelection(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine?.commitFloating() === true) {
       this.refreshLayers();
       this.dirty = true;
@@ -18088,6 +18441,9 @@ export class GnumarusShell extends LitElement {
 
   /** Feather the floating mask by the dialog radius (no undo until merge). */
   private async applyFeatherFromDialog(): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     // Baking a live adjust first keeps the previewed pixels (a reshape
     // replaces the floating buffer, which would orphan the session).
     await this.confirmBrightnessContrast();
@@ -18106,6 +18462,9 @@ export class GnumarusShell extends LitElement {
 
   /** Grow (+1) or shrink (-1) the floating mask by the dialog pixel count. */
   private async reshapeFloatingSelection(direction: 1 | -1): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     // Bake a live adjust first (a reshape replaces the floating buffer,
     // which would orphan the session).
     await this.confirmBrightnessContrast();
@@ -18222,6 +18581,9 @@ export class GnumarusShell extends LitElement {
 
   /** Apply the dialog levels to the current cell (single undoable entry). */
   private confirmAdjustColors(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     const levels = this.currentDialogAdjustLevels();
     this.adjustBrightness = levels.brightness;
     this.adjustContrast = levels.contrast;
@@ -18243,6 +18605,9 @@ export class GnumarusShell extends LitElement {
 
   /** Open the live brightness/contrast floating window (two sliders + Cancel/Apply/OK). */
   private async openBrightnessContrastDialog(): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.bcOpen) {
       return;
     }
@@ -18290,6 +18655,9 @@ export class GnumarusShell extends LitElement {
 
   /** Apply: keep the visible change, rebase the session and reset the sliders (dialog stays open). */
   private applyBrightnessContrast(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null || !this.bcOpen) {
       return;
     }
@@ -18338,6 +18706,9 @@ export class GnumarusShell extends LitElement {
 
   /** Open the generic filter dialog for one filter id (run actions route here). */
   async openFilterDialog(id: string): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     const def = getFilterDef(id);
     if (def === undefined || this.engine === null) {
       return;
@@ -18551,6 +18922,9 @@ export class GnumarusShell extends LitElement {
 
   /** Apply: bake the preview as the new base (undoable later as one entry on OK). */
   private async applyFilter(): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (!this.filterOpen || this.engine === null) {
       return;
     }
@@ -18561,6 +18935,9 @@ export class GnumarusShell extends LitElement {
 
   /** OK: commit one undoable entry and close. */
   private async confirmFilter(): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (!this.filterOpen) {
       return;
     }
@@ -18585,6 +18962,9 @@ export class GnumarusShell extends LitElement {
 
   /** OK: one undoable entry from the dialog-open snapshot to the current pixels. */
   private confirmBrightnessContrast(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (!this.bcOpen) {
       return;
     }
@@ -18605,6 +18985,9 @@ export class GnumarusShell extends LitElement {
 
   /** Open the live hue/saturation floating window (four sliders + model/mode + Cancel/Apply/OK). */
   private async openHslAdjustDialog(): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.hsOpen) {
       return;
     }
@@ -18731,6 +19114,9 @@ export class GnumarusShell extends LitElement {
 
   /** Apply: keep the visible change, rebase the session and reset the sliders (dialog stays open). */
   private async applyHslAdjust(): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null || !this.hsOpen) {
       return;
     }
@@ -18757,6 +19143,9 @@ export class GnumarusShell extends LitElement {
 
   /** OK: one undoable entry from the dialog-open snapshot to the current pixels. */
   private async confirmHslAdjust(): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (!this.hsOpen) {
       return;
     }
@@ -18782,6 +19171,9 @@ export class GnumarusShell extends LitElement {
 
   /** Invert the current cell colors (single undoable entry). */
   private adjustCellInvert(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -18797,6 +19189,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private confirmFitTexture(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     const target = this.fitTextureTarget;
     if (target === null || this.engine === null) {
       this.closeFitTextureDialog();
@@ -18834,6 +19229,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private cropAllCellsToCanvas(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -18866,6 +19264,9 @@ export class GnumarusShell extends LitElement {
    * skipped with counts. One undoable history entry when pixels change.
    */
   private async reloadAllTextures(): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -18934,6 +19335,9 @@ export class GnumarusShell extends LitElement {
    * (see Reload All Textures). Missing or undecodable files are skipped.
    */
   private async reloadAllContents(): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -19029,6 +19433,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onCropCellToCanvasFromLayer(layerId: string): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       this.closeLayerMenu();
       return;
@@ -19040,6 +19447,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onCropCellToCanvasFromCell(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     const target = this.matrixCellTarget();
     this.closeMatrixMenu();
     if (target === null || this.engine === null) {
@@ -19075,6 +19485,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onResizeCellToCanvasFromLayer(layerId: string): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       this.closeLayerMenu();
       return;
@@ -19086,6 +19499,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onResizeCellToCanvasFromCell(): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     const target = this.matrixCellTarget();
     this.closeMatrixMenu();
     if (target === null || this.engine === null) {
@@ -19121,6 +19537,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private expandCurrentCellTexture(direction: "up" | "down" | "left" | "right"): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -19186,6 +19605,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private onRenameCommit(id: string): void {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.renamingId !== id) {
       return;
     }
@@ -19204,6 +19626,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private async createNew(): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     this.stopPlayback();
     this.exitFlycam();
     const widthInput = this.shadowRoot?.getElementById("newWidth") as HTMLInputElement | null;
@@ -19398,6 +19823,9 @@ export class GnumarusShell extends LitElement {
     displayName: string,
     embeddedName: string | null,
   ): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     this.stopPlayback();
     this.exitFlycam();
     {
@@ -19490,6 +19918,9 @@ export class GnumarusShell extends LitElement {
    * external references) is dropped with a warning toast naming it.
    */
   private async importSvgFile(): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     this.fileMenuOpen = false;
     if (this.engine === null) {
       return;
@@ -19570,6 +20001,9 @@ export class GnumarusShell extends LitElement {
    * offscreen turntable-style raster of the model.
    */
   private async importModel3dFile(): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     this.fileMenuOpen = false;
     if (this.engine === null) {
       return;
@@ -19723,6 +20157,9 @@ export class GnumarusShell extends LitElement {
     fileName: string,
     strictEmptyCell: boolean,
   ): Promise<boolean> {
+    if (this.denyEditWhilePlaying()) {
+      return false;
+    }
     if (this.engine === null) {
       return false;
     }
@@ -19773,6 +20210,9 @@ export class GnumarusShell extends LitElement {
 
   /** Import a dropped vector graphic as the current cell's SVG content. */
   private async importDroppedVectorFile(fileName: string, bytes: Uint8Array): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -19819,6 +20259,9 @@ export class GnumarusShell extends LitElement {
 
   /** Import a dropped 3D model as the current cell's model content. */
   private async importDroppedModel3dFile(fileName: string, bytes: Uint8Array): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -19868,6 +20311,9 @@ export class GnumarusShell extends LitElement {
 
   /** Import a dropped HTML file as the current cell's text content. */
   private async importDroppedTextFile(fileName: string, bytes: Uint8Array): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     if (this.engine === null) {
       return;
     }
@@ -19964,6 +20410,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private async loadAseDocument(fileName: string, dot: number, bytes: Uint8Array): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     const imported = await parseAsepriteFile(bytes);
       this.engine?.loadAnimationProject(imported.width, imported.height, {
         layers: imported.layers.map((layer) => ({
@@ -20024,6 +20473,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private async loadPsdDocument(fileName: string, dot: number, bytes: Uint8Array): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     const psd = await parsePsdFile(bytes);
     this.engine?.loadAnimationProject(psd.width, psd.height, {
       layers: psd.layers.map((layer) => ({
@@ -20071,6 +20523,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private async loadXcfDocument(fileName: string, dot: number, bytes: Uint8Array): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     const xcf = await parseXcfFile(bytes);
     this.engine?.loadAnimationProject(xcf.width, xcf.height, {
       layers: xcf.layers.map((layer) => ({
@@ -20118,6 +20573,9 @@ export class GnumarusShell extends LitElement {
   }
 
   private async loadKraDocument(fileName: string, dot: number, bytes: Uint8Array): Promise<void> {
+    if (this.denyEditWhilePlaying()) {
+      return;
+    }
     const { parseKraFile } = await import("../project/GnumarusKra");
     const kra = await parseKraFile(bytes);
     this.engine?.loadAnimationProject(kra.width, kra.height, {

@@ -822,7 +822,7 @@ export interface GnumarusEngineOptions {
   /** Fired when the crop tool resolves a drag (for status/toast display). */
   onCropOutcome?: (outcome: "cropped" | "unchanged" | "outside" | "empty", width: number, height: number) => void;
   /** Fired for user-facing notices that need a toast (blocked paint on derived cells). */
-  onNotice?: (kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked" | "tilemap-paint-blocked" | "tile-rot-needs-square" | "model3d-needs-cell") => void;
+  onNotice?: (kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked" | "tilemap-paint-blocked" | "tile-rot-needs-square" | "model3d-needs-cell" | "edits-locked") => void;
   /** Tile-brush click outcomes for shell status/toast display. */
   onTileBrushOutcome?: (outcome: "placed" | "erased" | "no-tileset" | "occupied" | "nothing") => void;
   checker?: GnumarusCheckerSettings;
@@ -1026,6 +1026,27 @@ export class GnumarusCanvasEngine {
   private flipX = false;
   private flipY = false;
   private tool: GnumarusCanvasTool = "brush";
+  /**
+   * Edit lock (set by the shell): while true, every mutating engine entry
+   * point — canvas paint/gesture paths, keyboard commits, and all public
+   * mutating methods — silently no-ops (or reports editsLocked for direct
+   * canvas input). View, navigation, tool and brush settings stay live.
+   */
+  private editsLocked = false;
+
+  /** Lock or unlock project edits (the shell mirrors playback state here). */
+  setEditsLocked(locked: boolean): void {
+    this.editsLocked = locked === true;
+  }
+
+  /** Whether project edits are currently locked (toasts explain the block). */
+  private denyEditsLocked(): boolean {
+    if (!this.editsLocked) {
+      return false;
+    }
+    this.onNotice?.("edits-locked");
+    return true;
+  }
   /** Previous tool while Ctrl temporarily holds the eyedropper, or null. */
   private toolBeforeEyedropper: GnumarusCanvasTool | null = null;
   private tempEyedropper = false;
@@ -1444,7 +1465,7 @@ export class GnumarusCanvasEngine {
   private readonly onTextEditRequested:
     | ((info: { layerId: string; frame: number; contentId: string; textId: string }) => void)
     | undefined;
-  private readonly onNotice: ((kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked" | "tilemap-paint-blocked" | "tile-rot-needs-square" | "model3d-needs-cell") => void) | undefined;
+  private readonly onNotice: ((kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked" | "tilemap-paint-blocked" | "tile-rot-needs-square" | "model3d-needs-cell" | "edits-locked") => void) | undefined;
   private readonly onTileBrushOutcome:
     | ((outcome: "placed" | "erased" | "no-tileset" | "occupied" | "nothing") => void)
     | undefined;
@@ -2496,6 +2517,9 @@ export class GnumarusCanvasEngine {
   }
 
   addFrame(): number {
+    if (this.denyEditsLocked()) {
+      return -1;
+    }
     return this.insertFrame(this.frameCount);
   }
 
@@ -2505,6 +2529,9 @@ export class GnumarusCanvasEngine {
    * new frame. Returns the new frame index, or -1 for invalid positions.
    */
   insertFrame(at: number): number {
+    if (this.denyEditsLocked()) {
+      return -1;
+    }
     if (!Number.isInteger(at) || at < 0 || at > this.frameCount) {
       return -1;
     }
@@ -2539,6 +2566,9 @@ export class GnumarusCanvasEngine {
    * and single-frame projects.
    */
   moveFrame(frame: number, direction: 1 | -1): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount || this.frameCount <= 1) {
       return false;
     }
@@ -2574,6 +2604,9 @@ export class GnumarusCanvasEngine {
   }
 
   removeFrame(frame: number): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     if (this.frameCount <= 1) {
       return false;
     }
@@ -2636,6 +2669,9 @@ export class GnumarusCanvasEngine {
    * or would remove every frame (at least one frame always survives).
    */
   removeFrames(frames: readonly number[]): number {
+    if (this.denyEditsLocked()) {
+      return -1;
+    }
     const unique = normalizeFrameSet(frames, this.frameCount);
     if (unique.length === 0 || unique.length >= this.frameCount) {
       return 0;
@@ -2685,6 +2721,9 @@ export class GnumarusCanvasEngine {
   }
 
   renameFrame(frame: number, name: string): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
       return false;
     }
@@ -2727,6 +2766,9 @@ export class GnumarusCanvasEngine {
    * name is already taken. Out-of-range frame entries are dropped.
    */
   addNamedAnimation(animation: GnumarusNamedAnimation): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const loop = animation.loop;
     if (
       typeof animation.name !== "string" ||
@@ -2754,6 +2796,9 @@ export class GnumarusCanvasEngine {
 
   /** Remove a named animation by name, clearing the selection if it pointed at it. */
   removeNamedAnimation(name: string): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const index = this.namedAnimations.findIndex((entry) => entry.name === name);
     if (index < 0) {
       return false;
@@ -2787,6 +2832,9 @@ export class GnumarusCanvasEngine {
   }
 
   setFrameDuration(frame: number, durationSec: number | null): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     if (!Number.isInteger(frame) || frame < 0 || frame >= this.frameCount) {
       return false;
     }
@@ -2813,6 +2861,9 @@ export class GnumarusCanvasEngine {
   }
 
   setDefaultFrameDuration(durationSec: number): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     if (!Number.isFinite(durationSec)) {
       return false;
     }
@@ -3230,6 +3281,9 @@ export class GnumarusCanvasEngine {
 
   /** Create fresh content with a new empty project-sized texture and attach it to the cell. */
   createCellContent(layerId: string, frame: number): string | null {
+    if (this.denyEditsLocked()) {
+      return null;
+    }
     if (this.findLayer(layerId) === null) {
       return null;
     }
@@ -3268,6 +3322,9 @@ export class GnumarusCanvasEngine {
 
   /** Create a textureless content and attach it to the cell (for the content picker flow). */
   createEmptyContentForCell(layerId: string, frame: number): string | null {
+    if (this.denyEditsLocked()) {
+      return null;
+    }
     if (this.findLayer(layerId) === null) {
       return null;
     }
@@ -3298,6 +3355,9 @@ export class GnumarusCanvasEngine {
 
   /** Create a new empty project-sized texture without attaching it to any content. */
   createEmptyTexture(): string {
+    if (this.denyEditsLocked()) {
+      return "";
+    }
     const textureId = this.nextTextureId();
     this.textures.set(textureId, {
       id: textureId,
@@ -3321,6 +3381,9 @@ export class GnumarusCanvasEngine {
    * still counted as applied so callers refresh uniformly.
    */
   reloadTextDocuments(entries: Array<{ textId: string; html: string }>): { applied: number; skipped: number } {
+    if (this.denyEditsLocked()) {
+      return { applied: 0, skipped: entries.length };
+    }
     let applied = 0;
     let skipped = 0;
     for (const { textId, html } of entries) {
@@ -3352,6 +3415,9 @@ export class GnumarusCanvasEngine {
    * new source up through the regular resolve path.
    */
   reloadSvgDocuments(entries: Array<{ svgId: string; svg: string }>): { applied: number; skipped: number } {
+    if (this.denyEditsLocked()) {
+      return { applied: 0, skipped: entries.length };
+    }
     let applied = 0;
     let skipped = 0;
     for (const { svgId, svg } of entries) {
@@ -3419,6 +3485,9 @@ export class GnumarusCanvasEngine {
    * null for invalid dimensions or buffer mismatches. Structural, no history.
    */
   registerTexturePixels(name: string, width: number, height: number, buffer: Uint8ClampedArray): string | null {
+    if (this.denyEditsLocked()) {
+      return null;
+    }
     if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
       return null;
     }
@@ -3475,6 +3544,9 @@ export class GnumarusCanvasEngine {
   }
 
   dissociateCellContent(layerId: string, frame: number): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const key = animationCellKey(layerId, frame);
     if (!this.cells.has(key)) {
       return false;
@@ -3490,6 +3562,9 @@ export class GnumarusCanvasEngine {
   }
 
   associateCellContent(layerId: string, frame: number, contentId: string): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     if (this.findLayer(layerId) === null || !this.contents.has(contentId)) {
       return false;
     }
@@ -3511,6 +3586,9 @@ export class GnumarusCanvasEngine {
   }
 
   dissociateContentTexture(contentId: string): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const content = this.contents.get(contentId);
     if (content === undefined || content.textureId === null) {
       return false;
@@ -3526,6 +3604,9 @@ export class GnumarusCanvasEngine {
   }
 
   associateContentTexture(contentId: string, textureId: string): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const content = this.contents.get(contentId);
     if (content === undefined || !this.textures.has(textureId)) {
       return false;
@@ -3569,6 +3650,9 @@ export class GnumarusCanvasEngine {
 
   /** Create a text entry with the default document (no history; structural). */
   createTextEntry(html?: string): string {
+    if (this.denyEditsLocked()) {
+      return "";
+    }
     const id = this.nextTextId();
     this.texts.set(id, {
       id,
@@ -3583,6 +3667,9 @@ export class GnumarusCanvasEngine {
    * Refuses textured contents: text and texture are mutually exclusive.
    */
   associateContentText(contentId: string, textId: string | null): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const content = this.contents.get(contentId);
     if (content === undefined || (textId !== null && !this.texts.has(textId))) {
       return false;
@@ -3607,6 +3694,9 @@ export class GnumarusCanvasEngine {
    * cell at it. Used by the text picker ("new text") flow.
    */
   createTextContent(layerId: string, frame: number, html?: string): { contentId: string; textId: string } | null {
+    if (this.denyEditsLocked()) {
+      return null;
+    }
     if (this.findLayer(layerId) === null) {
       return null;
     }
@@ -3641,6 +3731,9 @@ export class GnumarusCanvasEngine {
    * at it (shares the entry across cells/contents, like textures).
    */
   createCellContentWithText(layerId: string, frame: number, textId: string): string | null {
+    if (this.denyEditsLocked()) {
+      return null;
+    }
     if (this.findLayer(layerId) === null || !this.texts.has(textId)) {
       return null;
     }
@@ -3675,6 +3768,9 @@ export class GnumarusCanvasEngine {
    * "New content"). Returns the content and text ids for the editor.
    */
   ensureTextContent(layerId: string, frame: number): { contentId: string; textId: string } | null {
+    if (this.denyEditsLocked()) {
+      return null;
+    }
     if (this.findLayer(layerId) === null) {
       return null;
     }
@@ -3705,6 +3801,9 @@ export class GnumarusCanvasEngine {
    * and refresh the canvas. Returns false when nothing changed.
    */
   previewTextEdit(textId: string, html: string): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const entry = this.texts.get(textId);
     if (entry === undefined) {
       return false;
@@ -3729,6 +3828,9 @@ export class GnumarusCanvasEngine {
    * applied the new text; this only records history.
    */
   commitTextEdit(textId: string, beforeHtml: string): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const entry = this.texts.get(textId);
     if (entry === undefined) {
       return false;
@@ -3763,6 +3865,9 @@ export class GnumarusCanvasEngine {
    * (the text entry itself is kept, still reusable elsewhere).
    */
   rasterizeTextContent(layerId: string, frame: number): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     if (this.findLayer(layerId) === null) {
       return false;
     }
@@ -3907,6 +4012,9 @@ export class GnumarusCanvasEngine {
 
   /** Create a vector entry (no history; structural like text creation). */
   createSvgEntry(svg: string, name?: string): string {
+    if (this.denyEditsLocked()) {
+      return "";
+    }
     const id = this.nextSvgId();
     this.svgs.set(id, { id, name: name ?? this.nextSvgName(), svg });
     return id;
@@ -3933,6 +4041,9 @@ export class GnumarusCanvasEngine {
    * occupied-cell error), so imports never destroy work.
    */
   ensureSvgContent(layerId: string, frame: number, svg: string, name?: string): { contentId: string; svgId: string } | null {
+    if (this.denyEditsLocked()) {
+      return null;
+    }
     if (this.findLayer(layerId) === null) {
       return null;
     }
@@ -4010,6 +4121,9 @@ export class GnumarusCanvasEngine {
     buffer: Uint8ClampedArray,
     name?: string,
   ): { contentId: string; textureId: string } | null {
+    if (this.denyEditsLocked()) {
+      return null;
+    }
     if (this.findLayer(layerId) === null) {
       return null;
     }
@@ -4226,6 +4340,9 @@ export class GnumarusCanvasEngine {
     ext: string,
     bytes: Uint8Array,
   ): Promise<{ contentId: string; modelId: string } | null> {
+    if (this.denyEditsLocked()) {
+      return null;
+    }
     if (this.findLayer(layerId) === null) {
       return null;
     }
@@ -4427,6 +4544,9 @@ export class GnumarusCanvasEngine {
   adjustCurrentCellPixels(
     transform: (r: number, g: number, b: number, a: number) => [number, number, number, number],
   ): "adjusted" | "unchanged" | "empty" {
+    if (this.denyEditsLocked()) {
+      return "unchanged";
+    }
     const layer = this.activeLayer();
     if (layer === null) {
       return "empty";
@@ -4511,6 +4631,9 @@ export class GnumarusCanvasEngine {
    * cell texture. False when there is nothing to adjust.
    */
   startBrightnessContrast(): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     return this.beginAdjustSession("bc");
   }
 
@@ -4629,6 +4752,9 @@ export class GnumarusCanvasEngine {
    * levels are clamped. False when no session is active.
    */
   previewBrightnessContrast(brightness: number, contrast: number): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const session = this.bcSession;
     if (session === null) {
       return false;
@@ -4703,6 +4829,9 @@ export class GnumarusCanvasEngine {
    * No history entry; OK commits the whole session at once.
    */
   rebaseBrightnessContrast(): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const session = this.bcSession;
     if (session === null) {
       return false;
@@ -4722,6 +4851,9 @@ export class GnumarusCanvasEngine {
    * Clears the session.
    */
   commitBrightnessContrast(): "adjusted" | "unchanged" | "empty" {
+    if (this.denyEditsLocked()) {
+      return "unchanged";
+    }
     const session = this.bcSession;
     this.bcSession = null;
     if (session === null) {
@@ -4818,6 +4950,9 @@ export class GnumarusCanvasEngine {
    * or when there is nothing to filter.
    */
   startFilter(id: string): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     if (getFilterDef(id) === undefined) {
       return false;
     }
@@ -4878,6 +5013,9 @@ export class GnumarusCanvasEngine {
    * adjust preview, no history. False without a matching session/target.
    */
   previewFilter(id: string, values: GnumarusFilterValues): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const session = this.filterSession;
     if (session === null || this.filterSessionId !== id) {
       return false;
@@ -4938,6 +5076,9 @@ export class GnumarusCanvasEngine {
 
   /** Rebase the filter session: current pixels become the new preview base. */
   rebaseFilter(): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const session = this.filterSession;
     if (session === null) {
       return false;
@@ -4956,6 +5097,9 @@ export class GnumarusCanvasEngine {
    * floating targets stay floating (merge bakes the undo entry).
    */
   commitFilter(): "adjusted" | "unchanged" | "empty" {
+    if (this.denyEditsLocked()) {
+      return "unchanged";
+    }
     const session = this.filterSession;
     this.filterSession = null;
     this.filterSessionId = null;
@@ -5018,6 +5162,9 @@ export class GnumarusCanvasEngine {
    * only; otherwise it targets the whole cell texture.
    */
   startHslAdjust(): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     return this.beginAdjustSession("hs");
   }
 
@@ -5034,6 +5181,9 @@ export class GnumarusCanvasEngine {
     model: GnumarusHslAdjustModel,
     mode: GnumarusHslAdjustMode,
   ): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const session = this.hsSession;
     if (session === null) {
       return false;
@@ -5097,6 +5247,9 @@ export class GnumarusCanvasEngine {
    * No history entry; OK commits the whole session at once.
    */
   rebaseHslAdjust(): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const session = this.hsSession;
     return session !== null && this.rebaseAdjustSession(session);
   }
@@ -5107,6 +5260,9 @@ export class GnumarusCanvasEngine {
    * Clears the session.
    */
   commitHslAdjust(): "adjusted" | "unchanged" | "empty" {
+    if (this.denyEditsLocked()) {
+      return "unchanged";
+    }
     const session = this.hsSession;
     this.hsSession = null;
     if (session === null) {
@@ -5138,6 +5294,9 @@ export class GnumarusCanvasEngine {
    * Returns false when the active cell shows no 3D model.
    */
   startModelOrbit(): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const layer = this.activeLayer();
     if (layer === null) {
       return false;
@@ -5159,6 +5318,9 @@ export class GnumarusCanvasEngine {
 
   /** Orbit the pending view by screen pixels (drag right orbits left, drag down tilts up). */
   orbitModel(dx: number, dy: number): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     if (this.modelOrbit === null) {
       if (!this.startModelOrbit()) {
         return false;
@@ -5178,6 +5340,9 @@ export class GnumarusCanvasEngine {
 
   /** Dolly the pending view (factor > 1 moves away). */
   zoomModelOrbit(factor: number): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     if (this.modelOrbit === null) {
       if (!this.startModelOrbit()) {
         return false;
@@ -5196,6 +5361,9 @@ export class GnumarusCanvasEngine {
 
   /** Pan the pending view by screen pixels (grab-style). */
   panModelOrbit(dx: number, dy: number): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     if (this.modelOrbit === null) {
       if (!this.startModelOrbit()) {
         return false;
@@ -5216,6 +5384,9 @@ export class GnumarusCanvasEngine {
 
   /** Reset the pending (or stored) view to the classic 3/4 angle. */
   resetModelView(): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     if (!this.startModelOrbit()) {
       return false;
     }
@@ -5343,6 +5514,9 @@ export class GnumarusCanvasEngine {
 
   /** Fly the camera: forward/right/up steps in camera space. */
   flyMove(forwardAmount: number, rightAmount: number, upAmount: number): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const fly = this.flycam;
     if (fly === null || !this.models3d.has(fly.modelId)) {
       return false;
@@ -5365,6 +5539,9 @@ export class GnumarusCanvasEngine {
 
   /** Turn the camera from a mouse drag: right looks right, up looks up. */
   flyLook(dxPixels: number, dyPixels: number): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const fly = this.flycam;
     if (fly === null || !this.models3d.has(fly.modelId)) {
       return false;
@@ -5387,6 +5564,9 @@ export class GnumarusCanvasEngine {
 
   /** Orbit left (+1) or right (-1) around a point ahead of the camera. */
   flyOrbit(direction: 1 | -1): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const fly = this.flycam;
     if (fly === null || !this.models3d.has(fly.modelId)) {
       return false;
@@ -5410,6 +5590,9 @@ export class GnumarusCanvasEngine {
 
   /** Turn the camera in place: positive yaw turns left, positive pitch looks down. */
   flyLookByDegrees(yawDeltaDeg: number, pitchDeltaDeg: number): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const fly = this.flycam;
     if (fly === null || !this.models3d.has(fly.modelId)) {
       return false;
@@ -5434,6 +5617,9 @@ export class GnumarusCanvasEngine {
 
   /** Reset the fly pose to the classic 3/4 framing for the active model. */
   flyResetView(): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const fly = this.flycam;
     if (fly === null || !this.models3d.has(fly.modelId)) {
       return false;
@@ -5669,6 +5855,9 @@ export class GnumarusCanvasEngine {
    * history entry) and refresh. No-op without pending changes.
    */
   commitModelOrbit(): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const orbit = this.modelOrbit;
     if (orbit === null) {
       return false;
@@ -5854,6 +6043,9 @@ export class GnumarusCanvasEngine {
 
   /** Stage the tool tile size (applies to the active tilemap too, when any). */
   setTileBrushSize(w: number, h: number): void {
+    if (this.denyEditsLocked()) {
+      return;
+    }
     const tw = Math.min(1024, Math.max(1, Math.floor(w)));
     const th = Math.min(1024, Math.max(1, Math.floor(h)));
     if (!Number.isFinite(tw) || !Number.isFinite(th)) {
@@ -5883,6 +6075,9 @@ export class GnumarusCanvasEngine {
 
   /** Retarget a tilemap at another tileset (keeps placements, bumps revision). */
   setTilemapTileset(layerId: string, frame: number, tilesetId: string): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const contentId = this.cells.get(animationCellKey(layerId, frame));
     const content = contentId === undefined ? undefined : this.contents.get(contentId);
     const tilemap = content?.tilemapId === undefined || content?.tilemapId === null ? undefined : this.tilemaps.get(content.tilemapId);
@@ -6865,11 +7060,17 @@ export class GnumarusCanvasEngine {
   }
 
   addLayer(): string {
+    if (this.denyEditsLocked()) {
+      return "";
+    }
     return this.insertLayerAt(this.layers.length, null);
   }
 
   /** Insert a new layer immediately above the active layer and select it. */
   insertLayerAboveActive(): string {
+    if (this.denyEditsLocked()) {
+      return "";
+    }
     const active = this.findLayer(this.activeLayerId);
     if (active === null) {
       return this.insertLayerAt(this.layers.length, null);
@@ -6879,6 +7080,9 @@ export class GnumarusCanvasEngine {
 
   /** Insert a new layer immediately below the active layer and select it. */
   insertLayerBelowActive(): string {
+    if (this.denyEditsLocked()) {
+      return "";
+    }
     const active = this.findLayer(this.activeLayerId);
     if (active === null) {
       return this.insertLayerAt(0, null);
@@ -6888,6 +7092,9 @@ export class GnumarusCanvasEngine {
 
   /** Insert a new layer immediately above the given layer and select it. Null for unknown ids. */
   insertLayerAbove(id: string): string | null {
+    if (this.denyEditsLocked()) {
+      return null;
+    }
     const order = this.layerOrderIds();
     const parents = this.layerParentMap();
     const range = layerBlockRange(order, parents, id);
@@ -6899,6 +7106,9 @@ export class GnumarusCanvasEngine {
 
   /** Insert a new layer immediately below the given layer and select it. Null for unknown ids. */
   insertLayerBelow(id: string): string | null {
+    if (this.denyEditsLocked()) {
+      return null;
+    }
     const order = this.layerOrderIds();
     const parents = this.layerParentMap();
     const range = layerBlockRange(order, parents, id);
@@ -7099,6 +7309,9 @@ export class GnumarusCanvasEngine {
    * (masks are leaves: nothing nests under them). No history entry.
    */
   reparentLayerAsChild(childId: string, newParentId: string): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const order = this.layerOrderIds();
     const parents = this.layerParentMap();
     if (!order.includes(childId) || !order.includes(newParentId)) {
@@ -7127,6 +7340,9 @@ export class GnumarusCanvasEngine {
 
   /** Result of converting a layer to/from a mask (for precise UI feedback). */
   setLayerMask(id: string, mask: boolean): "ok" | "unknown" | "already" | "needs-parent" | "has-children" | "parent-is-mask" {
+    if (this.denyEditsLocked()) {
+      return "unknown";
+    }
     const layer = this.findLayer(id);
     if (layer === null) {
       return "unknown";
@@ -7164,6 +7380,9 @@ export class GnumarusCanvasEngine {
    * No history entry.
    */
   indentLayerIntoAboveSibling(id: string): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const layer = this.findLayer(id);
     if (layer === null) {
       return false;
@@ -7191,6 +7410,9 @@ export class GnumarusCanvasEngine {
    * normal layers (a root mask would have no target). No history entry.
    */
   outdentLayerBelowParent(id: string): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const layer = this.findLayer(id);
     if (layer === null) {
       return false;
@@ -7221,6 +7443,9 @@ export class GnumarusCanvasEngine {
    * Returns false for roots and unknown ids. No history entry.
    */
   makeRootLayer(id: string): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const order = this.layerOrderIds();
     const parents = this.layerParentMap();
     const result = makeRootLayer(order, parents, id);
@@ -7284,6 +7509,9 @@ export class GnumarusCanvasEngine {
   }
 
   removeLayer(id: string): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     if (this.layers.length <= 1) {
       return false;
     }
@@ -7302,6 +7530,9 @@ export class GnumarusCanvasEngine {
    * Like single removal this is structural (no history entry).
    */
   removeLayers(ids: readonly string[]): number {
+    if (this.denyEditsLocked()) {
+      return -1;
+    }
     const targets = [...new Set(ids)].filter((id) => this.layers.some((layer) => layer.id === id));
     if (targets.length === 0) {
       return 0;
@@ -7436,6 +7667,9 @@ export class GnumarusCanvasEngine {
    * single undoable history entry.
    */
   mergeDown(id: string): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const index = this.layers.findIndex((layer) => layer.id === id);
     if (index <= 0) {
       return false;
@@ -7752,6 +7986,9 @@ export class GnumarusCanvasEngine {
   }
 
   renameLayer(id: string, name: string): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const layer = this.findLayer(id);
     const trimmed = name.trim().slice(0, 64);
     if (layer === null || trimmed.length === 0) {
@@ -7764,6 +8001,9 @@ export class GnumarusCanvasEngine {
   }
 
   setLayerVisible(id: string, visible: boolean): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const layer = this.findLayer(id);
     if (layer === null) {
       return false;
@@ -7807,6 +8047,9 @@ export class GnumarusCanvasEngine {
   }
 
   setLayerOpacity(id: string, opacity: number): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const layer = this.findLayer(id);
     if (layer === null) {
       return false;
@@ -7832,6 +8075,9 @@ export class GnumarusCanvasEngine {
 
   /** Set the compositing blend mode of a layer (undoable: no, like opacity). */
   setLayerBlendMode(id: string, blend: GnumarusLayerBlendMode): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const layer = this.findLayer(id);
     if (layer === null) {
       return false;
@@ -7900,6 +8146,9 @@ export class GnumarusCanvasEngine {
   }
 
   setLayerLockedChannels(id: string, locked: GnumarusChannelLock): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const layer = this.findLayer(id);
     if (layer === null) {
       return false;
@@ -7910,6 +8159,9 @@ export class GnumarusCanvasEngine {
   }
 
   setLayerChannelLocked(id: string, channel: "r" | "g" | "b" | "a", locked: boolean): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const layer = this.findLayer(id);
     if (layer === null) {
       return false;
@@ -7924,6 +8176,9 @@ export class GnumarusCanvasEngine {
    * carrying its whole descendant block. Returns false at the level edge.
    */
   moveLayer(id: string, direction: "up" | "down"): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const order = this.layerOrderIds();
     const parents = this.layerParentMap();
     const next = moveLayerBlock(order, parents, id, direction);
@@ -7939,6 +8194,9 @@ export class GnumarusCanvasEngine {
 
   /** Move a layer up/down, wrapping around inside its own level. */
   moveLayerWrapping(id: string, direction: "up" | "down"): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     if (this.layers.length <= 1) {
       return false;
     }
@@ -7966,6 +8224,9 @@ export class GnumarusCanvasEngine {
   }
 
   setLayerTransform(id: string, transform: Partial<GnumarusLayerTransform>): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     if (
       this.floating !== null &&
       this.floating.active &&
@@ -8046,6 +8307,9 @@ export class GnumarusCanvasEngine {
   }
 
   resetLayerTransform(id: string): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     if (
       this.floating !== null &&
       this.floating.active &&
@@ -8103,6 +8367,9 @@ export class GnumarusCanvasEngine {
    * Successful resizes are undoable.
    */
   resizeLayer(id: string, newWidth: number, newHeight: number): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const layer = this.findLayer(id);
     if (layer === null) {
       return false;
@@ -8163,6 +8430,9 @@ export class GnumarusCanvasEngine {
    * Successful crops are undoable.
    */
   fitTextureToSize(textureId: string, threshold: number): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const entry = this.textures.get(textureId);
     if (entry === undefined) {
       return false;
@@ -8203,6 +8473,9 @@ export class GnumarusCanvasEngine {
     width: number,
     height: number,
   ): "cropped" | "unchanged" | "outside" | "empty" {
+    if (this.denyEditsLocked()) {
+      return "unchanged";
+    }
     if (this.isCellContentEmpty(layerId, frame)) {
       return "empty";
     }
@@ -8245,6 +8518,9 @@ export class GnumarusCanvasEngine {
     width: number,
     height: number,
   ): "cropped" | "unchanged" | "outside" | "empty" {
+    if (this.denyEditsLocked()) {
+      return "unchanged";
+    }
     if (this.isCellContentEmpty(layerId, frame)) {
       return "empty";
     }
@@ -8279,6 +8555,9 @@ export class GnumarusCanvasEngine {
    * re-seat the box on the new texture so adjustment can continue.
    */
   commitGrowBox(): "cropped" | "unchanged" | "outside" | "empty" | "none" {
+    if (this.denyEditsLocked()) {
+      return "unchanged";
+    }
     const box = this.growBox;
     const layer = this.activeLayer();
     if (box === null || layer === null) {
@@ -8394,6 +8673,9 @@ export class GnumarusCanvasEngine {
   }
 
   cropCellTextureToCanvas(layerId: string, frame: number): "cropped" | "unchanged" | "outside" {
+    if (this.denyEditsLocked()) {
+      return "unchanged";
+    }
     const contentId = this.cells.get(animationCellKey(layerId, frame));
     const content = contentId === undefined ? undefined : this.contents.get(contentId);
     const textureId = content?.textureId ?? null;
@@ -8428,6 +8710,9 @@ export class GnumarusCanvasEngine {
    * content is fully outside, degenerate, or would exceed the texture cap.
    */
   resizeCellTextureToCanvas(layerId: string, frame: number): "resized" | "unchanged" | "outside" {
+    if (this.denyEditsLocked()) {
+      return "unchanged";
+    }
     const contentId = this.cells.get(animationCellKey(layerId, frame));
     const content = contentId === undefined ? undefined : this.contents.get(contentId);
     const textureId = content?.textureId ?? null;
@@ -8470,6 +8755,9 @@ export class GnumarusCanvasEngine {
     direction: "up" | "down" | "left" | "right",
     amount: number,
   ): "expanded" | "unchanged" {
+    if (this.denyEditsLocked()) {
+      return "unchanged";
+    }
     const contentId = this.cells.get(animationCellKey(layerId, frame));
     const content = contentId === undefined ? undefined : this.contents.get(contentId);
     const textureId = content?.textureId ?? null;
@@ -8600,6 +8888,9 @@ export class GnumarusCanvasEngine {
    * whole batch. Returns fitted/unchanged counts.
    */
   fitAllTexturesToSize(threshold: number): { fitted: number; unchanged: number } {
+    if (this.denyEditsLocked()) {
+      return { fitted: 0, unchanged: 0 };
+    }
     const limit = Number.isFinite(threshold) ? Math.min(254, Math.max(0, Math.floor(threshold))) : 0;
     const records: GnumarusFitRecord[] = [];
     const touched = new Set<string>();
@@ -8642,6 +8933,9 @@ export class GnumarusCanvasEngine {
    * undoable history entry. Returns cropped/unchanged/outside counts.
    */
   cropAllCellsToCanvas(): { cropped: number; unchanged: number; outside: number } {
+    if (this.denyEditsLocked()) {
+      return { cropped: 0, unchanged: 0, outside: 0 };
+    }
     const byTexture = new Map<string, string[]>();
     for (const content of this.contents.values()) {
       if (content.textureId === null) {
@@ -8710,6 +9004,9 @@ export class GnumarusCanvasEngine {
     applied: number;
     skipped: number;
   } {
+    if (this.denyEditsLocked()) {
+      return { applied: 0, skipped: entries.length };
+    }
     const records: GnumarusReloadRecord[] = [];
     const touched = new Set<string>();
     let applied = 0;
@@ -8774,6 +9071,9 @@ export class GnumarusCanvasEngine {
   }
 
   loadProject(projectWidth: number, projectHeight: number, inputs: GnumarusProjectLayerInput[]): void {
+    if (this.denyEditsLocked()) {
+      return;
+    }
     if (inputs.length === 0) {
       throw new Error("Project has no layers.");
     }
@@ -8896,6 +9196,9 @@ export class GnumarusCanvasEngine {
       activeAnimation?: string | null;
     },
   ): void {
+    if (this.denyEditsLocked()) {
+      return;
+    }
     if (data.layers.length === 0) {
       throw new Error("Project has no layers.");
     }
@@ -9289,6 +9592,9 @@ export class GnumarusCanvasEngine {
   }
 
   newProject(width: number, height: number): void {
+    if (this.denyEditsLocked()) {
+      return;
+    }
     this.growBox = null;
     this.growDrag = null;
     this.imageWidth = width;
@@ -11919,6 +12225,9 @@ export class GnumarusCanvasEngine {
    * history entry. False without an active floating selection.
    */
   cutFloatingSelection(): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const floating = this.floating;
     if (floating === null || !floating.active) {
       return false;
@@ -11943,6 +12252,9 @@ export class GnumarusCanvasEngine {
    * stays a separate undoable step.
    */
   pasteClipboard(): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const clip = this.clipboard;
     if (clip === null || clip.width < 1 || clip.height < 1) {
       return false;
@@ -12116,6 +12428,9 @@ export class GnumarusCanvasEngine {
    * of the destructive 3D rotation tool.
    */
   resetFloatingRotations(): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const floating = this.floating;
     if (floating === null || !floating.active) {
       return false;
@@ -12134,6 +12449,9 @@ export class GnumarusCanvasEngine {
    * Ephemeral like moves: no history entry, commit captures the result.
    */
   resetFloatingTransform(): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const floating = this.floating;
     if (floating === null || !floating.active) {
       return false;
@@ -13324,6 +13642,9 @@ export class GnumarusCanvasEngine {
    * (inactive, missing home, degenerate transform or empty coverage).
    */
   commitFloating(): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const floating = this.floating;
     if (floating === null || !floating.active) {
       return false;
@@ -13614,6 +13935,9 @@ export class GnumarusCanvasEngine {
    * merge). Refuses transformed floatings; radius 0 is a no-op.
    */
   featherFloatingSelection(radius: number): "ok" | "transformed" | "none" {
+    if (this.denyEditsLocked()) {
+      return "none";
+    }
     const floating = this.floating;
     if (floating === null || !floating.active) {
       return "none";
@@ -13644,6 +13968,9 @@ export class GnumarusCanvasEngine {
    * the merge bakes the result. Transformed floatings refuse with a toast.
    */
   reshapeFloatingSelection(delta: number): "ok" | "transformed" | "none" {
+    if (this.denyEditsLocked()) {
+      return "none";
+    }
     const floating = this.floating;
     if (floating === null || !floating.active) {
       return "none";
@@ -14749,6 +15076,9 @@ export class GnumarusCanvasEngine {
    * and returns true when pixels changed.
    */
   commitLineTo(x: number, y: number): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const layer = this.activeLayer();
     if (layer === null) {
       return false;
@@ -14862,6 +15192,9 @@ export class GnumarusCanvasEngine {
 
   /** Commit a rectangle (outline or filled) from a drag box. */
   commitShapeRect(x0: number, y0: number, x1: number, y1: number): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const layer = this.activeLayer();
     if (layer === null) {
       return false;
@@ -14880,6 +15213,9 @@ export class GnumarusCanvasEngine {
 
   /** Commit an ellipse (outline or filled) from a drag box. */
   commitShapeEllipse(x0: number, y0: number, x1: number, y1: number): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const layer = this.activeLayer();
     if (layer === null) {
       return false;
@@ -14898,6 +15234,9 @@ export class GnumarusCanvasEngine {
 
   /** Commit a polygon (closed outline, plus even-odd fill when enabled). */
   commitShapePolygon(points: Array<{ x: number; y: number }>): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const layer = this.activeLayer();
     if (layer === null || points.length < 2) {
       return false;
@@ -14911,6 +15250,9 @@ export class GnumarusCanvasEngine {
 
   /** Commit a paint-to-transparent gradient over a drag axis. */
   commitGradient(ax: number, ay: number, bx: number, by: number): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const layer = this.activeLayer();
     if (layer === null) {
       return false;
@@ -15128,6 +15470,9 @@ export class GnumarusCanvasEngine {
    * destroys all auxiliaries and returns true when pixels changed.
    */
   commitCurveTo(c2x: number, c2y: number): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     if (this.curvePhase !== "awaitC2") {
       return false;
     }
@@ -16726,6 +17071,9 @@ export class GnumarusCanvasEngine {
   }
 
   clear(): void {
+    if (this.denyEditsLocked()) {
+      return;
+    }
     const layer = this.activeLayer();
     if (layer === null) {
       return;
@@ -16756,6 +17104,9 @@ export class GnumarusCanvasEngine {
    * changed (undoable via the same region-diff history as strokes).
    */
   clearCurrentCellTexture(): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const layer = this.activeLayer();
     if (layer === null) {
       return false;
@@ -16795,6 +17146,9 @@ export class GnumarusCanvasEngine {
    * empty cell first. Returns the filled pixel count (0 = no-op).
    */
   bucketFillAt(x: number, y: number): number {
+    if (this.denyEditsLocked()) {
+      return 0;
+    }
     const layer = this.activeLayer();
     if (layer === null) {
       return 0;
@@ -16838,6 +17192,9 @@ export class GnumarusCanvasEngine {
 
   /** Fill at a client point (maps through view + layer transforms). */
   bucketFillAtClient(clientX: number, clientY: number): number {
+    if (this.denyEditsLocked()) {
+      return 0;
+    }
     const layer = this.activeLayer();
     if (layer === null) {
       return 0;
@@ -17349,6 +17706,9 @@ export class GnumarusCanvasEngine {
   }
 
   undo(): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const applied = this.history.undo(
       (layerId) => this.historyLayerFor(layerId),
       (snapshot) => this.insertLayerSnapshot(snapshot),
@@ -17378,6 +17738,9 @@ export class GnumarusCanvasEngine {
   }
 
   redo(): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
     const applied = this.history.redo(
       (layerId) => this.historyLayerFor(layerId),
       (layerId) => {
@@ -18108,6 +18471,9 @@ export class GnumarusCanvasEngine {
       if (this.tool === "flycam") {
         // Every mouse button/gesture belongs to the fly camera: left-drag
         // looks around, everything else is swallowed.
+        if (this.denyEditsLocked()) {
+          return;
+        }
         if (event.button !== 0) {
           return;
         }
@@ -18145,6 +18511,9 @@ export class GnumarusCanvasEngine {
       }
       if (event.button === 1 && (this.tool === "loupe" || this.tool === "transform")) {
         event.preventDefault();
+        if (this.tool === "transform" && this.denyEditsLocked()) {
+          return;
+        }
         if (this.gestureModifiersSatisfied("view-loupe-reset", event)) {
           // Alt+middle-click resets the transform (keyboard part configurable).
           if (this.tool === "loupe") {
@@ -18210,6 +18579,9 @@ export class GnumarusCanvasEngine {
         return;
       }
       if (event.button === 2 && this.tool === "transform") {
+        if (this.denyEditsLocked()) {
+          return;
+        }
         const angle = this.layerPointerAngle(event.clientX, event.clientY);
         if (angle === null) {
           return;
@@ -18221,6 +18593,9 @@ export class GnumarusCanvasEngine {
       }
       if (event.button === 2 && this.tool === "polylasso") {
         // Right-click commits the polygon selection (needs 3+ points).
+        if (this.denyEditsLocked()) {
+          return;
+        }
         this.commitPolyLasso(event);
         return;
       }
@@ -18253,6 +18628,20 @@ export class GnumarusCanvasEngine {
           this.tool === "brush" ? this.brushSize : this.tool === "line" ? this.lineWidth : this.curveWidth;
         this.sizeDrag = { tool: this.tool, startClientX: event.clientX, startSize };
         canvas.setPointerCapture(event.pointerId);
+        return;
+      }
+      // Playback edit lock: left-button canvas work mutates (paint, select,
+      // transform, crop/grow, tile, model) except through the view tools
+      // (loupe, pan, rotate-canvas) and the eyedropper. View gestures above
+      // already returned, so anything reaching here would change the project.
+      if (
+        event.button === 0 &&
+        this.denyEditsLocked() &&
+        this.tool !== "loupe" &&
+        this.tool !== "pan" &&
+        this.tool !== "rotatecanvas" &&
+        this.tool !== "eyedropper"
+      ) {
         return;
       }
       if (this.tool === "transform") {
@@ -18494,6 +18883,9 @@ export class GnumarusCanvasEngine {
       if (this.tool === "modeltransform") {
         // Left-drag orbits the model, right-drag pans it. Requires a 3D
         // model in the active cell; other buttons are ignored.
+        if (this.denyEditsLocked()) {
+          return;
+        }
         if (event.button !== 0 && event.button !== 2) {
           return;
         }
@@ -18680,6 +19072,9 @@ export class GnumarusCanvasEngine {
         // Left button paints (drag stamps every traversed slot), right
         // button erases. Shift+click replays the last stamped cell as a
         // tile line; Ctrl+Shift+click replays it as a filled rectangle.
+        if (this.denyEditsLocked()) {
+          return;
+        }
         const pressed: 0 | 2 = (event.button as number) === 2 ? 2 : 0;
         if (pressed !== 0 && pressed !== 2) {
           return;
@@ -19782,6 +20177,9 @@ export class GnumarusCanvasEngine {
       }
       if (!event.ctrlKey && !event.altKey && !event.metaKey && !inField) {
         if (this.hasFloatingSelection() && (this.matchesShortcut("edit-merge-floating", event) || this.matchesShortcut("edit-confirm", event) || this.matchesShortcut("edit-cancel", event))) {
+          if (this.denyEditsLocked()) {
+            return;
+          }
           this.commitFloating();
           return;
         }
@@ -19790,6 +20188,9 @@ export class GnumarusCanvasEngine {
           this.tool === "polylasso" &&
           this.polyLassoPath !== null
         ) {
+          if (this.denyEditsLocked()) {
+            return;
+          }
           this.commitPolyLasso(event);
           return;
         }
@@ -19815,6 +20216,9 @@ export class GnumarusCanvasEngine {
           // R resets the orbit view; it takes precedence over the
           // rectselect tool shortcut below (configurable).
           if (this.matchesShortcut("model-reset-view", event)) {
+            if (this.denyEditsLocked()) {
+              return;
+            }
             this.resetModelView();
             this.updatePreviews();
             this.onLayersChanged?.();
@@ -20018,6 +20422,9 @@ export class GnumarusCanvasEngine {
           this.shapePolygon.length >= 2
         ) {
           event.preventDefault();
+          if (this.denyEditsLocked()) {
+            return;
+          }
           const finished = this.shapePolygon;
           this.shapePolygon = null;
           this.updatePreviews();
@@ -20026,12 +20433,18 @@ export class GnumarusCanvasEngine {
         }
         if (this.matchesShortcut("edit-confirm", event) && this.tool === "modeltransform" && this.hasUncommittedModelView()) {
           event.preventDefault();
+          if (this.denyEditsLocked()) {
+            return;
+          }
           this.commitModelOrbit();
           this.updatePreviews();
           return;
         }
         if (this.matchesShortcut("edit-delete-cell", event)) {
           event.preventDefault();
+          if (this.denyEditsLocked()) {
+            return;
+          }
           if (this.denyPaintOnDerived()) {
             return;
           }
@@ -20041,11 +20454,17 @@ export class GnumarusCanvasEngine {
       }
       if (!inTextField && this.matchesShortcut("edit-undo", event)) {
         event.preventDefault();
+        if (this.denyEditsLocked()) {
+          return;
+        }
         this.undo();
         return;
       }
       if (!inTextField && this.matchesShortcut("edit-redo", event)) {
         event.preventDefault();
+        if (this.denyEditsLocked()) {
+          return;
+        }
         this.redo();
         return;
       }

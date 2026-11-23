@@ -11,6 +11,7 @@ reports to the status bar, each row has a reset arrow):
 * Brush tip JXL quality, import cleanup (none/fit/crop/crop+fit).
 * Cell expand step, empty-cell handling, fit-to-size alpha threshold.
 * Default frame duration, toast display time.
+* Allow changes while playing, wide spritesheet packs.
 * Language (system/English/Português) — the manual link in Help
   follows this setting.
 

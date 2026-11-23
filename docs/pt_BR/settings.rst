@@ -15,6 +15,7 @@ redefinição):
 * Passo de expansão de célula, células vazias, limiar de ajuste ao
   tamanho.
 * Duração padrão de quadro, tempo do aviso flutuante.
+* Permitir alterações tocando, pacotes largos de spritesheet.
 * Idioma (sistema/inglês/português) — o link do manual na Ajuda segue
   esta configuração.
 

@@ -35,7 +35,7 @@ describe("GnumarusSpritesheet", () => {
   });
 
   it("lays flat strips in one line or one column", () => {
-    const line = computeSheetGeometry(strips([0, 1], [2]), "line", 1);
+    const line = computeSheetGeometry(strips([0, 1], [2]), "line", 1, true);
     expect(line.cols).toBe(3);
     expect(line.rows).toBe(1);
     expect(line.cells).toEqual([
@@ -43,7 +43,7 @@ describe("GnumarusSpritesheet", () => {
       { col: 1, row: 0, frame: 1 },
       { col: 2, row: 0, frame: 2 },
     ]);
-    const column = computeSheetGeometry(strips([0, 1], [2]), "column", 1);
+    const column = computeSheetGeometry(strips([0, 1], [2]), "column", 1, true);
     expect(column.cols).toBe(1);
     expect(column.rows).toBe(3);
     expect(column.cells).toEqual([
@@ -54,7 +54,7 @@ describe("GnumarusSpritesheet", () => {
   });
 
   it("keeps one animation per line or column with ragged edges", () => {
-    const perLine = computeSheetGeometry(strips([0, 1], [2]), "per-line", 1);
+    const perLine = computeSheetGeometry(strips([0, 1], [2]), "per-line", 1, true);
     expect(perLine.cols).toBe(2);
     expect(perLine.rows).toBe(2);
     expect(perLine.cells).toEqual([
@@ -62,7 +62,7 @@ describe("GnumarusSpritesheet", () => {
       { col: 1, row: 0, frame: 1 },
       { col: 0, row: 1, frame: 2 },
     ]);
-    const perColumn = computeSheetGeometry(strips([0, 1], [2]), "per-column", 1);
+    const perColumn = computeSheetGeometry(strips([0, 1], [2]), "per-column", 1, true);
     expect(perColumn.cols).toBe(2);
     expect(perColumn.rows).toBe(2);
     expect(perColumn.cells).toEqual([
@@ -72,9 +72,9 @@ describe("GnumarusSpritesheet", () => {
     ]);
   });
 
-  it("packs 40 frames into 6 columns and 7 rows", () => {
+  it("packs 40 frames into 6 columns and 7 rows when narrow", () => {
     const frames = Array.from({ length: 40 }, (_, index) => index);
-    const packed = computeSheetGeometry(strips(frames), "packed", 1);
+    const packed = computeSheetGeometry(strips(frames), "packed", 1, false);
     expect(packed.cols).toBe(6);
     expect(packed.rows).toBe(7);
     expect(packed.cells).toHaveLength(40);
@@ -82,30 +82,45 @@ describe("GnumarusSpritesheet", () => {
     expect(packed.cells[39]).toEqual({ col: 3, row: 6, frame: 39 });
   });
 
+  it("packs wide by rounding the column count up", () => {
+    const frames = Array.from({ length: 40 }, (_, index) => index);
+    const packed = computeSheetGeometry(strips(frames), "packed", 1, true);
+    expect(packed.cols).toBe(7);
+    expect(packed.rows).toBe(6);
+    expect(packed.cells).toHaveLength(40);
+    expect(packed.cells[7]).toEqual({ col: 0, row: 1, frame: 7 });
+    expect(packed.cells[39]).toEqual({ col: 4, row: 5, frame: 39 });
+    // 1..3 frames: a single column when narrow, two columns when wide.
+    expect(computeSheetGeometry(strips([0]), "packed", 1, false)).toMatchObject({ cols: 1, rows: 1 });
+    expect(computeSheetGeometry(strips([0]), "packed", 1, true)).toMatchObject({ cols: 1, rows: 1 });
+    expect(computeSheetGeometry(strips([0, 1, 2]), "packed", 1, false)).toMatchObject({ cols: 1, rows: 3 });
+    expect(computeSheetGeometry(strips([0, 1, 2]), "packed", 1, true)).toMatchObject({ cols: 2, rows: 2 });
+  });
+
   it("sizes fixed lines and columns to fit every frame", () => {
     const frames = [0, 1, 2, 3, 4];
-    const rows = computeSheetGeometry(strips(frames), "fixed-rows", 2);
+    const rows = computeSheetGeometry(strips(frames), "fixed-rows", 2, true);
     expect(rows.rows).toBe(2);
     expect(rows.cols).toBe(3);
     // Column-major fill: frames run down each column first.
     expect(rows.cells.map((cell) => cell.frame)).toEqual([0, 1, 2, 3, 4]);
     expect(rows.cells[2]).toEqual({ col: 1, row: 0, frame: 2 });
-    const cols = computeSheetGeometry(strips(frames), "fixed-cols", 3);
+    const cols = computeSheetGeometry(strips(frames), "fixed-cols", 3, true);
     expect(cols.cols).toBe(3);
     expect(cols.rows).toBe(2);
     expect(cols.cells[3]).toEqual({ col: 0, row: 1, frame: 3 });
   });
 
   it("rejects empty strips and bad fixed counts", () => {
-    expect(() => computeSheetGeometry([], "line", 1)).toThrow(/at least one frame/);
-    expect(() => computeSheetGeometry(strips([]), "packed", 1)).toThrow(/at least one frame/);
-    expect(() => computeSheetGeometry(strips([0]), "fixed-rows", 0)).toThrow(/line count/);
-    expect(() => computeSheetGeometry(strips([0]), "fixed-cols", -2)).toThrow(/column count/);
-    expect(() => computeSheetGeometry(strips([0]), "fixed-rows", Number.NaN)).toThrow(/line count/);
+    expect(() => computeSheetGeometry([], "line", 1, true)).toThrow(/at least one frame/);
+    expect(() => computeSheetGeometry(strips([]), "packed", 1, true)).toThrow(/at least one frame/);
+    expect(() => computeSheetGeometry(strips([0]), "fixed-rows", 0, true)).toThrow(/line count/);
+    expect(() => computeSheetGeometry(strips([0]), "fixed-cols", -2, true)).toThrow(/column count/);
+    expect(() => computeSheetGeometry(strips([0]), "fixed-rows", Number.NaN, true)).toThrow(/line count/);
   });
 
   it("blits frames side by side with exact pixels", () => {
-    const geometry = computeSheetGeometry(strips([0, 1]), "line", 1);
+    const geometry = computeSheetGeometry(strips([0, 1]), "line", 1, true);
     const frames = new Map([
       [0, solidFrame(2, 2, 10)],
       [1, solidFrame(2, 2, 200)],
@@ -120,7 +135,7 @@ describe("GnumarusSpritesheet", () => {
   });
 
   it("leaves ragged cells transparent", () => {
-    const geometry = computeSheetGeometry(strips([0, 1], [2]), "per-line", 1);
+    const geometry = computeSheetGeometry(strips([0, 1], [2]), "per-line", 1, true);
     const frames = new Map([
       [0, solidFrame(1, 1, 10)],
       [1, solidFrame(1, 1, 20)],
@@ -136,7 +151,7 @@ describe("GnumarusSpritesheet", () => {
   });
 
   it("rejects missing or mis-sized frame pixels", () => {
-    const geometry = computeSheetGeometry(strips([0, 1]), "line", 1);
+    const geometry = computeSheetGeometry(strips([0, 1]), "line", 1, true);
     expect(() => composeSheet(new Map([[0, solidFrame(2, 2, 1)]]), geometry, 2, 2)).toThrow(
       /Missing pixels/,
     );

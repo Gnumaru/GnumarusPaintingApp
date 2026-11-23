@@ -55,11 +55,14 @@ export const GNUMARUS_SHEET_LAYOUTS: Array<{ value: GnumarusSheetLayout; label: 
 /**
  * Compute sheet geometry for non-empty strips. Throws when no strip holds
  * a frame, when the layout is unknown, or when the fixed count is < 1.
+ * Packed columns come from the frame count's square root: rounded up for
+ * wide packs, down for narrow packs.
  */
 export function computeSheetGeometry(
   strips: GnumarusSheetStrip[],
   layout: GnumarusSheetLayout,
   fixedCount: number,
+  widePack: boolean,
 ): GnumarusSheetGeometry {
   const kept = strips.filter((strip) => strip.frames.length > 0);
   if (kept.length === 0) {
@@ -105,7 +108,10 @@ export function computeSheetGeometry(
     case "packed": {
       const flat = kept.flatMap((strip) => strip.frames);
       // Near-square: columns from the square root, rows as many as needed.
-      const cols = Math.max(1, Math.floor(Math.sqrt(flat.length)));
+      // Wide packs round up (packs wider than tall); narrow packs round
+      // down (packs taller than wide — one column for 1..3 frames).
+      const root = Math.sqrt(flat.length);
+      const cols = Math.max(1, widePack ? Math.ceil(root) : Math.floor(root));
       const rows = Math.ceil(flat.length / cols);
       return {
         cols,

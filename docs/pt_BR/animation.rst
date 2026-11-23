@@ -22,7 +22,11 @@ Reprodução e duração
 --------------------
 
 O transporte toca do quadro atual, avançando pela duração de cada
-quadro (configuração de duração padrão inclusa). Cabeçalhos mostram
+quadro (configuração de duração padrão inclusa). Durante a
+reprodução, a barra de status fica vermelha; a menos que a
+configuração "Permitir alterações tocando" esteja ativa, pintura,
+edições, desfazer e novos projetos ficam bloqueados com um aviso
+explicando o motivo. Cabeçalhos mostram
 em dica quais animações incluem o quadro.
 
 Animações nomeadas

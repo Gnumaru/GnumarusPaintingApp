@@ -200,7 +200,7 @@ test("File > Export saves an animation as a WebP spritesheet", async ({ page }) 
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator('[data-testid="export-tab-sheet"]').click();
-  await dialog.getByRole("checkbox", { name: "go" }).check();
+  await dialog.locator("#exportSheetAnimations").selectOption("go");
   await expect(dialog.locator("select#exportSheetLayout")).toHaveValue("line");
   await dialog.locator("select#exportSheetFormat").selectOption("image/webp");
   await dialog.locator("#exportSheetOk").click();
@@ -231,7 +231,7 @@ test("File > Export saves an animation as a JXL spritesheet", async ({ page }) =
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator('[data-testid="export-tab-sheet"]').click();
-  await dialog.getByRole("checkbox", { name: "go" }).check();
+  await dialog.locator("#exportSheetAnimations").selectOption("go");
   await expect(dialog.locator("select#exportSheetLayout")).toHaveValue("line");
   await dialog.locator("select#exportSheetFormat").selectOption("image/jxl");
   await dialog.locator("#exportSheetOk").click();
@@ -337,7 +337,7 @@ test("File > Export saves an animation as a single-line spritesheet", async ({ p
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator('[data-testid="export-tab-sheet"]').click();
-  await dialog.getByRole("checkbox", { name: "go" }).check();
+  await dialog.locator("#exportSheetAnimations").selectOption("go");
   await expect(dialog.locator("select#exportSheetLayout")).toHaveValue("line");
   await dialog.locator("#exportSheetOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("Exported");
@@ -367,8 +367,7 @@ test("File > Export saves one animation per line with ragged rows", async ({ pag
   const dialog = page.locator("gnumarus-shell dialog#exportDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator('[data-testid="export-tab-sheet"]').click();
-  await dialog.getByRole("checkbox", { name: "a", exact: true }).check();
-  await dialog.getByRole("checkbox", { name: "b", exact: true }).check();
+  await dialog.locator("#exportSheetAnimations").selectOption(["a", "b"]);
   await dialog.locator("select#exportSheetLayout").selectOption("per-line");
   await dialog.locator("#exportSheetOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("Exported");
