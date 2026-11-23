@@ -2828,6 +2828,7 @@ export class GnumarusShell extends LitElement {
     this.textEditorColor = "#000000";
     this.textEditorTab = "edit";
     this.textEditorHtml = "";
+    this.lastSizeSpan = null;
     this.tileWindowOpen = false;
     this.tileWindowX = 280;
     this.tileWindowY = 120;
@@ -15541,6 +15542,7 @@ export class GnumarusShell extends LitElement {
     this.textEditorColor = "#000000";
     this.textEditorTab = "edit";
     this.textEditorHtml = document.html;
+    this.lastSizeSpan = null;
     await this.updateComplete;
     const area = this.shadowRoot?.getElementById("textEditorArea");
     if (area !== null && area !== undefined) {
@@ -15625,7 +15627,7 @@ export class GnumarusShell extends LitElement {
                 // A fresh user edit re-arms the blur-commit below.
                 this.suppressSizeChangeOnce = false;
               }}
-              @change=${(): void => this.applyTextSizeFromDialogChange()}
+              @change=${(event: Event): void => this.applyTextSizeFromDialogChange(event)}
             />
           </label>
           <span class="text-color-row" title=${tr("dialog.textColor")}>
@@ -15694,6 +15696,13 @@ export class GnumarusShell extends LitElement {
    */
   private suppressSizeChangeOnce = false;
 
+  /**
+   * The span the last size commit created or restyled: slider ticks
+   * retarget it directly, so repeated commits never nest or trail spans
+   * even when the live selection is a native drag artifact.
+   */
+  private lastSizeSpan: HTMLSpanElement | null = null;
+
   /** Run a formatting command inside the editor, then push a live preview. */
   private applyTextCommand(command: "bold" | "italic" | "underline" | "foreColor", value?: string): void {
     const area = this.shadowRoot?.getElementById("textEditorArea");
@@ -15719,7 +15728,7 @@ export class GnumarusShell extends LitElement {
     this.wrapTextSelection(`font-family:${family.includes(" ") ? `"${family}"` : family}`);
   }
 
-  private applyTextSizeFromDialog(): void {
+  private applyTextSizeFromDialog(quiet = false): void {
     const input = this.shadowRoot?.getElementById("textEditorSize") as HTMLInputElement | null;
     const size = Math.min(500, Math.max(6, Math.round(Number.parseFloat(input?.value ?? "") || 0)));
     if (!Number.isFinite(size) || size < 6) {
@@ -15729,7 +15738,7 @@ export class GnumarusShell extends LitElement {
     // Focusing the editor blurs the input, which fires `change`: swallow that
     // follow-up so one commit (Enter, Set, or blur) applies exactly once.
     this.suppressSizeChangeOnce = true;
-    this.wrapTextSelection(`font-size:${size}px`);
+    this.wrapTextSelection(`font-size:${size}px`, quiet);
   }
 
   /**
@@ -15737,12 +15746,15 @@ export class GnumarusShell extends LitElement {
    * commit (Enter/Set) already applied and armed the one-shot guard, so a
    * `change` arriving right after it is the echo of that same commit.
    */
-  private applyTextSizeFromDialogChange(): void {
+  private applyTextSizeFromDialogChange(event?: Event): void {
     if (this.suppressSizeChangeOnce) {
       this.suppressSizeChangeOnce = false;
       return;
     }
-    this.applyTextSizeFromDialog();
+    // Slider ticks write through synthetic (untrusted) events while the drag
+    // is still running: apply without yanking focus, or the rest of the drag
+    // becomes a text selection inside the editor.
+    this.applyTextSizeFromDialog(event !== undefined && event.isTrusted === false);
   }
 
   /**
@@ -15775,9 +15787,16 @@ export class GnumarusShell extends LitElement {
     }
     if (!selection.isCollapsed) {
       try {
-        this.savedTextRange = selection.getRangeAt(0).cloneRange();
+        const fresh = selection.getRangeAt(0).cloneRange();
+        this.savedTextRange = fresh;
+        // A genuinely new user selection retires the running size span;
+        // slider ticks then target the fresh range instead of stale state.
+        if (this.fontSizeSpanForRange(fresh, area) !== this.lastSizeSpan) {
+          this.lastSizeSpan = null;
+        }
       } catch {
         this.savedTextRange = null;
+        this.lastSizeSpan = null;
       }
       return;
     }
@@ -15839,48 +15858,267 @@ export class GnumarusShell extends LitElement {
   }
 
   /**
-   * Wrap the editor selection in a styled span (or insert a styled
-   * placeholder when collapsed), then push a live preview.
+   * Parse a `font-size:<n>px` declaration (the only style this editor
+   * applies by size); anything else (font-family wraps) yields null.
    */
-  private wrapTextSelection(style: string): void {
+  private parseFontSizePx(style: string): number | null {
+    const match = /^\s*font-size\s*:\s*([\d.]+)px\s*$/.exec(style);
+    if (match === null) {
+      return null;
+    }
+    const size = Number(match[1]);
+    return Number.isFinite(size) ? size : null;
+  }
+
+  /** Replace the font-size declaration of a span's style, keeping the rest. */
+  private setSpanFontSize(span: HTMLSpanElement, size: number): void {
+    const raw = span.getAttribute("style") ?? "";
+    const next = /font-size\s*:[^;]+;?/i.test(raw)
+      ? raw.replace(/font-size\s*:[^;]+;?/i, `font-size:${size}px`)
+      : `${raw.replace(/;?\s*$/, "")};font-size:${size}px`;
+    span.setAttribute("style", next);
+  }
+
+  /** True when the element is a live font-size span inside the editor. */
+  private asFontSizeSpan(node: Node | null, area: HTMLElement): HTMLSpanElement | null {
+    if (
+      node instanceof HTMLSpanElement &&
+      node.isConnected &&
+      area.contains(node) &&
+      /font-size\s*:/i.test(node.getAttribute("style") ?? "")
+    ) {
+      return node;
+    }
+    return null;
+  }
+
+  /**
+   * The font-size span a non-collapsed range already covers: a single
+   * span child `(parent, i)-(parent, i+1)`, whole span contents, or the
+   * whole sole text child. Restyling it (instead of wrapping) keeps
+   * repeated commits — e.g. slider drags — idempotent.
+   */
+  private fontSizeSpanForRange(range: Range, area: HTMLElement): HTMLSpanElement | null {
+    const start = range.startContainer;
+    const end = range.endContainer;
+    if (start === end && start instanceof Element) {
+      if (range.endOffset - range.startOffset === 1) {
+        const only = this.asFontSizeSpan(start.childNodes[range.startOffset] ?? null, area);
+        if (only !== null) {
+          return only;
+        }
+      }
+      const whole = this.asFontSizeSpan(start, area);
+      if (
+        whole !== null &&
+        whole === end &&
+        range.startOffset === 0 &&
+        range.endOffset === whole.childNodes.length
+      ) {
+        return whole;
+      }
+    }
+    if (
+      start === end &&
+      start instanceof Text &&
+      range.startOffset === 0 &&
+      range.endOffset === start.data.length
+    ) {
+      const parent = start.parentNode;
+      if (
+        parent instanceof HTMLSpanElement &&
+        parent.childNodes.length === 1 &&
+        this.asFontSizeSpan(parent, area) !== null
+      ) {
+        return parent;
+      }
+    }
+    return null;
+  }
+
+  /** Nearest font-size span enclosing a collapsed caret (placeholder or sized text). */
+  private fontSizeSpanAtCaret(range: Range, area: HTMLElement): HTMLSpanElement | null {
+    if (!range.collapsed) {
+      return null;
+    }
+    let node: Node | null = range.startContainer;
+    for (let depth = 0; depth < 6 && node !== null; depth += 1) {
+      const hit = this.asFontSizeSpan(node, area);
+      if (hit !== null) {
+        return hit;
+      }
+      node = node.parentNode;
+      if (node !== null && !area.contains(node)) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Point the live and saved selection at the given span itself and make
+   * it the running size target for repeated commits.
+   */
+  private pointSelectionAtSpan(selection: Selection | null, span: HTMLSpanElement): void {
+    this.lastSizeSpan = span;
+    const parent = span.parentNode;
+    if (parent === null) {
+      selection?.removeAllRanges();
+      return;
+    }
+    const at = Array.prototype.indexOf.call(parent.childNodes, span);
+    const again = document.createRange();
+    again.setStart(parent, at);
+    again.setEnd(parent, at + 1);
+    selection?.removeAllRanges();
+    selection?.addRange(again);
+    this.savedTextRange = again.cloneRange();
+  }
+
+  /**
+   * Wrap the editor selection in a styled span (or insert a styled
+   * placeholder when collapsed), then push a live preview. A commit that
+   * lands on an existing font-size span restyles it in place, and every
+   * successful wrap repoints the saved selection at the new span, so
+   * repeated commits (number-slider drags) never nest or trail spans.
+   */
+  private wrapTextSelection(style: string, quiet = false): void {
     const area = this.shadowRoot?.getElementById("textEditorArea");
     if (!(area instanceof HTMLElement)) {
       return;
     }
-    area.focus();
+    if (!quiet) {
+      area.focus();
+    }
     this.restoreTextSelection();
     const selection = this.editorSelection();
-    const span = document.createElement("span");
-    span.setAttribute("style", style);
-    if (selection !== null && !selection.isCollapsed && area.contains(selection.anchorNode)) {
-      try {
-        const range = selection.getRangeAt(0);
-        range.surroundContents(span);
-        selection.removeAllRanges();
-      } catch {
+    const size = this.parseFontSizePx(style);
+    if (quiet && size !== null) {
+      // Slider ticks (synthetic events mid-drag): the live selection may be
+      // a native drag artifact, so restyle the running span, else wrap the
+      // saved snapshot, ignoring the live selection entirely.
+      const running =
+        this.lastSizeSpan !== null && area.contains(this.lastSizeSpan)
+          ? this.asFontSizeSpan(this.lastSizeSpan, area)
+          : null;
+      if (running !== null) {
+        this.setSpanFontSize(running, size);
+        this.pointSelectionAtSpan(selection, running);
+        this.onTextEditorInput();
+        return;
+      }
+      const saved = this.savedTextRange;
+      if (saved !== null) {
+        let probe: Range | null = null;
         try {
-          const range = selection.getRangeAt(0);
-          span.appendChild(range.extractContents());
-          range.insertNode(span);
-          selection.removeAllRanges();
+          const candidate = saved.cloneRange();
+          if (
+            !candidate.collapsed &&
+            area.contains(saved.startContainer) &&
+            area.contains(saved.endContainer)
+          ) {
+            probe = candidate;
+          }
         } catch {
-          // Leave the DOM untouched when the range cannot be wrapped.
+          probe = null;
+        }
+        if (probe !== null) {
+          const target = this.fontSizeSpanForRange(probe, area);
+          if (target !== null) {
+            this.setSpanFontSize(target, size);
+            this.pointSelectionAtSpan(selection, target);
+            this.onTextEditorInput();
+            return;
+          }
+          const span = document.createElement("span");
+          span.setAttribute("style", style);
+          try {
+            try {
+              probe.surroundContents(span);
+            } catch {
+              span.appendChild(probe.extractContents());
+              probe.insertNode(span);
+            }
+            this.pointSelectionAtSpan(selection, span);
+          } catch {
+            // Leave the DOM untouched when the range cannot be wrapped.
+            return;
+          }
+          this.onTextEditorInput();
           return;
         }
       }
+      // No usable snapshot: fall through to the collapsed/append path below.
+    }
+    if (selection !== null && !selection.isCollapsed && area.contains(selection.anchorNode)) {
+      const span = document.createElement("span");
+      span.setAttribute("style", style);
+      try {
+        const range = selection.getRangeAt(0);
+        if (size !== null) {
+          const target = this.fontSizeSpanForRange(range, area);
+          if (target !== null) {
+            this.setSpanFontSize(target, size);
+            this.pointSelectionAtSpan(selection, target);
+            this.onTextEditorInput();
+            return;
+          }
+        }
+        try {
+          range.surroundContents(span);
+        } catch {
+          span.appendChild(range.extractContents());
+          range.insertNode(span);
+        }
+        // Point the live and saved selection at the new span itself, so
+        // the next commit restyles it instead of nesting (slider drags
+        // used to collapse the snapshot into the extracted nodes and
+        // trail zero-width spans behind the text).
+        this.pointSelectionAtSpan(selection, span);
+      } catch {
+        // Leave the DOM untouched when the range cannot be wrapped.
+        return;
+      }
     } else {
+      if (
+        size !== null &&
+        selection !== null &&
+        selection.rangeCount > 0 &&
+        selection.isCollapsed &&
+        area.contains(selection.anchorNode)
+      ) {
+        const target = this.fontSizeSpanAtCaret(selection.getRangeAt(0), area);
+        if (target !== null) {
+          this.setSpanFontSize(target, size);
+          this.lastSizeSpan = target;
+          this.onTextEditorInput();
+          return;
+        }
+      }
+      const span = document.createElement("span");
+      span.setAttribute("style", style);
       span.innerHTML = "&#8203;";
       try {
-        if (selection !== null && selection.rangeCount > 0) {
-          const range = selection.getRangeAt(0).cloneRange();
-          range.collapse(true);
+        const live =
+          selection !== null && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+        if (live !== null && live.collapsed && area.contains(live.startContainer)) {
+          const range = live.cloneRange();
           range.insertNode(span);
           range.setStart(span.firstChild as Node, 1);
           range.collapse(true);
-          selection.removeAllRanges();
-          selection.addRange(range);
+          selection?.removeAllRanges();
+          selection?.addRange(range);
+          this.savedTextRange = range.cloneRange();
+          this.lastSizeSpan = span;
         } else {
           area.appendChild(span);
+          const tail = document.createRange();
+          tail.setStart(span.firstChild as Node, 1);
+          tail.collapse(true);
+          selection?.removeAllRanges();
+          selection?.addRange(tail);
+          this.savedTextRange = tail.cloneRange();
+          this.lastSizeSpan = span;
         }
       } catch {
         return;
@@ -16005,6 +16243,7 @@ export class GnumarusShell extends LitElement {
     this.suppressSizeChangeOnce = false;
     this.textEditorTab = "edit";
     this.textEditorHtml = "";
+    this.lastSizeSpan = null;
     const dialog = this.shadowRoot?.getElementById("textEditorDialog") as HTMLDialogElement | null;
     dialog?.close();
     if (this.engine.commitTextEdit(textId, beforeHtml)) {
@@ -16024,6 +16263,7 @@ export class GnumarusShell extends LitElement {
     this.suppressSizeChangeOnce = false;
     this.textEditorTab = "edit";
     this.textEditorHtml = "";
+    this.lastSizeSpan = null;
     const dialog = this.shadowRoot?.getElementById("textEditorDialog") as HTMLDialogElement | null;
     dialog?.close();
     if (editor !== null && this.engine !== null) {
@@ -16040,6 +16280,7 @@ export class GnumarusShell extends LitElement {
     this.suppressSizeChangeOnce = false;
     this.textEditorTab = "edit";
     this.textEditorHtml = "";
+    this.lastSizeSpan = null;
     if (editor !== null && this.engine !== null) {
       this.engine.previewTextEdit(editor.textId, editor.beforeHtml);
       this.refreshLayers();

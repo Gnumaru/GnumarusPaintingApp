@@ -243,3 +243,68 @@ test("right-clicking the HTML source copies it with a toast", async ({ page, con
   );
   expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("<div>Text</div>");
 });
+
+test("dragging the size slider restyles in place without trailing spans", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await createDefaultText(page);
+  await openTextEditor(page);
+  const dialog = page.locator('gnumarus-shell [data-testid="text-editor-dialog"]');
+  const area = page.locator('gnumarus-shell [data-testid="text-editor-area"]');
+  await area.click();
+  await page.keyboard.press("Control+a");
+  // Focusing the size input reveals its slider popup; dragging it commits
+  // continuously (one input+change pair per tick).
+  await page.locator('gnumarus-shell [data-testid="text-size"]').click();
+  const slider = dialog.locator(".gnumarus-number-popup input[type=range]");
+  await expect(slider).toBeVisible();
+  const box = await slider.boundingBox();
+  if (box === null) {
+    throw new Error("size slider has no bounding box");
+  }
+  await page.mouse.move(box.x + 10, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 10, box.y + box.height / 2, { steps: 10 });
+  await page.mouse.up();
+  const html = await area.evaluate((element) => (element as HTMLElement).innerHTML);
+  expect(html).toContain(">Text</span>");
+  // Exactly one size span: no nesting, no zero-width trailers.
+  expect(html.match(/font-size:/g)).toHaveLength(1);
+  expect(html).not.toContain("\u200B"); // no zero-width trailers
+});
+
+test("slider drags reshape a partial selection in place", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await createDefaultText(page);
+  await openTextEditor(page);
+  const dialog = page.locator('gnumarus-shell [data-testid="text-editor-dialog"]');
+  const area = page.locator('gnumarus-shell [data-testid="text-editor-area"]');
+  await area.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("adsf qwer zxcv");
+  await page.keyboard.press("Home");
+  for (let i = 0; i < 5; i += 1) {
+    await page.keyboard.press("ArrowRight");
+  }
+  for (let i = 0; i < 4; i += 1) {
+    await page.keyboard.press("Shift+ArrowRight");
+  }
+  await page.locator('gnumarus-shell [data-testid="text-size"]').click();
+  const slider = dialog.locator(".gnumarus-number-popup input[type=range]");
+  await expect(slider).toBeVisible();
+  const box = await slider.boundingBox();
+  if (box === null) {
+    throw new Error("size slider has no bounding box");
+  }
+  await page.mouse.move(box.x + 10, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 10, box.y + box.height / 2, { steps: 10 });
+  await page.mouse.up();
+  const html = await area.evaluate((element) => (element as HTMLElement).innerHTML);
+  expect(html).toContain("adsf ");
+  expect(html).toContain(">qwer</span>");
+  expect(html).toContain(" zxcv");
+  expect(html.match(/font-size:/g)).toHaveLength(1);
+  expect(html).not.toContain("\u200B"); // no zero-width trailers
+});
