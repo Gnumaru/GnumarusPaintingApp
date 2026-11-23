@@ -437,7 +437,7 @@ export class GnumarusColorPicker extends LitElement {
   private brushPanelOpen = true;
   /** Image palette entries (null = default procedural palette). */
   private paletteColors: GnumarusPaletteEntry[] | null = null;
-  /** Image palette sort: criterion plus direction, or manual drag order. */
+  /** Image palette sort: criterion plus direction, or manual drag order (the default). */
   private paletteSort:
     | "hue-asc"
     | "hue-desc"
@@ -447,7 +447,7 @@ export class GnumarusColorPicker extends LitElement {
     | "brightness-desc"
     | "lightness-asc"
     | "lightness-desc"
-    | "custom" = "hue-asc";
+    | "custom" = "custom";
   /** Manual palette order from drag-and-drop (shown when sort is "custom"). */
   private customPaletteOrder: GnumarusPaletteEntry[] | null = null;
   /** Active palette drag (indices into the displayed list), or null. */
@@ -1449,7 +1449,7 @@ export class GnumarusColorPicker extends LitElement {
                         aria-label=${tr("color.paletteSort")}
                         @change=${(event: Event): void => {
                           const select = event.target as HTMLSelectElement | null;
-                          const next = select?.value ?? "hue-asc";
+                          const next = select?.value ?? "custom";
                           this.paletteSort =
                             next === "custom" ||
                             next === "hue-desc" ||
@@ -1460,7 +1460,7 @@ export class GnumarusColorPicker extends LitElement {
                             next === "lightness-asc" ||
                             next === "lightness-desc"
                               ? next
-                              : "hue-asc";
+                              : "custom";
                           if (this.paletteSort === "custom" && this.customPaletteOrder === null) {
                             this.customPaletteOrder = [...(this.paletteColors ?? defaultHslPalette())];
                           }

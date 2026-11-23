@@ -298,6 +298,9 @@ test("image palette panel opens with the default palette and sorts @recent", asy
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
   const swatches = panel.getByTestId("palette-swatch");
   await expect(swatches).toHaveCount(48);
+  // Default sort is custom: generation order (hue 0 ramp first, lightness ascending).
+  await expect(panel.getByTestId("palette-sort")).toHaveValue("custom");
+  expect(await swatches.first().getAttribute("data-hex")).toBe("#330000");
   const firstHue = await swatches.first().getAttribute("data-hex");
   await panel.getByTestId("palette-sort").selectOption("brightness-desc");
   const firstBright = await panel.getByTestId("palette-swatch").first().getAttribute("data-hex");
