@@ -89,6 +89,53 @@ test("font size applies to the selected text after using the size input", async 
     .toContain("font-size:48px\">Text<");
 });
 
+test("font size commits when the size input loses focus without Enter", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await createDefaultText(page);
+  await openTextEditor(page);
+  const area = page.locator('gnumarus-shell [data-testid="text-editor-area"]');
+  await area.click();
+  await page.keyboard.press("Control+a");
+  // The reported failure: typing a size and clicking back into the editor
+  // (blur-commit, no Enter, no Set button) silently discarded the value.
+  await page.locator('gnumarus-shell [data-testid="text-size"]').click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("48");
+  await area.click();
+  await expect
+    .poll(async () => {
+      return area.evaluate((element) => (element as HTMLElement).innerHTML);
+    })
+    .toContain("font-size:48px\">Text<");
+});
+
+test("Set button applies the size exactly once, later blurs do not duplicate", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await createDefaultText(page);
+  await openTextEditor(page);
+  const area = page.locator('gnumarus-shell [data-testid="text-editor-area"]');
+  await area.click();
+  await page.keyboard.press("Control+a");
+  await page.locator('gnumarus-shell [data-testid="text-size"]').click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("72");
+  await page.locator('gnumarus-shell [data-testid="text-apply-size"]').click();
+  await expect
+    .poll(async () => {
+      return area.evaluate((element) => (element as HTMLElement).innerHTML);
+    })
+    .toContain("font-size:72px\">Text<");
+  const countSpans = async (): Promise<number> =>
+    area.evaluate((element) => (element as HTMLElement).innerHTML.split("font-size:72px").length - 1);
+  expect(await countSpans()).toBe(1);
+  // Blurring the input afterwards (the echo of the Set commit) must not wrap again.
+  await area.click();
+  await page.waitForTimeout(300);
+  expect(await countSpans()).toBe(1);
+});
+
 test("font size survives hostile blur timing that collapses the live caret", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

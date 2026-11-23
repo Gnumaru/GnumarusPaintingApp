@@ -2773,6 +2773,7 @@ export class GnumarusShell extends LitElement {
     this.textPickerTarget = null;
     this.textEditor = null;
     this.savedTextRange = null;
+    this.suppressSizeChangeOnce = false;
     this.textEditorColor = "#000000";
     this.tileWindowOpen = false;
     this.tileWindowX = 280;
@@ -15531,6 +15532,11 @@ export class GnumarusShell extends LitElement {
                   this.applyTextSizeFromDialog();
                 }
               }}
+              @input=${(): void => {
+                // A fresh user edit re-arms the blur-commit below.
+                this.suppressSizeChangeOnce = false;
+              }}
+              @change=${(): void => this.applyTextSizeFromDialogChange()}
             />
           </label>
           <span class="text-color-row" title=${tr("dialog.textColor")}>
@@ -15581,6 +15587,13 @@ export class GnumarusShell extends LitElement {
   /** Last editor selection (toolbar controls steal focus; restored before styling). */
   private savedTextRange: Range | null = null;
 
+  /**
+   * One-shot guard so a single size commit applies exactly once: explicit
+   * commits (Enter/Set) focus the editor, whose input blur fires `change`.
+   * A fresh `input` event (user edit) re-arms the blur-commit.
+   */
+  private suppressSizeChangeOnce = false;
+
   /** Run a formatting command inside the editor, then push a live preview. */
   private applyTextCommand(command: "bold" | "italic" | "underline" | "foreColor", value?: string): void {
     const area = this.shadowRoot?.getElementById("textEditorArea");
@@ -15610,9 +15623,26 @@ export class GnumarusShell extends LitElement {
     const input = this.shadowRoot?.getElementById("textEditorSize") as HTMLInputElement | null;
     const size = Math.min(500, Math.max(6, Math.round(Number.parseFloat(input?.value ?? "") || 0)));
     if (!Number.isFinite(size) || size < 6) {
+      this.suppressSizeChangeOnce = false;
       return;
     }
+    // Focusing the editor blurs the input, which fires `change`: swallow that
+    // follow-up so one commit (Enter, Set, or blur) applies exactly once.
+    this.suppressSizeChangeOnce = true;
     this.wrapTextSelection(`font-size:${size}px`);
+  }
+
+  /**
+   * Blur-commit for the size input (typing + Tab/click-away). An explicit
+   * commit (Enter/Set) already applied and armed the one-shot guard, so a
+   * `change` arriving right after it is the echo of that same commit.
+   */
+  private applyTextSizeFromDialogChange(): void {
+    if (this.suppressSizeChangeOnce) {
+      this.suppressSizeChangeOnce = false;
+      return;
+    }
+    this.applyTextSizeFromDialog();
   }
 
   /**
@@ -15813,6 +15843,7 @@ export class GnumarusShell extends LitElement {
     const textId = editor.textId;
     this.textEditor = null;
     this.savedTextRange = null;
+    this.suppressSizeChangeOnce = false;
     const dialog = this.shadowRoot?.getElementById("textEditorDialog") as HTMLDialogElement | null;
     dialog?.close();
     if (this.engine.commitTextEdit(textId, beforeHtml)) {
@@ -15829,6 +15860,7 @@ export class GnumarusShell extends LitElement {
     // Clear state before closing so @close does not restore twice.
     this.textEditor = null;
     this.savedTextRange = null;
+    this.suppressSizeChangeOnce = false;
     const dialog = this.shadowRoot?.getElementById("textEditorDialog") as HTMLDialogElement | null;
     dialog?.close();
     if (editor !== null && this.engine !== null) {
@@ -15842,6 +15874,7 @@ export class GnumarusShell extends LitElement {
     const editor = this.textEditor;
     this.textEditor = null;
     this.savedTextRange = null;
+    this.suppressSizeChangeOnce = false;
     if (editor !== null && this.engine !== null) {
       this.engine.previewTextEdit(editor.textId, editor.beforeHtml);
       this.refreshLayers();
