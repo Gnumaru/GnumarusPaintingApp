@@ -461,7 +461,7 @@ export function getPixel(
   return { r: buffer[i], g: buffer[i + 1], b: buffer[i + 2], a: buffer[i + 3] };
 }
 
-/** Bresenham line with solid pixels, no anti-aliasing (pixel-art pencil). */
+/** Bresenham line with solid pixels, no anti-aliasing (pixel-art brush). */
 export function drawPixelLine(
   buffer: Uint8ClampedArray,
   width: number,
@@ -1232,7 +1232,7 @@ export function drawImagePatternStamp(
 
 /**
  * Brush stroke along a Bresenham path, stamping the tip at every path pixel.
- * Preserves the 1px pencil path exactly when size is 1 (either shape).
+ * Preserves the 1px brush path exactly when size is 1 (either shape).
  *
  * Distance-based dab spacing (idea from Krita's effectiveSpacing): large tips
  * are stamped every `tip * 0.15` px along the path instead of at every pixel,
@@ -1402,7 +1402,7 @@ export function blendPixelCoverage(
 /**
  * Straight segment with thickness, end shape and optional anti-aliasing.
  * Without anti-aliasing this stamps the brush tip along the Bresenham path
- * (1px falls back to the exact pencil line). With anti-aliasing, coverage is
+ * (1px falls back to the exact brush line). With anti-aliasing, coverage is
  * computed per pixel from the distance to the segment: round (`circle`) uses
  * Euclidean distance with semicircular caps, flat (`square`) uses a butt-cap
  * rectangle with a 1px feather on edges and ends. Partial pixels are blended

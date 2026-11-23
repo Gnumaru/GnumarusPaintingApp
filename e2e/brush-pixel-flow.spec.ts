@@ -5,7 +5,7 @@ test("pixel tip shows flow and thins dither at lower flow @recent", async ({ pag
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  const options = page.locator('gnumarus-shell [aria-label="Pencil options"]');
+  const options = page.locator('gnumarus-shell [aria-label="Brush options"]');
   await options.locator("select#brushPreset").selectOption("Pixel Dither");
   await expect(page.locator("gnumarus-shell")).toContainText("Preset: Pixel Dither");
   // Flow is visible for the pixel tip; soft-only controls stay hidden.
@@ -33,7 +33,7 @@ test("flow is visible in the color-picker side panel for pixel tips @recent", as
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  const options = page.locator('gnumarus-shell [aria-label="Pencil options"]');
+  const options = page.locator('gnumarus-shell [aria-label="Brush options"]');
   await options.locator("select#brushPreset").selectOption("Pixel Dither");
   const canvas = page.locator("gnumarus-shell canvas[data-engine]");
   const box = await canvas.boundingBox();
@@ -41,7 +41,7 @@ test("flow is visible in the color-picker side panel for pixel tips @recent", as
     throw new Error("canvas has no bounding box");
   }
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "right" });
-  const picker = page.locator("gnumarus-shell #pencilColor");
+  const picker = page.locator("gnumarus-shell #brushColor");
   await expect(picker.getByRole("dialog", { name: "Color picker" })).toBeVisible();
   const panel = picker.locator("[data-testid='brush-side-panel']");
   await expect(panel).toBeVisible();

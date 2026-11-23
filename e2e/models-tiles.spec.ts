@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { SIMPLE_STL, borderedPngBytes, cellModel3dId, flyPoseOf, getLayers, layerCount, layerScreenTarget, loadBlankProject, modelPaintedPixels, modelViewOf, paintCenter, readPixel, redPngBytes, selectTool, selectionMaskDisplay, setPencil, setupTileBrushStroke, stubImagePicker, stubModelPicker, stubProjectDirectory, textPaintedPixels, tileBrushState, tileKeys, tileRubberState, tilemapTiles } from "./e2e-helpers";
+import { SIMPLE_STL, borderedPngBytes, cellModel3dId, flyPoseOf, getLayers, layerCount, layerScreenTarget, loadBlankProject, modelPaintedPixels, modelViewOf, paintCenter, readPixel, redPngBytes, selectTool, selectionMaskDisplay, setBrushColor, setupTileBrushStroke, stubImagePicker, stubModelPicker, stubProjectDirectory, textPaintedPixels, tileBrushState, tileKeys, tileRubberState, tilemapTiles } from "./e2e-helpers";
 
 test("import 3d model renders into an empty cell", async ({ page }) => {
   await page.goto("/");
@@ -79,7 +79,7 @@ test("tile brush creates a tilemap and places a tile", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   await page.locator('gnumarus-shell [data-testid="tool-tilebrush"]').click();
@@ -110,7 +110,7 @@ test("tile brush transforms tiles and resets on tile change", async ({ page }) =
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   await page.getByRole("button", { name: "Add frame", exact: true }).click();
@@ -133,7 +133,7 @@ test("tile brush transforms tiles and resets on tile change", async ({ page }) =
 test("tile brush erases with right-click and supports undo", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   await page.getByRole("button", { name: "Add frame", exact: true }).click();
@@ -225,7 +225,7 @@ test("tile brush ctrl+shift+click paints a filled tile rectangle @recent", async
 test("ellipse selection preview matches the committed mask @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   const corner = await layerScreenTarget(page, 0, 0);
   await page.mouse.click(corner.x, corner.y);
@@ -287,7 +287,7 @@ test("tilemaps save and reopen with placements", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   await page.getByRole("button", { name: "Add frame", exact: true }).click();
@@ -315,7 +315,7 @@ test("tilemaps save and reopen with placements", async ({ page }) => {
 test("content picker shows tilemap kind badges", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   await page.getByRole("button", { name: "Add frame", exact: true }).click();
@@ -457,7 +457,7 @@ test("3d model transform wheel up zooms in and wheel down zooms out @recent", as
 test("tile window draws the project canvas background @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   await page.locator('gnumarus-shell [data-testid="tool-tilebrush"]').click();
@@ -478,7 +478,7 @@ test("tile window draws the project canvas background @recent", async ({ page })
 test("tileset texture picker lists project textures on the canvas background @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   await page.locator('gnumarus-shell [data-testid="tool-tilebrush"]').click();
@@ -878,7 +878,7 @@ test("import image as layer creates a layer above when the cell is occupied @rec
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#00ff00");
+  await setBrushColor(page, "#00ff00");
   await paintCenter(page);
   await stubImagePicker(page, "red.png", await redPngBytes(page, 8));
   await page.getByRole("button", { name: "File" }).click();

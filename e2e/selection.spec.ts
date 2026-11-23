@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { canvasScreenPixel, dragRect, engineBrushSize, floatingRect, getFloatingSelection, getPendingResizeHandle, getViewState, layerScreenTarget, loadBlankProject, paintCenter, paintDot, readFloatingPixel, readPixel, selectTool, selectionMaskDisplay, selectionMaskMoves, selectionOverlayDisplay, setPencil } from "./e2e-helpers";
+import { canvasScreenPixel, dragRect, engineBrushSize, floatingRect, getFloatingSelection, getPendingResizeHandle, getViewState, layerScreenTarget, loadBlankProject, paintCenter, paintDot, readFloatingPixel, readPixel, selectTool, selectionMaskDisplay, selectionMaskMoves, selectionOverlayDisplay, setBrushColor } from "./e2e-helpers";
 
 test("final preview shows the canvas background", async ({ page }) => {
   await page.goto("/");
@@ -94,7 +94,7 @@ test("ctrl+wheel resizes the brush in whole steps", async ({ page }) => {
 test("polygonal lasso commits on Enter", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   const corner = await layerScreenTarget(page, 0, 0);
   await page.mouse.click(corner.x, corner.y);
@@ -114,7 +114,7 @@ test("polygonal lasso commits on Enter", async ({ page }) => {
 test("polygonal lasso commits on right-click and combines with shift", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   const corner = await layerScreenTarget(page, 0, 0);
   await page.mouse.click(corner.x, corner.y);
@@ -156,8 +156,8 @@ test("paint drawer swaps line and curve through the flyout", async ({ page }) =>
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const drawer = page.locator('gnumarus-shell [data-testid="paint-drawer"]');
-  await expect(drawer.getByRole("button", { name: "Pencil" })).toBeVisible();
-  await drawer.getByRole("button", { name: "Pencil" }).click({ button: "right" });
+  await expect(drawer.getByRole("button", { name: "Brush", exact: true })).toBeVisible();
+  await drawer.getByRole("button", { name: "Brush", exact: true }).click({ button: "right" });
   await expect(page.locator('gnumarus-shell [data-testid="paint-flyout"]')).toBeVisible();
   await page.locator('gnumarus-shell [data-testid="paint-flyout"]').getByRole("button", { name: "Curve" }).click();
   await expect(page.locator('gnumarus-shell [data-testid="paint-flyout"]')).toBeHidden();
@@ -187,7 +187,7 @@ test("destructive and transform drawers swap their front tools", async ({ page }
 test("elliptical selection cuts an ellipse", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   const corner = await layerScreenTarget(page, 0, 0);
   await page.mouse.click(corner.x, corner.y);
@@ -209,7 +209,7 @@ test("elliptical selection cuts an ellipse", async ({ page }) => {
 test("lasso selection cuts a freehand shape", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   const corner = await layerScreenTarget(page, 0, 0);
   await page.mouse.click(corner.x, corner.y);
@@ -270,11 +270,11 @@ test("color selection threshold gates near matches", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   const corner = await layerScreenTarget(page, 0, 0);
   await page.mouse.click(corner.x, corner.y);
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await paintDot(page, "#fe0000", 20, 20);
   await page.keyboard.press("w");
   // Exact match selects only the contiguous near-red dot.
@@ -311,7 +311,7 @@ test("boolean ops combine ellipse with rectangle", async ({ page }) => {
 test("rectangular selection shift-drag adds to the selection", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   const center = await layerScreenTarget(page, 32, 32);
   await page.mouse.click(center.x, center.y);
@@ -343,7 +343,7 @@ test("rectangular selection shift-drag adds to the selection", async ({ page }) 
 test("rectangular selection ctrl-shift-drag intersects the selection", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   const center = await layerScreenTarget(page, 32, 32);
   await page.mouse.click(center.x, center.y);
@@ -367,7 +367,7 @@ test("rectangular selection ctrl-shift-drag intersects the selection", async ({ 
 test("rectangular selection ctrl-shift-drag with no overlap clears the selection", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   const center = await layerScreenTarget(page, 32, 32);
   await page.mouse.click(center.x, center.y);
@@ -386,7 +386,7 @@ test("rectangular selection ctrl-shift-drag with no overlap clears the selection
 test("rectangular selection alt-shift-drag subtracts from the selection", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   const center = await layerScreenTarget(page, 32, 32);
   await page.mouse.click(center.x, center.y);
@@ -409,7 +409,7 @@ test("rectangular selection alt-shift-drag subtracts from the selection", async 
 test("rectangular selection alt-shift-drag with no overlap changes nothing", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   const center = await layerScreenTarget(page, 32, 32);
   await page.mouse.click(center.x, center.y);
@@ -429,7 +429,7 @@ test("rectangular selection cuts to floating and destructive transform moves and
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.evaluate(() => {
     const root = window as unknown as { __gnumarus?: { shell?: { setBrushSize(size: number): void } } };
     root.__gnumarus?.shell?.setBrushSize(3);
@@ -491,7 +491,7 @@ test("destructive transform auto-selects the whole texture and Esc merges", asyn
 test("undo and redo track the floating selection lifecycle", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.evaluate(() => {
     const root = window as unknown as { __gnumarus?: { shell?: { setBrushSize(size: number): void } } };
     root.__gnumarus?.shell?.setBrushSize(3);
@@ -508,7 +508,7 @@ test("undo and redo track the floating selection lifecycle", async ({ page }) =>
   expect(await floatingRect(page)).toEqual({ x: 30, y: 30, width: 5, height: 5 });
   // A later paint is an independent entry: undoing it keeps the selection.
   await page.keyboard.press("b");
-  await setPencil(page, "#0000ff");
+  await setBrushColor(page, "#0000ff");
   const dot = await layerScreenTarget(page, 10, 10);
   await page.mouse.click(dot.x, dot.y);
   expect(await readPixel(page, 10, 10)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
@@ -575,7 +575,7 @@ test("tool tooltips start with the selection shortcut", async ({ page }) => {
     return entries;
   });
   expect(titles).toEqual([
-    { label: "Pencil", title: expect.stringMatching(/^B: Pencil \(/) },
+    { label: "Brush", title: expect.stringMatching(/^B: Brush \(/) },
     { label: "Loupe", title: expect.stringMatching(/^Z: Loupe \(/) },
     { label: "Bucket fill", title: expect.stringMatching(/^G or F: Bucket fill \(/) },
     { label: "Eyedropper", title: expect.stringMatching(/^Ctrl \(hold\): Eyedropper \(/) },
@@ -596,11 +596,11 @@ test("tool tooltips start with the selection shortcut", async ({ page }) => {
 test("R and V select the rectangular selection and destructive transform tools", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await expect(page.locator("gnumarus-shell")).toContainText("pencil");
+  await expect(page.locator("gnumarus-shell")).toContainText("brush");
   await page.keyboard.press("r");
   await expect(page.locator("gnumarus-shell")).toContainText("rectangular selection");
   await page.keyboard.press("b");
-  await expect(page.locator("gnumarus-shell")).toContainText("pencil");
+  await expect(page.locator("gnumarus-shell")).toContainText("brush");
   await page.keyboard.press("v");
   await expect(page.locator("gnumarus-shell")).toContainText("destructive selection transform");
   await expect(page.getByRole("button", { name: "Commit selection" })).toBeVisible();
@@ -613,7 +613,7 @@ test("R and V select the rectangular selection and destructive transform tools",
 test("rectangular selection chains three unions", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   const center = await layerScreenTarget(page, 32, 32);
   await page.mouse.click(center.x, center.y);
@@ -642,7 +642,7 @@ test("rectangular selection stays pending without cutting the layer @recent", as
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   await selectTool(page, "Rectangular selection");
   await dragRect(page, 28, 28, 36, 36);
@@ -667,7 +667,7 @@ test("pending rect resizes via corner handle without touching pixels @recent", a
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   await selectTool(page, "Rectangular selection");
   await dragRect(page, 28, 28, 36, 36);
@@ -691,7 +691,7 @@ test("pending rect resizes from any border point, not just handles @recent", asy
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   await selectTool(page, "Rectangular selection");
   await dragRect(page, 28, 28, 36, 36);
@@ -712,7 +712,7 @@ test("pending ellipse resizes via edge handle @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   const corner = await layerScreenTarget(page, 0, 0);
   await page.mouse.click(corner.x, corner.y);
@@ -745,7 +745,7 @@ test("dragged pending selection shows its pixels while moving @recent", async ({
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.evaluate(() => {
     const root = window as unknown as {
       __gnumarus?: { engine?: { setBrushSize(size: number): void } };

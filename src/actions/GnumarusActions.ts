@@ -7,7 +7,7 @@
 
 /** Snapshot of the UI state an action's prerequisites are checked against. */
 export interface GnumarusActionContext {
-  /** Active tool id (e.g. "pencil", "rectselect"). */
+  /** Active tool id (e.g. "brush", "rectselect"). */
   tool: string;
   /** True while a floating selection cut is in progress. */
   hasFloatingSelection: boolean;

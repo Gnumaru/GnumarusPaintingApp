@@ -43,7 +43,7 @@ test("drawer submenus list every tool with tooltips @recent", async ({ page }) =
   const menu = toolsMenu(page);
   const flyout = page.locator("gnumarus-shell .submenu-flyout");
   const expected: Array<[string, string[]]> = [
-    ["Paint", ["Pencil", "Line", "Curve"]],
+    ["Paint", ["Brush", "Line", "Curve"]],
     ["Shapes", ["Rectangle", "Ellipse", "Polygon", "Gradient"]],
     ["Retouch", ["Shading", "Blur", "Clone", "Recolor", "Jumble"]],
     ["Selection", ["Rectangular selection", "Elliptical selection", "Freehand lasso", "Polygonal lasso", "Color selection"]],
@@ -70,7 +70,7 @@ test("menu selection activates the tool @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  expect(await activeTool(page)).toBe("pencil");
+  expect(await activeTool(page)).toBe("brush");
   await page.getByRole("button", { name: "Tools", exact: true }).click();
   await toolsMenu(page).getByRole("button", { name: "Bucket fill", exact: true }).click();
   expect(await activeTool(page)).toBe("bucket");
@@ -93,7 +93,7 @@ test("every tool runs from the action palette @recent", async ({ page }) => {
     ["tool-eyedropper", "eyedropper"],
     ["tool-text", "text"],
     ["tool-tilebrush", "tilebrush"],
-    ["tool-pencil", "pencil"],
+    ["tool-brush", "brush"],
     ["tool-line", "line"],
     ["tool-curve", "curve"],
     ["tool-rectangle", "rectangle"],

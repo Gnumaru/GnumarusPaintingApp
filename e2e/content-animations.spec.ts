@@ -1,11 +1,11 @@
 import { expect, test } from "@playwright/test";
-import { addAnimation, getLayers, getMatrix, loadBlankProject, namedAnimations, paintCenter, setPencil, stubProjectDirectory } from "./e2e-helpers";
+import { addAnimation, getLayers, getMatrix, loadBlankProject, namedAnimations, paintCenter, setBrushColor, stubProjectDirectory } from "./e2e-helpers";
 
 test("content manager dialog lists every project content @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   await page.getByRole("button", { name: "File" }).click();
@@ -35,7 +35,7 @@ test("content manager dialog lists every project content @recent", async ({ page
 test("content manager search filters by name similarity @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   await page.keyboard.press("Control+Shift+P");
@@ -63,7 +63,7 @@ test("content manager search filters by name similarity @recent", async ({ page 
 test("content manager shows on-disk sizes for saved textures @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   const project = await stubProjectDirectory(page);
@@ -112,7 +112,7 @@ test("new project starts with no textures or contents @recent", async ({ page })
 test("adding layers and frames creates no textures or contents @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   await page.getByRole("button", { name: "Add layer" }).click();
@@ -307,7 +307,7 @@ test("first painted cell content is named C1 @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   await page.getByRole("button", { name: "File" }).click();
   await page.getByRole("button", { name: "Content manager" }).click();

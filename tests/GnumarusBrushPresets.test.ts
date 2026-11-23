@@ -49,7 +49,7 @@ describe("GnumarusBrushPresets", () => {
       "Spray",
       "Chisel Marker",
       "Velocity Ink",
-      "Tilt Pencil",
+      "Tilt Brush",
       "Pixel Spray",
       "Pixel Spray (Pressure = Size)",
       "Pixel Dither",

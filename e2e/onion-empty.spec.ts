@@ -6,7 +6,7 @@ import {
   onionVisible,
   paintCenter,
   setOnion,
-  setPencil,
+  setBrushColor,
 } from "./e2e-helpers";
 
 async function selectFrame(page: import("@playwright/test").Page, frame: number): Promise<void> {
@@ -40,7 +40,7 @@ test("painted neighbor frames still build ghosts @recent", async ({ page }) => {
   await loadBlankProject(page, 64);
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
   await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await selectFrame(page, 1);
   await paintCenter(page);
   await selectFrame(page, 0);
@@ -59,7 +59,7 @@ test("painted neighbor frames still build ghosts @recent", async ({ page }) => {
   expect(await onionVisible(page)).toEqual({ past: false, future: true });
   // Painting different pixels busts the cache: the next visit recomposites.
   await selectFrame(page, 1);
-  await setPencil(page, "#0000ff");
+  await setBrushColor(page, "#0000ff");
   await paintCenter(page);
   await selectFrame(page, 0);
   expect(await onionFlattenCount(page)).toBeGreaterThan(built);

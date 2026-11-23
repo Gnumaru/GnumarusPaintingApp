@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { buildXcfBytes, getLayers, getMatrix, loadBlankProject, paintCenter, readPixel, runPaletteAction, setImportCleanup, setPencil, stubAsepritePicker, stubDirectoryWithFileStore } from "./e2e-helpers";
+import { buildXcfBytes, getLayers, getMatrix, loadBlankProject, paintCenter, readPixel, runPaletteAction, setImportCleanup, setBrushColor, stubAsepritePicker, stubDirectoryWithFileStore } from "./e2e-helpers";
 
 test("quick action palette filters and runs actions", async ({ page }) => {
   await page.goto("/");
@@ -59,7 +59,7 @@ test("quick action palette filters and runs actions", async ({ page }) => {
   for (const name of coreActions) {
     expect(listed).toContain(name);
   }
-  for (const id of ["tool-pencil", "tool-rectselect", "filter-levels", "filter-gaussian-blur"]) {
+  for (const id of ["tool-brush", "tool-rectselect", "filter-levels", "filter-gaussian-blur"]) {
     await expect(
       dialog.locator(`[data-testid="action-palette-item"][data-action-id="${id}"]`),
     ).toBeVisible();
@@ -119,7 +119,7 @@ test("Fit All Textures to Size fits every texture at once", async ({ page }) => 
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   await page.getByRole("button", { name: "Add layer" }).click();
   await page.keyboard.press("Control+Shift+P");
@@ -147,7 +147,7 @@ test("Crop All Cells to Canvas crops shared textures sequentially", async ({ pag
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
   await matrix.getByRole("button", { name: "Add frame", exact: true }).click();

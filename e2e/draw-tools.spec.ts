@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { layerPixelToScreen } from "../src/canvas/GnumarusViewportMath";
-import { getViewState, loadBlankProject, openPicker, paintedPixelCount, readPixel, selectTool, setPencil, shapePreviewVisible } from "./e2e-helpers";
+import { getViewState, loadBlankProject, openPicker, paintedPixelCount, readPixel, selectTool, setBrushColor, shapePreviewVisible } from "./e2e-helpers";
 
 test("line tool draws two-click segments with width, shape and aliasing", async ({ page }) => {
   await page.goto("/");
@@ -39,7 +39,7 @@ test("line tool draws two-click segments with width, shape and aliasing", async 
       },
     ]);
   });
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await selectTool(page, 'Line');
   const options = page.locator('gnumarus-shell [data-testid="tool-options"]');
   await expect(options).toContainText("Line width");
@@ -103,7 +103,7 @@ test("brush and line previews follow the mouse", async ({ page }) => {
   if (box === null) {
     throw new Error("canvas has no bounding box");
   }
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await expect.poll(() => previewState().then((state) => state.brush)).toBe("block");
   const tipSize = await page.evaluate(() => {
@@ -136,7 +136,7 @@ test("brush and line previews follow the mouse", async ({ page }) => {
   expect(await paintedPixelCount(page)).toBe(0);
 });
 
-test("pencil anti-aliasing smooths diagonal edges", async ({ page }) => {
+test("brush anti-aliasing smooths diagonal edges", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.evaluate(() => {
@@ -173,13 +173,13 @@ test("pencil anti-aliasing smooths diagonal edges", async ({ page }) => {
       },
     ]);
   });
-  await setPencil(page, "#ff0000");
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await setBrushColor(page, "#ff0000");
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toContainText("Anti-aliasing");
   const flagOf = (): Promise<boolean> =>
     page.evaluate(() => {
-      const root = window as unknown as { __gnumarus?: { engine?: { getPencilAntialias(): boolean } } };
-      return root.__gnumarus?.engine?.getPencilAntialias() ?? true;
+      const root = window as unknown as { __gnumarus?: { engine?: { getBrushAntialias(): boolean } } };
+      return root.__gnumarus?.engine?.getBrushAntialias() ?? true;
     });
   expect(await flagOf()).toBe(false);
   const canvas = page.locator("gnumarus-shell canvas");
@@ -204,8 +204,8 @@ test("pencil anti-aliasing smooths diagonal edges", async ({ page }) => {
   expect(await readPixel(page, 2, 1)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   await page.keyboard.press("Delete");
   expect(await readPixel(page, 1, 1)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
-  await page.locator("gnumarus-shell input#pencilAntialias").check();
-  await expect(page.locator("gnumarus-shell")).toContainText("Pencil anti-aliasing: on");
+  await page.locator("gnumarus-shell input#brushAntialias").check();
+  await expect(page.locator("gnumarus-shell")).toContainText("Brush anti-aliasing: on");
   expect(await flagOf()).toBe(true);
   await dragDiagonal();
   expect(await readPixel(page, 1, 1)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
@@ -281,7 +281,7 @@ test("curve tool draws cubic beziers with two control clicks", async ({ page }) 
       },
     ]);
   });
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await selectTool(page, 'Curve');
   await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toContainText("Curve width");
   await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toContainText("Anti-aliasing");
@@ -350,7 +350,7 @@ test("curve tool draws cubic beziers with two control clicks", async ({ page }) 
   await page.keyboard.press("c");
   await expect(page.locator("gnumarus-shell")).toContainText("curve");
   await page.keyboard.press("b");
-  await expect(page.locator("gnumarus-shell")).toContainText("pencil");
+  await expect(page.locator("gnumarus-shell")).toContainText("brush");
 });
 
 test("brush and line widths accept floats with AA-dependent rounding", async ({ page }) => {
@@ -390,8 +390,8 @@ test("brush and line widths accept floats with AA-dependent rounding", async ({ 
       },
     ]);
   });
-  await setPencil(page, "#ff0000");
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await setBrushColor(page, "#ff0000");
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await page.locator("gnumarus-shell select#brushShape").selectOption("square");
   const brushOf = (): Promise<number> =>
     page.evaluate(() => {
@@ -422,11 +422,11 @@ test("brush and line widths accept floats with AA-dependent rounding", async ({ 
     );
     await page.mouse.click(target.x, target.y);
   };
-  await expect(page.locator("gnumarus-shell input#pencilAntialias")).not.toBeChecked();
+  await expect(page.locator("gnumarus-shell input#brushAntialias")).not.toBeChecked();
   await clickAt(4, 4);
   expect(await readPixel(page, 5, 5)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   await page.keyboard.press("Delete");
-  await page.locator("gnumarus-shell input#pencilAntialias").check();
+  await page.locator("gnumarus-shell input#brushAntialias").check();
   await clickAt(4, 4);
   const soft = await readPixel(page, 5, 5);
   expect(soft).not.toBeNull();
@@ -447,7 +447,7 @@ test("brush and line widths accept floats with AA-dependent rounding", async ({ 
 test("hsv triangle and hue ring edit the color in any model", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  const picker = await openPicker(page, "pencilColor");
+  const picker = await openPicker(page, "brushColor");
   const wheel = picker.locator('[data-testid="hsv-wheel"]');
   const ring = picker.locator('[data-testid="hsv-ring"]');
   const triangle = picker.locator('[data-testid="hsv-triangle"]');
@@ -562,8 +562,8 @@ test("normal blend accumulates translucent paint and eraser subtracts alpha", as
       },
     ]);
   });
-  await setPencil(page, "#00000080");
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await setBrushColor(page, "#00000080");
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await page.locator("gnumarus-shell input#brushSize").fill("1");
   await page.locator("gnumarus-shell select#blendMode").selectOption("normal");
   await expect(page.locator("gnumarus-shell")).toContainText("Blend mode: Normal");
@@ -599,7 +599,7 @@ test("normal blend accumulates translucent paint and eraser subtracts alpha", as
   await expect(page.locator("gnumarus-shell")).toContainText("Blend mode: Eraser");
   await clickAt(4, 4);
   expect(await readPixel(page, 4, 4)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
-  await setPencil(page, "#00000020");
+  await setBrushColor(page, "#00000020");
   await page.locator("gnumarus-shell select#blendMode").selectOption("copy");
   await clickAt(2, 2);
   expect(await readPixel(page, 2, 2)).toEqual({ r: 0, g: 0, b: 0, a: 32 });
@@ -668,8 +668,8 @@ test("E toggles eraser and strokes can opt out of accumulation", async ({ page }
       },
     ]);
   });
-  await setPencil(page, "#00000080");
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await setBrushColor(page, "#00000080");
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await page.locator("gnumarus-shell input#brushSize").fill("1");
   await page.locator("gnumarus-shell select#blendMode").selectOption("normal");
   await expect(page.locator('gnumarus-shell input#accumulate')).toBeChecked();

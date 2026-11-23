@@ -8,7 +8,7 @@ O seletor na barra de opções aplica uma configuração completa de uma
 vez (21 embutidas: Pixel Hard, Pixel Hard (Pressure = Size), Pixel Spray, Pixel Spray (Pressure = Size), Pixel Dither, Palette
 Shade, Soft Round, Chalk, Ink, Airbrush, Smudge, borrachas dura/suave,
 Glaze, Dry Brush, Charcoal, Blender, Spray, Chisel Marker, Velocity
-Ink, Tilt Pencil). Depois ajuste à vontade.
+Ink, Tilt Brush). Depois ajuste à vontade.
 
 Botão Redefinir
 ---------------
@@ -30,7 +30,7 @@ Pincel de seleção
 -----------------
 
 **Editar > Criar pincel da seleção** (exige seleção flutuante) captura
-a seleção como pincel e troca o lápis para ele:
+a seleção como pincel e troca o pincel para ele:
 
 * **Carimbo**: a captura inteira carimba por ponto (a prévia contorna
   a caixa).

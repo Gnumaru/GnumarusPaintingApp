@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { loadBlankProject, paintCenter, readPixel, setPencil } from "./e2e-helpers";
+import { loadBlankProject, paintCenter, readPixel, setBrushColor } from "./e2e-helpers";
 
 async function setBrush(page: import("@playwright/test").Page, shape: string, angle: number, size: number): Promise<void> {
   await page.evaluate(
@@ -15,7 +15,7 @@ async function setBrush(page: import("@playwright/test").Page, shape: string, an
         };
       };
       const shell = root.__gnumarus?.shell;
-      shell?.runAction("tool-pencil");
+      shell?.runAction("tool-brush");
       shell?.setBrushShape(shapeName);
       shell?.setBrushAngle(angleValue);
       shell?.setBrushSize(sizeValue);
@@ -28,7 +28,7 @@ test("line brush paints a straight horizontal dab at angle 0 @recent", async ({ 
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await setBrush(page, "line", 0, 5);
   await paintCenter(page);
   // Length-5 horizontal line through the center pixel.
@@ -47,7 +47,7 @@ test("line brush rotates to vertical at 90 degrees @recent", async ({ page }) =>
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await setBrush(page, "line", 90, 5);
   await paintCenter(page);
   for (const y of [30, 31, 32, 33, 34]) {
@@ -72,7 +72,7 @@ test("brush options expose the line shape and angle control @recent", async ({ p
   await angle.fill("90");
   expect(await angle.inputValue()).toBe("90");
   // The dialog selection drove the engine: painting draws a vertical line.
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.evaluate(() => {
     const root = window as unknown as { __gnumarus?: { shell?: { setBrushSize(size: number): void } } };
     root.__gnumarus?.shell?.setBrushSize(5);

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { layerPixelToScreen } from "../src/canvas/GnumarusViewportMath";
-import { canvasBox, engineBrushSize, getViewState, layerToScreen, loadBlankProject, loadTinyLayer, openPicker, paintedPixelCount, readPixel, setPencil } from "./e2e-helpers";
+import { canvasBox, engineBrushSize, getViewState, layerToScreen, loadBlankProject, loadTinyLayer, openPicker, paintedPixelCount, readPixel, setBrushColor } from "./e2e-helpers";
 
 test("menubar menus render above floating windows @recent", async ({ page }) => {
   await page.goto("/");
@@ -150,7 +150,7 @@ test("brush size ceiling defaults to 512 and is configurable up to 2048 @recent"
   // (a 64px disk paints ~3k pixels; a 500px disk paints ~200k).
   await page.locator("gnumarus-shell input#brushSize").fill("500");
   await expect(engineBrushSize(page)).resolves.toBe(500);
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   const center = await canvasBox(page);
   await page.mouse.click(center.x + center.width / 2, center.y + center.height / 2);
   expect(await paintedPixelCount(page)).toBeGreaterThan(100000);
@@ -159,7 +159,7 @@ test("brush size ceiling defaults to 512 and is configurable up to 2048 @recent"
 test("hsv triangle clamps outside picks to its edges @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  const picker = await openPicker(page, "pencilColor");
+  const picker = await openPicker(page, "brushColor");
   const triangle = picker.getByTestId("hsv-triangle");
   const box = await triangle.boundingBox();
   if (box === null) {
@@ -183,7 +183,7 @@ test("hsv triangle clamps outside picks to its edges @recent", async ({ page }) 
   await page.mouse.click(outside.x, outside.y);
   const result = await page.evaluate(() => {
     const root = document.querySelector("gnumarus-shell")?.shadowRoot ?? null;
-    const picker = root?.querySelector("#pencilColor") as unknown as {
+    const picker = root?.querySelector("#brushColor") as unknown as {
       shadowRoot: ShadowRoot | null;
     } | null;
     const inner = picker?.shadowRoot ?? null;
@@ -214,7 +214,7 @@ test("hsv triangle clamps outside picks to its edges @recent", async ({ page }) 
 test("recent colors update once per picker gesture @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  const picker = await openPicker(page, "pencilColor");
+  const picker = await openPicker(page, "brushColor");
   const triangle = picker.getByTestId("hsv-triangle");
   const box = await triangle.boundingBox();
   if (box === null) {
@@ -238,7 +238,7 @@ test("right-click on canvas opens the paint color picker @recent", async ({ page
     throw new Error("canvas has no bounding box");
   }
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "right" });
-  const picker = page.locator("gnumarus-shell #pencilColor");
+  const picker = page.locator("gnumarus-shell #brushColor");
   await expect(picker.getByRole("dialog", { name: "Color picker" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(picker.getByRole("dialog", { name: "Color picker" })).toBeHidden();
@@ -266,7 +266,7 @@ test("X swaps the foreground and background paint colors @recent", async ({ page
   await page.keyboard.press("x");
   expect(await colorsOf()).toMatchObject({ fg: "#ffffff", bg: "#000000" });
   // Painting uses the new foreground color.
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.keyboard.press("x");
   expect(await colorsOf()).toMatchObject({ fg: "#000000", bg: "#ff0000" });
   const center = await layerToScreen(page, 32, 32);
@@ -274,7 +274,7 @@ test("X swaps the foreground and background paint colors @recent", async ({ page
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
   // The back well edits the background instead of swapping.
   await page.locator("gnumarus-shell [data-testid='bg-well']").click();
-  const paintPicker = page.locator("gnumarus-shell #pencilColor");
+  const paintPicker = page.locator("gnumarus-shell #brushColor");
   await expect(paintPicker.getByRole("dialog", { name: "Color picker" })).toBeVisible();
   expect(await colorsOf()).toMatchObject({ fg: "#000000", bg: "#ff0000" });
   await page.keyboard.press("Escape");
@@ -289,7 +289,7 @@ test("X swaps the foreground and background paint colors @recent", async ({ page
 test("image palette panel opens with the default palette and sorts @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  const picker = await openPicker(page, "pencilColor");
+  const picker = await openPicker(page, "brushColor");
   const toggle = picker.getByTestId("palette-toggle");
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
   await toggle.click();
@@ -313,7 +313,7 @@ test("image palette panel opens with the default palette and sorts @recent", asy
 test("image palette panel loads an image palette and picks from it @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  const picker = await openPicker(page, "pencilColor");
+  const picker = await openPicker(page, "brushColor");
   await picker.getByTestId("palette-toggle").click();
   const panel = picker.getByTestId("palette-panel");
   await expect(panel).toBeVisible();
@@ -357,9 +357,9 @@ test("image palette panel loads an image palette and picks from it @recent", asy
 test("large hard brush keeps V shape instead of collapsing to endpoints @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await loadTinyLayer(page, 64);
-  await setPencil(page, "#000000");
+  await setBrushColor(page, "#000000");
   await page.locator("gnumarus-shell input#brushSize").fill("32");
   const canvas = page.locator("gnumarus-shell canvas");
   const box = await canvas.boundingBox();
@@ -401,7 +401,7 @@ test("front well opens the picker editing the foreground @recent", async ({ page
       };
     });
   await page.locator("gnumarus-shell [data-testid='fg-well']").click();
-  const picker = page.locator("gnumarus-shell #pencilColor");
+  const picker = page.locator("gnumarus-shell #brushColor");
   await expect(picker.getByRole("dialog", { name: "Color picker" })).toBeVisible();
   await picker.locator("#hexInput").fill("#00ff00");
   expect(await colorsOf()).toMatchObject({ fg: "#00ff00", bg: "#ffffff" });
@@ -427,7 +427,7 @@ test("back well opens the picker editing the background @recent", async ({ page 
       };
     });
   await page.locator("gnumarus-shell [data-testid='bg-well']").click();
-  const picker = page.locator("gnumarus-shell #pencilColor");
+  const picker = page.locator("gnumarus-shell #brushColor");
   await expect(picker.getByRole("dialog", { name: "Color picker" })).toBeVisible();
   await picker.locator("#hexInput").fill("#0000ff");
   expect(await colorsOf()).toMatchObject({ fg: "#000000", bg: "#0000ff" });
@@ -438,7 +438,7 @@ test("back well opens the picker editing the background @recent", async ({ page 
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
 });
 
-test("right-click with pencil shows the brush settings side panel @recent", async ({ page }) => {
+test("right-click with brush shows the brush settings side panel @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const canvas = page.locator("gnumarus-shell canvas[data-engine]");
@@ -447,7 +447,7 @@ test("right-click with pencil shows the brush settings side panel @recent", asyn
     throw new Error("canvas has no bounding box");
   }
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "right" });
-  const picker = page.locator("gnumarus-shell #pencilColor");
+  const picker = page.locator("gnumarus-shell #brushColor");
   await expect(picker.getByRole("dialog", { name: "Color picker" })).toBeVisible();
   const panel = picker.locator("[data-testid='brush-side-panel']");
   await expect(panel).toBeVisible();
@@ -473,7 +473,7 @@ test("right-click with pencil shows the brush settings side panel @recent", asyn
   await page.keyboard.press("Escape");
 });
 
-test("right-click without pencil shows no brush side panel @recent", async ({ page }) => {
+test("right-click without brush shows no brush side panel @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.getByRole("button", { name: "Bucket fill" }).click();
@@ -483,7 +483,7 @@ test("right-click without pencil shows no brush side panel @recent", async ({ pa
     throw new Error("canvas has no bounding box");
   }
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "right" });
-  const picker = page.locator("gnumarus-shell #pencilColor");
+  const picker = page.locator("gnumarus-shell #brushColor");
   await expect(picker.getByRole("dialog", { name: "Color picker" })).toBeVisible();
   await expect(picker.locator("[data-testid='brush-side-panel']")).toHaveCount(0);
   await page.keyboard.press("Escape");
@@ -492,7 +492,7 @@ test("right-click without pencil shows no brush side panel @recent", async ({ pa
 test("palette panel keeps the central picker width @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  const picker = await openPicker(page, "pencilColor");
+  const picker = await openPicker(page, "brushColor");
   const main = picker.locator(".popup-main");
   const before = await main.boundingBox();
   if (before === null) {
@@ -529,7 +529,7 @@ test("palette swatches reorder by drag and drop, switching sort to custom @recen
   // Shading follows the displayed order, so the engine echoes the new order.
   const bar = page.locator('gnumarus-shell [data-testid="tool-options"]');
   await bar.locator("select#brushColorMode").selectOption("palette");
-  const picker = await openPicker(page, "pencilColor");
+  const picker = await openPicker(page, "brushColor");
   await picker.getByTestId("palette-toggle").click();
   const panel = picker.getByTestId("palette-panel");
   await expect(panel).toBeVisible();
@@ -576,7 +576,7 @@ test("brush settings side panel collapses and expands with the top-left arrow @r
     throw new Error("canvas has no bounding box");
   }
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "right" });
-  const picker = page.locator("gnumarus-shell #pencilColor");
+  const picker = page.locator("gnumarus-shell #brushColor");
   await expect(picker.getByRole("dialog", { name: "Color picker" })).toBeVisible();
   const panel = picker.locator("[data-testid='brush-side-panel']");
   await expect(panel).toBeVisible();
@@ -609,7 +609,7 @@ test("brush collapse arrow never overlaps the first brush field @recent", async 
     throw new Error("canvas has no bounding box");
   }
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "right" });
-  const picker = page.locator("gnumarus-shell #pencilColor");
+  const picker = page.locator("gnumarus-shell #brushColor");
   await expect(picker.getByRole("dialog", { name: "Color picker" })).toBeVisible();
   const toggleBox = await picker.getByTestId("brush-toggle").boundingBox();
   const labelBox = await picker.locator("[data-testid='brush-side-panel'] label").first().boundingBox();

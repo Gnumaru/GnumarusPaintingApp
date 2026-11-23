@@ -54,7 +54,7 @@ describe("GnumarusActions", () => {
       makeAction({
         id: "gated",
         name: "Gated",
-        requirements: [requireTool("pencil", "Pencil"), requireFloatingSelection()],
+        requirements: [requireTool("brush", "Brush"), requireFloatingSelection()],
         run: (): void => {
           ran += 100;
         },
@@ -62,17 +62,17 @@ describe("GnumarusActions", () => {
     );
     expect(registry.execute("free", { tool: "loupe", hasFloatingSelection: false })).toEqual({ ok: true });
     expect(ran).toBe(1);
-    expect(registry.execute("missing", { tool: "pencil", hasFloatingSelection: true }).ok).toBe(false);
+    expect(registry.execute("missing", { tool: "brush", hasFloatingSelection: true }).ok).toBe(false);
     expect(ran).toBe(1);
     const blocked = registry.execute("gated", { tool: "loupe", hasFloatingSelection: false });
     expect(blocked).toEqual({
       ok: false,
-      reasons: ["the Pencil tool selected", "an active floating selection"],
+      reasons: ["the Brush tool selected", "an active floating selection"],
     });
     expect(ran).toBe(1);
-    const partial = registry.execute("gated", { tool: "pencil", hasFloatingSelection: false });
+    const partial = registry.execute("gated", { tool: "brush", hasFloatingSelection: false });
     expect(partial).toEqual({ ok: false, reasons: ["an active floating selection"] });
-    expect(registry.execute("gated", { tool: "pencil", hasFloatingSelection: true })).toEqual({ ok: true });
+    expect(registry.execute("gated", { tool: "brush", hasFloatingSelection: true })).toEqual({ ok: true });
     expect(ran).toBe(101);
   });
 
@@ -89,11 +89,11 @@ describe("GnumarusActions", () => {
         },
       }),
     );
-    const blocked = registry.execute("paste", { tool: "pencil", hasFloatingSelection: false });
+    const blocked = registry.execute("paste", { tool: "brush", hasFloatingSelection: false });
     expect(blocked.ok).toBe(false);
     expect(blocked.ok === false ? blocked.reasons : []).toEqual(["content in memory"]);
     expect(
-      registry.execute("paste", { tool: "pencil", hasFloatingSelection: false, hasClipboard: true }),
+      registry.execute("paste", { tool: "brush", hasFloatingSelection: false, hasClipboard: true }),
     ).toEqual({ ok: true });
     expect(ran).toBe(1);
   });
@@ -102,8 +102,8 @@ describe("GnumarusActions", () => {
     expect(actionBlockedMessage("Commit Float", ["an active floating selection"])).toBe(
       'Cannot run "Commit Float": requires an active floating selection.',
     );
-    expect(actionBlockedMessage("Paint", ["the Pencil tool selected", "an active floating selection"])).toBe(
-      'Cannot run "Paint": requires the Pencil tool selected and an active floating selection.',
+    expect(actionBlockedMessage("Paint", ["the Brush tool selected", "an active floating selection"])).toBe(
+      'Cannot run "Paint": requires the Brush tool selected and an active floating selection.',
     );
   });
 

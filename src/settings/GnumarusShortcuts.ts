@@ -142,7 +142,7 @@ export const GNUMARUS_DEFAULT_SHORTCUTS: GnumarusShortcutDef[] = [
   { id: "frame-new-left", keyboard: k("ArrowLeft", { ctrl: true, shift: true }), mouse: "" },
   { id: "frame-new-right", keyboard: k("ArrowRight", { ctrl: true, shift: true }), mouse: "" },
   // Tools (factory letters).
-  { id: "tool-pencil", keyboard: k("b"), mouse: "" },
+  { id: "tool-brush", keyboard: k("b"), mouse: "" },
   { id: "tool-bucket", keyboard: k("g"), mouse: "" },
   { id: "tool-line", keyboard: k("n"), mouse: "" },
   { id: "tool-curve", keyboard: k("c"), mouse: "" },
@@ -626,7 +626,7 @@ function presetTools(
 }
 
 const PHOTOSHOP_KEYS: Record<string, string> = {
-  pencil: "b",
+  brush: "b",
   bucket: "g",
   line: "u",
   curve: "p",
@@ -654,7 +654,7 @@ const PHOTOSHOP_KEYS: Record<string, string> = {
 };
 
 const KRITA_KEYS: Record<string, string> = {
-  pencil: "b",
+  brush: "b",
   bucket: "f",
   line: "v",
   curve: "v",
@@ -680,7 +680,7 @@ const KRITA_KEYS: Record<string, string> = {
 };
 
 const GIMP_KEYS: Record<string, string> = {
-  pencil: "p",
+  brush: "p",
   bucket: "g",
   line: "l",
   curve: "b",
@@ -705,7 +705,7 @@ const GIMP_KEYS: Record<string, string> = {
 };
 
 const MYPAINT_KEYS: Record<string, string> = {
-  pencil: "b",
+  brush: "b",
   bucket: "f",
   line: "l",
   curve: "c",
@@ -729,7 +729,7 @@ const MYPAINT_KEYS: Record<string, string> = {
 };
 
 const ASEPRITE_KEYS: Record<string, string> = {
-  pencil: "b",
+  brush: "b",
   bucket: "g",
   line: "l",
   curve: "c",
@@ -753,7 +753,7 @@ const ASEPRITE_KEYS: Record<string, string> = {
 };
 
 const PROCREATE_KEYS: Record<string, string> = {
-  pencil: "b",
+  brush: "b",
   bucket: "g",
   line: "l",
   curve: "c",
@@ -777,7 +777,7 @@ const PROCREATE_KEYS: Record<string, string> = {
 };
 
 const MEDIBANG_KEYS: Record<string, string> = {
-  pencil: "b",
+  brush: "b",
   bucket: "g",
   line: "l",
   curve: "c",
@@ -801,7 +801,7 @@ const MEDIBANG_KEYS: Record<string, string> = {
 };
 
 const IBIS_KEYS: Record<string, string> = {
-  pencil: "b",
+  brush: "b",
   bucket: "g",
   line: "l",
   curve: "c",
@@ -825,7 +825,7 @@ const IBIS_KEYS: Record<string, string> = {
 };
 
 const SAI_KEYS: Record<string, string> = {
-  pencil: "b",
+  brush: "b",
   bucket: "g",
   line: "l",
   curve: "c",
@@ -849,7 +849,7 @@ const SAI_KEYS: Record<string, string> = {
 };
 
 const FIREALPACA_KEYS: Record<string, string> = {
-  pencil: "b",
+  brush: "b",
   bucket: "g",
   line: "l",
   curve: "c",
@@ -966,6 +966,11 @@ export function parseShortcutStore(jsonText: string): GnumarusShortcutStore {
       };
     }
   }
+  // Migration (v1 pencil->brush rename): keep pre-rename custom bindings.
+  if ("tool-pencil" in overrides && !("tool-brush" in overrides)) {
+    overrides["tool-brush"] = overrides["tool-pencil"];
+  }
+  delete overrides["tool-pencil"];
   return { preset, overrides };
 }
 

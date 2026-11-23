@@ -6,7 +6,7 @@ import {
   onionVisible,
   paintCenter,
   setOnion,
-  setPencil,
+  setBrushColor,
 } from "./e2e-helpers";
 
 async function selectFrame(page: import("@playwright/test").Page, frame: number): Promise<void> {
@@ -30,7 +30,7 @@ test("halved cache resolution keeps ghosts working with cache hits @recent", asy
   await loadBlankProject(page, 64);
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
   await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await selectFrame(page, 0);
   await paintCenter(page);
   await selectFrame(page, 1);
@@ -53,10 +53,10 @@ test("zero cached frames disables caching @recent", async ({ page }) => {
   await loadBlankProject(page, 64);
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
   await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await selectFrame(page, 0);
   await paintCenter(page);
-  await setPencil(page, "#0000ff");
+  await setBrushColor(page, "#0000ff");
   await selectFrame(page, 1);
   await paintCenter(page);
   await selectFrame(page, 0);

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { imageToScreenPixel, layerPixelToScreen } from "../src/canvas/GnumarusViewportMath";
-import { GnumarusViewState, getLayers, getViewState, loadBlankProject, paintCenter, readPixel, setEmptyCellHold, setPencil } from "./e2e-helpers";
+import { GnumarusViewState, getLayers, getViewState, loadBlankProject, paintCenter, readPixel, setEmptyCellHold, setBrushColor } from "./e2e-helpers";
 
 test("undo and redo restore image pixels via menu and shortcuts", async ({ page }) => {
   await page.goto("/");
@@ -163,7 +163,7 @@ test("layer context menu merges down with opacity", async ({ page }) => {
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
 
   await page.getByRole("button", { name: "Add layer" }).click();
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   const afterAdd = await page.locator("gnumarus-shell canvas").boundingBox();
   if (afterAdd === null) {
     throw new Error("canvas has no bounding box");
@@ -201,17 +201,17 @@ test("merge down keeps a layer used by other frames and dissociates only the cur
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
 
   await page.getByRole("button", { name: "Add layer" }).click();
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
   await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
   await page.locator('gnumarus-shell [data-layer-id="layer0"] .layer-name').click();
-  await setPencil(page, "#000000");
+  await setBrushColor(page, "#000000");
   await paintCenter(page);
   await page.locator('gnumarus-shell [data-layer-id="layer1"] .layer-name').click();
-  await setPencil(page, "#0000ff");
+  await setBrushColor(page, "#0000ff");
   await paintCenter(page);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
 
@@ -253,7 +253,7 @@ test("merge down links the upper content when the lower cell is empty", async ({
   await page.getByRole("button", { name: "Add layer" }).click();
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
   await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
-  await setPencil(page, "#0000ff");
+  await setBrushColor(page, "#0000ff");
   await paintCenter(page);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
   const lowerCell = matrix.locator('[data-testid="anim-cell"][data-matrix-layer="layer0"][data-matrix-frame="1"]');
@@ -285,7 +285,7 @@ test("merge down links the upper texture when the lower content has none", async
   await setEmptyCellHold(page, false);
   await paintCenter(page);
   await page.getByRole("button", { name: "Add layer" }).click();
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
   await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
@@ -295,7 +295,7 @@ test("merge down links the upper texture when the lower content has none", async
   await page.locator('gnumarus-shell [data-testid="content-picker-new"]').click();
   await page.locator('gnumarus-shell [data-testid="texture-picker-none"]').click();
   await page.locator('gnumarus-shell [data-layer-id="layer1"] .layer-name').click();
-  await setPencil(page, "#0000ff");
+  await setBrushColor(page, "#0000ff");
   await paintCenter(page);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
 
@@ -427,7 +427,7 @@ test("painting works on a layer smaller than the project", async ({ page }) => {
   expect(await readPixel(page, 0, 0)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
-test("pencil paints the right pixel while the canvas is rotated", async ({ page }) => {
+test("brush paints the right pixel while the canvas is rotated", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
@@ -463,7 +463,7 @@ test("pencil paints the right pixel while the canvas is rotated", async ({ page 
   expect(await readPixel(page, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
 });
 
-test("channel locks toggle in the panel and mask pencil strokes", async ({ page }) => {
+test("channel locks toggle in the panel and mask brush strokes", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
@@ -481,7 +481,7 @@ test("channel locks toggle in the panel and mask pencil strokes", async ({ page 
   });
   expect(locked).toEqual({ r: false, g: true, b: false, a: false });
 
-  await setPencil(page, "#00ffff");
+  await setBrushColor(page, "#00ffff");
   const canvas = page.locator("gnumarus-shell canvas");
   const box = await canvas.boundingBox();
   if (box === null) {
@@ -564,7 +564,7 @@ test("merge down respects destination locks and undo restores the upper lock", a
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
 
   await page.getByRole("button", { name: "Add layer" }).click();
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   const afterAddLocks = await page.locator("gnumarus-shell canvas").boundingBox();
   if (afterAddLocks === null) {
     throw new Error("canvas has no bounding box");

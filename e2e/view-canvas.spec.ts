@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
-import { GnumarusViewState, getViewState, loadBlankProject, openPicker, paintedPixelCount, readPixel, setPencil } from "./e2e-helpers";
+import { GnumarusViewState, getViewState, loadBlankProject, openPicker, paintedPixelCount, readPixel, setBrushColor } from "./e2e-helpers";
 
-test("pencil draws a solid pixel on the WebGL2 canvas", async ({ page }) => {
+test("brush draws a solid pixel on the WebGL2 canvas", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell");
   await loadBlankProject(page, 64);
@@ -147,11 +147,11 @@ test("M flips the canvas view horizontally and Shift+M vertically", async ({ pag
   expect(await getViewState(page)).toMatchObject({ flipX: false, flipY: false });
 });
 
-test("pencil stroke can start outside the texture and paint on entry", async ({ page }) => {
+test("brush stroke can start outside the texture and paint on entry", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   // Zoom to 100% so the canvas corners are well outside the 64x64 texture.
   await page.keyboard.press("1");
   const canvas = page.locator("gnumarus-shell canvas");
@@ -300,14 +300,14 @@ test("loupe middle-click flips the canvas", async ({ page }) => {
   await expect(page.locator("gnumarus-shell")).toContainText("Flip XY");
 });
 
-test("B and Z switch between pencil and loupe", async ({ page }) => {
+test("B and Z switch between brush and loupe", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await expect(page.locator("gnumarus-shell")).toContainText("pencil");
+  await expect(page.locator("gnumarus-shell")).toContainText("brush");
   await page.keyboard.press("z");
   await expect(page.locator("gnumarus-shell")).toContainText("loupe");
   await page.keyboard.press("b");
-  await expect(page.locator("gnumarus-shell")).toContainText("pencil");
+  await expect(page.locator("gnumarus-shell")).toContainText("brush");
 });
 
 test("Edit > Reset Canvas Transform restores the default view", async ({ page }) => {

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { decodeJxlInPage, loadBlankProject, paintCenter, readJpegSamples, readPixel, runPaletteAction, setPencil, stubProjectDirectory } from "./e2e-helpers";
+import { decodeJxlInPage, loadBlankProject, paintCenter, readJpegSamples, readPixel, runPaletteAction, setBrushColor, stubProjectDirectory } from "./e2e-helpers";
 
 test("Control+S saves to the chosen folder without prompting again", async ({ page }) => {
   await page.goto("/");
@@ -83,7 +83,7 @@ test("project textures save as lossless JXL named tN and reopen", async ({ page 
     const root = window as unknown as { __gnumarus?: { shell?: { setImportCleanup(mode: string): void } } };
     root.__gnumarus?.shell?.setImportCleanup("none");
   });
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
@@ -121,7 +121,7 @@ test("project texture lossy setting is honored and persists", async ({ page }) =
   expect(persisted).toContain('"lossless": false');
   expect(persisted).toContain('"quality": 10');
   await dialog.getByRole("button", { name: "Close" }).click();
-  await setPencil(page, "#00ff00");
+  await setBrushColor(page, "#00ff00");
   await paintCenter(page);
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
@@ -150,7 +150,7 @@ test("project textures save as PNG with a compression level and reopen", async (
     const root = window as unknown as { __gnumarus?: { shell?: { setImportCleanup(mode: string): void } } };
     root.__gnumarus?.shell?.setImportCleanup("none");
   });
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Settings" }).click();
@@ -183,7 +183,7 @@ test("project textures save as PNG with a compression level and reopen", async (
 test("project textures save as JPEG with a grayscale alpha companion", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   // Bucket-fill the whole transparent canvas: solid blocks survive JPEG best.
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
@@ -212,7 +212,7 @@ test("project textures save as JPEG with a grayscale alpha companion", async ({ 
   expect(alpha?.center[0] ?? 0).toBeGreaterThan(200);
   expect(alpha?.corner[0] ?? 0).toBeGreaterThan(200);
   // Paint over, then reload: the JPEG pair restores approximately.
-  await setPencil(page, "#00ff00");
+  await setBrushColor(page, "#00ff00");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 255, b: 0, a: 255 });
@@ -233,7 +233,7 @@ test("project meta saves zipped by default and reopens", async ({ page }) => {
     const root = window as unknown as { __gnumarus?: { shell?: { setImportCleanup(mode: string): void } } };
     root.__gnumarus?.shell?.setImportCleanup("none");
   });
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
@@ -258,7 +258,7 @@ test("project meta plain mode writes project.json and removes project.gpa", asyn
     const root = window as unknown as { __gnumarus?: { shell?: { setImportCleanup(mode: string): void } } };
     root.__gnumarus?.shell?.setImportCleanup("none");
   });
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   const project = await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
@@ -300,7 +300,7 @@ test("changing texture storage removes stale texture files", async ({ page }) =>
     const root = window as unknown as { __gnumarus?: { shell?: { setImportCleanup(mode: string): void } } };
     root.__gnumarus?.shell?.setImportCleanup("none");
   });
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   const project = await stubProjectDirectory(page);
   const save = async (): Promise<void> => {

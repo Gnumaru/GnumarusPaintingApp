@@ -374,7 +374,7 @@ export interface GnumarusEngineStats {
 }
 
 export type GnumarusCanvasTool =
-  | "pencil"
+  | "brush"
   | "bucket"
   | "line"
   | "curve"
@@ -803,7 +803,7 @@ export const GRID_FRAGMENT_SHADER = [
   "}",
 ].join("\n");
 
-export type GnumarusSizedTool = "pencil" | "line" | "curve";
+export type GnumarusSizedTool = "brush" | "line" | "curve";
 export type GnumarusToolSizeKind = "brush" | "line" | "curve";
 
 export interface GnumarusEngineOptions {
@@ -1025,7 +1025,7 @@ export class GnumarusCanvasEngine {
   private rotationStepDeg = DEFAULT_ROTATION_SETTINGS.stepDeg;
   private flipX = false;
   private flipY = false;
-  private tool: GnumarusCanvasTool = "pencil";
+  private tool: GnumarusCanvasTool = "brush";
   /** Previous tool while Ctrl temporarily holds the eyedropper, or null. */
   private toolBeforeEyedropper: GnumarusCanvasTool | null = null;
   private tempEyedropper = false;
@@ -1042,7 +1042,7 @@ export class GnumarusCanvasEngine {
   private blendBeforeEraser: GnumarusBlendMode = "normal";
   private accumulate = true;
   private brushSize = 1;
-  /** Minimum pencil size: pen pressure interpolates min→max, otherwise max paints. */
+  /** Minimum brush size: pen pressure interpolates min→max, otherwise max paints. */
   private brushSizeMin = 1;
   /** Ceiling for brush/line/curve sizes (brush setting, default 512, up to 2048). */
   private maxBrushSize = DEFAULT_BRUSH_SETTINGS.maxBrushSize;
@@ -1130,10 +1130,10 @@ export class GnumarusCanvasEngine {
   private strokePaintStart = true;
   private pressureResponse: GnumarusPressureResponse = "none";
   private strokePressure = 1;
-  private pencilAntialias = false;
-  private pencilPixelPerfect = false;
+  private brushAntialias = false;
+  private brushPixelPerfect = false;
   private curvePixelPerfect = false;
-  private readonly pencilPixelPerfectStroke = new GnumarusPixelPerfectStroke();
+  private readonly brushPixelPerfectStroke = new GnumarusPixelPerfectStroke();
   private stabilizerMode: GnumarusStabilizerMode = GNUMARUS_DEFAULT_STABILIZER_MODE;
   private ropeLength = GNUMARUS_DEFAULT_ROPE_LENGTH;
   private followStrength = GNUMARUS_DEFAULT_FOLLOW_STRENGTH;
@@ -1219,6 +1219,8 @@ export class GnumarusCanvasEngine {
   private curveDragCurrent: { x: number; y: number; clientX: number; clientY: number } | null = null;
   private lastMouseClient: { x: number; y: number } | null = null;
   private readonly previewTip: HTMLDivElement;
+  /** Eraser glyph riding above the brush-size preview while blend is eraser. */
+  private readonly eraserBadge: HTMLDivElement;
   /** Tile-brush cursor preview (tile image, positioned over the target grid cell). */
   private readonly tileTip: HTMLDivElement;
   private readonly tileTipImage: HTMLImageElement;
@@ -1272,7 +1274,7 @@ export class GnumarusCanvasEngine {
   private shortcutConflicts = new Set<string>();
   /** Held main keys for drag-gesture matching (lowercased key or code). */
   private shortcutHeldKeys = new Set<string>();
-  /** Shift+Left-drag tool-size gesture state (pencil/line/curve only). */
+  /** Shift+Left-drag tool-size gesture state (brush/line/curve only). */
   private sizeDrag: { tool: GnumarusSizedTool; startClientX: number; startSize: number } | null = null;
   private strokeBase: Uint8ClampedArray | null = null;
   private strokeLayerId: string | null = null;
@@ -1280,7 +1282,7 @@ export class GnumarusCanvasEngine {
   private whiteMaskTexture: THREE.DataTexture | null = null;
   /** Parents whose combined mask texture needs a recompute before drawing. */
   private maskRefreshQueued = new Set<string>();
-  /** Coverage mask for non-accumulating pencil strokes (union semantics). */
+  /** Coverage mask for non-accumulating brush strokes (union semantics). */
   private strokeMask: Uint8Array | null = null;
   private readonly history = new GnumarusHistory(100);
   private lastPixel: { x: number; y: number } | null = null;
@@ -1525,6 +1527,25 @@ export class GnumarusCanvasEngine {
     this.previewTip.style.boxSizing = "border-box";
     this.previewTip.style.zIndex = "5";
     container.appendChild(this.previewTip);
+    this.eraserBadge = document.createElement("div");
+    this.eraserBadge.setAttribute("data-testid", "brush-eraser-badge");
+    this.eraserBadge.setAttribute("aria-hidden", "true");
+    this.eraserBadge.style.position = "absolute";
+    this.eraserBadge.style.left = "50%";
+    this.eraserBadge.style.bottom = "100%";
+    this.eraserBadge.style.transform = "translateX(-50%)";
+    this.eraserBadge.style.marginBottom = "5px";
+    this.eraserBadge.style.width = "18px";
+    this.eraserBadge.style.height = "18px";
+    this.eraserBadge.style.pointerEvents = "none";
+    this.eraserBadge.style.display = "none";
+    this.eraserBadge.innerHTML =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24">' +
+      '<g transform="rotate(45 12 12)">' +
+      '<rect x="3" y="9" width="18" height="7" rx="1.5" fill="#f4f4f4" stroke="#111111"/>' +
+      '<rect x="3" y="9" width="6" height="7" fill="#e08fa0"/>' +
+      "</g></svg>";
+    this.previewTip.appendChild(this.eraserBadge);
     this.tileTip = document.createElement("div");
     this.tileTip.setAttribute("data-testid", "tile-preview");
     this.tileTip.style.position = "absolute";
@@ -2462,7 +2483,7 @@ export class GnumarusCanvasEngine {
     this.stabilizerPos = null;
     this.stabilizerTarget = null;
     this.stopFollowLoop();
-    this.resetPencilPixelPerfect();
+    this.resetBrushPixelPerfect();
     this.growBox = null;
     this.growDrag = null;
     this.syncAllLayerRenders();
@@ -2502,7 +2523,7 @@ export class GnumarusCanvasEngine {
     this.stabilizerPos = null;
     this.stabilizerTarget = null;
     this.stopFollowLoop();
-    this.resetPencilPixelPerfect();
+    this.resetBrushPixelPerfect();
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
     this.render();
@@ -2542,7 +2563,7 @@ export class GnumarusCanvasEngine {
     this.stabilizerPos = null;
     this.stabilizerTarget = null;
     this.stopFollowLoop();
-    this.resetPencilPixelPerfect();
+    this.resetBrushPixelPerfect();
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
     this.render();
@@ -2599,7 +2620,7 @@ export class GnumarusCanvasEngine {
     this.stabilizerPos = null;
     this.stabilizerTarget = null;
     this.stopFollowLoop();
-    this.resetPencilPixelPerfect();
+    this.resetBrushPixelPerfect();
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
     this.render();
@@ -2641,7 +2662,7 @@ export class GnumarusCanvasEngine {
     this.stabilizerPos = null;
     this.stabilizerTarget = null;
     this.stopFollowLoop();
-    this.resetPencilPixelPerfect();
+    this.resetBrushPixelPerfect();
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
     this.render();
@@ -6830,7 +6851,7 @@ export class GnumarusCanvasEngine {
     this.stabilizerPos = null;
     this.stabilizerTarget = null;
     this.stopFollowLoop();
-    this.resetPencilPixelPerfect();
+    this.resetBrushPixelPerfect();
     this.growBox = null;
     this.growDrag = null;
     this.syncWrapTiles();
@@ -8835,7 +8856,7 @@ export class GnumarusCanvasEngine {
     this.stabilizerPos = null;
     this.stabilizerTarget = null;
     this.stopFollowLoop();
-    this.resetPencilPixelPerfect();
+    this.resetBrushPixelPerfect();
     this.syncImageUniforms();
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
@@ -9214,7 +9235,7 @@ export class GnumarusCanvasEngine {
     this.stabilizerPos = null;
     this.stabilizerTarget = null;
     this.stopFollowLoop();
-    this.resetPencilPixelPerfect();
+    this.resetBrushPixelPerfect();
     this.resetSymmetryCenter();
     this.syncImageUniforms();
     this.syncAllLayerRenders();
@@ -9256,7 +9277,7 @@ export class GnumarusCanvasEngine {
     this.stabilizerPos = null;
     this.stabilizerTarget = null;
     this.stopFollowLoop();
-    this.resetPencilPixelPerfect();
+    this.resetBrushPixelPerfect();
     this.disposeShapePreview();
     this.hidePreviews();
     this.frameDurations.clear();
@@ -10199,7 +10220,7 @@ export class GnumarusCanvasEngine {
     const airbrushAngle = this.tipAngleMode === "direction" ? this.strokeDabAngle : 0;
     for (let i = 0; i < count; i += 1) {
       if (this.brushTipKind === "pixel") {
-        if (this.tool === "pencil" && this.brushSource === "selection" && this.selectionBrush !== null) {
+        if (this.tool === "brush" && this.brushSource === "selection" && this.selectionBrush !== null) {
           this.stampSelectionDab(tex, layer.lockedChannels, Math.round(at.x), Math.round(at.y), undefined);
         } else {
           drawBrushStamp(
@@ -10213,7 +10234,7 @@ export class GnumarusCanvasEngine {
             Math.round(at.x), Math.round(at.y), Math.round(at.x), Math.round(at.y),
             this.symmetryCenter.x, this.symmetryCenter.y, this.symmetryMode,
           )) {
-            if (this.tool === "pencil" && this.brushSource === "selection" && this.selectionBrush !== null) {
+            if (this.tool === "brush" && this.brushSource === "selection" && this.selectionBrush !== null) {
               this.stampSelectionDab(tex, layer.lockedChannels, mirror.x0, mirror.y0, undefined);
             } else {
               drawBrushStamp(
@@ -10306,7 +10327,7 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
-  /** Pencil size scaled by the current stroke pressure and tilt when enabled. */
+  /** Brush size scaled by the current stroke pressure and tilt when enabled. */
   private pressureBrushSize(): number {
     const pressureGain =
       this.pressureResponse === "size" || this.pressureResponse === "size+opacity"
@@ -10319,7 +10340,7 @@ export class GnumarusCanvasEngine {
     );
   }
 
-  /** Pencil color with alpha scaled by the current stroke pressure when enabled. */
+  /** Brush color with alpha scaled by the current stroke pressure when enabled. */
   private pressureBrushColor(): GnumarusRgba {
     const active = this.pressureResponse === "opacity" || this.pressureResponse === "size+opacity";
     const gain = active ? evalPressureCurve(this.pressureAlphaCurve, this.strokePressure) : 1;
@@ -10342,35 +10363,35 @@ export class GnumarusCanvasEngine {
     );
   }
 
-  getPencilAntialias(): boolean {
-    return this.pencilAntialias;
+  getBrushAntialias(): boolean {
+    return this.brushAntialias;
   }
 
-  setPencilAntialias(enabled: boolean): boolean {
+  setBrushAntialias(enabled: boolean): boolean {
     const next = enabled === true;
-    if (next === this.pencilAntialias) {
+    if (next === this.brushAntialias) {
       return false;
     }
-    this.pencilAntialias = next;
+    this.brushAntialias = next;
     this.emitStats();
     this.updatePreviews();
     return true;
   }
 
-  getPencilPixelPerfect(): boolean {
-    return this.pencilPixelPerfect;
+  getBrushPixelPerfect(): boolean {
+    return this.brushPixelPerfect;
   }
 
   getCurvePixelPerfect(): boolean {
     return this.curvePixelPerfect;
   }
 
-  setPencilPixelPerfect(enabled: boolean): boolean {
+  setBrushPixelPerfect(enabled: boolean): boolean {
     const next = enabled === true;
-    if (next === this.pencilPixelPerfect) {
+    if (next === this.brushPixelPerfect) {
       return false;
     }
-    this.pencilPixelPerfect = next;
+    this.brushPixelPerfect = next;
     this.emitStats();
     this.updatePreviews();
     return true;
@@ -10388,13 +10409,13 @@ export class GnumarusCanvasEngine {
   }
 
   /** Pixel perfect only applies to pixel tips at exactly 1px without anti-aliasing and no wrap. */
-  private pencilPixelPerfectActive(): boolean {
+  private brushPixelPerfectActive(): boolean {
     return (
-      this.pencilPixelPerfect &&
+      this.brushPixelPerfect &&
       this.brushTipKind === "pixel" &&
       this.brushSizeMin === 1 &&
       this.brushSize === 1 &&
-      !this.pencilAntialias &&
+      !this.brushAntialias &&
       this.wrapMode === "off"
     );
   }
@@ -10409,8 +10430,8 @@ export class GnumarusCanvasEngine {
     );
   }
 
-  private resetPencilPixelPerfect(): void {
-    this.pencilPixelPerfectStroke.reset();
+  private resetBrushPixelPerfect(): void {
+    this.brushPixelPerfectStroke.reset();
   }
 
   getStabilizerMode(): GnumarusStabilizerMode {
@@ -10469,7 +10490,7 @@ export class GnumarusCanvasEngine {
   }
 
   private isStabilizing(): boolean {
-    return this.tool === "pencil" && this.stabilizerMode !== "none";
+    return this.tool === "brush" && this.stabilizerMode !== "none";
   }
 
   private stabilizerStep(
@@ -11304,7 +11325,7 @@ export class GnumarusCanvasEngine {
   private dabReach(size: number): number {
     const rounded = Math.round(size);
     if (this.brushShape !== "square" || this.brushAngle === 0) {
-      return (this.pencilAntialias ? size : rounded) / 2 + 1;
+      return (this.brushAntialias ? size : rounded) / 2 + 1;
     }
     const radians = (Math.abs(this.brushAngle) * Math.PI) / 180;
     return Math.ceil(((rounded - 1) / 2) * (Math.abs(Math.cos(radians)) + Math.abs(Math.sin(radians)))) + 1;
@@ -11514,7 +11535,7 @@ export class GnumarusCanvasEngine {
 
   /**
    * Paint one integer selection-brush run `from -> to` (Bresenham walk,
-   * like the aliased pencil path). Latches the stroke-start dab for
+   * like the aliased brush path). Latches the stroke-start dab for
    * `destination` patterns on first use.
    */
   private paintSelectionStroke(
@@ -11556,11 +11577,11 @@ export class GnumarusCanvasEngine {
   }
 
   /**
-   * Paint one integer pencil run, mirrored across the symmetry axes when a
+   * Paint one integer brush run, mirrored across the symmetry axes when a
    * symmetry mode is active and pixel perfect is off (the per-stroke
    * pixel-perfect filter cannot be shared across mirrored runs).
    */
-  private paintPencilLine(
+  private paintBrushLine(
     tex: { buffer: Uint8ClampedArray; width: number; height: number },
     locked: GnumarusChannelLock,
     x0: number,
@@ -11568,26 +11589,26 @@ export class GnumarusCanvasEngine {
     x1: number,
     y1: number,
   ): void {
-    this.paintPencilLineSingle(tex, locked, x0, y0, x1, y1);
-    if (this.symmetryMode === "off" || this.pencilPixelPerfectActive()) {
+    this.paintBrushLineSingle(tex, locked, x0, y0, x1, y1);
+    if (this.symmetryMode === "off" || this.brushPixelPerfectActive()) {
       return;
     }
     for (const mirror of mirrorSegmentEndsOnAxis(
       x0, y0, x1, y1, this.symmetryCenter.x, this.symmetryCenter.y, this.symmetryMode,
     )) {
-      this.paintPencilLineSingle(tex, locked, mirror.x0, mirror.y0, mirror.x1, mirror.y1);
+      this.paintBrushLineSingle(tex, locked, mirror.x0, mirror.y0, mirror.x1, mirror.y1);
     }
   }
 
   /**
-   * Paint one integer pencil run `from -> to` (endpoints already quantized).
+   * Paint one integer brush run `from -> to` (endpoints already quantized).
    * With pixel perfect active (exactly 1px, no AA) each Bresenham candidate
    * passes through the per-stroke filter so the line stays 1px thick:
    * elbows are eaten retroactively (restored from the stroke base snapshot
    * or cleared from the union mask) while crossings/revisits always paint.
    * Otherwise uses the standard brush/accumulate paths.
    */
-  private paintPencilLineSingle(
+  private paintBrushLineSingle(
     tex: { buffer: Uint8ClampedArray; width: number; height: number },
     locked: GnumarusChannelLock,
     x0: number,
@@ -11600,7 +11621,7 @@ export class GnumarusCanvasEngine {
     const gate = this.pixelArtGate(color);
     // Dithered dabs keep full opacity: pressure already thins the pattern.
     const paint = ditherPaintColor(this.color, color, this.brushDither);
-    if (this.tool === "pencil" && this.brushSource === "selection" && this.selectionBrush !== null) {
+    if (this.tool === "brush" && this.brushSource === "selection" && this.selectionBrush !== null) {
       this.paintSelectionStroke(tex, locked, x0, y0, x1, y1, gate);
       return;
     }
@@ -11608,8 +11629,8 @@ export class GnumarusCanvasEngine {
     // Shading always goes through the union mask (repainted from the
     // stroke-start snapshot), so both accumulate settings behave the same.
     const accumulating = this.accumulate && !shade;
-    if (this.pencilPixelPerfectActive()) {
-      const stroke = this.pencilPixelPerfectStroke;
+    if (this.brushPixelPerfectActive()) {
+      const stroke = this.brushPixelPerfectStroke;
       const base = this.strokeBase;
       const mask = this.strokeMask;
       if (!accumulating && base !== null && mask !== null) {
@@ -11676,7 +11697,7 @@ export class GnumarusCanvasEngine {
         y1,
         size,
         this.brushShape,
-        this.pencilAntialias,
+        this.brushAntialias,
         this.wrapMode,
         this.maxBrushSize,
         gate,
@@ -11703,7 +11724,7 @@ export class GnumarusCanvasEngine {
         y1,
         size,
         this.brushShape,
-        this.pencilAntialias,
+        this.brushAntialias,
         this.wrapMode,
         this.maxBrushSize,
         gate,
@@ -11729,7 +11750,7 @@ export class GnumarusCanvasEngine {
       y1,
       size,
       this.brushShape,
-      this.pencilAntialias,
+      this.brushAntialias,
       paint,
       locked,
       this.blendMode,
@@ -12147,7 +12168,7 @@ export class GnumarusCanvasEngine {
    * turns a fast "C" into a straight line. Walking every coalesced
    * sample preserves the curvature.
    */
-  private pencilCoalescedEvents(event: PointerEvent): PointerEvent[] {
+  private brushCoalescedEvents(event: PointerEvent): PointerEvent[] {
     try {
       const get = event.getCoalescedEvents;
       if (typeof get !== "function") {
@@ -14503,7 +14524,7 @@ export class GnumarusCanvasEngine {
   }
 
   /**
-   * Paint one stabilized pencil segment `from -> to` in layer-image space.
+   * Paint one stabilized brush segment `from -> to` in layer-image space.
    * Uses the same brush/AA/blend/accumulate paths as unstabilized strokes.
    */
   private paintStabilizedSegment(
@@ -14513,16 +14534,16 @@ export class GnumarusCanvasEngine {
     to: { x: number; y: number },
   ): void {    // Quantize like toImagePixel for the aliased path so stabilized strokes
     // land on the same pixels as unstabilized ones (pixel x covers [x, x+1)).
-    const qx0 = this.pencilAntialias ? from.x : Math.floor(from.x);
-    const qy0 = this.pencilAntialias ? from.y : Math.floor(from.y);
-    const qx1 = this.pencilAntialias ? to.x : Math.floor(to.x);
-    const qy1 = this.pencilAntialias ? to.y : Math.floor(to.y);
+    const qx0 = this.brushAntialias ? from.x : Math.floor(from.x);
+    const qy0 = this.brushAntialias ? from.y : Math.floor(from.y);
+    const qx1 = this.brushAntialias ? to.x : Math.floor(to.x);
+    const qy1 = this.brushAntialias ? to.y : Math.floor(to.y);
     const size = this.pressureBrushSize();
     const color = this.pressureBrushColor();
     const gate = this.pixelArtGate(color);
     // Dithered dabs keep full opacity: pressure already thins the pattern.
     const paint = ditherPaintColor(this.color, color, this.brushDither);
-    if (this.tool === "pencil" && this.brushSource === "selection" && this.selectionBrush !== null) {
+    if (this.tool === "brush" && this.brushSource === "selection" && this.selectionBrush !== null) {
       this.paintSelectionStroke(tex, locked, qx0, qy0, qx1, qy1, gate);
       if (this.symmetryMode !== "off") {
         for (const mirror of mirrorSegmentEndsOnAxis(qx0, qy0, qx1, qy1, this.symmetryCenter.x, this.symmetryCenter.y, this.symmetryMode)) {
@@ -14531,8 +14552,8 @@ export class GnumarusCanvasEngine {
       }
       return;
     }
-    if (this.pencilPixelPerfectActive()) {
-      this.paintPencilLine(tex, locked, qx0, qy0, qx1, qy1);
+    if (this.brushPixelPerfectActive()) {
+      this.paintBrushLine(tex, locked, qx0, qy0, qx1, qy1);
       return;
     }
     if (this.brushTipKind !== "pixel") {
@@ -14560,7 +14581,7 @@ export class GnumarusCanvasEngine {
           end.y1,
           size,
           this.brushShape,
-          this.pencilAntialias,
+          this.brushAntialias,
           this.wrapMode,
           this.maxBrushSize,
           gate,
@@ -14596,7 +14617,7 @@ export class GnumarusCanvasEngine {
           end.y1,
           size,
           this.brushShape,
-          this.pencilAntialias,
+          this.brushAntialias,
           this.wrapMode,
           this.maxBrushSize,
           gate,
@@ -14632,7 +14653,7 @@ export class GnumarusCanvasEngine {
         end.y1,
         size,
         this.brushShape,
-        this.pencilAntialias,
+        this.brushAntialias,
         paint,
         locked,
         this.blendMode,
@@ -15165,7 +15186,7 @@ export class GnumarusCanvasEngine {
     return `rgba(${this.color.r}, ${this.color.g}, ${this.color.b}, ${alpha})`;
   }
 
-  /** Position the stabilizer focus dot and rope line for the pencil tool. */
+  /** Position the stabilizer focus dot and rope line for the brush tool. */
   private updateStabilizerOverlay(): void {
     const mouse = this.lastMouseClient;
     if (!this.isStabilizing() || mouse === null || this.stabilizerPos === null) {
@@ -16274,23 +16295,24 @@ export class GnumarusCanvasEngine {
     }
     const mouse = this.lastMouseClient;
     const showTip =
-      (this.tool === "pencil" || this.tool === "line" || this.tool === "curve") && mouse !== null;
+      (this.tool === "brush" || this.tool === "line" || this.tool === "curve") && mouse !== null;
     if (!showTip || mouse === null) {
       this.previewTip.style.display = "none";
+      this.eraserBadge.style.display = "none";
     } else {
       const rect = this.renderer.domElement.getBoundingClientRect();
       const tipSize =
-        (this.tool === "pencil"
+        (this.tool === "brush"
           ? this.brushSize
           : this.tool === "line"
             ? this.lineWidth
             : this.curveWidth) * this.zoom;
       const tipShape =
-        this.tool === "pencil" ? this.brushShape : this.tool === "line" ? this.lineShape : this.curveShape;
+        this.tool === "brush" ? this.brushShape : this.tool === "line" ? this.lineShape : this.curveShape;
       // A captured brush stamps its whole bbox: outline it instead of the
       // geometric tip (pattern modes keep the geometric preview below).
       const stampBox =
-        this.tool === "pencil" && this.brushSource === "selection" && this.selectionBrushMode === "stamp"
+        this.tool === "brush" && this.brushSource === "selection" && this.selectionBrushMode === "stamp"
           ? this.getSelectionBrushSize()
           : null;
       const size = Math.max(2, tipSize);
@@ -16312,18 +16334,19 @@ export class GnumarusCanvasEngine {
         this.previewTip.style.borderRadius = tipShape === "circle" ? "50%" : "0";
         // The line tip previews as a rotated bar (positive angles clockwise,
         // matching the stamp); a rotated square shows its own rotation.
-        // Only the pencil uses dab tips (line/curve shapes are width profiles).
-        if (this.tool === "pencil" && tipShape === "line") {
+        // Only the brush uses dab tips (line/curve shapes are width profiles).
+        if (this.tool === "brush" && tipShape === "line") {
           this.previewTip.style.height = "2px";
           this.previewTip.style.top = `${mouse.y - rect.top - 1}px`;
           this.previewTip.style.transform = `rotate(${this.brushAngle}deg)`;
-        } else if (this.tool === "pencil" && tipShape === "square" && this.brushAngle !== 0) {
+        } else if (this.tool === "brush" && tipShape === "square" && this.brushAngle !== 0) {
           this.previewTip.style.transform = `rotate(${this.brushAngle}deg)`;
         } else {
           this.previewTip.style.transform = "";
         }
       }
     }
+    this.eraserBadge.style.display = this.blendMode === "eraser" ? "block" : "none";
     this.updateTilePreview(mouse);
     this.syncTileRubber();
     this.previewShapeRect.style.display = "none";
@@ -17030,7 +17053,7 @@ export class GnumarusCanvasEngine {
     this.lastPixel = null;
     this.sizeDrag = null;
     this.clearTransformDrags();
-    this.resetPencilPixelPerfect();
+    this.resetBrushPixelPerfect();
     this.stopAirbrush();
     this.flushStrokeRender();
     if (this.stabilizerNeedsLoop()) {
@@ -17230,7 +17253,7 @@ export class GnumarusCanvasEngine {
     if (tool !== "curve") {
       this.resetCurveState();
     }
-    if (tool !== "pencil") {
+    if (tool !== "brush") {
       this.stabilizerPos = null;
       this.stabilizerTarget = null;
       this.stopFollowLoop();
@@ -17260,7 +17283,7 @@ export class GnumarusCanvasEngine {
     this.lassoPath = null;
     this.polyLassoPath = null;
     this.clearTransformGestures();
-    this.resetPencilPixelPerfect();
+    this.resetBrushPixelPerfect();
     this.updatePreviews();
     this.onToolChanged?.(tool);
   }
@@ -18218,7 +18241,7 @@ export class GnumarusCanvasEngine {
       }
       if (
         event.button === 0 &&
-        (this.tool === "pencil" || this.tool === "line" || this.tool === "curve") &&
+        (this.tool === "brush" || this.tool === "line" || this.tool === "curve") &&
         this.gestureModifiersSatisfied("view-live-resize", event)
       ) {
         // Shift+Left-drag resizes the active size tool from horizontal
@@ -18227,7 +18250,7 @@ export class GnumarusCanvasEngine {
         // lock lands on the host element, starving canvas listeners and
         // breaking pointer capture. Absolute positioning stays.)
         const startSize =
-          this.tool === "pencil" ? this.brushSize : this.tool === "line" ? this.lineWidth : this.curveWidth;
+          this.tool === "brush" ? this.brushSize : this.tool === "line" ? this.lineWidth : this.curveWidth;
         this.sizeDrag = { tool: this.tool, startClientX: event.clientX, startSize };
         canvas.setPointerCapture(event.pointerId);
         return;
@@ -18869,7 +18892,7 @@ export class GnumarusCanvasEngine {
         if (!this.accumulate || this.shadeModeActive()) {
           this.strokeMask = new Uint8Array(tex.width * tex.height);
         }
-        this.resetPencilPixelPerfect();
+        this.resetBrushPixelPerfect();
         this.resetPaintStroke();
         this.strokePressure = normalizePointerPressure(event.pointerType, event.pressure);
         this.trackStrokeMotion(event, { x: this.stabilizerPos.x, y: this.stabilizerPos.y });
@@ -18896,13 +18919,13 @@ export class GnumarusCanvasEngine {
       if (!this.accumulate || this.shadeModeActive()) {
         this.strokeMask = new Uint8Array(tex.width * tex.height);
       }
-      this.resetPencilPixelPerfect();
+      this.resetBrushPixelPerfect();
       this.resetPaintStroke();
       this.strokePressure = normalizePointerPressure(event.pointerType, event.pressure);
       this.trackStrokeMotion(event, { x: pixel.x, y: pixel.y });
       this.airbrushAt = { x: pixel.x, y: pixel.y };
       this.startAirbrush();
-      this.paintPencilLine(tex, layer.lockedChannels, pixel.x, pixel.y, pixel.x, pixel.y);
+      this.paintBrushLine(tex, layer.lockedChannels, pixel.x, pixel.y, pixel.x, pixel.y);
       this.scheduleStrokeRender(tex.id);
       this.onPixelsChanged();
       this.onLayersChanged?.();
@@ -18950,7 +18973,7 @@ export class GnumarusCanvasEngine {
       }
       const usePaintMapping =
         this.wrapMode !== "off" &&
-        (this.tool === "pencil" || this.tool === "line" || this.tool === "curve" || this.tool === "bucket");
+        (this.tool === "brush" || this.tool === "line" || this.tool === "curve" || this.tool === "bucket");
       const pixel = usePaintMapping
         ? this.toPaintPixel(event.clientX, event.clientY)
         : this.toImagePixel(event.clientX, event.clientY);
@@ -19265,7 +19288,7 @@ export class GnumarusCanvasEngine {
           this.sizeDrag.startSize + (event.clientX - this.sizeDrag.startClientX) / GNUMARUS_SIZE_DRAG_PX_PER_UNIT,
           this.maxBrushSize,
         );
-        if (this.sizeDrag.tool === "pencil") {
+        if (this.sizeDrag.tool === "brush") {
           if (this.setBrushSize(size)) {
             this.onToolSizeChanged?.("brush", size);
           }
@@ -19278,8 +19301,8 @@ export class GnumarusCanvasEngine {
         }
         return;
       }
-      if (this.tool === "pencil" && this.stabilizerMode !== "none") {
-        const subEvents = this.pencilCoalescedEvents(event);
+      if (this.tool === "brush" && this.stabilizerMode !== "none") {
+        const subEvents = this.brushCoalescedEvents(event);
         let painted = false;
         for (const sub of subEvents) {
           const floatTarget = this.clientToLayerImageFloat(sub.clientX, sub.clientY);
@@ -19336,7 +19359,7 @@ export class GnumarusCanvasEngine {
           return;
         }
         let painted = false;
-        for (const sub of this.pencilCoalescedEvents(event)) {
+        for (const sub of this.brushCoalescedEvents(event)) {
           const subPixel = usePaintMapping
             ? this.toPaintPixel(sub.clientX, sub.clientY)
             : this.toImagePixel(sub.clientX, sub.clientY);
@@ -19346,7 +19369,7 @@ export class GnumarusCanvasEngine {
           this.strokePressure = normalizePointerPressure(sub.pointerType, sub.pressure);
           this.trackStrokeMotion(sub, { x: subPixel.x, y: subPixel.y });
           this.airbrushAt = { x: subPixel.x, y: subPixel.y };
-          this.paintPencilLine(tex, layer.lockedChannels, this.lastPixel.x, this.lastPixel.y, subPixel.x, subPixel.y);
+          this.paintBrushLine(tex, layer.lockedChannels, this.lastPixel.x, this.lastPixel.y, subPixel.x, subPixel.y);
           this.lastPixel = subPixel;
           painted = true;
         }
@@ -19383,7 +19406,7 @@ export class GnumarusCanvasEngine {
       this.lastPixel = null;
       this.sizeDrag = null;
       this.clearTransformDrags();
-      this.resetPencilPixelPerfect();
+      this.resetBrushPixelPerfect();
       this.stopAirbrush();
       this.flushStrokeRender();
       // Keep the stabilizer focus for hover preview; let follow/string converge.
@@ -19654,7 +19677,7 @@ export class GnumarusCanvasEngine {
       this.stabilizerPos = null;
       this.stabilizerTarget = null;
       this.stopFollowLoop();
-      this.resetPencilPixelPerfect();
+      this.resetBrushPixelPerfect();
       this.hidePreviews();
       this.emitStats();
     });
@@ -19798,8 +19821,8 @@ export class GnumarusCanvasEngine {
             return;
           }
         }
-        if (this.matchesShortcut("tool-pencil", event)) {
-          this.setTool("pencil");
+        if (this.matchesShortcut("tool-brush", event)) {
+          this.setTool("brush");
           return;
         }
         if (this.matchesShortcut("tool-bucket", event)) {

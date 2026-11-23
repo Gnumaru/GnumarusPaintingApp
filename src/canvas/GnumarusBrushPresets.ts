@@ -1,5 +1,5 @@
 /**
- * Shareable brush presets: every pencil paint setting as versioned JSON.
+ * Shareable brush presets: every brush paint setting as versioned JSON.
  * Tip *images* are intentionally excluded (bitmaps don't belong in a
  * settings preset): applying an `image`-kind preset without an installed
  * tip paints nothing until one is imported. Dual tips are likewise
@@ -16,7 +16,7 @@ import type { GnumarusBrushShape, GnumarusShadeDirection } from "./GnumarusPixel
 import { GNUMARUS_MAX_MAX_BRUSH_SIZE } from "../settings/GnumarusBrushSettings";
 import type { GnumarusLocale } from "../i18n/GnumarusI18n";
 
-/** Pencil color source: solid foreground or stepping through a palette. */
+/** Brush color source: solid foreground or stepping through a palette. */
 export type GnumarusBrushColorMode = "solid" | "palette";
 
 export interface GnumarusBrushPreset {
@@ -939,8 +939,8 @@ export const BUILT_IN_BRUSH_PRESETS: GnumarusBrushPreset[] = [
   },
   {
     version: 1,
-    name: "Tilt Pencil",
-    labelPt: "Lápis de inclinação",
+    name: "Tilt Brush",
+    labelPt: "Pincel de inclinação",
     brushSize: 16,
     brushSizeMin: 4,
     brushShape: "circle",

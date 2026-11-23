@@ -16,7 +16,7 @@ test("shell boots with menu, toolbar, canvas host and status bar", async ({ page
   await expect(page.getByRole("button", { name: "Save Project", exact: true })).toBeVisible();
 
   await expect(page.locator("gnumarus-shell")).toContainText("1920 x 1080");
-  await expect(page.locator("gnumarus-shell")).toContainText("pencil");
+  await expect(page.locator("gnumarus-shell")).toContainText("brush");
   expect(await readPixel(page, 0, 0)).toBeNull();
   expect(errors).toEqual([]);
 });

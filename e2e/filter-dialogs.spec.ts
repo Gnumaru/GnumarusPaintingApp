@@ -7,7 +7,7 @@ import {
   readFloatingPixel,
   readPixel,
   selectTool,
-  setPencil,
+  setBrushColor,
 } from "./e2e-helpers";
 
 async function runFilter(page: import("@playwright/test").Page, id: string): Promise<boolean> {
@@ -23,7 +23,7 @@ function dialog(page: import("@playwright/test").Page): import("@playwright/test
 
 async function paintRedBlock(page: import("@playwright/test").Page): Promise<void> {
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintLayerRect(page, "#ff0000", 24, 24, 39, 39);
 }
 
@@ -240,13 +240,13 @@ test("every filter applies and undoes cleanly @recent", async ({ page }) => {
     await page.waitForSelector("gnumarus-shell canvas");
     await loadBlankProject(page, 64);
     if (item.setup === "graydot") {
-      await setPencil(page, "#808080");
+      await setBrushColor(page, "#808080");
       await paintCenter(page);
     } else if (item.setup === "whitedot") {
-      await setPencil(page, "#ffffff");
+      await setBrushColor(page, "#ffffff");
       await paintCenter(page);
     } else {
-      await setPencil(page, "#ff0000");
+      await setBrushColor(page, "#ff0000");
       await paintLayerRect(page, "#ff0000", 24, 24, 39, 39);
     }
     expect(await runFilter(page, item.id)).toBe(true);

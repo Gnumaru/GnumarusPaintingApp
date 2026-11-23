@@ -15,7 +15,7 @@ Mobile interface
 
 * On phones (tablets keep the desktop interface), the app boots a
   touch-optimized shell: full-screen canvas and a single bottom bar
-  (scrollable tools — pencil, eraser, undo, redo, color/size sheet,
+  (scrollable tools — brush, eraser, undo, redo, color/size sheet,
   bucket, eyedropper — plus a fixed menu button holding Save and the
   Desktop version switch).
 * One finger paints; two fingers pinch-zoom and pan. The mobile MVP is
@@ -30,7 +30,7 @@ Your first painting
 -------------------
 
 1. Open the app. A default project is already there, ready to paint.
-2. Pick the **Pencil** (``B``) and a foreground color in the paint wells.
+2. Pick the **Brush** (``B``) and a foreground color in the paint wells.
 3. Drag on the canvas. ``Ctrl+Z`` undoes, ``Ctrl+Y`` redoes.
 4. **File > Save Project** (``Ctrl+S``) writes the project back to its
    folder. The first save asks for a directory.

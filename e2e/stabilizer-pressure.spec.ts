@@ -1,11 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { layerPixelToScreen } from "../src/canvas/GnumarusViewportMath";
-import { blurActiveElement, canvasCenter, getViewState, loadBlankProject, loadTinyLayer, paintedNeighborStats, paintedPixelCount, penDot, readPixel, selectTool, setPencil, stubPenPointerCapture } from "./e2e-helpers";
+import { blurActiveElement, canvasCenter, getViewState, loadBlankProject, loadTinyLayer, paintedNeighborStats, paintedPixelCount, penDot, readPixel, selectTool, setBrushColor, stubPenPointerCapture } from "./e2e-helpers";
 
-test("pencil stabilizer dropdown defaults to none with conditional rope and follow settings", async ({ page }) => {
+test("brush stabilizer dropdown defaults to none with conditional rope and follow settings", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   const options = page.locator('gnumarus-shell [data-testid="tool-options"]');
   await expect(options).toContainText("Stabilizer");
   const mode = page.locator("gnumarus-shell select#stabilizerMode");
@@ -44,10 +44,10 @@ test("rope stabilizer holds the focus within the rope and pulls beyond it", asyn
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await page.locator("gnumarus-shell select#stabilizerMode").selectOption("rope");
   await page.locator("gnumarus-shell input#ropeLength").fill("10");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   const canvas = page.locator("gnumarus-shell canvas");
   const box = await canvas.boundingBox();
   if (box === null) {
@@ -100,11 +100,11 @@ test("follow stabilizer paints while chasing the cursor", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await page.locator("gnumarus-shell select#stabilizerMode").selectOption("follow");
   await page.locator("gnumarus-shell input#followStrength").fill("100");
   await expect(page.locator("gnumarus-shell")).toContainText("Follow strength: 100");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   const canvas = page.locator("gnumarus-shell canvas");
   const box = await canvas.boundingBox();
   if (box === null) {
@@ -221,10 +221,10 @@ test("1 sets zoom 100 percent and 2 fits the rotated canvas", async ({ page }) =
   expect((await getViewState(page)).zoom).toBeCloseTo(plain, 5);
 });
 
-test("shift-drag adjusts the pencil brush size live without painting", async ({ page }) => {
+test("shift-drag adjusts the brush brush size live without painting", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   const sizeOf = (): Promise<number> =>
     page.evaluate(() => {
       const root = window as unknown as { __gnumarus?: { engine?: { getBrushSize(): number } } };
@@ -301,11 +301,11 @@ test("shift-drag adjusts line and curve widths", async ({ page }) => {
   expect(curveWidth).toBeCloseTo(Math.max(0.1, 1 - 40 / 20), 5);
 });
 
-test("pencil pressure size scales the stroke", async ({ page }) => {
+test("brush pressure size scales the stroke", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await stubPenPointerCapture(page);
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await page.locator("gnumarus-shell input#brushSize").fill("10");
   await page.locator("gnumarus-shell input#brushSizeMin").fill("2");
   await page.locator("gnumarus-shell select#pressureResponse").selectOption("size");
@@ -322,14 +322,14 @@ test("pencil pressure size scales the stroke", async ({ page }) => {
   expect(full).toBeGreaterThan(2 * half);
 });
 
-test("pencil pressure opacity scales the alpha", async ({ page }) => {
+test("brush pressure opacity scales the alpha", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
   await stubPenPointerCapture(page);
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await page.locator("gnumarus-shell select#pressureResponse").selectOption("opacity");
-  await setPencil(page, "#00000080");
+  await setBrushColor(page, "#00000080");
   const center = await canvasCenter(page);
   await penDot(page, center.x, center.y, 1);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 128 });
@@ -339,12 +339,12 @@ test("pencil pressure opacity scales the alpha", async ({ page }) => {
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 64 });
 });
 
-test("pencil pressure none ignores pen pressure", async ({ page }) => {
+test("brush pressure none ignores pen pressure", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
   await stubPenPointerCapture(page);
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await expect(page.locator("gnumarus-shell select#pressureResponse")).toHaveValue("none");
   await page.locator("gnumarus-shell input#brushSize").fill("10");
   const center = await canvasCenter(page);
@@ -352,34 +352,34 @@ test("pencil pressure none ignores pen pressure", async ({ page }) => {
   expect(await paintedPixelCount(page)).toBeGreaterThan(50);
   await blurActiveElement(page);
   await page.keyboard.press("Control+z");
-  await setPencil(page, "#00000080");
+  await setBrushColor(page, "#00000080");
   await page.locator("gnumarus-shell input#brushSize").fill("1");
   await penDot(page, center.x, center.y, 0.5);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 128 });
 });
 
-test("pencil pressure size+opacity applies both", async ({ page }) => {
+test("brush pressure size+opacity applies both", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
   await stubPenPointerCapture(page);
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await page.locator("gnumarus-shell input#brushSize").fill("10");
   await page.locator("gnumarus-shell select#pressureResponse").selectOption("size+opacity");
-  await setPencil(page, "#00000080");
+  await setBrushColor(page, "#00000080");
   const center = await canvasCenter(page);
   await penDot(page, center.x, center.y, 0.5);
   expect(await paintedPixelCount(page)).toBeLessThan(40);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 64 });
 });
 
-test("pencil pixel perfect snaps size to 1 and thins tight turns @recent", async ({ page }) => {
+test("brush pixel perfect snaps size to 1 and thins tight turns @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   const options = page.locator('gnumarus-shell [data-testid="tool-options"]');
   await expect(options).toContainText("Pixel perfect");
-  const pixelPerfect = page.locator("gnumarus-shell input#pencilPixelPerfect");
+  const pixelPerfect = page.locator("gnumarus-shell input#brushPixelPerfect");
   await expect(pixelPerfect).toBeEnabled();
   await page.locator("gnumarus-shell input#brushSize").fill("3");
   await page.locator("gnumarus-shell input#brushSizeMin").fill("2");
@@ -387,16 +387,16 @@ test("pencil pixel perfect snaps size to 1 and thins tight turns @recent", async
   await pixelPerfect.check();
   await expect(page.locator("gnumarus-shell input#brushSize")).toHaveValue("1");
   await expect(page.locator("gnumarus-shell input#brushSizeMin")).toHaveValue("1");
-  await page.locator("gnumarus-shell input#pencilAntialias").check();
+  await page.locator("gnumarus-shell input#brushAntialias").check();
   await expect(pixelPerfect).toBeEnabled();
-  await page.locator("gnumarus-shell input#pencilAntialias").uncheck();
+  await page.locator("gnumarus-shell input#brushAntialias").uncheck();
   await expect(pixelPerfect).toBeEnabled();
   await pixelPerfect.uncheck();
 
   await loadTinyLayer(page, 8);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await pixelPerfect.check();
-  await expect(page.locator("gnumarus-shell")).toContainText("Pencil pixel perfect: on");
+  await expect(page.locator("gnumarus-shell")).toContainText("Brush pixel perfect: on");
   const dragUTurn = async (): Promise<void> => {
     const canvas = page.locator("gnumarus-shell canvas");
     const box = await canvas.boundingBox();
@@ -426,20 +426,20 @@ test("pencil pixel perfect snaps size to 1 and thins tight turns @recent", async
   expect(stats.max).toBeLessThanOrEqual(2);
   await page.keyboard.press("Delete");
   await pixelPerfect.uncheck();
-  await expect(page.locator("gnumarus-shell")).toContainText("Pencil pixel perfect: off");
+  await expect(page.locator("gnumarus-shell")).toContainText("Brush pixel perfect: off");
   await dragUTurn();
   stats = await paintedNeighborStats(page, 8);
   expect(stats.painted).toBeGreaterThan(0);
   expect(stats.max).toBeGreaterThan(2);
 });
 
-test("pencil pixel perfect still paints crossings and revisits", async ({ page }) => {
+test("brush pixel perfect still paints crossings and revisits", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await loadTinyLayer(page, 8);
-  await setPencil(page, "#ff0000");
-  await page.locator("gnumarus-shell input#pencilPixelPerfect").check();
+  await setBrushColor(page, "#ff0000");
+  await page.locator("gnumarus-shell input#brushPixelPerfect").check();
   const canvas = page.locator("gnumarus-shell canvas");
   const box = await canvas.boundingBox();
   if (box === null) {
@@ -471,7 +471,7 @@ test("curve pixel perfect snaps width to 1 and keeps curves thin @recent", async
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadTinyLayer(page, 16);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await selectTool(page, 'Curve');
   const pixelPerfect = page.locator("gnumarus-shell input#curvePixelPerfect");
   await expect(pixelPerfect).toBeEnabled();

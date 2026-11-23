@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { dragRect, layerScreenTarget, loadBlankProject, paintLayerRect, readPixel, selectTool, setPencil } from "./e2e-helpers";
+import { dragRect, layerScreenTarget, loadBlankProject, paintLayerRect, readPixel, selectTool, setBrushColor } from "./e2e-helpers";
 
 async function runAction(page: import("@playwright/test").Page, id: string): Promise<boolean> {
   return page.evaluate((actionId: string) => {
@@ -31,13 +31,13 @@ test("captures the floating selection and stamps it as a brush @recent", async (
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await selectBlock(page);
   expect(await runAction(page, "create-brush-from-selection")).toBe(true);
   expect((await shellState(page)).brushSource).toBe("selection");
   // Merge the pending selection away, back to plain-cell painting.
   await page.keyboard.press("Enter");
-  expect(await runAction(page, "tool-pencil")).toBe(true);
+  expect(await runAction(page, "tool-brush")).toBe(true);
   // Stamp the 16x16 capture centered on (50, 32): left half red, right half blue.
   await paintAt(page, 50, 32);
   expect(await readPixel(page, 43, 25)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
@@ -51,11 +51,11 @@ test("origin and destination anchor the pattern differently @recent", async ({ p
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await selectBlock(page);
   expect(await runAction(page, "create-brush-from-selection")).toBe(true);
   await page.keyboard.press("Enter");
-  expect(await runAction(page, "tool-pencil")).toBe(true);
+  expect(await runAction(page, "tool-brush")).toBe(true);
   await page.evaluate(() => {
     const shell = document.querySelector("gnumarus-shell") as unknown as {
       setBrushSize(size: number): void;

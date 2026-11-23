@@ -1,7 +1,7 @@
 Painting tools
 ==============
 
-Pencil (B)
+Brush (B)
 ----------
 
 The pixel brush. Size is a min–max range: pen pressure interpolates
@@ -49,7 +49,7 @@ Blend, accumulate, symmetry, wrap
 Paint blend modes: normal, copy, eraser (``E`` toggles eraser,
 remembering the previous mode). **Accumulate** unifies overlapping
 dabs; canvas symmetry (left-right/up-down/four-way, draggable axes)
-mirrors pencil strokes; wrap modes repeat the texture infinitely while
+mirrors brush strokes; wrap modes repeat the texture infinitely while
 painting.
 
 Line, curve, shapes, bucket

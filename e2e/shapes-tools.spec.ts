@@ -1,10 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { canvasBox, canvasCenter, dragCanvas, loadBlankProject, mouseDot, paintCenter, paintedPixelCount, penDot, readPixel, selectTool, setPencil, stubPenPointerCapture, textureDims } from "./e2e-helpers";
+import { canvasBox, canvasCenter, dragCanvas, loadBlankProject, mouseDot, paintCenter, paintedPixelCount, penDot, readPixel, selectTool, setBrushColor, stubPenPointerCapture, textureDims } from "./e2e-helpers";
 
 test("brush size range paints max without pressure response @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toContainText("Min size");
   await page.locator("gnumarus-shell input#brushSize").fill("8");
   await page.locator("gnumarus-shell input#brushSizeMin").fill("2");
@@ -25,7 +25,7 @@ test("brush size range paints max without pressure response @recent", async ({ p
 test("brush min size clamps to the max @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await page.locator("gnumarus-shell input#brushSize").fill("4");
   await page.locator("gnumarus-shell input#brushSizeMin").fill("99");
   expect(await page.evaluate(() => {
@@ -38,8 +38,8 @@ test("brush min size clamps to the max @recent", async ({ page }) => {
 test("pixel perfect snaps min and max size to 1 @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await page.getByRole("button", { name: "Pencil" }).click();
-  const box = page.locator('gnumarus-shell input#pencilPixelPerfect');
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
+  const box = page.locator('gnumarus-shell input#brushPixelPerfect');
   await expect(box).toBeEnabled();
   await page.locator("gnumarus-shell input#brushSize").fill("4");
   await page.locator("gnumarus-shell input#brushSizeMin").fill("2");
@@ -47,9 +47,9 @@ test("pixel perfect snaps min and max size to 1 @recent", async ({ page }) => {
   await box.check();
   await expect(page.locator("gnumarus-shell input#brushSize")).toHaveValue("1");
   await expect(page.locator("gnumarus-shell input#brushSizeMin")).toHaveValue("1");
-  await expect(page.locator("gnumarus-shell")).toContainText("Pencil pixel perfect: on");
+  await expect(page.locator("gnumarus-shell")).toContainText("Brush pixel perfect: on");
   await box.uncheck();
-  await expect(page.locator("gnumarus-shell")).toContainText("Pencil pixel perfect: off");
+  await expect(page.locator("gnumarus-shell")).toContainText("Brush pixel perfect: off");
 });
 
 test("rectangle tool paints an outline and undoes @recent", async ({ page }) => {
@@ -124,7 +124,7 @@ test("gradient tool fades paint to transparent and undoes @recent", async ({ pag
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.keyboard.press("k");
   await expect(page.locator("gnumarus-shell")).toContainText("gradient");
   const box = await canvasBox(page);
@@ -145,7 +145,7 @@ test("shading tool lightens pixels and undoes @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#808080");
+  await setBrushColor(page, "#808080");
   const box = await canvasBox(page);
   await mouseDot(page, box.width / 2, box.height / 2);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 128, g: 128, b: 128, a: 255 });
@@ -162,7 +162,7 @@ test("blur tool softens a hard dot @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#000000");
+  await setBrushColor(page, "#000000");
   const box = await canvasBox(page);
   await mouseDot(page, box.width / 2, box.height / 2);
   await page.keyboard.press("i");
@@ -179,7 +179,7 @@ test("clone tool stamps from the alt-clicked source @recent", async ({ page }) =
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   const box = await canvasBox(page);
   const cx = box.width / 2;
   const cy = box.height / 2;
@@ -236,10 +236,10 @@ test("recolor tool shifts similar hues toward the paint color @recent", async ({
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#0000ff");
+  await setBrushColor(page, "#0000ff");
   const box = await canvasBox(page);
   await mouseDot(page, box.width / 2, box.height / 2);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.keyboard.press("q");
   await expect(page.locator("gnumarus-shell")).toContainText("recolor");
   await page.locator("gnumarus-shell input#recolorTolerance").fill("100");
@@ -253,12 +253,12 @@ test("jumble tool displaces pixels @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   const box = await canvasBox(page);
   const cx = box.width / 2;
   const cy = box.height / 2;
   await mouseDot(page, cx - 2, cy);
-  await setPencil(page, "#0000ff");
+  await setBrushColor(page, "#0000ff");
   await mouseDot(page, cx + 2, cy);
   const before = await page.evaluate(() => {
     const root = window as unknown as { __gnumarus?: { engine?: { readPixel(x: number, y: number): unknown } } };
@@ -317,7 +317,7 @@ test("crop tool crops the cell texture to the dragged box @recent", async ({ pag
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   expect(await textureDims(page)).toEqual({ width: 64, height: 64 });
   await selectTool(page, "Crop");

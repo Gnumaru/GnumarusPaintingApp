@@ -4,7 +4,7 @@ Keyboard shortcuts
 Painting
 --------
 
-* ``B`` pencil, ``N`` line, ``C`` curve, ``G`` bucket, ``F`` bucket
+* ``B`` brush, ``N`` line, ``C`` curve, ``G`` bucket, ``F`` bucket
   fill, ``T`` transform, ``Y`` 3D rotation, ``U`` selection 3D
 * ``R`` rectangular selection, ``O`` ellipse, ``L`` lasso,
   ``P`` polygonal lasso, ``W`` color select

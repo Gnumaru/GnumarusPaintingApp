@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { unzipSync } from "fflate";
-import { createHelloText, forceNoFileSystemApi, getModelBytes, getSvgSource, loadBlankProject, paintCenter, readPixel, removeEmbeddedProject, runPaletteAction, saveEmbeddedAs, setPencil, stubDirectoryWithFileStore, stubFsProjectDir, stubSaveFilePicker, textHtml } from "./e2e-helpers";
+import { createHelloText, forceNoFileSystemApi, getModelBytes, getSvgSource, loadBlankProject, paintCenter, readPixel, removeEmbeddedProject, runPaletteAction, saveEmbeddedAs, setBrushColor, stubDirectoryWithFileStore, stubFsProjectDir, stubSaveFilePicker, textHtml } from "./e2e-helpers";
 
 test("saving a project creates every content directory even when empty @recent", async ({ page }) => {
   await page.goto("/");
@@ -101,7 +101,7 @@ test("reload all contents reprocesses texts, vectors and models, not textures @r
   await loadBlankProject(page, 64);
   const textId = await createHelloText(page);
   await page.getByRole("button", { name: "Add layer" }).click();
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await paintCenter(page);
   const svgId = await page.evaluate(() => {
     const engine = (window as unknown as { __gnumarus?: { engine?: unknown } }).__gnumarus?.engine as unknown as
@@ -195,7 +195,7 @@ test("embedded save-as, save and open round-trip pixels @recent", async ({ page 
   await saveEmbeddedAs(page, "RoundTrip");
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to RoundTrip");
   // Paint more, then Ctrl+S must save into the same embedded project.
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   await page.keyboard.press("Control+s");
@@ -238,7 +238,7 @@ test("embedded upload unpacks a .gpp and opens it @recent", async ({ page }) => 
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
   await forceNoFileSystemApi(page);
-  await setPencil(page, "#00ff00");
+  await setBrushColor(page, "#00ff00");
   await paintCenter(page);
   await saveEmbeddedAs(page, "UpSrc");
   await expect(page.locator("gnumarus-shell")).toContainText("Saved to UpSrc");

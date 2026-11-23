@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { getFloatingSelection, getMatrix, layerScreenTarget, layerToScreen, loadBlankProject, paintedPixelCount, readBox, readPixel, selectTool, setPencil, shapePreviewPixels, shapePreviewVisible, sliceBox } from "./e2e-helpers";
+import { getFloatingSelection, getMatrix, layerScreenTarget, layerToScreen, loadBlankProject, paintedPixelCount, readBox, readPixel, selectTool, setBrushColor, shapePreviewPixels, shapePreviewVisible, sliceBox } from "./e2e-helpers";
 
 test("changing frame/layer scrolls the matrix and layers list into view @recent", async ({ page }) => {
   await page.goto("/");
@@ -161,7 +161,7 @@ test("raster preview matches the committed rectangle @recent", async ({ page }) 
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.keyboard.press("d");
   const a = await layerToScreen(page, 20, 20);
   const b = await layerToScreen(page, 35, 30);
@@ -184,7 +184,7 @@ test("raster preview matches the committed ellipse fill @recent", async ({ page 
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.keyboard.press("h");
   await page.locator("gnumarus-shell input#shapeFilled").click();
   const a = await layerToScreen(page, 18, 18);
@@ -206,7 +206,7 @@ test("raster preview matches the committed line @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await selectTool(page, "Line");
   const a = await layerToScreen(page, 10, 32);
   const b = await layerToScreen(page, 50, 32);
@@ -226,7 +226,7 @@ test("raster preview matches the committed polygon @recent", async ({ page }) =>
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.keyboard.press("j");
   const v0 = await layerToScreen(page, 20, 20);
   const v1 = await layerToScreen(page, 44, 20);
@@ -251,7 +251,7 @@ test("raster preview matches the committed curve @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await selectTool(page, "Curve");
   const p0 = await layerToScreen(page, 20, 32);
   const p3 = await layerToScreen(page, 44, 32);
@@ -277,7 +277,7 @@ test("raster preview matches the committed gradient @recent", async ({ page }) =
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.keyboard.press("k");
   const a = await layerToScreen(page, 0, 32);
   const b = await layerToScreen(page, 63, 32);
@@ -329,7 +329,7 @@ test("shape preview hides when switching tools mid-drag @recent", async ({ page 
 test("rectangular selection with Alt cuts a perfect square @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   const corner = await layerScreenTarget(page, 0, 0);
   await page.mouse.click(corner.x, corner.y);
@@ -352,7 +352,7 @@ test("rectangular selection with Alt cuts a perfect square @recent", async ({ pa
 test("elliptical selection with Alt cuts a perfect circle @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   const corner = await layerScreenTarget(page, 0, 0);
   await page.mouse.click(corner.x, corner.y);
@@ -375,7 +375,7 @@ test("elliptical selection with Alt cuts a perfect circle @recent", async ({ pag
 test("rectangle shape with Alt draws a perfect square @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.keyboard.press("d");
   await page.locator("gnumarus-shell input#shapeFilled").click();
   const a = await layerToScreen(page, 20, 20);
@@ -394,7 +394,7 @@ test("rectangle shape with Alt draws a perfect square @recent", async ({ page })
 test("ellipse shape with Alt draws a perfect circle @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.keyboard.press("h");
   await page.locator("gnumarus-shell input#shapeFilled").click();
   const a = await layerToScreen(page, 18, 18);

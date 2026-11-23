@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { getMatrix, layerSize, loadBlankProject, paintCenter, readPixel, setEmptyCellHold, setPencil } from "./e2e-helpers";
+import { getMatrix, layerSize, loadBlankProject, paintCenter, readPixel, setEmptyCellHold, setBrushColor } from "./e2e-helpers";
 
 test("animation matrix shows one row per layer and one column per frame", async ({ page }) => {
   await page.goto("/");
@@ -179,7 +179,7 @@ test("fit texture to size crops transparent borders and keeps apparent position"
   await dialog.getByRole("button", { name: "OK" }).click();
   await expect(page.locator('gnumarus-shell [data-layer-id="layer0"]')).toContainText("1×1");
   expect(await readPixel(page, 0, 0)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   expect(await readPixel(page, 0, 0)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   await page.keyboard.press("Control+z");
@@ -450,7 +450,7 @@ test("toolbar icons fill buttons without growing them", async ({ page }) => {
   });
   expect(boxes).toHaveLength(16);
   const expected: Record<string, { w: number; h: number }> = {
-    Pencil: { w: 33, h: 25 },
+    Brush: { w: 33, h: 25 },
     Loupe: { w: 30, h: 25 },
     "Bucket fill": { w: 35, h: 26 },
     Eyedropper: { w: 35, h: 26 },

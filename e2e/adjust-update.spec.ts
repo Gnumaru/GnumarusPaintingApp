@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { layerPixelToScreen } from "../src/canvas/GnumarusViewportMath";
-import { commitFloatingSelection, countRedIn, dragLayerBox, dragRect, fillHsAndWait, getFloatingSelection, getViewState, layerSize, loadBlankProject, paintLayerRect, readFloatingPixel, readPixel, selectTool, setMaskOption, setPencil } from "./e2e-helpers";
+import { commitFloatingSelection, countRedIn, dragLayerBox, dragRect, fillHsAndWait, getFloatingSelection, getViewState, layerSize, loadBlankProject, paintLayerRect, readFloatingPixel, readPixel, selectTool, setMaskOption, setBrushColor } from "./e2e-helpers";
 
 test("selection feather softens the merged edge @recent", async ({ page }) => {
   await page.goto("/");
@@ -214,8 +214,8 @@ test("painting on canvas with adjust window open bakes the adjustment @recent", 
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await paintLayerRect(page, "#ff0000", 24, 24, 39, 39);
-  await page.getByRole("button", { name: "Pencil" }).click();
-  await setPencil(page, "#0000ff");
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
+  await setBrushColor(page, "#0000ff");
   expect(await readPixel(page, 960, 540)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   await page.evaluate(() => {
     const root = window as unknown as { __gnumarus?: { shell?: { runAction(id: string): boolean } } };
@@ -335,7 +335,7 @@ test("escape with focus outside the adjust window reverts @recent", async ({ pag
   await dialog.locator("#bcBrightness").evaluate((el: HTMLElement) => el.blur());
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
   // Focusing other chrome does not commit: the preview stands.
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await expect(dialog).toBeVisible();
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 255, b: 255, a: 255 });
   // Global Esc reverts even though the window itself is not focused.

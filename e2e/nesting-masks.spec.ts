@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { canvasCenterPixel, dropLayerOnto, engineReparent, expectPreviewCenter, getFrameDuration, getLayerMasks, getLayerParents, getLayers, loadBlankProject, paintCenter, readPixel, selectTool, setPencil } from "./e2e-helpers";
+import { canvasCenterPixel, dropLayerOnto, engineReparent, expectPreviewCenter, getFrameDuration, getLayerMasks, getLayerParents, getLayers, loadBlankProject, paintCenter, readPixel, selectTool, setBrushColor } from "./e2e-helpers";
 
 test("nested layers indent children between parent and next root @recent", async ({ page }) => {
   await page.goto("/");
@@ -157,10 +157,10 @@ test("hiding a parent hides its children on canvas and flatten @recent", async (
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   await page.getByRole("button", { name: "Add layer" }).click();
-  await setPencil(page, "#0000ff");
+  await setBrushColor(page, "#0000ff");
   await paintCenter(page);
   // Top layer1 (blue) covers bottom layer0 (red) at the center.
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
@@ -211,7 +211,7 @@ test("child layer list collapses without touching the matrix or canvas @recent",
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   await page.getByRole("button", { name: "Add layer" }).click();
   await page.getByRole("button", { name: "Add layer" }).click();
@@ -240,10 +240,10 @@ test("layer mask conversion hides with black and shows with white @recent", asyn
   // Parent red, mask white (full-layer bucket fills).
   await page.locator('gnumarus-shell [data-layer-id="layer1"] .layer-name').click();
   await selectTool(page, "Bucket fill");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   await page.locator('gnumarus-shell [data-layer-id="layer2"] .layer-name').click();
-  await setPencil(page, "#ffffff");
+  await setBrushColor(page, "#ffffff");
   await paintCenter(page);
   await page.locator('gnumarus-shell [data-layer-id="layer2"]').click({ button: "right" });
   await page.getByRole("button", { name: "Convert to mask" }).click();
@@ -254,7 +254,7 @@ test("layer mask conversion hides with black and shows with white @recent", asyn
   await expectPreviewCenter(page, "255,0,0,255");
   await page.getByRole("button", { name: "Close preview" }).click();
   // Black mask hides the parent (default image checker shows through).
-  await setPencil(page, "#000000");
+  await setBrushColor(page, "#000000");
   await paintCenter(page);
   await page.getByRole("button", { name: "Final preview" }).click();
   await expectPreviewCenter(page, "148,148,148,255");
@@ -298,7 +298,7 @@ test("masks never render alone and reject nesting and merges @recent", async ({ 
   // Parent red so the mask has content to modulate.
   await page.locator('gnumarus-shell [data-layer-id="layer1"] .layer-name').click();
   await selectTool(page, "Bucket fill");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   // Toggle via the run action palette.
   await page.locator('gnumarus-shell [data-layer-id="layer2"] .layer-name').click();
@@ -309,7 +309,7 @@ test("masks never render alone and reject nesting and merges @recent", async ({ 
   await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveText(["Toggle layer mask"]);
   await dialog.locator('[data-testid="action-palette-item"]').click();
   expect(await getLayerMasks(page)).toContainEqual({ id: "layer2", isMask: true });
-  await setPencil(page, "#ffffff");
+  await setBrushColor(page, "#ffffff");
   await paintCenter(page);
   // Flattening excludes the mask as an independent layer and wires the parent.
   const flatten = await page.evaluate(() => {
@@ -367,10 +367,10 @@ test("toggling visibility off and on preserves masking @recent", async ({ page }
   expect(await engineReparent(page, "layer2", "layer1")).toBe(true);
   await page.locator('gnumarus-shell [data-layer-id="layer1"] .layer-name').click();
   await selectTool(page, "Bucket fill");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   await page.locator('gnumarus-shell [data-layer-id="layer2"] .layer-name').click();
-  await setPencil(page, "#000000");
+  await setBrushColor(page, "#000000");
   await paintCenter(page);
   await page.locator('gnumarus-shell [data-layer-id="layer2"]').click({ button: "right" });
   await page.getByRole("button", { name: "Convert to mask" }).click();
@@ -385,7 +385,7 @@ test("toggling visibility off and on preserves masking @recent", async ({ page }
   await page.locator('gnumarus-shell [data-layer-id="layer2"] input[type="checkbox"]').click();
   expect(await canvasCenterPixel(page)).not.toBe("255,0,0,255");
   // Repainting the mask white lifts the mask everywhere.
-  await setPencil(page, "#ffffff");
+  await setBrushColor(page, "#ffffff");
   await paintCenter(page);
   expect(await canvasCenterPixel(page)).toBe("255,0,0,255");
 });

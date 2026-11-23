@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { blurActiveElement, buildXcfBytes, decodeJxlInPage, getLayers, layerScreenTarget, loadBlankProject, openPicker, paintCenter, paintedPixelCount, readPixel, setImportCleanup, setPaintDynamics, setPaintTip, setPencil, stubAsepritePicker, stubProjectDirectory, textureDims } from "./e2e-helpers";
+import { blurActiveElement, buildXcfBytes, decodeJxlInPage, getLayers, layerScreenTarget, loadBlankProject, openPicker, paintCenter, paintedPixelCount, readPixel, setImportCleanup, setPaintDynamics, setPaintTip, setBrushColor, stubAsepritePicker, stubProjectDirectory, textureDims } from "./e2e-helpers";
 
 test("import cleanup setting is configurable and persists", async ({ page }) => {
   await page.goto("/");
@@ -20,7 +20,7 @@ test("native project open keeps textures exact despite cleanup setting @recent",
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   await stubProjectDirectory(page);
   await page.getByRole("button", { name: "File" }).click();
@@ -146,7 +146,7 @@ test("Pixel Spray (Pressure = Size) applies size response with 8/1 range @recent
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  const options = page.locator('gnumarus-shell [aria-label="Pencil options"]');
+  const options = page.locator('gnumarus-shell [aria-label="Brush options"]');
   await options.locator("select#brushPreset").selectOption("Pixel Spray (Pressure = Size)");
   await expect(page.locator("gnumarus-shell")).toContainText("Preset: Pixel Spray (Pressure = Size)");
   await expect(options.locator("input#brushSize")).toHaveValue("8");
@@ -158,7 +158,7 @@ test("Pixel Hard (Pressure = Size) applies size response with 8/1 range @recent"
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  const options = page.locator('gnumarus-shell [aria-label="Pencil options"]');
+  const options = page.locator('gnumarus-shell [aria-label="Brush options"]');
   await options.locator("select#brushPreset").selectOption("Pixel Hard (Pressure = Size)");
   await expect(page.locator("gnumarus-shell")).toContainText("Preset: Pixel Hard (Pressure = Size)");
   await expect(options.locator("input#brushSize")).toHaveValue("8");
@@ -169,7 +169,7 @@ test("Pixel Hard (Pressure = Size) applies size response with 8/1 range @recent"
 test("brush presets apply, save and persist", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  const options = page.locator('gnumarus-shell [aria-label="Pencil options"]');
+  const options = page.locator('gnumarus-shell [aria-label="Brush options"]');
   await options.locator("select#brushPreset").selectOption("Chalk");
   await expect(page.locator("gnumarus-shell")).toContainText("Preset: Chalk");
   await expect(options.locator("select#brushTipKind")).toHaveValue("soft");
@@ -185,7 +185,7 @@ test("brush presets apply, save and persist", async ({ page }) => {
   await page.reload();
   await page.waitForSelector("gnumarus-shell canvas");
   await expect(
-    page.locator('gnumarus-shell [aria-label="Pencil options"] select#brushPreset'),
+    page.locator('gnumarus-shell [aria-label="Brush options"] select#brushPreset'),
   ).toContainText("E2E Custom");
 });
 
@@ -213,7 +213,7 @@ test("brush preset JSON imports and applies", async ({ page }) => {
   expect(imported.ok).toBe(true);
   expect(imported.names).toContain("E2E Imported");
   await expect(page.locator("gnumarus-shell")).toContainText("Preset: E2E Imported");
-  const options = page.locator('gnumarus-shell [aria-label="Pencil options"]');
+  const options = page.locator('gnumarus-shell [aria-label="Brush options"]');
   await expect(options.locator("input#paintGrainStrength")).toHaveValue("60");
   expect(await page.evaluate(() => {
     const root = window as unknown as {
@@ -226,7 +226,7 @@ test("brush preset JSON imports and applies", async ({ page }) => {
 test("tip rotation follows the stroke direction", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await setPaintTip(page, "image", 16, 100, 15);
   const installed = await page.evaluate(() => {
     const root = window as unknown as {
@@ -255,7 +255,7 @@ test("airbrush builds paint up while held", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await setPaintTip(page, "soft", 16, 100, 15);
   await setPaintDynamics(page, 30, 0, 0, 8);
   await page.evaluate(() => {
@@ -318,7 +318,7 @@ test("new built-in presets apply and erase @recent", async ({ page }) => {
     "Spray",
     "Chisel Marker",
     "Velocity Ink",
-    "Tilt Pencil",
+    "Tilt Brush",
   ]) {
     await expect(dialog.locator("select#brushPresetDialog")).toContainText(name);
   }
@@ -327,7 +327,7 @@ test("new built-in presets apply and erase @recent", async ({ page }) => {
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(dialog).toBeHidden();
   // Eraser Hard actually erases painted pixels and undoes cleanly.
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await bar.locator("select#brushPreset").selectOption("Pixel Hard");
   await paintCenter(page);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
@@ -353,7 +353,7 @@ test("pixel-art spray dither and palette shade @recent", async ({ page }) => {
       // eslint-disable-next-line @typescript-eslint/no-implied-eval
       new Function("engine", body)(engine);
     }, expression);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   // Pixel-art brushes lead the preset list.
   expect(await bar.locator("select#brushPreset option").allTextContents()).toEqual(
     expect.arrayContaining(["Pixel Hard", "Pixel Hard (Pressure = Size)", "Pixel Spray", "Pixel Spray (Pressure = Size)", "Pixel Dither", "Palette Shade"]),
@@ -405,7 +405,7 @@ test("pixel-art spray dither and palette shade @recent", async ({ page }) => {
   const source = await paletteEntry(5);
   const first = await paletteEntry(6);
   const second = await paletteEntry(7);
-  await setPencil(page, toHex(source));
+  await setBrushColor(page, toHex(source));
   await bar.locator("select#brushPreset").selectOption("Pixel Hard");
   await paintCenter(page);
   expect(await readPixel(page, 32, 32)).toEqual({ ...source, a: 255 });
@@ -440,7 +440,7 @@ test("pixel-art spray dither and palette shade @recent", async ({ page }) => {
     return root.__gnumarus?.engine?.getShadingPalette().slice(0, 4) ?? [];
   });
   expect(before.length).toBe(4);
-  const picker = await openPicker(page, "pencilColor");
+  const picker = await openPicker(page, "brushColor");
   await picker.getByTestId("palette-toggle").click();
   const panel = picker.getByTestId("palette-panel");
   await expect(panel).toBeVisible();

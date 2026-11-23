@@ -20,12 +20,12 @@ export async function readPixel(page: import("@playwright/test").Page, x: number
   }, [x, y]);
 }
 
-export async function setPencil(page: import("@playwright/test").Page, hex: string): Promise<void> {
+export async function setBrushColor(page: import("@playwright/test").Page, hex: string): Promise<void> {
   await page.evaluate((value: string) => {
     const root = window as unknown as {
-      __gnumarus?: { shell?: { setPencilColor(hex: string): void } };
+      __gnumarus?: { shell?: { setBrushColor(hex: string): void } };
     };
-    root.__gnumarus?.shell?.setPencilColor(value);
+    root.__gnumarus?.shell?.setBrushColor(value);
   }, hex);
 }
 
@@ -66,7 +66,7 @@ export async function setChecker(page: import("@playwright/test").Page, which: "
 
 export async function openPicker(page: import("@playwright/test").Page, pickerId: string): Promise<import("@playwright/test").Locator> {
   const picker = page.locator(`gnumarus-shell #${pickerId}`);
-  if (pickerId === "pencilColor") {
+  if (pickerId === "brushColor") {
     // The paint picker lost its own swatch button; the wells open it instead.
     await page.locator("gnumarus-shell [data-testid='fg-well']").click();
   } else {
@@ -795,7 +795,7 @@ export async function paintDot(
   x: number,
   y: number,
 ): Promise<void> {
-  await setPencil(page, hex);
+  await setBrushColor(page, hex);
   const target = await layerScreenTarget(page, x, y);
   await page.mouse.click(target.x, target.y);
 }
@@ -1003,7 +1003,7 @@ export async function cutRedBlock(page: import("@playwright/test").Page): Promis
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.evaluate(() => {
     const root = window as unknown as { __gnumarus?: { shell?: { setBrushSize(size: number): void } } };
     root.__gnumarus?.shell?.setBrushSize(3);
@@ -1029,7 +1029,7 @@ export async function cutSingleRedPixel(
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.evaluate(() => {
     const root = window as unknown as { __gnumarus?: { shell?: { setBrushSize(size: number): void } } };
     root.__gnumarus?.shell?.setBrushSize(1);
@@ -2459,7 +2459,7 @@ export async function setupTileBrushStroke(page: import("@playwright/test").Page
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   await page.getByRole("button", { name: "Add frame", exact: true }).click();
@@ -2653,7 +2653,7 @@ export async function dragLayerBox(
 }
 
 export async function paintLayerRect(page: import("@playwright/test").Page, hex: string, x0: number, y0: number, x1: number, y1: number): Promise<void> {
-  await setPencil(page, hex);
+  await setBrushColor(page, hex);
   await page.evaluate(([ax, ay, bx, by]: number[]) => {
     const root = window as unknown as { __gnumarus?: { engine?: { setShapeFilled(f: boolean): void; commitShapeRect(a: number, b: number, c: number, d: number): boolean } } };
     root.__gnumarus?.engine?.setShapeFilled(true);

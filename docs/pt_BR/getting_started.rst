@@ -16,7 +16,7 @@ Interface móvel
 
 * Em celulares (tablets mantêm a interface de desktop), o aplicativo
   abre um shell otimizado para toque: canvas em tela cheia e uma única
-  barra inferior (ferramentas roláveis — lápis, borracha, desfazer,
+  barra inferior (ferramentas roláveis — pincel, borracha, desfazer,
   refazer, painel de cor/tamanho, balde, conta-gotas — mais um botão
   de menu fixo com Salvar e a troca para versão desktop).
 * Um dedo pinta; dois dedos aproximam (pinça) e arrastam. O MVP móvel
@@ -31,7 +31,7 @@ Sua primeira pintura
 --------------------
 
 1. Abra o aplicativo. Já há um projeto padrão, pronto para pintar.
-2. Escolha o **Lápis** (``B``) e uma cor de frente nos potes de tinta.
+2. Escolha o **Pincel** (``B``) e uma cor de frente nos potes de tinta.
 3. Arraste no canvas. ``Ctrl+Z`` desfaz, ``Ctrl+Y`` refaz.
 4. **Arquivo > Salvar projeto** (``Ctrl+S``) grava o projeto de volta
    na pasta. O primeiro salvamento pede um diretório.

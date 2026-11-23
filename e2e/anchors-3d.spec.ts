@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { cutRedBlock, cutSingleRedPixel, floatingRect, getAxisOverlay, getFloatingTransform, getLayerTransform, getPlaneMatrix, getSelectionHandle, getViewState, layerDragHandle, layerScreenTarget, loadBlankProject, loadRedProject, paintCenter, readPixel, redPixelCount, rot3DCenter, rot3DHandle, selectTool, setEmptyCellHold, setPencil, zoomToFitLayer } from "./e2e-helpers";
+import { cutRedBlock, cutSingleRedPixel, floatingRect, getAxisOverlay, getFloatingTransform, getLayerTransform, getPlaneMatrix, getSelectionHandle, getViewState, layerDragHandle, layerScreenTarget, loadBlankProject, loadRedProject, paintCenter, readPixel, redPixelCount, rot3DCenter, rot3DHandle, selectTool, setEmptyCellHold, setBrushColor, zoomToFitLayer } from "./e2e-helpers";
 
 test("final preview follows non-destructive transforms live", async ({ page }) => {
   await page.goto("/");
@@ -614,7 +614,7 @@ test("destructive selection 3d rotation auto-selects, tilts and merges", async (
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.evaluate(() => {
     const root = window as unknown as { __gnumarus?: { shell?: { setBrushSize(size: number): void } } };
     root.__gnumarus?.shell?.setBrushSize(3);
@@ -662,7 +662,7 @@ test("painting on a tilted layer lands in layer space", async ({ page }) => {
   expect((await getLayerTransform(page)).rotationY).toBeCloseTo(-40 / 128, 4);
   // Tilt is about the layer center, so the canvas center still addresses
   // the layer center pixel through the ray-plane solve.
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.evaluate(() => {
     const root = window as unknown as { __gnumarus?: { shell?: { setBrushSize(size: number): void } } };
     root.__gnumarus?.shell?.setBrushSize(1);

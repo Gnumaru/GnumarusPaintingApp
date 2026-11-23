@@ -4,7 +4,7 @@ Atalhos de teclado
 Pintura
 -------
 
-* ``B`` lápis, ``N`` linha, ``C`` curva, ``G`` balde, ``F``
+* ``B`` pincel, ``N`` linha, ``C`` curva, ``G`` balde, ``F``
   preenchimento, ``T`` transformação, ``Y`` rotação 3D, ``U`` 3D de
   seleção
 * ``R`` seleção retangular, ``O`` elipse, ``L`` laço, ``P`` laço

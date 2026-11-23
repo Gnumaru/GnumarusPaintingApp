@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { canvasBox, canvasScreenPixel, getLayers, getMatrix, layerToScreen, onionGhostBox, onionVisible, paintCenter, setPencil } from "./e2e-helpers";
+import { canvasBox, canvasScreenPixel, getLayers, getMatrix, layerToScreen, onionGhostBox, onionVisible, paintCenter, setBrushColor } from "./e2e-helpers";
 
 test("drawer flyout renders above the canvas instead of clipped @recent", async ({ page }) => {
   await page.goto("/");
@@ -43,14 +43,14 @@ test("multiply on an unpainted texture shows the layers below on the GPU canvas 
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   // Bottom layer: solid red.
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   // Layer above with a real texture that is still transparent at the center:
   // an empty cell renders no plane at all, so materialize with a corner dot.
   await page.keyboard.press("Insert");
-  await page.getByRole("button", { name: "Pencil" }).click();
-  await setPencil(page, "#000000");
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
+  await setBrushColor(page, "#000000");
   const dot = await layerToScreen(page, 8, 8);
   await page.mouse.click(dot.x, dot.y);
   const box = await canvasBox(page);
@@ -59,11 +59,11 @@ test("multiply on an unpainted texture shows the layers below on the GPU canvas 
   await page.locator('gnumarus-shell [data-layer-id="layer1"] select[aria-label="Blend mode"]').selectOption("multiply");
   await expect.poll(async () => canvasScreenPixel(page, cx, cy), { timeout: 10000 }).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   // White is invisible in multiply, black stays black (Krita parity).
-  await setPencil(page, "#ffffff");
+  await setBrushColor(page, "#ffffff");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   await expect.poll(async () => canvasScreenPixel(page, cx, cy), { timeout: 10000 }).toEqual({ r: 255, g: 0, b: 0, a: 255 });
-  await setPencil(page, "#000000");
+  await setBrushColor(page, "#000000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   await expect.poll(async () => canvasScreenPixel(page, cx, cy), { timeout: 10000 }).toEqual({ r: 0, g: 0, b: 0, a: 255 });
@@ -72,12 +72,12 @@ test("multiply on an unpainted texture shows the layers below on the GPU canvas 
 test("darken/lighten/add/screen show through unpainted texels on the GPU canvas @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   await page.keyboard.press("Insert");
-  await page.getByRole("button", { name: "Pencil" }).click();
-  await setPencil(page, "#000000");
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
+  await setBrushColor(page, "#000000");
   const dot = await layerToScreen(page, 8, 8);
   await page.mouse.click(dot.x, dot.y);
   const box = await canvasBox(page);
@@ -90,18 +90,18 @@ test("darken/lighten/add/screen show through unpainted texels on the GPU canvas 
   }
   // Opaque semantics per mode (Krita parity): darken keeps black, drops white.
   await blend.selectOption("darken");
-  await setPencil(page, "#000000");
+  await setBrushColor(page, "#000000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   await expect.poll(async () => canvasScreenPixel(page, cx, cy), { timeout: 10000 }).toEqual({ r: 0, g: 0, b: 0, a: 255 });
-  await setPencil(page, "#ffffff");
+  await setBrushColor(page, "#ffffff");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   await expect.poll(async () => canvasScreenPixel(page, cx, cy), { timeout: 10000 }).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   // Lighten is mirrored: white wins, black shows through.
   await blend.selectOption("lighten");
   await expect.poll(async () => canvasScreenPixel(page, cx, cy), { timeout: 10000 }).toEqual({ r: 255, g: 255, b: 255, a: 255 });
-  await setPencil(page, "#000000");
+  await setBrushColor(page, "#000000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   await expect.poll(async () => canvasScreenPixel(page, cx, cy), { timeout: 10000 }).toEqual({ r: 255, g: 0, b: 0, a: 255 });
@@ -244,7 +244,7 @@ test("matrix cells multi-select with plain, ctrl and shift clicks @recent", asyn
 test("unlink cell content action dissociates selected cells @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   await page.getByRole("button", { name: "Add frame", exact: true }).click();
@@ -279,7 +279,7 @@ test("unlink cell content action dissociates selected cells @recent", async ({ p
 test("relink cell content action shares one content across cells @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   await page.getByRole("button", { name: "Add frame", exact: true }).click();
@@ -327,7 +327,7 @@ test("onion toggle looks pressed while enabled @recent", async ({ page }) => {
 test("onion ghosts follow canvas pan, zoom and rotation @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
   await page.getByRole("button", { name: "Add frame", exact: true }).click();

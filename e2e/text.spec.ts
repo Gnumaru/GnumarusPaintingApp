@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { cellTextId, cellTextureId, createDefaultText, createHelloText, paintCenter, setPencil, setTextStorage, stubProjectDirectory, stubSaveFilePicker, textHtml, textPaintedPixels } from "./e2e-helpers";
+import { cellTextId, cellTextureId, createDefaultText, createHelloText, paintCenter, setBrushColor, setTextStorage, stubProjectDirectory, stubSaveFilePicker, textHtml, textPaintedPixels } from "./e2e-helpers";
 
 test("text tool creates a text cell and renders it", async ({ page }) => {
   await page.goto("/");
@@ -79,7 +79,7 @@ test("rasterize text bakes a paintable texture content", async ({ page }) => {
   await expect(page.locator("gnumarus-shell")).toContainText("Text rasterized");
   expect(await cellTextId(page, "layer0", 0)).toBeNull();
   expect(await cellTextureId(page, "layer0", 0)).not.toBeNull();
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.keyboard.press("b");
   await paintCenter(page);
   const redCount = await page.evaluate(() => {

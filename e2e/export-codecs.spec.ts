@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { addAnimation, addFrames, decodeJxlInPage, decodeWebpInPage, exportedFile, exportedGifBytes, exportedJxlBytes, exportedSequence, exportedSheetPixels, loadBlankProject, paintCenter, readPixel, setEmptyCellHold, setPencil, stubExportDirectory, stubProjectDirectory, stubSaveFilePicker } from "./e2e-helpers";
+import { addAnimation, addFrames, decodeJxlInPage, decodeWebpInPage, exportedFile, exportedGifBytes, exportedJxlBytes, exportedSequence, exportedSheetPixels, loadBlankProject, paintCenter, readPixel, setEmptyCellHold, setBrushColor, stubExportDirectory, stubProjectDirectory, stubSaveFilePicker } from "./e2e-helpers";
 
 test("File > Export saves the current frame as lossless JXL", async ({ page }) => {
   await page.goto("/");
@@ -77,7 +77,7 @@ test("project textures save as lossless WebP and reopen", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   // Bucket-fill the whole transparent canvas so the default crop+fit import
   // cleanup keeps the 64x64 texture as is after reopening.
   await page.getByRole("button", { name: "Bucket fill" }).click();

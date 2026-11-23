@@ -22,7 +22,7 @@ Menu bar
 Tool options bar
 ----------------
 
-Directly below the menu bar, it follows the active tool: the pencil
+Directly below the menu bar, it follows the active tool: the brush
 shows brush size, shape, tip kind, dynamics, stabilizer and blend mode;
 line/curve/bucket and the other tools show their own settings. Tools
 with nothing to configure say so explicitly.
@@ -34,7 +34,7 @@ Drawer buttons group related tools (front tool paints, right-click
 opens the flyout). Standalone buttons: loupe (``Z``), bucket (``F``),
 eyedropper (hold ``Ctrl`` anywhere for a temporary one), text and tile
 brush. Below them sit the foreground/background wells (click to edit,
-``X`` swaps) and the pencil color picker, whose side panel docks the
+``X`` swaps) and the brush color picker, whose side panel docks the
 same brush settings as the options bar.
 
 Layers panel and animation matrix
@@ -63,7 +63,7 @@ Action palette
 --------------
 
 ``Ctrl+Shift+P`` (``Cmd+Shift+P`` on macOS) opens the run-action dialog.
-Type a few letters — every menu item, tool (``tool-pencil`` and
+Type a few letters — every menu item, tool (``tool-brush`` and
 friends) and filter (``filter-levels`` and friends) is listed and runs
 on ``Enter``. ``0`` resets the canvas transform; ``Tab`` hides the
 interface chrome.

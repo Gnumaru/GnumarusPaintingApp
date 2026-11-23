@@ -1,11 +1,11 @@
 import { expect, test } from "@playwright/test";
-import { getDefaultFrameDuration, getFrameDuration, getMatrixFrame, loadBlankProject, openPicker, readPixel, setPencil } from "./e2e-helpers";
+import { getDefaultFrameDuration, getFrameDuration, getMatrixFrame, loadBlankProject, openPicker, readPixel, setBrushColor } from "./e2e-helpers";
 
-test("custom picker edits pencil color through models and inputs", async ({ page }) => {
+test("custom picker edits brush color through models and inputs", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  const picker = await openPicker(page, "pencilColor");
+  const picker = await openPicker(page, "brushColor");
   const modelSelect = picker.locator("select#modelSelect");
   await expect(modelSelect.locator("option")).toHaveCount(7);
   for (const id of ["rgb", "cmyk", "hsv", "hsl", "okhsl", "okhsv", "ard"]) {
@@ -40,8 +40,8 @@ test("custom picker edits pencil color through models and inputs", async ({ page
 test("custom picker bars render gradients and drag to change color", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
-  const picker = await openPicker(page, "pencilColor");
+  await setBrushColor(page, "#ff0000");
+  const picker = await openPicker(page, "brushColor");
   await picker.locator("select#modelSelect").selectOption("hsl");
   const hueBar = picker.locator('[data-testid="axis-bar-h"]');
   const style = await hueBar.getAttribute("style");
@@ -72,7 +72,7 @@ test("custom picker supports alpha and clamps manual input", async ({ page }) =>
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  const picker = await openPicker(page, "pencilColor");
+  const picker = await openPicker(page, "brushColor");
   await picker.locator("select#modelSelect").selectOption("rgb");
   await picker.getByLabel("Red", { exact: true }).fill("10");
   await picker.getByLabel("Green", { exact: true }).fill("20");
@@ -100,7 +100,7 @@ test("custom picker supports alpha and clamps manual input", async ({ page }) =>
 test("custom picker defaults to hsl and exposes alpha in every model", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  const picker = await openPicker(page, "pencilColor");
+  const picker = await openPicker(page, "brushColor");
   await expect(picker.locator("select#modelSelect")).toHaveValue("hsl");
   for (const id of ["rgb", "cmyk", "hsv", "hsl", "okhsl", "okhsv", "ard"]) {
     await picker.locator("select#modelSelect").selectOption(id);
@@ -117,7 +117,7 @@ test("custom picker defaults to hsl and exposes alpha in every model", async ({ 
 test("custom picker ard uses diagonal 0-360 and ratio 0-255", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  const picker = await openPicker(page, "pencilColor");
+  const picker = await openPicker(page, "brushColor");
   await picker.locator("select#modelSelect").selectOption("ard");
   await expect(picker.getByLabel("Angle", { exact: true })).toHaveAttribute("max", "360");
   await expect(picker.getByLabel("Ratio", { exact: true })).toHaveAttribute("max", "255");
@@ -131,7 +131,7 @@ test("custom picker ard uses diagonal 0-360 and ratio 0-255", async ({ page }) =
 test("custom picker sliders and inputs work while value is zero", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  const picker = await openPicker(page, "pencilColor");
+  const picker = await openPicker(page, "brushColor");
   await picker.locator("select#modelSelect").selectOption("hsv");
   await picker.getByLabel("Value", { exact: true }).fill("0");
   const hueBar = picker.locator('[data-testid="axis-bar-h"]');
@@ -303,7 +303,7 @@ test("backward animation plays frames in reverse order @recent", async ({ page }
 test("opening the picker on black switches out immediately @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  const picker = await openPicker(page, "pencilColor");
+  const picker = await openPicker(page, "brushColor");
   const hexInput = picker.locator("#hexInput");
   await expect(hexInput).toHaveValue("#ff0000");
   await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("100.0");
@@ -313,7 +313,7 @@ test("opening the picker on black switches out immediately @recent", async ({ pa
 test("image palette open button matches dialog button styling @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  const picker = await openPicker(page, "pencilColor");
+  const picker = await openPicker(page, "brushColor");
   await picker.getByTestId("palette-toggle").click();
   const openButton = picker.getByTestId("palette-open");
   await expect(openButton).toBeVisible();
@@ -324,7 +324,7 @@ test("image palette open button matches dialog button styling @recent", async ({
 test("black switches out to vivid colors when changing color models @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  const picker = await openPicker(page, "pencilColor");
+  const picker = await openPicker(page, "brushColor");
   const modelSelect = picker.locator("select#modelSelect");
   const hexInput = picker.locator("#hexInput");
   await expect(modelSelect.locator("option")).toHaveCount(7);
@@ -383,7 +383,7 @@ test("black switch can be disabled in settings @recent", async ({ page }) => {
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.locator("gnumarus-shell input#blackSwitchOutOfBlack")).not.toBeChecked();
   await page.keyboard.press("Escape");
-  const picker = await openPicker(page, "pencilColor");
+  const picker = await openPicker(page, "brushColor");
   const modelSelect = picker.locator("select#modelSelect");
   const hexInput = picker.locator("#hexInput");
   await expect(hexInput).toHaveValue("#000000");
@@ -400,7 +400,7 @@ test("black switch can be disabled in settings @recent", async ({ page }) => {
   expect(persisted).toContain("true");
   await page.keyboard.press("Escape");
   if (!(await hexInput.isVisible())) {
-    await openPicker(page, "pencilColor");
+    await openPicker(page, "brushColor");
   }
   await hexInput.fill("#000000");
   await modelSelect.selectOption("hsv");

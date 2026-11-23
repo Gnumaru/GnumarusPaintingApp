@@ -525,7 +525,7 @@ export interface GnumarusToolDrawerDef {
 }
 
 export const GNUMARUS_TOOL_DRAWERS: GnumarusToolDrawerDef[] = [
-  { id: "paint", tools: ["pencil", "line", "curve"] },
+  { id: "paint", tools: ["brush", "line", "curve"] },
   { id: "shape", tools: ["rectangle", "ellipseShape", "polygon", "gradient"] },
   { id: "retouch", tools: ["shading", "blur", "clone", "recolor", "jumble"] },
   { id: "selection", tools: ["rectselect", "ellipse", "lasso", "polylasso", "colorselect"] },
@@ -2288,8 +2288,8 @@ export class GnumarusShell extends LitElement {
     paintDualName: { type: String },
     paintTipName: { type: String },
     pressureResponse: { type: String },
-    pencilAntialias: { type: Boolean },
-    pencilPixelPerfect: { type: Boolean },
+    brushAntialias: { type: Boolean },
+    brushPixelPerfect: { type: Boolean },
     curvePixelPerfect: { type: Boolean },
     stabilizerMode: { type: String },
     ropeLength: { type: Number },
@@ -2587,8 +2587,8 @@ export class GnumarusShell extends LitElement {
   declare paintDualStrength: number;
   declare paintTipName: string;
   declare pressureResponse: GnumarusPressureResponse;
-  declare pencilAntialias: boolean;
-  declare pencilPixelPerfect: boolean;
+  declare brushAntialias: boolean;
+  declare brushPixelPerfect: boolean;
   declare curvePixelPerfect: boolean;
   declare stabilizerMode: GnumarusStabilizerMode;
   declare ropeLength: number;
@@ -2645,12 +2645,12 @@ export class GnumarusShell extends LitElement {
 
   constructor() {
     super();
-    this.tool = "pencil";
+    this.tool = "brush";
     this.uiMode = detectUiMode();
     this.mobileSheetOpen = false;
     this.mobileMenuOpen = false;
     this.drawerFront = {
-      paint: "pencil",
+      paint: "brush",
       view: "loupe",
       selection: "rectselect",
       destructive: "destransform",
@@ -2892,8 +2892,8 @@ export class GnumarusShell extends LitElement {
     this.paintDualStrength = DEFAULT_PAINT_DUAL_STRENGTH;
     this.paintTipName = "";
     this.pressureResponse = "none";
-    this.pencilAntialias = false;
-    this.pencilPixelPerfect = false;
+    this.brushAntialias = false;
+    this.brushPixelPerfect = false;
     this.curvePixelPerfect = false;
     this.stabilizerMode = GNUMARUS_DEFAULT_STABILIZER_MODE;
     this.ropeLength = GNUMARUS_DEFAULT_ROPE_LENGTH;
@@ -2923,10 +2923,10 @@ export class GnumarusShell extends LitElement {
   }
 
   /**
-   * Activate an MVP mobile tool: pencil (normal or eraser blend), bucket or
+   * Activate an MVP mobile tool: brush (normal or eraser blend), bucket or
    * eyedropper. Same engine path as the desktop menus, minus the drawers.
    */
-  private setMobileTool(tool: "pencil" | "bucket" | "eyedropper", eraser: boolean): void {
+  private setMobileTool(tool: "brush" | "bucket" | "eyedropper", eraser: boolean): void {
     this.tool = tool;
     this.engine?.setTool(tool);
     this.setBlendMode(eraser ? "eraser" : "normal");
@@ -2934,8 +2934,8 @@ export class GnumarusShell extends LitElement {
 
   /** Touch-optimized shell: full-bleed canvas, single bottom tool bar. */
   private renderMobileShell(): unknown {
-    const eraserActive = this.tool === "pencil" && this.blendMode === "eraser";
-    const pencilActive = this.tool === "pencil" && !eraserActive;
+    const eraserActive = this.tool === "brush" && this.blendMode === "eraser";
+    const brushActive = this.tool === "brush" && !eraserActive;
     return html`
       <div class="mobile-shell" data-testid="mobile-shell">
         <div class="mobile-canvas-host" id="mobileCanvasHost"></div>
@@ -2951,7 +2951,7 @@ export class GnumarusShell extends LitElement {
                     @input=${(event: Event): void => {
                       const target = event.target as HTMLInputElement | null;
                       if (target !== null) {
-                        this.setPencilColor(target.value);
+                        this.setBrushColor(target.value);
                       }
                     }}
                   />
@@ -2980,16 +2980,16 @@ export class GnumarusShell extends LitElement {
         <div class="mobile-toolbar" data-testid="mobile-toolbar">
           <div class="mobile-tools" data-testid="mobile-tools">
             <button
-              data-testid="mobile-pencil"
-              class=${pencilActive ? "active" : ""}
-              @click=${(): void => this.setMobileTool("pencil", false)}
+              data-testid="mobile-brush"
+              class=${brushActive ? "active" : ""}
+              @click=${(): void => this.setMobileTool("brush", false)}
             >
-              ${tr("tool.pencil")}
+              ${tr("tool.brush")}
             </button>
             <button
               data-testid="mobile-eraser"
               class=${eraserActive ? "active" : ""}
-              @click=${(): void => this.setMobileTool("pencil", true)}
+              @click=${(): void => this.setMobileTool("brush", true)}
             >
               ${tr("val.eraser")}
             </button>
@@ -3413,7 +3413,7 @@ export class GnumarusShell extends LitElement {
           ${this.renderToolDrawer("destructive")}
           ${this.renderToolDrawer("transform")}
           <gnumarus-color-picker
-            id="pencilColor"
+            id="brushColor"
             hideSwatch
             .switchOutOfBlack=${this.colorSwitchOutOfBlack}
             .value=${this.pickerTarget === "background" ? this.secondaryColorValue : this.colorValue}
@@ -3463,11 +3463,11 @@ export class GnumarusShell extends LitElement {
               }
             }}
           >
-            ${this.tool === "pencil"
+            ${this.tool === "brush"
               ? html`<div slot="side-panel">
                   <div class="tool-options brush-side-panel" data-testid="brush-side-panel">
                     ${this.renderBrushPresetRow("Panel")}
-                    ${this.renderPencilBrushOptions("Panel")}
+                    ${this.renderBrushTipOptions("Panel")}
                   </div>
                 </div>`
               : html``}
@@ -4335,7 +4335,7 @@ export class GnumarusShell extends LitElement {
       ${this.renderAnimationMatrix()}
       ${this.renderMatrixMenu()}
       <div class="statusbar" ?hidden=${this.uiHidden}>
-        <span>${this.toolDisplayName(this.tool)}</span>
+        <span>${this.statusToolName()}</span>
         <span>${this.colorValue}</span>
         <span>${this.cursorText}</span>
         <span>${this.canvasText}</span>
@@ -5977,6 +5977,14 @@ export class GnumarusShell extends LitElement {
   }
 
   /** User-facing name of a tool. The internal id stays unchanged. */
+  /** Status-bar tool name: eraser blend on the brush reads as an eraser (there is no eraser tool). */
+  private statusToolName(): string {
+    if (this.tool === "brush" && this.blendMode === "eraser") {
+      return tr("toolname.eraser");
+    }
+    return this.toolDisplayName(this.tool);
+  }
+
   private toolDisplayName(tool: GnumarusCanvasTool): string {
     if (tool === "transform") {
       return tr("toolname.transform");
@@ -6017,8 +6025,8 @@ export class GnumarusShell extends LitElement {
     if (tool === "flycam") {
       return tr("toolname.flycam");
     }
-    if (tool === "pencil") {
-      return tr("toolname.pencil");
+    if (tool === "brush") {
+      return tr("toolname.brush");
     }
     if (tool === "loupe") {
       return tr("toolname.loupe");
@@ -6226,7 +6234,7 @@ export class GnumarusShell extends LitElement {
     if (def !== undefined && front !== undefined && (def.tools as GnumarusCanvasTool[]).includes(front)) {
       return front;
     }
-    return def?.tools[0] ?? "pencil";
+    return def?.tools[0] ?? "brush";
   }
 
   /** Front-button and flyout accessible name: the tool label, unchanged. */
@@ -6318,7 +6326,7 @@ export class GnumarusShell extends LitElement {
     if (tool === "rotatecanvas") {
       return tr("tool.rotatecanvas");
     }
-    return tr("tool.pencil");
+    return tr("tool.brush");
   }
 
   private drawerFrontName(id: string): string {
@@ -6407,7 +6415,7 @@ export class GnumarusShell extends LitElement {
     if (tool === "rotatecanvas") {
       return tr("tool.rotatecanvasHint");
     }
-    return tr("tool.pencilHint");
+    return tr("tool.brushHint");
   }
 
   private drawerFrontHint(id: string): string {
@@ -6563,7 +6571,7 @@ export class GnumarusShell extends LitElement {
 
   /** Leave fly-camera mode, restoring the previously active tool. */
   private exitFlycam(): void {
-    const previous = this.toolBeforeFlycam ?? "pencil";
+    const previous = this.toolBeforeFlycam ?? "brush";
     this.toolBeforeFlycam = null;
     if (this.tool !== "flycam") {
       return;
@@ -6728,7 +6736,7 @@ export class GnumarusShell extends LitElement {
     `;
   }
 
-  /** Shared pencil settings (toolbar bar, picker side panel, preset dialog uses its own). */
+  /** Shared brush settings (toolbar bar, picker side panel, preset dialog uses its own). */
   private renderBrushPresetRow(sfx: "" | "Panel" | "Dialog") {
     return html`
               <label title=${tr("opt.presetHint")}
@@ -6745,7 +6753,7 @@ export class GnumarusShell extends LitElement {
   }
 
   /** Brush size, tip, dynamics, pressure, AA, pixel-perfect, stabilizer, blend, accumulate. */
-  private renderPencilBrushOptions(sfx: "" | "Panel") {
+  private renderBrushTipOptions(sfx: "" | "Panel") {
     return html`
               <label title=${tr("opt.brushSizeHint")}
                 >${tr("opt.brushSize")}
@@ -7075,21 +7083,21 @@ export class GnumarusShell extends LitElement {
                       <option value="firm">${tr("val.firm")}</option>
                     </select>
                   </label>`}
-              <label title=${tr("opt.pencilAntialiasHint")}
+              <label title=${tr("opt.brushAntialiasHint")}
                 ><input
                   type="checkbox"
-                  id="pencilAntialias${sfx}"
-                  .checked=${this.pencilAntialias}
-                  @change=${(): void => this.applyPencilAntialiasFromDialog(sfx)}
+                  id="brushAntialias${sfx}"
+                  .checked=${this.brushAntialias}
+                  @change=${(): void => this.applyBrushAntialiasFromDialog(sfx)}
                 />
                 ${tr("opt.antialias")}
               </label>
-              <label title=${tr("opt.pencilPixelPerfectHint")}
+              <label title=${tr("opt.brushPixelPerfectHint")}
                 ><input
                   type="checkbox"
-                  id="pencilPixelPerfect${sfx}"
-                  .checked=${this.pencilPixelPerfect}
-                  @change=${(): void => this.applyPencilPixelPerfectFromDialog(sfx)}
+                  id="brushPixelPerfect${sfx}"
+                  .checked=${this.brushPixelPerfect}
+                  @change=${(): void => this.applyBrushPixelPerfectFromDialog(sfx)}
                 />
                 ${tr("opt.pixelPerfect")}
               </label>
@@ -7098,10 +7106,10 @@ export class GnumarusShell extends LitElement {
   }
 
   private renderToolOptions() {
-    if (this.tool === "pencil") {      return html`
-        <div class="tool-options" data-testid="tool-options" aria-label=${tr("opt.pencilAria")} ?hidden=${this.uiHidden}>
+    if (this.tool === "brush") {      return html`
+        <div class="tool-options" data-testid="tool-options" aria-label=${tr("opt.brushAria")} ?hidden=${this.uiHidden}>
           ${this.renderBrushPresetRow("")}
-          ${this.renderPencilBrushOptions("")}
+          ${this.renderBrushTipOptions("")}
         </div>
       `;
     }
@@ -8008,7 +8016,7 @@ export class GnumarusShell extends LitElement {
           void this.refreshPreview();
         },
         onEyedropperPick: (hex): void => {
-          this.setPencilColor(hex);
+          this.setBrushColor(hex);
           this.statusMessage = tr("status.eyedropper", { hex });
         },
         onOpenColorPicker: (clientX, clientY): void => {
@@ -8094,7 +8102,7 @@ export class GnumarusShell extends LitElement {
       this.engine.setOnionCounts(this.onionPast, this.onionFuture);
       this.engine.setOnionTint(this.onionTint);
       this.engine.setOnionCache(this.onionResolutionScale, this.onionCacheFrames);
-      this.engine.setPencilPixelPerfect(this.pencilPixelPerfect);
+      this.engine.setBrushPixelPerfect(this.brushPixelPerfect);
       this.engine.setCurvePixelPerfect(this.curvePixelPerfect);
       this.engine.setModelLighting(this.storageModelLighting);
       this.engine.setMaxBrushSize(this.maxBrushSize);
@@ -8241,7 +8249,7 @@ export class GnumarusShell extends LitElement {
   /**
    * Mobile two-finger gesture gate (capture phase, before the engine):
    * a second concurrent touch starts pinch-zoom/pan instead of painting —
-   * the in-progress pencil dot is discarded via `cancelStroke()` — and all
+   * the in-progress brush dot is discarded via `cancelStroke()` — and all
    * gesture events are swallowed so the engine never sees a partial stroke.
    * Mouse pointers and desktop mode are never intercepted.
    */
@@ -8257,7 +8265,7 @@ export class GnumarusShell extends LitElement {
     if (this.gesturePointers.size === 2) {
       event.stopPropagation();
       event.preventDefault();
-      if (this.tool === "pencil") {
+      if (this.tool === "brush") {
         this.engine.cancelStroke();
       }
       this.gesturePrev = this.gestureSnapshot();
@@ -9748,7 +9756,7 @@ export class GnumarusShell extends LitElement {
       "frame-move-right": "sc.moveFrameRight",
       "frame-new-left": "sc.newFrameLeft",
       "frame-new-right": "sc.newFrameRight",
-      "tool-pencil": "sc.toolPencil",
+      "tool-brush": "sc.toolBrush",
       "tool-bucket": "sc.toolBucket",
       "tool-line": "sc.toolLine",
       "tool-curve": "sc.toolCurve",
@@ -11295,8 +11303,8 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.checkerColorBReset");
   }
 
-  /** Test and picker hook: set the pencil color from any parseable hex. */
-  setPencilColor(hex: string): void {
+  /** Test and picker hook: set the brush color from any parseable hex. */
+  setBrushColor(hex: string): void {
     const parsed = parseHexToRgbaBytes(hex);
     if (parsed === null) {
       return;
@@ -11310,7 +11318,7 @@ export class GnumarusShell extends LitElement {
   private swapPaintColors(): void {
     const foreground = this.secondaryColorValue;
     this.secondaryColorValue = this.colorValue;
-    this.setPencilColor(foreground);
+    this.setBrushColor(foreground);
     this.statusMessage = tr("status.colorsSwapped");
   }
 
@@ -11328,7 +11336,7 @@ export class GnumarusShell extends LitElement {
   /** Open the paint color picker popup at a viewport position (canvas right-click). */
   private openColorPickerAt(clientX: number, clientY: number): void {
     this.pickerTarget = "foreground";
-    const picker = this.shadowRoot?.getElementById("pencilColor") as GnumarusColorPicker | null;
+    const picker = this.shadowRoot?.getElementById("brushColor") as GnumarusColorPicker | null;
     if (picker !== null) {
       picker.value = this.colorValue;
       picker.openAt(clientX, clientY);
@@ -11338,7 +11346,7 @@ export class GnumarusShell extends LitElement {
   /** Open the paint color picker popup for one well, anchored under it. */
   private openWellPicker(target: "foreground" | "background", anchor: HTMLElement): void {
     this.pickerTarget = target;
-    const picker = this.shadowRoot?.getElementById("pencilColor") as GnumarusColorPicker | null;
+    const picker = this.shadowRoot?.getElementById("brushColor") as GnumarusColorPicker | null;
     if (picker === null) {
       return;
     }
@@ -11873,7 +11881,7 @@ export class GnumarusShell extends LitElement {
    * engine as the shading sequence. No-op when the picker is not mounted.
    */
   private refreshShadingPalette(): void {
-    const picker = this.shadowRoot?.getElementById("pencilColor") as unknown as {
+    const picker = this.shadowRoot?.getElementById("brushColor") as unknown as {
       getPaletteHexes?: () => string[];
     } | null;
     let hexes: string[] = [];
@@ -12110,7 +12118,7 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.dualCleared");
   }
 
-  /** Snapshot the current pencil state as a preset object. */
+  /** Snapshot the current brush state as a preset object. */
   private currentBrushPreset(name: string): GnumarusBrushPreset {
     return {
       version: 1,
@@ -12282,7 +12290,7 @@ export class GnumarusShell extends LitElement {
     return this.allBrushPresets().map((preset) => preset.name);
   }
 
-  /** Save the current pencil state as a custom preset (replaces same-name). */
+  /** Save the current brush state as a custom preset (replaces same-name). */
   saveBrushPresetAs(name: string): boolean {
     const trimmed = name.trim().slice(0, 64);
     if (trimmed.length === 0) {
@@ -12527,28 +12535,28 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.alphaCurve", { value: this.curveLabel(curve) });
   }
 
-  /** Test hook: enable or disable pencil anti-aliasing. */
-  setPencilAntialias(enabled: boolean): void {
+  /** Test hook: enable or disable brush anti-aliasing. */
+  setBrushAntialias(enabled: boolean): void {
     const next = enabled === true;
-    this.pencilAntialias = next;
-    this.engine?.setPencilAntialias(next);
-    this.statusMessage = tr("status.pencilAntialias", { value: this.onOffLabel(next) });
+    this.brushAntialias = next;
+    this.engine?.setBrushAntialias(next);
+    this.statusMessage = tr("status.brushAntialias", { value: this.onOffLabel(next) });
   }
 
-  private currentDialogPencilAntialias(scope = ""): boolean {
-    const input = this.shadowRoot?.getElementById("pencilAntialias" + scope) as HTMLInputElement | null;
+  private currentDialogBrushAntialias(scope = ""): boolean {
+    const input = this.shadowRoot?.getElementById("brushAntialias" + scope) as HTMLInputElement | null;
     return input?.checked === true;
   }
 
-  private applyPencilAntialiasFromDialog(scope = ""): void {
-    const enabled = this.currentDialogPencilAntialias(scope);
-    this.pencilAntialias = enabled;
-    this.engine?.setPencilAntialias(enabled);
-    this.statusMessage = tr("status.pencilAntialias", { value: this.onOffLabel(enabled) });
+  private applyBrushAntialiasFromDialog(scope = ""): void {
+    const enabled = this.currentDialogBrushAntialias(scope);
+    this.brushAntialias = enabled;
+    this.engine?.setBrushAntialias(enabled);
+    this.statusMessage = tr("status.brushAntialias", { value: this.onOffLabel(enabled) });
   }
 
-  /** Test hook: enable or disable pencil pixel perfect (enabling snaps brush size min/max to 1). */
-  setPencilPixelPerfect(enabled: boolean): void {
+  /** Test hook: enable or disable brush pixel perfect (enabling snaps brush size min/max to 1). */
+  setBrushPixelPerfect(enabled: boolean): void {
     const next = enabled === true;
     if (next) {
       this.brushSize = 1;
@@ -12556,9 +12564,9 @@ export class GnumarusShell extends LitElement {
       this.engine?.setBrushSize(1);
       this.engine?.setBrushSizeMin(1);
     }
-    this.pencilPixelPerfect = next;
-    this.engine?.setPencilPixelPerfect(next);
-    this.statusMessage = tr("status.pencilPixelPerfect", { value: this.onOffLabel(next) });
+    this.brushPixelPerfect = next;
+    this.engine?.setBrushPixelPerfect(next);
+    this.statusMessage = tr("status.brushPixelPerfect", { value: this.onOffLabel(next) });
   }
 
   /** Test hook: enable or disable curve pixel perfect (enabling snaps curve width min/max to 1). */
@@ -12575,8 +12583,8 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.curvePixelPerfect", { value: this.onOffLabel(next) });
   }
 
-  private currentDialogPencilPixelPerfect(scope = ""): boolean {
-    const input = this.shadowRoot?.getElementById("pencilPixelPerfect" + scope) as HTMLInputElement | null;
+  private currentDialogBrushPixelPerfect(scope = ""): boolean {
+    const input = this.shadowRoot?.getElementById("brushPixelPerfect" + scope) as HTMLInputElement | null;
     return input?.checked === true;
   }
 
@@ -12585,17 +12593,17 @@ export class GnumarusShell extends LitElement {
     return input?.checked === true;
   }
 
-  private applyPencilPixelPerfectFromDialog(scope = ""): void {
-    const enabled = this.currentDialogPencilPixelPerfect(scope);
+  private applyBrushPixelPerfectFromDialog(scope = ""): void {
+    const enabled = this.currentDialogBrushPixelPerfect(scope);
     if (enabled) {
       this.brushSize = 1;
       this.brushSizeMin = 1;
       this.engine?.setBrushSize(1);
       this.engine?.setBrushSizeMin(1);
     }
-    this.pencilPixelPerfect = enabled;
-    this.engine?.setPencilPixelPerfect(enabled);
-    this.statusMessage = tr("status.pencilPixelPerfect", { value: this.onOffLabel(enabled) });
+    this.brushPixelPerfect = enabled;
+    this.engine?.setBrushPixelPerfect(enabled);
+    this.statusMessage = tr("status.brushPixelPerfect", { value: this.onOffLabel(enabled) });
   }
 
   private applyCurvePixelPerfectFromDialog(): void {

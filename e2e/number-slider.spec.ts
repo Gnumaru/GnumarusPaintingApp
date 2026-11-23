@@ -5,7 +5,7 @@ async function openBrushSize(page: import("@playwright/test").Page): Promise<imp
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   const input = page.locator("gnumarus-shell input#brushSize");
   await input.click();
   return input;
@@ -79,9 +79,9 @@ test("dialog buttons and number spinners match the dark theme @recent", async ({
 test("color picker axis inputs get the slider too @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await page.locator("gnumarus-shell [data-testid='fg-well']").click();
-  const picker = page.locator("gnumarus-shell #pencilColor");
+  const picker = page.locator("gnumarus-shell #brushColor");
   await expect(picker.getByRole("dialog", { name: "Color picker" })).toBeVisible();
   await picker.locator("select#modelSelect").selectOption("rgb");
   const red = picker.getByLabel("Red", { exact: true });

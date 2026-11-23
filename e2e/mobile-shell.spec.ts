@@ -30,7 +30,7 @@ test.describe("mobile shell", () => {
     await page.waitForSelector('gnumarus-shell [data-testid="mobile-shell"]');
     await expect(page.locator("gnumarus-shell .menubar")).toHaveCount(0);
     for (const id of [
-      "mobile-pencil",
+      "mobile-brush",
       "mobile-eraser",
       "mobile-undo",
       "mobile-redo",
@@ -41,7 +41,7 @@ test.describe("mobile shell", () => {
     ]) {
       await expect(page.locator(`gnumarus-shell [data-testid="${id}"]`)).toBeVisible();
     }
-    await expect(page.locator('gnumarus-shell [data-testid="mobile-pencil"]')).toHaveClass(/active/);
+    await expect(page.locator('gnumarus-shell [data-testid="mobile-brush"]')).toHaveClass(/active/);
     // Save and the desktop switch live inside the hamburger menu.
     await expect(page.locator('gnumarus-shell [data-testid="mobile-menu-sheet"]')).toHaveCount(0);
   });

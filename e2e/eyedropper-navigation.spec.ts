@@ -1,14 +1,14 @@
 import { expect, test } from "@playwright/test";
-import { getLayers, getMatrix, getMatrixFrame, loadBlankProject, openPicker, paintCenter, readPixel, setPencil } from "./e2e-helpers";
+import { getLayers, getMatrix, getMatrixFrame, loadBlankProject, openPicker, paintCenter, readPixel, setBrushColor } from "./e2e-helpers";
 
 test("F selects the bucket tool", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await expect(page.locator("gnumarus-shell")).toContainText("pencil");
+  await expect(page.locator("gnumarus-shell")).toContainText("brush");
   await page.keyboard.press("f");
   await expect(page.locator("gnumarus-shell")).toContainText("bucket");
   await page.keyboard.press("b");
-  await expect(page.locator("gnumarus-shell")).toContainText("pencil");
+  await expect(page.locator("gnumarus-shell")).toContainText("brush");
   await page.keyboard.press("F");
   await expect(page.locator("gnumarus-shell")).toContainText("bucket");
 });
@@ -50,7 +50,7 @@ test("eyedropper copies the clicked pixel color", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   const canvas = page.locator("gnumarus-shell canvas");
   const box = await canvas.boundingBox();
   if (box === null) {
@@ -60,7 +60,7 @@ test("eyedropper copies the clicked pixel color", async ({ page }) => {
   const cy = box.y + box.height / 2;
   await page.mouse.click(cx, cy);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
-  await setPencil(page, "#0000ff");
+  await setBrushColor(page, "#0000ff");
   await page.getByRole("button", { name: "Eyedropper" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("eyedropper");
   await page.mouse.click(cx, cy);
@@ -76,7 +76,7 @@ test("eyedropper copies the clicked pixel color", async ({ page }) => {
 test("holding Ctrl temporarily switches to the eyedropper", async ({ page }) => {  await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   const canvas = page.locator("gnumarus-shell canvas");
   const box = await canvas.boundingBox();
   if (box === null) {
@@ -85,13 +85,13 @@ test("holding Ctrl temporarily switches to the eyedropper", async ({ page }) => 
   const cx = box.x + box.width / 2;
   const cy = box.y + box.height / 2;
   await page.mouse.click(cx, cy);
-  await setPencil(page, "#0000ff");
+  await setBrushColor(page, "#0000ff");
   await page.keyboard.down("Control");
   await expect(page.locator("gnumarus-shell")).toContainText("eyedropper");
   await page.mouse.click(cx, cy);
   await expect(page.locator("gnumarus-shell")).toContainText("Eyedropper: #ff0000");
   await page.keyboard.up("Control");
-  await expect(page.locator("gnumarus-shell")).toContainText("pencil");
+  await expect(page.locator("gnumarus-shell")).toContainText("brush");
   // Painting after release uses the picked color with the restored tool.
   await page.keyboard.press("Delete");
   await page.mouse.click(cx, cy);
@@ -109,7 +109,7 @@ test("eyedropper copies the composited color through empty layers", async ({ pag
     }
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   };
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await clickCenter();
   await page.getByRole("button", { name: "Add layer" }).click();
   // The new top layer is active and empty: the old eyedropper would copy
@@ -119,7 +119,7 @@ test("eyedropper copies the composited color through empty layers", async ({ pag
   await expect(page.locator("gnumarus-shell")).toContainText("Eyedropper: #ff0000");
   // Opaque paint on the top layer wins the composite.
   await page.keyboard.press("b");
-  await setPencil(page, "#0000ff");
+  await setBrushColor(page, "#0000ff");
   await clickCenter();
   await page.getByRole("button", { name: "Eyedropper" }).click();
   await clickCenter();
@@ -273,7 +273,7 @@ test("arrow keys stay out of inputs and the color picker", async ({ page }) => {
   expect((await getLayers(page)).active).toBe(before.active);
   expect(await getMatrixFrame(page)).toBe(frameBefore);
   await page.keyboard.press("Escape");
-  const picker = await openPicker(page, "pencilColor");
+  const picker = await openPicker(page, "brushColor");
   await picker.locator('[data-testid="hsv-triangle"]').focus();
   await page.keyboard.press("ArrowUp");
   expect((await getLayers(page)).active).toBe(before.active);

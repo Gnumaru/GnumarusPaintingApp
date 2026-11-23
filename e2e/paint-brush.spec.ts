@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { layerPixelToScreen } from "../src/canvas/GnumarusViewportMath";
-import { backgroundPlaneSize, blurActiveElement, canvasCenter, canvasScreenPixel, getViewState, layerScreenTarget, loadBlankProject, outsideLayerTarget, paintCenter, paintedPixelCount, penDot, penTiltDot, readLayerPixel, readPixel, selectTool, setPaintDynamics, setPaintTip, setPencil, stubPenPointerCapture } from "./e2e-helpers";
+import { backgroundPlaneSize, blurActiveElement, canvasCenter, canvasScreenPixel, getViewState, layerScreenTarget, loadBlankProject, outsideLayerTarget, paintCenter, paintedPixelCount, penDot, penTiltDot, readLayerPixel, readPixel, selectTool, setPaintDynamics, setPaintTip, setBrushColor, stubPenPointerCapture } from "./e2e-helpers";
 
 test("bucket fill fills a contiguous region without crossing barriers", async ({ page }) => {
   await page.goto("/");
@@ -47,7 +47,7 @@ test("bucket fill fills a contiguous region without crossing barriers", async ({
       },
     ]);
   });
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await expect(page.locator("gnumarus-shell")).toContainText("bucket");
   const canvas = page.locator("gnumarus-shell canvas");
@@ -75,7 +75,7 @@ test("bucket fill fills a contiguous region without crossing barriers", async ({
   await page.keyboard.press("g");
   await expect(page.locator("gnumarus-shell")).toContainText("bucket");
   await page.keyboard.press("b");
-  await expect(page.locator("gnumarus-shell")).toContainText("pencil");
+  await expect(page.locator("gnumarus-shell")).toContainText("brush");
 });
 
 test("tool options bar shows drawing settings and empty labels otherwise", async ({ page }) => {
@@ -94,7 +94,7 @@ test("tool options bar shows drawing settings and empty labels otherwise", async
   await expect(options).toContainText("the loupe tool does not have any setting or helper button");
   await selectTool(page, 'Non-destructive cell transform');
   await expect(options).toContainText("the non-destructive cell transform tool does not have any setting or helper button");
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await expect(options).toContainText("Brush size");
   const icon = await page.evaluate(() => {
     const root = document.querySelector("gnumarus-shell")?.shadowRoot;
@@ -110,7 +110,7 @@ test("tool options bar shows drawing settings and empty labels otherwise", async
   expect(icon.html).toContain("<path");
 });
 
-test("pencil brush size and shape paint thick strokes", async ({ page }) => {
+test("brush brush size and shape paint thick strokes", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.evaluate(() => {
@@ -170,7 +170,7 @@ test("pencil brush size and shape paint thick strokes", async ({ page }) => {
   expect(await brushOf()).toEqual({ size: 512, shape: "square" });
   await page.locator("gnumarus-shell input#brushSize").fill("3");
   await page.locator("gnumarus-shell select#brushShape").selectOption("square");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   const canvas = page.locator("gnumarus-shell canvas");
   const box = await canvas.boundingBox();
   if (box === null) {
@@ -202,7 +202,7 @@ test("pencil brush size and shape paint thick strokes", async ({ page }) => {
   expect(await readPixel(page, 4, 3)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
 });
 
-test("brush shape defaults to circle for pencil, line and curve", async ({ page }) => {
+test("brush shape defaults to circle for brush, line and curve", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   const shapeOf = (kind: string): Promise<string> =>
@@ -218,7 +218,7 @@ test("brush shape defaults to circle for pencil, line and curve", async ({ page 
       }
       return root.__gnumarus?.engine?.getBrushShape() ?? "";
     }, kind);
-  expect(await shapeOf("pencil")).toBe("circle");
+  expect(await shapeOf("brush")).toBe("circle");
   expect(await shapeOf("line")).toBe("circle");
   expect(await shapeOf("curve")).toBe("circle");
   await expect(page.locator("gnumarus-shell select#brushShape")).toHaveValue("circle");
@@ -232,7 +232,7 @@ test("soft brush tip paints with feathered edges", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await setPaintTip(page, "soft", 16, 50, 15);
   await paintCenter(page);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
@@ -245,7 +245,7 @@ test("soft brush tip paints with feathered edges", async ({ page }) => {
 test("wide tip spacing leaves gaps between dabs", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await setPaintTip(page, "soft", 8, 100, 15);
   const dense = async (): Promise<number> => {
     const start = await layerScreenTarget(page, 8, 32);
@@ -270,7 +270,7 @@ test("image tip masks paint by its luminance", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await setPaintTip(page, "image", 16, 100, 15);
   const installed = await page.evaluate(() => {
     const root = window as unknown as {
@@ -290,7 +290,7 @@ test("low flow paints translucent dabs", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await setPaintTip(page, "soft", 16, 100, 15);
   await setPaintDynamics(page, 30, 0, 0, 8);
   await paintCenter(page);
@@ -304,7 +304,7 @@ test("paper grain varies dab alpha across pixels", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await setPaintTip(page, "image", 16, 100, 15);
   const installed = await page.evaluate(() => {
     const root = window as unknown as {
@@ -331,7 +331,7 @@ test("paper grain varies dab alpha across pixels", async ({ page }) => {
 test("fuzzy jitter changes the footprint deterministically", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await setPaintTip(page, "soft", 8, 100, 100);
   await setPaintDynamics(page, 100, 0, 0, 8);
   const stroke = async (): Promise<number> => {
@@ -360,7 +360,7 @@ test("fuzzy jitter changes the footprint deterministically", async ({ page }) =>
 test("firm pressure curve paints smaller than linear", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.evaluate(() => {
     const root = window as unknown as {
       __gnumarus?: {
@@ -397,7 +397,7 @@ test("firm pressure curve paints smaller than linear", async ({ page }) => {
 test("dual tip masks the primary tip", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await setPaintTip(page, "soft", 16, 100, 15);
   await setPaintDynamics(page, 100, 0, 0, 8);
   const installed = await page.evaluate(() => {
@@ -441,7 +441,7 @@ test("dual tip masks the primary tip", async ({ page }) => {
 test("pen tilt broadens dabs with tilt size", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await setPaintTip(page, "soft", 8, 100, 15);
   await page.evaluate(() => {
     const root = window as unknown as {
@@ -464,7 +464,7 @@ test("pen tilt broadens dabs with tilt size", async ({ page }) => {
 test("speed fade thins fast-stroke flow", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await setPaintTip(page, "soft", 16, 100, 15);
   await page.evaluate(() => {
     const root = window as unknown as {
@@ -502,10 +502,10 @@ test("dry smudge drags paint instead of laying color", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
-  await setPencil(page, "#0000ff");
+  await setBrushColor(page, "#0000ff");
   await setPaintTip(page, "soft", 16, 100, 15);
   await page.evaluate(() => {
     const root = window as unknown as {
@@ -529,7 +529,7 @@ test("symmetry mirrors pixel dabs across axes", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.evaluate(() => {
     const root = window as unknown as {
       __gnumarus?: { shell?: { setSymmetryMode(mode: string): void } };
@@ -558,7 +558,7 @@ test("symmetry lives in the editor bar and shows axis lines", async ({ page }) =
   await page.waitForSelector("gnumarus-shell canvas");
   const editor = page.locator('gnumarus-shell [data-testid="editor-options"]');
   await expect(editor.locator("select#symmetryMode")).toHaveValue("off");
-  await expect(page.locator('gnumarus-shell [aria-label="Pencil options"] select#symmetryMode')).toHaveCount(0);
+  await expect(page.locator('gnumarus-shell [aria-label="Brush options"] select#symmetryMode')).toHaveCount(0);
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await expect(editor.locator("select#symmetryMode")).toBeVisible();
   await editor.locator("select#symmetryMode").selectOption("mirror-x");
@@ -668,7 +668,7 @@ test("symmetry axis drag moves the mirror and resets with Shift+click", async ({
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.evaluate(() => {
     const root = window as unknown as {
       __gnumarus?: { shell?: { setSymmetryMode(mode: string): void } };
@@ -722,7 +722,7 @@ test("editor bar stays visible across tools and holds wrap", async ({ page }) =>
   await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toHaveAttribute("aria-label", "Bucket options");
   await editor.locator("select#wrapMode").selectOption("x");
   await expect(page.locator("gnumarus-shell")).toContainText("Wrap: Left-right");
-  await page.getByRole("button", { name: "Pencil" }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await expect(editor.locator("select#wrapMode")).toHaveValue("x");
 });
 
@@ -768,7 +768,7 @@ test("painting outside the texture does nothing with wrap off", async ({ page })
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   const outside = await outsideLayerTarget(page, 70, 32);
   await page.mouse.click(outside.x, outside.y);
   expect(await paintedPixelCount(page)).toBe(0);
@@ -778,7 +778,7 @@ test("wrap-x paints outside pixels back into the texture", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await page.evaluate(() => {
     const root = window as unknown as {
       __gnumarus?: { shell?: { setWrapMode(mode: string): void } };

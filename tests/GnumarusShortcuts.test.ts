@@ -4,6 +4,7 @@ import {
   applyShortcutPreset,
   findShortcutConflicts,
   normalizeShortcutKey,
+  parseShortcutStore,
   resolveEffectiveShortcuts,
   shortcutMatchesEvent,
   shortcutToString,
@@ -41,11 +42,11 @@ describe("GnumarusShortcuts", () => {
 
   test("duplicate keyboards conflict unless overlap-allowed", () => {
     const effective = resolveEffectiveShortcuts({
-      "tool-pencil": kb({ key: "b" }),
+      "tool-brush": kb({ key: "b" }),
       "tool-bucket": kb({ key: "b" }),
     });
     const conflicts = findShortcutConflicts(effective);
-    expect(conflicts.has("tool-pencil")).toBe(true);
+    expect(conflicts.has("tool-brush")).toBe(true);
     expect(conflicts.has("tool-bucket")).toBe(true);
   });
 
@@ -104,5 +105,13 @@ describe("GnumarusShortcuts", () => {
   test("defaults define every documented id once", () => {
     const ids = GNUMARUS_DEFAULT_SHORTCUTS.map((entry) => entry.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  test("pre-rename tool-pencil overrides migrate to tool-brush", () => {
+    const store = parseShortcutStore(
+      JSON.stringify({ preset: "gnumarus", overrides: { "tool-pencil": kb({ key: "x" }) } }),
+    );
+    expect(store.overrides["tool-brush"]).toEqual(kb({ key: "x" }));
+    expect("tool-pencil" in store.overrides).toBe(false);
   });
 });

@@ -1,8 +1,8 @@
 Ferramentas de pintura
 ======================
 
-Lápis (B)
----------
+Pincel (B)
+----------
 
 O pincel de pixel. O tamanho é uma faixa mín–máx: a pressão da caneta
 interpola entre eles pela curva de tamanho; sem resposta à pressão, o

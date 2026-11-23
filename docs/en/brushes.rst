@@ -8,7 +8,7 @@ The preset select in the tool options bar applies a full brush setup at
 once (21 built-ins: Pixel Hard, Pixel Hard (Pressure = Size), Pixel Spray, Pixel Spray (Pressure = Size), Pixel Dither, Palette
 Shade, Soft Round, Chalk, Ink, Airbrush, Smudge, hard/soft Erasers,
 Glaze, Dry Brush, Charcoal, Blender, Spray, Chisel Marker, Velocity
-Ink, Tilt Pencil). Tweak anything afterwards freely.
+Ink, Tilt Brush). Tweak anything afterwards freely.
 
 Reset button
 ------------
@@ -30,7 +30,7 @@ Selection brush
 ---------------
 
 **Edit > Create brush from selection** (needs a floating selection)
-captures it as a paintable brush and switches the pencil to it:
+captures it as a paintable brush and switches the brush to it:
 
 * **Stamp**: the whole capture is stamped per dab (the tip preview
   outlines its bounding box).

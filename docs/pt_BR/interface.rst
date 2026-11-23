@@ -26,7 +26,7 @@ Barra de menus
 Barra de opções da ferramenta
 -----------------------------
 
-Logo abaixo da barra de menus, ela segue a ferramenta ativa: o lápis
+Logo abaixo da barra de menus, ela segue a ferramenta ativa: o pincel
 mostra tamanho, forma, tipo de ponta, dinâmicas, estabilizador e modo
 de mesclagem; linha/curva/balde e as demais mostram suas próprias
 configurações. Ferramentas sem nada a configurar dizem isso
@@ -40,7 +40,7 @@ frente pinta, o botão direito abre o menu). Botões avulsos: lupa
 (``Z``), balde (``F``), conta-gotas (segure ``Ctrl`` em qualquer lugar
 para um temporário), texto e pincel de azulejo. Abaixo ficam os potes
 de cor de frente/fundo (clique para editar, ``X`` troca) e o seletor
-de cor do lápis, cujo painel lateral traz as mesmas configurações de
+de cor do pincel, cujo painel lateral traz as mesmas configurações de
 pincel da barra de opções.
 
 Painel de camadas e matriz de animação
@@ -70,7 +70,7 @@ Paleta de ações
 ---------------
 
 ``Ctrl+Shift+P`` (``Cmd+Shift+P`` no macOS) abre o diálogo de ações.
-Digite algumas letras — todo item de menu, ferramenta (``tool-pencil``
+Digite algumas letras — todo item de menu, ferramenta (``tool-brush``
 e outros) e filtro (``filter-levels`` e outros) aparece na lista e
 executa com ``Enter``. ``0`` redefine a transformação do canvas;
 ``Tab`` oculta a interface.

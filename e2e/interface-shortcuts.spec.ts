@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { getLayers, loadBlankProject, readPixel, setPencil } from "./e2e-helpers";
+import { getLayers, loadBlankProject, readPixel, setBrushColor } from "./e2e-helpers";
 
 test("shortcuts dialog shows translated key labels in Brazilian Portuguese @recent", async ({ page }) => {
   await page.goto("/");
@@ -110,7 +110,7 @@ test("Control+E merges down honoring the lower layer transform", async ({ page }
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
   await page.getByRole("button", { name: "Add layer" }).click();
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   const canvas = page.locator("gnumarus-shell canvas");
   const box = await canvas.boundingBox();
   if (box === null) {

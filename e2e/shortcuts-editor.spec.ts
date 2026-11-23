@@ -21,10 +21,10 @@ test("Edit menu and run action open the same shortcuts editor", async ({ page })
   await expect(dialog.locator('[data-testid="shortcut-search"]')).toBeVisible();
   await expect(dialog.locator('[data-testid="shortcut-reset-all"]')).toBeVisible();
   // Every row has a name, a key description and a change button.
-  const pencil = rowFor(dialog, "tool-pencil");
-  await expect(pencil).toContainText("Pencil");
-  await expect(pencil.locator('[data-testid="shortcut-keys"]')).toContainText("B");
-  await expect(pencil.locator('[data-testid="shortcut-change"]')).toBeVisible();
+  const brush = rowFor(dialog, "tool-brush");
+  await expect(brush).toContainText("Brush");
+  await expect(brush.locator('[data-testid="shortcut-keys"]')).toContainText("B");
+  await expect(brush.locator('[data-testid="shortcut-change"]')).toBeVisible();
   // Mouse gestures describe the fixed gesture.
   const pan = rowFor(dialog, "view-pan");
   await expect(pan.locator('[data-testid="shortcut-keys"]')).toContainText("space");
@@ -47,8 +47,8 @@ test("Edit menu and run action open the same shortcuts editor", async ({ page })
 test("search filters shortcuts by name similarity", async ({ page }) => {
   const dialog = await openEditor(page);
   const search = dialog.locator('[data-testid="shortcut-search"]');
-  await search.fill("pencil");
-  await expect(rowFor(dialog, "tool-pencil")).toBeVisible();
+  await search.fill("brush");
+  await expect(rowFor(dialog, "tool-brush")).toBeVisible();
   await expect(rowFor(dialog, "tool-bucket")).toBeHidden();
   await search.fill("eyedropper");
   await expect(rowFor(dialog, "edit-temp-eyedropper")).toBeVisible();
@@ -58,9 +58,9 @@ test("search filters shortcuts by name similarity", async ({ page }) => {
 
 test("change applies, cancel discards and default restores", async ({ page }) => {
   const dialog = await openEditor(page);
-  await dialog.locator('[data-testid="shortcut-search"]').fill("Pencil");
-  const pencil = rowFor(dialog, "tool-pencil");
-  await pencil.locator('[data-testid="shortcut-change"]').click();
+  await dialog.locator('[data-testid="shortcut-search"]').fill("Brush");
+  const brush = rowFor(dialog, "tool-brush");
+  await brush.locator('[data-testid="shortcut-change"]').click();
   const edit = page.locator("gnumarus-shell dialog#shortcutEditDialog");
   await expect(edit).toBeVisible();
   // Five modifier checkboxes plus a symbol input.
@@ -72,48 +72,52 @@ test("change applies, cancel discards and default restores", async ({ page }) =>
   // Cancel discards.
   await input.fill("F8");
   await edit.locator('[data-testid="shortcut-edit-cancel"]').click();
-  await expect(pencil.locator('[data-testid="shortcut-keys"]')).toContainText("B");
-  // OK applies: pencil moves to F8 and F8 actually selects it.
-  await pencil.locator('[data-testid="shortcut-change"]').click();
+  await expect(brush.locator('[data-testid="shortcut-keys"]')).toContainText("B");
+  // OK applies: brush moves to F8 and F8 actually selects it.
+  await brush.locator('[data-testid="shortcut-change"]').click();
   await edit.locator('[data-testid="shortcut-key-input"]').fill("F8");
   await edit.locator('[data-testid="shortcut-edit-ok"]').click();
-  await expect(pencil.locator('[data-testid="shortcut-keys"]')).toContainText("F8");
+  await expect(brush.locator('[data-testid="shortcut-keys"]')).toContainText("F8");
   await dialog.locator('[data-testid="shortcut-close"]').click();
   await expect(dialog).toBeHidden();
   await page.keyboard.press("g");
   await expect(page.locator("gnumarus-shell")).toContainText("bucket");
   await page.keyboard.press("F8");
-  await expect(page.locator("gnumarus-shell")).toContainText("pencil");
+  await expect(page.locator("gnumarus-shell")).toContainText("brush");
   // Default restores the factory key.
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Edit shortcuts" }).click();
   await expect(dialog).toBeVisible();
-  await dialog.locator('[data-testid="shortcut-search"]').fill("Pencil");
-  await rowFor(dialog, "tool-pencil").locator('[data-testid="shortcut-change"]').click();
+  await dialog.locator('[data-testid="shortcut-search"]').fill("Brush");
+  await rowFor(dialog, "tool-brush").locator('[data-testid="shortcut-change"]').click();
   await edit.locator('[data-testid="shortcut-edit-default"]').click();
   await expect(edit.locator('[data-testid="shortcut-key-input"]')).toHaveValue("b");
   await edit.locator('[data-testid="shortcut-edit-ok"]').click();
-  await expect(rowFor(dialog, "tool-pencil").locator('[data-testid="shortcut-keys"]')).toContainText("B");
+  await expect(rowFor(dialog, "tool-brush").locator('[data-testid="shortcut-keys"]')).toContainText("B");
 });
 
 test("conflicting shortcuts turn red and stay disabled until changed", async ({ page }) => {
   const dialog = await openEditor(page);
   await dialog.locator('[data-testid="shortcut-search"]').fill("");
-  // Force bucket onto B (pencil's key).
+  // Force bucket onto B (brush's key).
   await rowFor(dialog, "tool-bucket").locator('[data-testid="shortcut-change"]').click();
   const edit = page.locator("gnumarus-shell dialog#shortcutEditDialog");
   await edit.locator('[data-testid="shortcut-key-input"]').fill("b");
   await edit.locator('[data-testid="shortcut-edit-ok"]').click();
-  await expect(rowFor(dialog, "tool-pencil")).toHaveClass(/shortcut-conflict/);
+  await expect(rowFor(dialog, "tool-brush")).toHaveClass(/shortcut-conflict/);
   await expect(rowFor(dialog, "tool-bucket")).toHaveClass(/shortcut-conflict/);
-  // Closing disables both: B selects neither pencil nor bucket.
+  // Closing disables both: B selects neither brush nor bucket.
   await dialog.locator('[data-testid="shortcut-close"]').click();
   await expect(dialog).toBeHidden();
-  await page.keyboard.press("l");
-  await expect(page.locator("gnumarus-shell")).toContainText("line");
+  await page.keyboard.press("n");
+  const activeTool = async (): Promise<string | null> =>
+    page.evaluate(() => {
+      const root = window as unknown as { __gnumarus?: { shell?: { tool: string } } };
+      return root.__gnumarus?.shell?.tool ?? null;
+    });
+  expect(await activeTool()).toBe("line");
   await page.keyboard.press("b");
-  await expect(page.locator("gnumarus-shell")).not.toContainText("pencil");
-  await expect(page.locator("gnumarus-shell")).not.toContainText("bucket");
+  expect(await activeTool()).toBe("line");
   // Resolve the conflict: bucket back to G re-enables both.
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Edit shortcuts" }).click();
@@ -121,10 +125,10 @@ test("conflicting shortcuts turn red and stay disabled until changed", async ({ 
   await rowFor(dialog, "tool-bucket").locator('[data-testid="shortcut-change"]').click();
   await edit.locator('[data-testid="shortcut-edit-default"]').click();
   await edit.locator('[data-testid="shortcut-edit-ok"]').click();
-  await expect(rowFor(dialog, "tool-pencil")).not.toHaveClass(/shortcut-conflict/);
+  await expect(rowFor(dialog, "tool-brush")).not.toHaveClass(/shortcut-conflict/);
   await dialog.locator('[data-testid="shortcut-close"]').click();
   await page.keyboard.press("b");
-  await expect(page.locator("gnumarus-shell")).toContainText("pencil");
+  expect(await activeTool()).toBe("brush");
 });
 
 test("mouse gestures keep the fixed gesture and edit only the keyboard part", async ({ page }) => {

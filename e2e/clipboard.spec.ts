@@ -9,7 +9,7 @@ import {
   readFloatingPixel,
   readPixel,
   selectTool,
-  setPencil,
+  setBrushColor,
 } from "./e2e-helpers";
 
 async function runAction(page: import("@playwright/test").Page, id: string): Promise<boolean> {
@@ -27,7 +27,7 @@ test("copy selection and paste round-trips pixels at the same origin @recent", a
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   await selectTool(page, "Rectangular selection");
   await dragRect(page, 28, 28, 36, 36);
@@ -92,7 +92,7 @@ test("shortcuts and Edit menu invoke copy and paste @recent", async ({ page }) =
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#00ff00");
+  await setBrushColor(page, "#00ff00");
   await paintCenter(page);
   await selectTool(page, "Rectangular selection");
   await dragRect(page, 28, 28, 36, 36);
@@ -109,14 +109,14 @@ test("persisting a paste keeps what transparent pixels cover @recent", async ({ 
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   await selectTool(page, "Rectangular selection");
   // Box larger than the dot: floating holds red plus transparent surroundings.
   await dragRect(page, 24, 24, 40, 40);
   expect(await runAction(page, "copy-selection")).toBe(true);
   await loadBlankProject(page, 64);
-  await selectTool(page, "Pencil");
+  await selectTool(page, "Brush");
   await paintDot(page, "#0000ff", 36, 32);
   expect(await runAction(page, "paste")).toBe(true);
   await page.keyboard.press("Enter");
@@ -138,7 +138,7 @@ test("persisting a paste blends partial alpha over the layer @recent", async ({ 
     root.__gnumarus?.engine?.setBrushSize(8);
     root.__gnumarus?.engine?.setBrushFlow(0.5);
   });
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   // Soft low-flow dab: half-transparent red.
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 128 });
@@ -153,7 +153,7 @@ test("persisting a paste blends partial alpha over the layer @recent", async ({ 
     root.__gnumarus?.engine?.setBrushTipKind("pixel");
     root.__gnumarus?.engine?.setBrushFlow(1);
   });
-  await selectTool(page, "Pencil");
+  await selectTool(page, "Brush");
   await paintDot(page, "#0000ff", 32, 32);
   expect(await runAction(page, "paste")).toBe(true);
   await page.keyboard.press("Enter");
@@ -165,7 +165,7 @@ test("cut copies to memory and removes the floating selection @recent", async ({
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await setPencil(page, "#ff0000");
+  await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   await selectTool(page, "Rectangular selection");
   await dragRect(page, 28, 28, 36, 36);
@@ -185,12 +185,12 @@ test("cut without floating and Ctrl+X invoke the action @recent", async ({ page 
   await loadBlankProject(page, 64);
   expect(await runAction(page, "cut")).toBe(false);
   await expect(toast(page)).toContainText("floating selection");
-  await setPencil(page, "#00ff00");
+  await setBrushColor(page, "#00ff00");
   await paintCenter(page);
   await selectTool(page, "Rectangular selection");
   await dragRect(page, 28, 28, 36, 36);
   await page.getByRole("button", { name: "Edit" }).click();
-  await page.getByRole("button", { name: "Cut" }).click();
+  await page.getByRole("button", { name: "Cut", exact: true }).click();
   expect(await getFloatingSelection(page)).toBeNull();
   await page.keyboard.press("Control+x");
   expect(await getFloatingSelection(page)).toBeNull();
