@@ -111,6 +111,29 @@ describe("GnumarusSpritesheet", () => {
     expect(cols.cells[3]).toEqual({ col: 0, row: 1, frame: 3 });
   });
 
+  it("treats the fixed count as a maximum unless full size is ensured", () => {
+    // One frame in a 9-column grid: exact grid when ensured, single cell otherwise.
+    const full = computeSheetGeometry(strips([0]), "fixed-cols", 9, true, true);
+    expect(full).toMatchObject({ cols: 9, rows: 1 });
+    expect(full.cells).toHaveLength(1);
+    const maxed = computeSheetGeometry(strips([0]), "fixed-cols", 9, true, false);
+    expect(maxed).toMatchObject({ cols: 1, rows: 1 });
+    // Same for lines: 1 frame in 10 lines shrinks to one cell by default.
+    const fullRows = computeSheetGeometry(strips([0]), "fixed-rows", 10, true, true);
+    expect(fullRows).toMatchObject({ cols: 1, rows: 10 });
+    const maxedRows = computeSheetGeometry(strips([0]), "fixed-rows", 10, true);
+    expect(maxedRows).toMatchObject({ cols: 1, rows: 1 });
+    // Partial grids still round up the open side in both modes.
+    expect(computeSheetGeometry(strips([0, 1, 2]), "fixed-cols", 5, true, true)).toMatchObject({
+      cols: 5,
+      rows: 1,
+    });
+    expect(computeSheetGeometry(strips([0, 1, 2]), "fixed-cols", 5, true, false)).toMatchObject({
+      cols: 3,
+      rows: 1,
+    });
+  });
+
   it("rejects empty strips and bad fixed counts", () => {
     expect(() => computeSheetGeometry([], "line", 1, true)).toThrow(/at least one frame/);
     expect(() => computeSheetGeometry(strips([]), "packed", 1, true)).toThrow(/at least one frame/);

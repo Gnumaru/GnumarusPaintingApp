@@ -2223,6 +2223,7 @@ export class GnumarusShell extends LitElement {
     exportSheetLayout: { type: String },
     exportSheetFormat: { type: String },
     exportSheetCount: { type: Number },
+    exportSheetFullSize: { type: Boolean },
     exportSheetAll: { type: Boolean },
     videoSupportWebm: { type: Boolean },
     videoSupportMp4: { type: Boolean },
@@ -2508,6 +2509,7 @@ export class GnumarusShell extends LitElement {
   declare exportSheetLayout: string;
   declare exportSheetFormat: string;
   declare exportSheetCount: number;
+  declare exportSheetFullSize: boolean;
   declare exportSheetAll: boolean;
   declare videoSupportWebm: boolean;
   declare videoSupportMp4: boolean;
@@ -2837,6 +2839,7 @@ export class GnumarusShell extends LitElement {
     this.exportSheetLayout = "line";
     this.exportSheetFormat = "image/png";
     this.exportSheetCount = 2;
+    this.exportSheetFullSize = false;
     this.exportSheetAll = false;
     this.exportBackground = false;
     this.exportBackgroundType = "project";
@@ -5950,6 +5953,18 @@ export class GnumarusShell extends LitElement {
             .value=${String(this.exportSheetCount)}
           />
         </label>
+        <label
+          title=${tr("dialog.sheetFullSizeTitle")}
+          ?hidden=${this.exportSheetLayout !== "fixed-rows" && this.exportSheetLayout !== "fixed-cols"}
+          ><input
+            type="checkbox"
+            id="exportSheetFull"
+            .checked=${this.exportSheetFullSize}
+            @change=${(event: Event): void => {
+              this.exportSheetFullSize = (event.target as HTMLInputElement).checked;
+            }}
+          />${tr("dialog.sheetFullSize")}</label
+        >
         <label title=${tr("dialog.formatTitle")}
           >${tr("dialog.format")}
           <select
@@ -17537,6 +17552,8 @@ export class GnumarusShell extends LitElement {
     const countInput = this.shadowRoot?.getElementById("exportSheetCount") as HTMLInputElement | null;
     const countRaw = Math.floor(Number(countInput?.value ?? String(this.exportSheetCount)));
     this.exportSheetCount = Number.isFinite(countRaw) ? countRaw : 0;
+    const fullInput = this.shadowRoot?.getElementById("exportSheetFull") as HTMLInputElement | null;
+    this.exportSheetFullSize = fullInput?.checked === true;
     const fail = (message: string): void => {
       this.closeExportDialog();
       this.statusMessage = message;
@@ -17593,7 +17610,7 @@ export class GnumarusShell extends LitElement {
         await this.saveStillSequence(blobs, `${base}-sheet`, format);
         return;
       }
-      const geometry = computeSheetGeometry(strips, layoutValue as GnumarusSheetLayout, this.exportSheetCount, this.wideSpritesheetPacks);
+      const geometry = computeSheetGeometry(strips, layoutValue as GnumarusSheetLayout, this.exportSheetCount, this.wideSpritesheetPacks, this.exportSheetFullSize);
       const needed = new Set<number>();
       for (const cell of geometry.cells) {
         needed.add(cell.frame);

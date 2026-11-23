@@ -56,13 +56,16 @@ export const GNUMARUS_SHEET_LAYOUTS: Array<{ value: GnumarusSheetLayout; label: 
  * Compute sheet geometry for non-empty strips. Throws when no strip holds
  * a frame, when the layout is unknown, or when the fixed count is < 1.
  * Packed columns come from the frame count's square root: rounded up for
- * wide packs, down for narrow packs.
+ * wide packs, down for narrow packs. For the fixed layouts the count is
+ * exact when `ensureFullSize` is set (short strips leave transparent
+ * cells); otherwise the count is a maximum and shrinks to fit the frames.
  */
 export function computeSheetGeometry(
   strips: GnumarusSheetStrip[],
   layout: GnumarusSheetLayout,
   fixedCount: number,
   widePack: boolean,
+  ensureFullSize = false,
 ): GnumarusSheetGeometry {
   const kept = strips.filter((strip) => strip.frames.length > 0);
   if (kept.length === 0) {
@@ -123,8 +126,8 @@ export function computeSheetGeometry(
       if (!Number.isFinite(fixedCount) || Math.floor(fixedCount) < 1) {
         throw new Error("Fixed lines needs a line count of at least 1.");
       }
-      const rows = Math.floor(fixedCount);
       const flat = kept.flatMap((strip) => strip.frames);
+      const rows = ensureFullSize ? Math.floor(fixedCount) : Math.min(Math.floor(fixedCount), flat.length);
       const cols = Math.ceil(flat.length / rows);
       return {
         cols,
@@ -136,8 +139,8 @@ export function computeSheetGeometry(
       if (!Number.isFinite(fixedCount) || Math.floor(fixedCount) < 1) {
         throw new Error("Fixed columns needs a column count of at least 1.");
       }
-      const cols = Math.floor(fixedCount);
       const flat = kept.flatMap((strip) => strip.frames);
+      const cols = ensureFullSize ? Math.floor(fixedCount) : Math.min(Math.floor(fixedCount), flat.length);
       const rows = Math.ceil(flat.length / cols);
       return {
         cols,

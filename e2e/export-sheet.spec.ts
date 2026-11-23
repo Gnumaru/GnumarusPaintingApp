@@ -81,3 +81,38 @@ test("wide spritesheet packs round columns up, narrow packs down", async ({ page
   expect(narrow?.width).toBe(64);
   expect(narrow?.height).toBe(192);
 });
+
+test("fixed columns shrink to content unless full size is ensured", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await paintCenter(page);
+  await stubSaveFilePicker(page);
+  const exportFixed = async (): Promise<void> => {
+    const dialog = await openSheetTab(page);
+    await dialog.getByRole("checkbox", { name: "All frames" }).check();
+    await dialog.locator("select#exportSheetLayout").selectOption("fixed-cols");
+    await dialog.locator("#exportSheetCount").fill("9");
+  };
+  // Default (unchecked): the fixed count is a maximum, so one frame stays 64x64.
+  await exportFixed();
+  const dialog = page.locator('gnumarus-shell dialog#exportDialog');
+  await expect(dialog.getByRole("checkbox", { name: "Ensure full size" })).not.toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: "Ensure full size" })).toBeVisible();
+  await dialog.locator("#exportSheetOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported");
+  expect((await exportedFile(page))?.width).toBe(64);
+  expect((await exportedFile(page))?.height).toBe(64);
+  await expect(page.locator('gnumarus-shell [data-testid="toast"]')).toBeHidden();
+  // Checked: the 9-column grid is kept, so one 64px frame exports as 576x64.
+  await exportFixed();
+  await page
+    .locator('gnumarus-shell dialog#exportDialog')
+    .getByRole("checkbox", { name: "Ensure full size" })
+    .check();
+  await page.locator('gnumarus-shell dialog#exportDialog').locator("#exportSheetOk").click();
+  await expect
+    .poll(async () => (await exportedFile(page))?.width, { timeout: 15000 })
+    .toBe(576);
+  expect((await exportedFile(page))?.height).toBe(64);
+});
