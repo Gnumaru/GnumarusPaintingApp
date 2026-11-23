@@ -4410,6 +4410,7 @@ export class GnumarusShell extends LitElement {
             <option value="png">PNG</option>
             <option value="webp">WebP</option>
             <option value="jxl">JPEG XL</option>
+            <option value="jpg">JPEG</option>
           </select>
         </label>
         <label
@@ -4419,10 +4420,14 @@ export class GnumarusShell extends LitElement {
             .value=${this.newStorageLossless ? "lossless" : "lossy"}
             @change=${(): void => this.applyNewStorageFromDialog()}
           >
-            <option value="lossless">${tr("val.lossless")}</option>
-            ${this.newStorageFormat === "png"
-              ? html``
-              : html`<option value="lossy">${tr("val.lossy")}</option>`}
+            ${this.newStorageFormat === "jpg"
+              ? html`<option value="lossy">${tr("val.lossy")}</option>`
+              : this.newStorageFormat === "png"
+                ? html`<option value="lossless">${tr("val.lossless")}</option>`
+                : html`
+                    <option value="lossless">${tr("val.lossless")}</option>
+                    <option value="lossy">${tr("val.lossy")}</option>
+                  `}
           </select>
         </label>
         ${this.newStorageFormat !== "png" && !this.newStorageLossless
@@ -8880,7 +8885,7 @@ export class GnumarusShell extends LitElement {
     const modeInput = this.shadowRoot?.getElementById("newStorageMode") as HTMLSelectElement | null;
     const qualityInput = this.shadowRoot?.getElementById("newStorageQuality") as HTMLInputElement | null;
     const format = parseStorageFormat(formatInput?.value ?? this.newStorageFormat);
-    const lossless = format === "png" ? true : (modeInput?.value ?? "lossless") !== "lossy";
+    const lossless = format === "png" ? true : format === "jpg" ? false : (modeInput?.value ?? "lossless") !== "lossy";
     let quality = this.newStorageQuality;
     if (qualityInput !== null) {
       const raw = Math.floor(Number(qualityInput.value));

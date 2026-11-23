@@ -103,6 +103,25 @@ test("File > New PNG storage forces lossless and hides quality", async ({ page }
   expect(persisted).toContain('"lossless": true');
 });
 
+test("File > New JPEG storage forces lossy and shows quality", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell");
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "New Project" }).click();
+  const dialog = page.locator("gnumarus-shell dialog#newDialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator("select#newPreset").selectOption("Sketches MQ");
+  await expect(dialog.locator("select#newStorageMode")).toHaveValue("lossy");
+  await dialog.locator("select#newStorageFormat").selectOption("jpg");
+  await expect(dialog.locator("select#newStorageMode")).toHaveValue("lossy");
+  await expect(dialog.locator("input#newStorageQuality")).toHaveCount(1);
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("New 1920 x 1080 canvas");
+  const persisted = await page.evaluate(() => window.localStorage.getItem("gnumarus.settings.storage.v1"));
+  expect(persisted).toContain('"format": "jpg"');
+  expect(persisted).toContain('"lossless": false');
+});
+
 test("File > New accepts canvas sizes up to 16384", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell");
