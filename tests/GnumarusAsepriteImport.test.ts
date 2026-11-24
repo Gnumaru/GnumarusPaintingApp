@@ -534,6 +534,7 @@ describe("GnumarusAseprite", () => {
       {
         name: "walk",
         loop: "forward",
+        color: expect.any(String),
         frames: [
           { frame: 0, duration: null },
           { frame: 1, duration: null },
@@ -543,6 +544,7 @@ describe("GnumarusAseprite", () => {
       {
         name: "back",
         loop: "forward",
+        color: expect.any(String),
         frames: [
           { frame: 3, duration: null },
           { frame: 2, duration: null },
@@ -552,6 +554,7 @@ describe("GnumarusAseprite", () => {
       {
         name: "boing",
         loop: "ping-pong",
+        color: expect.any(String),
         frames: [
           { frame: 0, duration: null },
           { frame: 1, duration: null },
@@ -561,6 +564,7 @@ describe("GnumarusAseprite", () => {
       {
         name: "gnob",
         loop: "ping-pong",
+        color: expect.any(String),
         frames: [
           { frame: 2, duration: null },
           { frame: 1, duration: null },
@@ -598,13 +602,14 @@ describe("GnumarusAseprite", () => {
       {
         name: "once",
         loop: "none",
+        color: expect.any(String),
         frames: [
           { frame: 0, duration: null },
           { frame: 1, duration: null },
         ],
       },
-      { name: "Tag 2", loop: "forward", frames: [{ frame: 0, duration: null }] },
-      { name: "once (2)", loop: "ping-pong", frames: [{ frame: 1, duration: null }] },
+      { name: "Tag 2", loop: "forward", color: expect.any(String), frames: [{ frame: 0, duration: null }] },
+      { name: "once (2)", loop: "ping-pong", color: expect.any(String), frames: [{ frame: 1, duration: null }] },
     ]);
   });
 

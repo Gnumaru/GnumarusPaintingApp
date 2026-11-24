@@ -334,6 +334,8 @@ import {
 import {
   GNUMARUS_ANIMATION_LOOPS,
   mapNamedAnimationFrames,
+  normalizeAnimationColor,
+  randomAnimationColor,
   type GnumarusNamedAnimation,
 } from "../animation/GnumarusNamedAnimations";
 import {
@@ -2757,15 +2759,17 @@ export class GnumarusCanvasEngine {
     return this.namedAnimations.map((animation) => ({
       name: animation.name,
       loop: animation.loop,
+      color: normalizeAnimationColor(animation.color),
       frames: animation.frames.map((entry) => ({ frame: entry.frame, duration: entry.duration })),
     }));
   }
 
   /**
    * Add a parsed named animation. False when the shape is invalid or the
-   * name is already taken. Out-of-range frame entries are dropped.
+   * name is already taken. Out-of-range frame entries are dropped. A
+   * missing color becomes a random tag color.
    */
-  addNamedAnimation(animation: GnumarusNamedAnimation): boolean {
+  addNamedAnimation(animation: Omit<GnumarusNamedAnimation, "color"> & { color?: string }): boolean {
     if (this.denyEditsLocked()) {
       return false;
     }
@@ -2789,6 +2793,8 @@ export class GnumarusCanvasEngine {
     this.namedAnimations.push({
       name: animation.name,
       loop,
+      color:
+        animation.color === undefined ? randomAnimationColor() : normalizeAnimationColor(animation.color),
       frames: frames.map((entry) => ({ frame: entry.frame, duration: entry.duration })),
     });
     return true;
@@ -2807,6 +2813,22 @@ export class GnumarusCanvasEngine {
     if (this.activeAnimationName === name) {
       this.activeAnimationName = null;
     }
+    return true;
+  }
+
+  /** Recolor a named animation tag (`#rrggbb`); false for unknown names or bad colors. */
+  setNamedAnimationColor(name: string, color: string): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
+    if (typeof color !== "string" || !/^#[0-9a-fA-F]{6}$/.test(color)) {
+      return false;
+    }
+    const entry = this.namedAnimations.find((item) => item.name === name);
+    if (entry === undefined) {
+      return false;
+    }
+    entry.color = `#${color.slice(1).toLowerCase()}`;
     return true;
   }
 

@@ -29,9 +29,10 @@ import {
   GNUMARUS_DEFAULT_FRAME_DURATION_SEC,
   type GnumarusTexturePixels,
 } from "../animation/GnumarusAnimationModel";
-import type {
-  GnumarusAnimationLoop,
-  GnumarusNamedAnimation,
+import {
+  randomAnimationColor,
+  type GnumarusAnimationLoop,
+  type GnumarusNamedAnimation,
 } from "../animation/GnumarusNamedAnimations";
 import type { GnumarusChannelLock } from "../canvas/GnumarusPixelBuffer";
 import {
@@ -739,7 +740,7 @@ export function tagsToNamedAnimations(tags: GnumarusAseTag[]): GnumarusNamedAnim
       suffix += 1;
     }
     taken.add(candidate);
-    animations.push({ name: candidate, loop, frames });
+    animations.push({ name: candidate, loop, frames, color: randomAnimationColor() });
   });
   return animations;
 }

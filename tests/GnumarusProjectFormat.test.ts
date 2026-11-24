@@ -377,7 +377,7 @@ describe("GnumarusProjectFormat", () => {
     expect(parsed.animation.defaultFrameDuration).toBe(0.25);
     expect(parsed.animation.frameDurations).toEqual([{ frame: 1, duration: 0.5 }]);
     expect(parsed.animation.namedAnimations).toEqual([
-      { name: "walk", loop: "forward", frames: [{ frame: 0, duration: 0.4 }] },
+      { name: "walk", loop: "forward", color: "#000000", frames: [{ frame: 0, duration: 0.4 }] },
     ]);
   });
 
@@ -401,6 +401,7 @@ describe("GnumarusProjectFormat", () => {
       {
         name: "walk",
         loop: "forward",
+        color: "#123456",
         frames: [
           { frame: 0, duration: 0.4 },
           { frame: 1, duration: null },
@@ -408,13 +409,28 @@ describe("GnumarusProjectFormat", () => {
           { frame: 3, duration: null },
         ],
       },
-      { name: "idle", loop: "ping-pong", frames: [{ frame: 1, duration: 0.2 }] },
+      { name: "idle", loop: "ping-pong", color: "#000000", frames: [{ frame: 1, duration: 0.2 }] },
       { name: "moon", loop: "backward", frames: [{ frame: 2, duration: null }] },
       { name: "yoyo", loop: "ping-pong-backward", frames: [{ frame: 0, duration: null }] },
     ];
     project.animation.activeAnimation = "walk";
     const parsed = parseProject(serializeProject(project));
-    expect(parsed.animation.namedAnimations).toEqual(project.animation.namedAnimations);
+    expect(parsed.animation.namedAnimations).toEqual([
+      {
+        name: "walk",
+        loop: "forward",
+        color: "#123456",
+        frames: [
+          { frame: 0, duration: 0.4 },
+          { frame: 1, duration: null },
+          { frame: 2, duration: null },
+          { frame: 3, duration: null },
+        ],
+      },
+      { name: "idle", loop: "ping-pong", color: "#000000", frames: [{ frame: 1, duration: 0.2 }] },
+      { name: "moon", loop: "backward", color: "#000000", frames: [{ frame: 2, duration: null }] },
+      { name: "yoyo", loop: "ping-pong-backward", color: "#000000", frames: [{ frame: 0, duration: null }] },
+    ]);
     expect(parsed.animation.activeAnimation).toBe("walk");
   });
 

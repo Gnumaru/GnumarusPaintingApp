@@ -34,7 +34,10 @@ Named animations
 Define ``name,loop,frames`` strings (loop is one of ``none``,
 ``forward``, ``ping-pong``, ``backward`` or ``ping-pong-backward``;
 dropdown + highlight + scoped playback, Aseprite tag import) and delete
-with confirmation. The
+with confirmation. A collapsible tag lane above the matrix shows one
+bracket per contiguous frame run (first run carries the name chip;
+clicking selects the animation), stacked in lanes, each animation with
+a random color editable in the manage dialog. The
 action palette offers frame/layer menus, arrows navigation and the
 matrix context menus for bulk delete, per-range duration and total
 duration (evenly split).

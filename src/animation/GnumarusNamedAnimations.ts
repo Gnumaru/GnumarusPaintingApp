@@ -29,6 +29,87 @@ export interface GnumarusNamedAnimation {
   name: string;
   loop: GnumarusAnimationLoop;
   frames: GnumarusNamedAnimationFrame[];
+  /** Tag color as `#rrggbb` (shown in the tag lane; random per new animation). */
+  color: string;
+}
+
+/** Default tag color (Aseprite shows new tags in black). */
+export const GNUMARUS_DEFAULT_ANIMATION_COLOR = "#000000";
+
+/** Validate a `#rrggbb` color, falling back to the default tag color. */
+export function normalizeAnimationColor(value: unknown): string {
+  if (typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value)) {
+    return `#${value.slice(1).toLowerCase()}`;
+  }
+  return GNUMARUS_DEFAULT_ANIMATION_COLOR;
+}
+
+/** Random vivid-enough tag color (fixed saturation/lightness for dark-theme contrast). */
+export function randomAnimationColor(random: () => number = Math.random): string {
+  const raw = random();
+  const hue = (((Number.isFinite(raw) ? raw : 0) % 1 + 1) % 1) * 360;
+  const saturation = 0.65;
+  const lightness = 0.6;
+  const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
+  const peak = hue / 60;
+  const cross = chroma * (1 - Math.abs((peak % 2) - 1));
+  let red = 0;
+  let green = 0;
+  let blue = 0;
+  if (peak < 1) {
+    red = chroma;
+    green = cross;
+  } else if (peak < 2) {
+    red = cross;
+    green = chroma;
+  } else if (peak < 3) {
+    green = chroma;
+    blue = cross;
+  } else if (peak < 4) {
+    green = cross;
+    blue = chroma;
+  } else if (peak < 5) {
+    red = cross;
+    blue = chroma;
+  } else {
+    red = chroma;
+    blue = cross;
+  }
+  const lift = lightness - chroma / 2;
+  const toByte = (channel: number): string =>
+    Math.max(0, Math.min(255, Math.round((channel + lift) * 255)))
+      .toString(16)
+      .padStart(2, "0");
+  return `#${toByte(red)}${toByte(green)}${toByte(blue)}`;
+}
+
+/** One contiguous 0-based frame run (inclusive on both ends). */
+export interface GnumarusAnimationRun {
+  start: number;
+  end: number;
+}
+
+/**
+ * Contiguous runs of an animation's frames (sorted, deduped): segmented
+ * animations produce one run per sequence, each getting its own tag line.
+ */
+export function animationRuns(frames: readonly { frame: number }[]): GnumarusAnimationRun[] {
+  const ones = [...new Set(frames.map((entry) => entry.frame))]
+    .filter((frame) => Number.isInteger(frame) && frame >= 0)
+    .sort((a, b) => a - b);
+  const runs: GnumarusAnimationRun[] = [];
+  let index = 0;
+  while (index < ones.length) {
+    const start = ones[index] as number;
+    let end = start;
+    while (index + 1 < ones.length && ones[index + 1] === end + 1) {
+      index += 1;
+      end += 1;
+    }
+    runs.push({ start, end });
+    index += 1;
+  }
+  return runs;
 }
 
 export class GnumarusNamedAnimationError extends Error {
@@ -66,11 +147,48 @@ function parsePositiveSeconds(text: string, what: string): number {
 }
 
 /**
+ * Greedy lane assignment for tag segments (interval-graph coloring, like
+ * Aseprite's stacked labels): sort by start, reuse the lowest lane whose
+ * last run ends strictly before this run starts (adjacent runs may share
+ * a lane). Returns the lane per input run, in input order.
+ */
+export function assignTagLanes(runs: readonly GnumarusAnimationRun[]): number[] {
+  const order = runs.map((_run, index) => index).sort((a, b) => {
+    const byStart = (runs[a]?.start ?? 0) - (runs[b]?.start ?? 0);
+    if (byStart !== 0) {
+      return byStart;
+    }
+    return (runs[a]?.end ?? 0) - (runs[b]?.end ?? 0);
+  });
+  const laneOf = new Array<number>(runs.length).fill(0);
+  const laneEnds: number[] = [];
+  for (const index of order) {
+    const run = runs[index];
+    if (run === undefined) {
+      continue;
+    }
+    let lane = laneEnds.findIndex((end) => end < run.start);
+    if (lane < 0) {
+      lane = laneEnds.length;
+      laneEnds.push(run.end);
+    } else {
+      laneEnds[lane] = run.end;
+    }
+    laneOf[index] = lane;
+  }
+  return laneOf;
+}
+
+/**
  * Parse `name,loop,frames...` against a project with `frameCount` frames
  * (1-based numbers must exist). Throws GnumarusNamedAnimationError with a
  * user-facing message on any problem.
  */
-export function parseNamedAnimation(text: string, frameCount: number): GnumarusNamedAnimation {
+export function parseNamedAnimation(
+  text: string,
+  frameCount: number,
+  color: string = randomAnimationColor(),
+): GnumarusNamedAnimation {
   const parts = text.split(",");
   if (parts.length < 3) {
     throw new GnumarusNamedAnimationError(
@@ -124,7 +242,7 @@ export function parseNamedAnimation(text: string, frameCount: number): GnumarusN
       frames.push({ frame: frame - 1, duration });
     }
   }
-  return { name, loop, frames };
+  return { name, loop, frames, color: normalizeAnimationColor(color) };
 }
 
 /**
@@ -251,6 +369,7 @@ export function mapNamedAnimationFrames(
   return animations.map((animation) => ({
     name: animation.name,
     loop: animation.loop,
+    color: normalizeAnimationColor(animation.color),
     frames: animation.frames.flatMap((entry) => {
       const mapped = map(entry.frame);
       return mapped === null ? [] : [{ frame: mapped, duration: entry.duration }];

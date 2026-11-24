@@ -35,7 +35,11 @@ Animações nomeadas
 Defina strings ``nome,loop,quadros`` (loop é um de ``none``,
 ``forward``, ``ping-pong``, ``backward`` ou ``ping-pong-backward``;
 lista + destaque + reprodução restrita, importação de tags do Aseprite)
-e exclua com confirmação.
+e exclua com confirmação. Uma faixa colapsável de etiquetas acima da
+matriz mostra um colchete por sequência contínua de quadros (a primeira
+sequência leva o chip com o nome; clicar seleciona a animação),
+empilhados em fileiras, cada animação com uma cor aleatória editável no
+diálogo de gerenciamento.
 A paleta oferece menus de quadro/camada, navegação por setas e menus
 de contexto para excluir em massa, duração por intervalo e duração
 total (dividida igualmente).

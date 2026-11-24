@@ -117,6 +117,8 @@ export interface GnumarusNamedAnimationMeta {
   name: string;
   loop: GnumarusAnimationLoop;
   frames: GnumarusNamedAnimationFrameMeta[];
+  /** Tag color as `#rrggbb`; optional for legacy files (defaults to black). */
+  color?: string;
 }
 
 export interface GnumarusAnimationMeta {
@@ -1019,6 +1021,7 @@ function parseNamedAnimationMetas(value: unknown, frameCount: number, durationsI
       throw new GnumarusProjectError("project.json has an invalid named animation");
     }
     const { name, loop, frames } = entry;
+    const color = (entry as { color?: unknown }).color;
     if (typeof name !== "string" || name.trim().length === 0) {
       throw new GnumarusProjectError("project.json has a named animation with an invalid name");
     }
@@ -1051,7 +1054,11 @@ function parseNamedAnimationMetas(value: unknown, frameCount: number, durationsI
       });
     }
     const checkedLoop: GnumarusAnimationLoop = loop as GnumarusAnimationLoop;
-    checked.push({ name: trimmed, loop: checkedLoop, frames: checkedFrames });
+    const checkedColor =
+      typeof color === "string" && /^#[0-9a-fA-F]{6}$/.test(color)
+        ? `#${color.slice(1).toLowerCase()}`
+        : "#000000";
+    checked.push({ name: trimmed, loop: checkedLoop, frames: checkedFrames, color: checkedColor });
   }
   return checked;
 }

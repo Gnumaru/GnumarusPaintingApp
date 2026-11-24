@@ -450,6 +450,8 @@ import {
 } from "../settings/GnumarusLocaleSettings";
 import { type GnumarusTexturePixels, sharedCellContentIds } from "../animation/GnumarusAnimationModel";
 import {
+  assignTagLanes,
+  animationRuns,
   countAnimationFrames,
   describeNamedAnimation,
   nextAnimationStep,
@@ -554,6 +556,9 @@ export const GNUMARUS_TOOL_DRAWERS: GnumarusToolDrawerDef[] = [
   { id: "model", tools: ["modeltransform", "flycam"] },
   { id: "view", tools: ["loupe", "pan", "rotatecanvas"] },
 ];
+
+/** localStorage flag for the animation tag lane panel (open by default). */
+const TAG_PANEL_STORAGE_KEY = "gnumarus.tagsPanelOpen";
 
 export class GnumarusShell extends LitElement {
   static styles = css`
@@ -1078,6 +1083,52 @@ export class GnumarusShell extends LitElement {
     .anim-scroll {
       overflow: auto;
       min-height: 0;
+    }
+    .anim-tags {
+      overflow-y: auto;
+      overflow-x: hidden;
+      max-height: 118px;
+      background: #232323;
+      border-bottom: 1px solid #111;
+    }
+    .anim-tags-inner {
+      position: relative;
+      min-height: 4px;
+    }
+    .anim-tag-lane {
+      position: relative;
+      height: 22px;
+    }
+    .tag-seg {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      box-sizing: border-box;
+      border-bottom: 2px solid;
+      border-left: 2px solid;
+      border-right: 2px solid;
+      border-bottom-left-radius: 2px;
+      border-bottom-right-radius: 2px;
+    }
+    .tag-chip {
+      position: absolute;
+      top: 1px;
+      left: 2px;
+      max-width: calc(100% - 4px);
+      height: 16px;
+      line-height: 16px;
+      font-size: 11px;
+      padding: 0 6px;
+      border-radius: 3px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: pointer;
+      border: 1px solid rgba(255, 255, 255, 0.35);
+    }
+    .tag-chip.active {
+      outline: 2px solid #ffffff;
+      outline-offset: 0;
     }
     .anim-grid {
       display: inline-grid;
@@ -2302,6 +2353,7 @@ export class GnumarusShell extends LitElement {
     mobileSheetOpen: { type: Boolean },
     mobileMenuOpen: { type: Boolean },
     matrixHeightPx: { type: Number },
+    tagsPanelOpen: { type: Boolean },
     layersPanelWidthPx: { type: Number },
     toastMessage: { type: String },
     updateStatus: { type: String },
@@ -2600,6 +2652,7 @@ export class GnumarusShell extends LitElement {
   declare mobileMenuOpen: boolean;
   /** Explicit animation-matrix height in px (null = automatic). */
   declare matrixHeightPx: number | null;
+  declare tagsPanelOpen: boolean;
   /** Layers panel width in px (null = 220px stylesheet default). */
   declare layersPanelWidthPx: number | null;
   declare toastMessage: string;
@@ -2935,6 +2988,7 @@ export class GnumarusShell extends LitElement {
     this.playTimer = null;
     this.uiHidden = false;
     this.matrixHeightPx = null;
+    this.tagsPanelOpen = GnumarusShell.loadTagPanelOpen();
     this.layersPanelWidthPx = null;
     this.toastMessage = "";
     this.updateStatus = "unknown";
@@ -5687,6 +5741,15 @@ export class GnumarusShell extends LitElement {
           ${(this.engine?.getNamedAnimations() ?? []).map(
             (animation) => html`
               <li>
+                <input
+                  type="color"
+                  data-testid="animation-color"
+                  data-animation=${animation.name}
+                  .value=${animation.color}
+                  title=${tr("dialog.animColor")}
+                  aria-label=${tr("dialog.animColor")}
+                  @input=${(event: Event): void => this.onAnimationColorInput(animation.name, event)}
+                />
                 <span>${describeNamedAnimation(animation, { frame: tr("anim.frameOne"), frames: tr("anim.framesMany") })}</span>
                 <button
                   aria-label=${tr("dialog.deleteAnim") + ` ${animation.name}`}
@@ -7668,6 +7731,22 @@ export class GnumarusShell extends LitElement {
             ),
           );
     const animationFrameCounts = countAnimationFrames(this.engine.getNamedAnimations());
+    // Tag lanes above the headers (Aseprite-style): one bracket per
+    // contiguous frame run (segmented animations get several), stacked in
+    // the lowest free lane so overlapping runs never collide.
+    const tagAnimations = this.engine.getNamedAnimations();
+    const tagSegments = tagAnimations.flatMap((animation) =>
+      animationRuns(animation.frames).map((run, runIndex) => ({
+        name: animation.name,
+        color: animation.color,
+        start: run.start,
+        end: run.end,
+        first: runIndex === 0,
+        active: animation.name === activeAnimation,
+      })),
+    );
+    const tagLanes = assignTagLanes(tagSegments);
+    const tagLaneCount = tagSegments.length === 0 ? 0 : Math.max(...tagLanes) + 1;
     const selectedCellKeys = new Set(
       this.validSelectedCells().map((cell) => this.cellSelectionKey(cell.layerId, cell.frame)),
     );
@@ -7695,8 +7774,50 @@ export class GnumarusShell extends LitElement {
           @pointerdown=${(event: PointerEvent): void => this.onMatrixResizeStart(event)}
         ></div>
         <div class="anim-scroll">
+          ${this.tagsPanelOpen && tagSegments.length > 0
+            ? html`<div class="anim-tags" data-testid="animation-tags" role="group" aria-label=${tr("matrix.tagPanel")}>
+                <div class="anim-tags-inner" style="margin-left: 190px; width: ${matrix.frameCount * 76}px;">
+                  ${Array.from({ length: tagLaneCount }, (_unused, lane) => html`
+                    <div class="anim-tag-lane">
+                      ${tagSegments
+                        .filter((_segment, index) => tagLanes[index] === lane)
+                        .map(
+                          (segment) => html`<div
+                            class="tag-seg"
+                            data-testid="animation-tag-seg"
+                            data-animation=${segment.name}
+                            style="left: ${segment.start * 76}px; width: ${(segment.end - segment.start + 1) * 76}px; border-color: ${segment.color};"
+                            title=${segment.name}
+                          >
+                            ${segment.first
+                              ? html`<button
+                                  class="tag-chip ${segment.active ? "active" : ""}"
+                                  data-testid="animation-tag"
+                                  data-animation=${segment.name}
+                                  style="background: ${segment.color}; color: ${this.tagTextColor(segment.color)};"
+                                  title=${segment.name}
+                                  @click=${(): void => this.selectAnimationByName(segment.name)}
+                                >
+                                  ${segment.name}</button
+                                >`
+                              : html``}
+                          </div>`,
+                        )}
+                    </div>
+                  `)}
+                </div>
+              </div>`
+            : html``}
           <div class="anim-grid" style="grid-template-columns: ${columns};">
             <div class="anim-corner">
+              <button
+                aria-label=${tr("matrix.toggleTags")}
+                title=${tr("matrix.toggleTagsHint")}
+                data-testid="tags-toggle"
+                aria-expanded=${this.tagsPanelOpen ? "true" : "false"}
+                @click=${(): void => this.toggleTagPanel()}
+                >${this.tagsPanelOpen ? "▾🏷" : "▸🏷"}</button
+              >
               <button
                 aria-label=${tr("matrix.manageAnimations")}
                 title=${tr("matrix.manageAnimationsHint")}
@@ -17215,11 +17336,44 @@ export class GnumarusShell extends LitElement {
     }
   }
 
-  private onSelectAnimation(event: Event): void {
+  /** Persisted open state of the animation tag lane panel (open by default). */  private static loadTagPanelOpen(): boolean {
+    try {
+      const stored = window.localStorage.getItem(TAG_PANEL_STORAGE_KEY);
+      if (stored === null) {
+        return true;
+      }
+      return stored !== "0";
+    } catch {
+      return true;
+    }
+  }
+
+  private toggleTagPanel(): void {
+    this.tagsPanelOpen = !this.tagsPanelOpen;
+    try {
+      window.localStorage.setItem(TAG_PANEL_STORAGE_KEY, this.tagsPanelOpen ? "1" : "0");
+    } catch {
+      // Storage failures must not break the panel toggle.
+    }
+  }
+
+  /** Black or white chip text, whichever contrasts the tag background. */
+  private tagTextColor(background: string): string {
+    const match = /^#([0-9a-fA-F]{6})$/.exec(background);
+    if (match?.[1] === undefined) {
+      return "#ffffff";
+    }
+    const red = Number.parseInt(match[1].slice(0, 2), 16);
+    const green = Number.parseInt(match[1].slice(2, 4), 16);
+    const blue = Number.parseInt(match[1].slice(4, 6), 16);
+    return (0.299 * red + 0.587 * green + 0.114 * blue) / 255 > 0.5 ? "#000000" : "#ffffff";
+  }
+
+  /** Scope playback to the named animation (or all frames for ""). */
+  private selectAnimationByName(name: string): void {
     if (this.engine === null) {
       return;
     }
-    const value = (event.target as HTMLSelectElement).value;
     const wasPlaying = this.playing;
     const restartPlayback = (): void => {
       // Switching scope mid-playback restarts on the new animation (or
@@ -17229,7 +17383,7 @@ export class GnumarusShell extends LitElement {
         this.togglePlayback();
       }
     };
-    if (value === "") {
+    if (name === "") {
       if (this.engine.setActiveAnimation(null)) {
         this.refreshLayers();
         this.dirty = true;
@@ -17238,12 +17392,29 @@ export class GnumarusShell extends LitElement {
       }
       return;
     }
-    if (this.engine.setActiveAnimation(value)) {
+    if (this.engine.setActiveAnimation(name)) {
       this.refreshLayers();
       this.dirty = true;
-      this.statusMessage = tr("status.animSelected", { value });
+      this.statusMessage = tr("status.animSelected", { value: name });
       restartPlayback();
     }
+  }
+
+  private onAnimationColorInput(name: string, event: Event): void {
+    const input = event.target as HTMLInputElement | null;
+    const color = input?.value ?? "";
+    if (this.engine?.setNamedAnimationColor(name, color) === true) {
+      this.refreshLayers();
+      this.dirty = true;
+    }
+  }
+
+  private onSelectAnimation(event: Event): void {
+    if (this.engine === null) {
+      return;
+    }
+    const value = (event.target as HTMLSelectElement).value;
+    this.selectAnimationByName(value);
   }
 
   private async openExportDialog(): Promise<void> {
@@ -20596,6 +20767,7 @@ export class GnumarusShell extends LitElement {
         namedAnimations: project.animation.namedAnimations.map((entry) => ({
           name: entry.name,
           loop: entry.loop,
+          color: entry.color ?? "#000000",
           frames: entry.frames.map((item) => ({ ...item })),
         })),
         activeAnimation: project.animation.activeAnimation,
@@ -21145,6 +21317,7 @@ export class GnumarusShell extends LitElement {
         namedAnimations: imported.namedAnimations.map((entry) => ({
           name: entry.name,
           loop: entry.loop,
+          color: entry.color ?? "#000000",
           frames: entry.frames.map((item) => ({ ...item })),
         })),
         activeAnimation: null,
