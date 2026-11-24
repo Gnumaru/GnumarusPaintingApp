@@ -44,7 +44,11 @@ Projetos
   tempo de quadro que define a duração padrão de quadro da nova
   animação).
 * **Arquivo > Abrir projeto** lê de volta uma pasta de projeto
-  (``project.json`` mais um PNG por célula de camada).
+  (``project.json`` mais um PNG por célula de camada). Soltar uma pasta
+  de projeto sobre o app também a abre (só Chromium): pastas sem
+  ``project.json`` nem ``project.gpa`` são recusadas com um aviso, e a
+  permissão de escrita é pedida uma vez via um arquivo de prova que é
+  apagado em seguida.
 * **Arquivo > Enviar projeto** importa um pacote ``.gpp`` para o
   armazenamento do navegador; projetos embutidos também podem ser
   abertos e salvos pelo mesmo menu.

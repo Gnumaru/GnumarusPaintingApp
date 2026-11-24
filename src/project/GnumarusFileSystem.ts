@@ -24,7 +24,7 @@ interface GnumarusPickedFile {
   arrayBuffer(): Promise<ArrayBuffer>;
 }
 
-interface GnumarusFileHandle {
+export interface GnumarusFileHandle {
   getFile(): Promise<GnumarusPickedFile>;
   createWritable(): Promise<GnumarusWritableStream>;
 }
@@ -77,6 +77,140 @@ export async function pickProjectDirectory(): Promise<GnumarusDirectoryHandle> {
     throw new Error("File System Access API is only available in Chromium derivatives.");
   }
   return showPicker.call(window, { mode: "readwrite" });
+}
+
+/** Minimal DataTransfer item surface needed to spot directory drops. */
+export interface GnumarusDroppedItem {
+  getAsFileSystemHandle?: () => Promise<unknown>;
+  webkitGetAsEntry?: () => unknown;
+}
+
+/** Subset of FileSystemDirectoryHandle used for dropped project folders. */
+export interface GnumarusDroppedDirectory {
+  readonly kind: string;
+  readonly name: string;
+  queryPermission?: (descriptor: { mode: string }) => Promise<PermissionState>;
+  getFileHandle(name: string, options?: { create?: boolean }): Promise<GnumarusFileHandle>;
+  getDirectoryHandle(name: string, options?: { create?: boolean }): Promise<GnumarusDroppedDirectory>;
+  removeEntry(name: string, options?: { recursive?: boolean }): Promise<void>;
+}
+
+/** First dropped directory handle, or null when the drop holds none. */
+export async function getDroppedDirectoryHandle(items: Iterable<unknown>): Promise<GnumarusDroppedDirectory | null> {
+  for (const item of items) {
+    if (item === null || typeof item !== "object") {
+      continue;
+    }
+    const getHandle = (item as GnumarusDroppedItem).getAsFileSystemHandle;
+    if (typeof getHandle !== "function") {
+      continue;
+    }
+    try {
+      const handle = (await getHandle.call(item)) as { kind?: unknown } | null;
+      if (handle !== null && typeof handle === "object" && handle.kind === "directory") {
+        return handle as GnumarusDroppedDirectory;
+      }
+    } catch {
+      // Unreadable entries are skipped; files keep the regular drop path.
+    }
+  }
+  return null;
+}
+
+/** True when a directory was dropped but exposes no file-system handle (non-Chromium). */
+export function hasDroppedDirectoryWithoutHandle(items: Iterable<unknown>): boolean {
+  for (const item of items) {
+    if (item === null || typeof item !== "object") {
+      continue;
+    }
+    const record = item as GnumarusDroppedItem;
+    if (typeof record.getAsFileSystemHandle === "function") {
+      continue;
+    }
+    try {
+      const entry = record.webkitGetAsEntry?.call(item) as { isDirectory?: unknown } | null | undefined;
+      if (entry !== null && entry !== undefined && entry.isDirectory === true) {
+        return true;
+      }
+    } catch {
+      // Ignore entry inspection failures; the file drop path decides.
+    }
+  }
+  return false;
+}
+
+/**
+ * True when project.json or project.gpa exists in the directory root.
+ * Missing entries are not errors; anything else aborts the check so
+ * callers never force permissions on unreadable folders.
+ */
+export async function directoryHasProjectFile(dir: {
+  getFileHandle(name: string): Promise<unknown>;
+}): Promise<boolean> {
+  for (const name of [GNUMARUS_PROJECT_FILE, GNUMARUS_PROJECT_ARCHIVE_FILE]) {
+    try {
+      await dir.getFileHandle(name);
+      return true;
+    } catch (error) {
+      if (
+        error instanceof DOMException &&
+        (error.name === "NotFoundError" || error.name === "TypeMismatchError")
+      ) {
+        continue;
+      }
+      throw error;
+    }
+  }
+  return false;
+}
+
+/** Random probe file name for the write-permission check. */
+export function dropWriteProbeName(): string {
+  const random =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}${Math.floor(Math.random() * 2 ** 32).toString(36)}`;
+  return `gnumarus-write-test-${random}.tmp`;
+}
+
+/**
+ * Ensure write access, forcing the browser permission prompt by writing
+ * and deleting an empty probe file when the grant is missing. Returns
+ * false when writing stays denied (callers toast instead of loading).
+ * Never prompts for folders that failed the project check — callers run
+ * that check first.
+ */
+export async function ensureDirectoryWritable(
+  dir: GnumarusDroppedDirectory,
+  probeName = dropWriteProbeName(),
+): Promise<boolean> {
+  let granted = false;
+  try {
+    granted = (await dir.queryPermission?.({ mode: "readwrite" })) === "granted";
+  } catch {
+    granted = false;
+  }
+  if (!granted) {
+    try {
+      const handle = await dir.getFileHandle(probeName, { create: true });
+      const writable = await handle.createWritable();
+      try {
+        await writable.write(new Blob([]));
+      } finally {
+        await writable.close();
+      }
+      granted = true;
+    } catch {
+      granted = false;
+    } finally {
+      try {
+        await dir.removeEntry(probeName);
+      } catch {
+        // Best-effort cleanup of the probe file.
+      }
+    }
+  }
+  return granted;
 }
 
 /**

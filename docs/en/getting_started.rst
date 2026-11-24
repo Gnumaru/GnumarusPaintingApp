@@ -42,7 +42,10 @@ Projects
   storage presets for textures, and a linked FPS / frame-time pair
   that seeds the new animation's default frame duration).
 * **File > Open Project** reads a project folder back (``project.json``
-  plus one PNG per layer cell).
+  plus one PNG per layer cell). Dropping a project folder onto the app
+  opens it too (Chromium only): folders without ``project.json`` or
+  ``project.gpa`` are refused with a toast, and write permission is
+  requested once via a probe file that is deleted right away.
 * **File > Upload Project** imports a packaged ``.gpp`` file into
   browser storage; embedded projects can also be opened and saved from
   the same menu.

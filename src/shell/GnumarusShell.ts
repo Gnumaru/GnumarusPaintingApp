@@ -44,6 +44,10 @@ import {
   isOpfsSupported,
   listEmbeddedProjects,
   openEmbeddedProjectStore,
+  directoryHasProjectFile,
+  ensureDirectoryWritable,
+  getDroppedDirectoryHandle,
+  hasDroppedDirectoryWithoutHandle,
   isRasterDropFile,
   isModel3dDropFile,
   isTextDropFile,
@@ -69,6 +73,7 @@ import {
   writeProjectFiles,
   type GnumarusDirectoryHandle,
   type GnumarusDiscoveredContentFile,
+  type GnumarusDroppedDirectory,
 } from "../project/GnumarusFileSystem";
 import {
   DEFAULT_ONION_SETTINGS,
@@ -8251,27 +8256,40 @@ export class GnumarusShell extends LitElement {
     if (this.engine === null) {
       return;
     }
-    const files = Array.from(event.dataTransfer?.files ?? []);
-    const project = files.find((file) => projectDropKind(file.name) !== null);
-    if (project !== undefined) {
-      void project.arrayBuffer().then((buffer) => {
-        this.openProjectDropDialog(project.name, new Uint8Array(buffer));
-      });
-      return;
-    }
-    const dropped = files.find(
-      (file) =>
-        isRasterDropFile(file.name, file.type) ||
-        isVectorDropFile(file.name) ||
-        isModel3dDropFile(file.name) ||
-        isTextDropFile(file.name, file.type),
-    );
-    if (dropped === undefined) {
-      return;
-    }
-    this.stopPlayback();
-    this.exitFlycam();
+    // Dropped folders open as projects (File System Access API); dropped
+    // files keep the import path below. Directories resolve first so a
+    // mixed drop never both opens a project and imports into it.
     void (async (): Promise<void> => {
+      const items = Array.from(event.dataTransfer?.items ?? []);
+      const dir = await getDroppedDirectoryHandle(items);
+      if (dir !== null) {
+        await this.openDroppedProjectDirectory(dir);
+        return;
+      }
+      if (hasDroppedDirectoryWithoutHandle(items)) {
+        this.statusMessage = tr("status.openNeedsFs");
+        this.showToast(tr("status.openNeedsFs"));
+        return;
+      }
+      const files = Array.from(event.dataTransfer?.files ?? []);
+      const project = files.find((file) => projectDropKind(file.name) !== null);
+      if (project !== undefined) {
+        const buffer = await project.arrayBuffer();
+        this.openProjectDropDialog(project.name, new Uint8Array(buffer));
+        return;
+      }
+      const dropped = files.find(
+        (file) =>
+          isRasterDropFile(file.name, file.type) ||
+          isVectorDropFile(file.name) ||
+          isModel3dDropFile(file.name) ||
+          isTextDropFile(file.name, file.type),
+      );
+      if (dropped === undefined) {
+        return;
+      }
+      this.stopPlayback();
+      this.exitFlycam();
       const bytes = new Uint8Array(await dropped.arrayBuffer());
       if (isVectorDropFile(dropped.name)) {
         await this.importDroppedVectorFile(dropped.name, bytes);
@@ -8292,6 +8310,48 @@ export class GnumarusShell extends LitElement {
       }
     })();
   };
+
+  /**
+   * Open a dropped folder as a project. Non-project folders only get an
+   * error toast (write permission is never forced for them); project
+   * folders get write access forced through a probe file when needed.
+   */
+  private async openDroppedProjectDirectory(dir: GnumarusDroppedDirectory): Promise<void> {
+    if (this.engine === null) {
+      return;
+    }
+    if (!isFileSystemAccessSupported()) {
+      this.statusMessage = tr("status.openNeedsFs");
+      this.showToast(tr("status.openNeedsFs"));
+      return;
+    }
+    let isProject = false;
+    try {
+      isProject = await directoryHasProjectFile(dir);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.statusMessage = tr("status.importFailed", { reason });
+      this.showToast(tr("status.importFailed", { reason }));
+      return;
+    }
+    if (!isProject) {
+      this.statusMessage = tr("status.dropNotProject");
+      this.showToast(tr("status.dropNotProject"));
+      return;
+    }
+    if (!(await ensureDirectoryWritable(dir))) {
+      this.statusMessage = tr("status.dropWriteDenied");
+      this.showToast(tr("status.dropWriteDenied"));
+      return;
+    }
+    try {
+      await this.loadProjectFromDirectory(dir, dir.name, null);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.statusMessage = tr("status.importFailed", { reason });
+      this.showToast(tr("status.importFailed", { reason }));
+    }
+  }
 
   /** Shift fixed-position context menus left/up only by the measured overflow so they stay adjacent to the cursor. */
   private fitContextMenusToViewport(): void {
