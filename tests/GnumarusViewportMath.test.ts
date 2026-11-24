@@ -9,6 +9,7 @@ import {
   constrainSquareDrag,
   growTextureBoxForPlacement,
   hitGrowBoxHandles,
+  hitQuadHandles,
   normalizeGrowBox,
   snapCropBox,
   imageToScreenPixel,
@@ -620,5 +621,42 @@ describe("grow-or-crop box helpers", () => {
     expect(hit(150, 150)).toBeNull();
     expect(hit(10, 10)).toBeNull();
     expect(hit(150, 40)).toBeNull();
+  });
+
+  it("matches the axis-aligned hit test on unrotated boxes", () => {
+    const quad = {
+      nw: { x: 100, y: 100 },
+      ne: { x: 200, y: 100 },
+      sw: { x: 100, y: 200 },
+      se: { x: 200, y: 200 },
+    };
+    for (let x = 80; x <= 220; x += 2) {
+      for (let y = 80; y <= 220; y += 2) {
+        expect(hitQuadHandles(quad.nw, quad.ne, quad.sw, quad.se, x, y)).toBe(
+          hitGrowBoxHandles(quad.nw.x, quad.nw.y, quad.se.x, quad.se.y, x, y),
+        );
+      }
+    }
+  });
+
+  it("hits the outline of a rotated box", () => {
+    // 100x100 box centered at (150,150), rotated 45 degrees clockwise.
+    const c = Math.SQRT1_2 * 50;
+    const quad = {
+      nw: { x: 150, y: 150 - 2 * c },
+      ne: { x: 150 + 2 * c, y: 150 },
+      sw: { x: 150 - 2 * c, y: 150 },
+      se: { x: 150, y: 150 + 2 * c },
+    };
+    expect(hitQuadHandles(quad.nw, quad.ne, quad.sw, quad.se, 150, 150 - 2 * c)).toBe("nw");
+    expect(hitQuadHandles(quad.nw, quad.ne, quad.sw, quad.se, 150 + 2 * c, 150)).toBe("ne");
+    // Edge middles: the north edge runs from nw to ne.
+    expect(hitQuadHandles(quad.nw, quad.ne, quad.sw, quad.se, 150 + c, 150 - c)).toBe("n");
+    expect(hitQuadHandles(quad.nw, quad.ne, quad.sw, quad.se, 150 - c, 150 + c)).toBe("s");
+    expect(hitQuadHandles(quad.nw, quad.ne, quad.sw, quad.se, 150 - c, 150 - c)).toBe("w");
+    expect(hitQuadHandles(quad.nw, quad.ne, quad.sw, quad.se, 150 + c, 150 + c)).toBe("e");
+    // Center and far points miss.
+    expect(hitQuadHandles(quad.nw, quad.ne, quad.sw, quad.se, 150, 150)).toBeNull();
+    expect(hitQuadHandles(quad.nw, quad.ne, quad.sw, quad.se, 10, 10)).toBeNull();
   });
 });

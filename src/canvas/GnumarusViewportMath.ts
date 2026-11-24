@@ -633,6 +633,81 @@ export function hitGrowBoxHandles(
   return best;
 }
 
+/** One mapped corner of a rotated box outline. */
+export interface GnumarusQuadCorner {
+  x: number;
+  y: number;
+}
+
+/** Point-to-segment projection factor (unclamped) and perpendicular distance. */
+function pointSegmentProjection(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): { dist: number; t: number } {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len = Math.hypot(dx, dy);
+  if (!(len > 0)) {
+    return { dist: Math.hypot(px - ax, py - ay), t: 0 };
+  }
+  const t = ((px - ax) * dx + (py - ay) * dy) / (len * len);
+  return { dist: Math.abs((px - ax) * dy - (py - ay) * dx) / len, t };
+}
+
+/**
+ * Nearest outline handle of a (possibly rotated) box quad, same zones as
+ * hitGrowBoxHandles: corners win ties at 14px, then the closest edge
+ * within the perpendicular 8px band (span extended past the edge ends,
+ * later edges win ties in n/s/w/e order). Null when nowhere near the
+ * outline. Axis-aligned quads decide exactly like hitGrowBoxHandles.
+ */
+export function hitQuadHandles(
+  nw: GnumarusQuadCorner,
+  ne: GnumarusQuadCorner,
+  sw: GnumarusQuadCorner,
+  se: GnumarusQuadCorner,
+  x: number,
+  y: number,
+  cornerRadius = 14,
+  band = 8,
+): GnumarusGrowBoxHandle | null {
+  const corners: Array<{ id: GnumarusGrowBoxHandle; corner: GnumarusQuadCorner }> = [
+    { id: "nw", corner: nw },
+    { id: "ne", corner: ne },
+    { id: "sw", corner: sw },
+    { id: "se", corner: se },
+  ];
+  for (const { id, corner } of corners) {
+    const dx = corner.x - x;
+    const dy = corner.y - y;
+    if (dx * dx + dy * dy <= cornerRadius * cornerRadius) {
+      return id;
+    }
+  }
+  const edges: Array<{ id: GnumarusGrowBoxHandle; from: GnumarusQuadCorner; to: GnumarusQuadCorner }> = [
+    { id: "n", from: nw, to: ne },
+    { id: "s", from: sw, to: se },
+    { id: "w", from: nw, to: sw },
+    { id: "e", from: ne, to: se },
+  ];
+  let best: GnumarusGrowBoxHandle | null = null;
+  let bestDist = band;
+  for (const edge of edges) {
+    const { dist, t } = pointSegmentProjection(x, y, edge.from.x, edge.from.y, edge.to.x, edge.to.y);
+    const len = Math.hypot(edge.to.x - edge.from.x, edge.to.y - edge.from.y);
+    const margin = len > 0 ? band / len : 0;
+    if (t >= -margin && t <= 1 + margin && dist <= bestDist) {
+      bestDist = dist;
+      best = edge.id;
+    }
+  }
+  return best;
+}
+
 /**
  * Float bounds of the canvas area in texture space, by inverse-mapping the
  * four canvas corners. Null when the transform is degenerate.

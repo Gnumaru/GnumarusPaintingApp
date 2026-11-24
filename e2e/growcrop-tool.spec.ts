@@ -161,19 +161,69 @@ test("crop tool draws the thin white box and snaps to whole pixels @recent", asy
   await page.mouse.move(a.x, a.y);
   await page.mouse.down();
   await page.mouse.move(b.x, b.y, { steps: 8 });
-  const preview = page.locator('gnumarus-shell [data-testid="line-preview"] rect[stroke="#ffffff"]');
+  const preview = page.locator('gnumarus-shell [data-testid="box-preview"]');
   await expect(preview).toHaveAttribute("stroke", "#ffffff");
   await expect(preview).toHaveAttribute("stroke-width", "1.5");
-  // Snapped box is (16,16)-(32,32): 32 content px wide at zoom 2 (plus
-  // the 1.5px outline stroke in the bounding box), while the raw
-  // fractional drag would render 29.6px wide.
-  const box = await preview.boundingBox();
-  expect(box?.width).toBeGreaterThan(33);
-  expect(box?.width).toBeLessThan(34);
+  // Snapped box is (16,16)-(32,32): the polygon spans exactly 32px at
+  // zoom 2 (boundingBox() inflates SVG polygons, so read points).
+  const points = await preview.getAttribute("points");
+  const xs = (points ?? "").split(" ").map((pair) => Number(pair.split(",")[0]));
+  const ys = (points ?? "").split(" ").map((pair) => Number(pair.split(",")[1]));
+  expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(31.4);
+  expect(Math.max(...xs) - Math.min(...xs)).toBeLessThan(32.6);
+  expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(31.4);
+  expect(Math.max(...ys) - Math.min(...ys)).toBeLessThan(32.6);
   await page.mouse.up();
   // The outward snap matches the commit: a 16x16 texture.
   expect(await countRedIn(page, 0, 0, 16, 16)).toBe(16 * 16);
   expect(await readPixel(page, 16, 16)).toBeNull();
+});
+
+test("crop box follows canvas and layer rotation @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await paintLayerRect(page, "#ff0000", 0, 0, 63, 63);
+  // Canvas rotated 22.5 degrees and the cell rotated another 22.5: the
+  // drawn box must render turned 45 degrees, not axis-aligned.
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: {
+        engine?: {
+          rotateByDegrees(d: number): void;
+          getActiveLayerId(): string | null;
+          setLayerTransform(id: string, transform: { rotation: number }): boolean;
+        };
+      };
+    };
+    const engine = root.__gnumarus?.engine;
+    engine?.rotateByDegrees(22.5);
+    const active = engine?.getActiveLayerId() ?? null;
+    if (active !== null) {
+      engine?.setLayerTransform(active, { rotation: Math.PI / 8 });
+    }
+  });
+  await selectTool(page, "Crop");
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + box.width * 0.3, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.7, y, { steps: 8 });
+  const points = await page.locator('gnumarus-shell [data-testid="box-preview"]').getAttribute("points");
+  await page.mouse.up();
+  const corners = (points ?? "").split(" ").map((pair) => pair.split(",").map(Number)) as Array<[number, number]>;
+  expect(corners).toHaveLength(4);
+  const angleOf = (a: [number, number], b: [number, number]): number =>
+    (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI;
+  const first = angleOf(corners[0] as [number, number], corners[1] as [number, number]);
+  const second = angleOf(corners[1] as [number, number], corners[2] as [number, number]);
+  // Still a rectangle (edges ~90 degrees apart), turned ~45 degrees.
+  expect(Math.abs(Math.abs(second - first) - 90)).toBeLessThan(5);
+  expect(Math.abs(Math.abs(first) - 45)).toBeLessThan(5);
 });
 
 test("empty cell shows no box and Esc clears a drawn one @recent", async ({ page }) => {

@@ -240,7 +240,7 @@ import {
   canvasVisibleTextureBox,
   clampCropBoxToMin1,
   growTextureBoxForPlacement,
-  hitGrowBoxHandles,
+  hitQuadHandles,
   normalizeGrowBox,
   snapCropBox,
   GNUMARUS_MAX_LAYER_SKEW,
@@ -1273,7 +1273,7 @@ export class GnumarusCanvasEngine {
   private readonly previewStabilizer: HTMLDivElement;
   private readonly previewSvg: SVGSVGElement;
   /** Live drag outline for the crop tool (the rectangle crop box). */
-  private readonly previewShapeRect: SVGRectElement;
+  private readonly previewShapeRect: SVGPolygonElement;
   /** Rubber-band ellipse for the ellipse selection tool. */
   private readonly previewSelectEllipse: SVGEllipseElement;
   /** Freehand path preview for the lasso selection tool. */
@@ -1308,7 +1308,7 @@ export class GnumarusCanvasEngine {
   /** Grow-or-crop corner handles (screen-space squares over the box). */
   private readonly previewGrowHandles: SVGCircleElement[];
   /** Region overlay rectangles (one pooled rect per displayed region). */
-  private readonly previewRegionRects: SVGRectElement[] = [];
+  private readonly previewRegionRects: SVGPolygonElement[] = [];
   /** Region corner dots (four pooled circles per displayed region). */
   private readonly previewRegionCorners: SVGCircleElement[] = [];
   /** Floating region-name editor layer (HTML inputs above the canvas). */
@@ -1659,7 +1659,8 @@ export class GnumarusCanvasEngine {
     this.previewSvg.style.display = "none";
     this.previewSvg.style.zIndex = "6";
     this.previewSvg.style.overflow = "visible";
-    this.previewShapeRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    this.previewShapeRect = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+    this.previewShapeRect.setAttribute("data-testid", "box-preview");
     this.previewShapeRect.setAttribute("fill", "none");
     this.previewShapeRect.setAttribute("opacity", "0.9");
     this.previewSvg.appendChild(this.previewShapeRect);
@@ -9038,9 +9039,18 @@ export class GnumarusCanvasEngine {
       );
       return { x: client.x - rect.left, y: client.y - rect.top };
     };
-    const a = toClient(Math.min(box.x0, box.x1), Math.min(box.y0, box.y1));
-    const b = toClient(Math.max(box.x0, box.x1), Math.max(box.y0, box.y1));
-    return hitGrowBoxHandles(a.x, a.y, b.x, b.y, clientX - rect.left, clientY - rect.top);
+    const minX = Math.min(box.x0, box.x1);
+    const minY = Math.min(box.y0, box.y1);
+    const maxX = Math.max(box.x0, box.x1);
+    const maxY = Math.max(box.y0, box.y1);
+    return hitQuadHandles(
+      toClient(minX, minY),
+      toClient(maxX, minY),
+      toClient(minX, maxY),
+      toClient(maxX, maxY),
+      clientX - rect.left,
+      clientY - rect.top,
+    );
   }
 
   /** Cursor for a grow-box border drag (matches the pending-resize set). */
@@ -9160,11 +9170,11 @@ export class GnumarusCanvasEngine {
     return targets;
   }
 
-  /** Screen rect of a region through its layer (container-relative). */
-  private regionClientBox(
+  /** Screen corners of a region through its layer (container-relative). */
+  private regionClientCorners(
     region: GnumarusRegion,
     layer: GnumarusLayer,
-  ): { minX: number; minY: number; maxX: number; maxY: number } {
+  ): { nw: { x: number; y: number }; ne: { x: number; y: number }; sw: { x: number; y: number }; se: { x: number; y: number } } {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const toClient = (imageX: number, imageY: number): { x: number; y: number } => {
       const project = layerImageToProject(imageX, imageY, layer.width, layer.height, layer.transform);
@@ -9176,9 +9186,23 @@ export class GnumarusCanvasEngine {
       );
       return { x: client.x - rect.left, y: client.y - rect.top };
     };
-    const a = toClient(region.x, region.y);
-    const b = toClient(region.x + region.w, region.y + region.h);
-    return { minX: Math.min(a.x, b.x), minY: Math.min(a.y, b.y), maxX: Math.max(a.x, b.x), maxY: Math.max(a.y, b.y) };
+    return {
+      nw: toClient(region.x, region.y),
+      ne: toClient(region.x + region.w, region.y),
+      sw: toClient(region.x, region.y + region.h),
+      se: toClient(region.x + region.w, region.y + region.h),
+    };
+  }
+
+  /** Screen rect of a region through its layer (container-relative AABB). */
+  private regionClientBox(
+    region: GnumarusRegion,
+    layer: GnumarusLayer,
+  ): { minX: number; minY: number; maxX: number; maxY: number } {
+    const corners = this.regionClientCorners(region, layer);
+    const xs = [corners.nw.x, corners.ne.x, corners.sw.x, corners.se.x];
+    const ys = [corners.nw.y, corners.ne.y, corners.sw.y, corners.se.y];
+    return { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };
   }
 
   /** Apply a region box without history (callers record one entry per gesture). */
@@ -9208,8 +9232,8 @@ export class GnumarusCanvasEngine {
       if (target === undefined) {
         continue;
       }
-      const box = this.regionClientBox(target.region, target.layer);
-      const edge = hitGrowBoxHandles(box.minX, box.minY, box.maxX, box.maxY, px, py);
+      const corners = this.regionClientCorners(target.region, target.layer);
+      const edge = hitQuadHandles(corners.nw, corners.ne, corners.sw, corners.se, px, py);
       if (edge !== null) {
         return { id: target.region.id, layer: target.layer, edge };
       }
@@ -9314,10 +9338,11 @@ export class GnumarusCanvasEngine {
     const seen = new Set<string>();
     if (active) {
       for (const { region, layer } of this.regionOverlayTargets()) {
+        const corners = this.regionClientCorners(region, layer);
         const box = this.regionClientBox(region, layer);
         let rect = this.previewRegionRects[rectIndex];
         if (rect === undefined) {
-          rect = document.createElementNS("http://www.w3.org/2000/svg", "rect") as SVGRectElement;
+          rect = document.createElementNS("http://www.w3.org/2000/svg", "polygon") as SVGPolygonElement;
           rect.setAttribute("data-testid", "region-rect");
           rect.setAttribute("fill", "none");
           rect.setAttribute("stroke", "#66ccff");
@@ -9328,10 +9353,10 @@ export class GnumarusCanvasEngine {
           this.previewSvg.appendChild(rect);
           this.previewRegionRects.push(rect);
         }
-        rect.setAttribute("x", String(box.minX));
-        rect.setAttribute("y", String(box.minY));
-        rect.setAttribute("width", String(Math.max(0, box.maxX - box.minX)));
-        rect.setAttribute("height", String(Math.max(0, box.maxY - box.minY)));
+        rect.setAttribute(
+          "points",
+          `${corners.nw.x},${corners.nw.y} ${corners.ne.x},${corners.ne.y} ${corners.se.x},${corners.se.y} ${corners.sw.x},${corners.sw.y}`,
+        );
         rect.style.display = "block";
         if (this.regionDraw !== null || this.regionGesture !== null) {
           rect.setAttribute("stroke-dasharray", "none");
@@ -9339,13 +9364,8 @@ export class GnumarusCanvasEngine {
           rect.setAttribute("stroke-dasharray", "6 4");
         }
         rectIndex += 1;
-        const corners = [
-          { x: box.minX, y: box.minY },
-          { x: box.maxX, y: box.minY },
-          { x: box.minX, y: box.maxY },
-          { x: box.maxX, y: box.maxY },
-        ];
-        for (const corner of corners) {
+        const dots = [corners.nw, corners.ne, corners.sw, corners.se];
+        for (const corner of dots) {
           let dot = this.previewRegionCorners[cornerIndex];
           if (dot === undefined) {
             dot = document.createElementNS("http://www.w3.org/2000/svg", "circle") as SVGCircleElement;
@@ -17589,22 +17609,25 @@ export class GnumarusCanvasEngine {
           );
           return { x: client.x - view.left, y: client.y - view.top };
         };
-        const a = toClient(Math.min(box.x0, box.x1), Math.min(box.y0, box.y1));
-        const b = toClient(Math.max(box.x0, box.x1), Math.max(box.y0, box.y1));
+        const minX = Math.min(box.x0, box.x1);
+        const minY = Math.min(box.y0, box.y1);
+        const maxX = Math.max(box.x0, box.x1);
+        const maxY = Math.max(box.y0, box.y1);
+        // Map all four image-space corners: under canvas/layer rotation
+        // the box renders as a rotated quad, not an axis-aligned rect.
+        const nw = toClient(minX, minY);
+        const ne = toClient(maxX, minY);
+        const sw = toClient(minX, maxY);
+        const se = toClient(maxX, maxY);
         this.previewSvg.style.display = "block";
         this.previewShapeRect.style.display = "block";
-        this.previewShapeRect.setAttribute("x", String(Math.min(a.x, b.x)));
-        this.previewShapeRect.setAttribute("y", String(Math.min(a.y, b.y)));
-        this.previewShapeRect.setAttribute("width", String(Math.abs(b.x - a.x)));
-        this.previewShapeRect.setAttribute("height", String(Math.abs(b.y - a.y)));
+        this.previewShapeRect.setAttribute(
+          "points",
+          `${nw.x},${nw.y} ${ne.x},${ne.y} ${se.x},${se.y} ${sw.x},${sw.y}`,
+        );
         this.previewShapeRect.setAttribute("stroke", "#ffffff");
         this.previewShapeRect.setAttribute("stroke-width", "1.5");
-        const corners = [
-          { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y) },
-          { x: Math.max(a.x, b.x), y: Math.min(a.y, b.y) },
-          { x: Math.min(a.x, b.x), y: Math.max(a.y, b.y) },
-          { x: Math.max(a.x, b.x), y: Math.max(a.y, b.y) },
-        ];
+        const corners = [nw, ne, sw, se];
         for (let index = 0; index < this.previewGrowHandles.length; index += 1) {
           const handle = this.previewGrowHandles[index];
           const corner = corners[index];
@@ -17662,12 +17685,11 @@ export class GnumarusCanvasEngine {
         };
         const a = toClient(drag.x0, drag.y0);
         const b = toClient(drag.x1, drag.y1);
+        const c = toClient(drag.x0, drag.y1);
+        const d = toClient(drag.x1, drag.y0);
         this.previewSvg.style.display = "block";
         this.previewShapeRect.style.display = "block";
-        this.previewShapeRect.setAttribute("x", String(Math.min(a.x, b.x)));
-        this.previewShapeRect.setAttribute("y", String(Math.min(a.y, b.y)));
-        this.previewShapeRect.setAttribute("width", String(Math.abs(b.x - a.x)));
-        this.previewShapeRect.setAttribute("height", String(Math.abs(b.y - a.y)));
+        this.previewShapeRect.setAttribute("points", `${a.x},${a.y} ${d.x},${d.y} ${b.x},${b.y} ${c.x},${c.y}`);
         // Same thin white outline as the grow-or-crop box (not the brush-colored shape width).
         this.previewShapeRect.setAttribute("stroke", "#ffffff");
         this.previewShapeRect.setAttribute("stroke-width", "1.5");
