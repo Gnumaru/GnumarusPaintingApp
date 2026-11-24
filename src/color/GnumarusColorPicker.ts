@@ -258,17 +258,19 @@ export class GnumarusColorPicker extends LitElement {
     .popup.palette-open {
       display: flex;
       gap: 12px;
-      max-width: min(556px, 96vw);
+      max-width: min(700px, 96vw);
     }
     .popup-main {
       min-width: 0;
       flex: 0 1 336px;
     }
     .popup.side-open.palette-open {
-      max-width: min(818px, 96vw);
+      max-width: min(970px, 96vw);
     }
     .palette-panel {
-      width: 172px;
+      width: 320px;
+      max-width: 100%;
+      min-width: 0;
       flex: 0 0 auto;
       display: flex;
       flex-direction: column;
@@ -295,11 +297,17 @@ export class GnumarusColorPicker extends LitElement {
       background: #1177b3;
     }
     .palette-grid {
-      display: flex;
-      flex-wrap: wrap;
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
       gap: 4px;
       overflow-y: auto;
       min-height: 0;
+    }
+    .palette-grid .palette-swatch {
+      width: 100%;
+      height: auto;
+      aspect-ratio: 1 / 1;
+      box-sizing: border-box;
     }
     .popup.side-open {
       display: flex;

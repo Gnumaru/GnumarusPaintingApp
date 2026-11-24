@@ -355,14 +355,17 @@ describe("GnumarusColorModels hsv triangle and wheel", () => {
 });
 
 describe("image palette", () => {
-  it("builds the default 48-color HSL palette", () => {
+  it("builds the default 120-color reference palette", () => {
     const palette = defaultHslPalette().map((entry) => entry.hex);
-    expect(palette).toHaveLength(48);
-    expect(new Set(palette).size).toBe(48);
-    // Hue 0 at lightness 0.1 with full saturation is dark red; the
-    // brightest stop (0.9) never reaches white.
-    expect(palette[0]).toBe("#330000");
-    expect(palette).toContain("#ffcccc");
+    expect(palette).toHaveLength(120);
+    expect(new Set(palette).size).toBe(120);
+    // Row-major sheet order: grayscale ramp first, then hue ramps.
+    expect(palette[0]).toBe("#ffffff");
+    expect(palette[11]).toBe("#000000");
+    expect(palette).toContain("#fe4016");
+    const entries = defaultHslPalette();
+    expect(entries[0]).toMatchObject({ hex: "#ffffff", r: 255, g: 255, b: 255, count: 1 });
+    expect(entries[119]).toMatchObject({ hex: "#e0eed5", r: 224, g: 238, b: 213, count: 1 });
   });
 
   it("collects unique colors dropping alpha", () => {

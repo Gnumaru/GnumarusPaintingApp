@@ -297,15 +297,28 @@ test("image palette panel opens with the default palette and sorts @recent", asy
   await expect(panel).toBeVisible();
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
   const swatches = panel.getByTestId("palette-swatch");
-  await expect(swatches).toHaveCount(48);
-  // Default sort is custom: generation order (hue 0 ramp first, lightness ascending).
+  await expect(swatches).toHaveCount(120);
+  // Default sort is custom: sheet order (grayscale ramp first).
   await expect(panel.getByTestId("palette-sort")).toHaveValue("custom");
-  expect(await swatches.first().getAttribute("data-hex")).toBe("#330000");
+  expect(await swatches.first().getAttribute("data-hex")).toBe("#ffffff");
+  // The grid lays out 12 swatches per row.
+  const tops: number[] = [];
+  for (let index = 0; index < 13; index += 1) {
+    const box = await swatches.nth(index).boundingBox();
+    if (box === null) {
+      throw new Error("palette swatch has no bounding box");
+    }
+    tops.push(Math.round(box.y));
+  }
+  expect(new Set(tops.slice(0, 12)).size).toBe(1);
+  expect(tops[12]).toBeGreaterThan(tops[0]);
   const firstHue = await swatches.first().getAttribute("data-hex");
-  await panel.getByTestId("palette-sort").selectOption("brightness-desc");
-  const firstBright = await panel.getByTestId("palette-swatch").first().getAttribute("data-hex");
-  expect(firstBright).not.toBe(firstHue);
-  expect(await panel.getByTestId("palette-swatch").count()).toBe(48);
+  await panel.getByTestId("palette-sort").selectOption("brightness-asc");
+  const firstDark = await panel.getByTestId("palette-swatch").first().getAttribute("data-hex");
+  // Black is the darkest entry, proving the sort reordered the sheet.
+  expect(firstDark).toBe("#000000");
+  expect(firstDark).not.toBe(firstHue);
+  expect(await panel.getByTestId("palette-swatch").count()).toBe(120);
   await toggle.click();
   await expect(panel).toBeHidden();
 });

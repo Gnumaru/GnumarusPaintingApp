@@ -1182,25 +1182,31 @@ export interface GnumarusPaletteEntry {
   count: number;
 }
 
-/** Lightness stops of the default procedural palette. */
-const DEFAULT_PALETTE_LIGHTNESS = [0.1, 0.37, 0.63, 0.9];
-
 /**
- * Default procedural palette: hues 0..330 in steps of 30, each with
- * maximum saturation at lightness 10/37/63/90 (12 x 4 = 48 colors).
+ * Default palette: 120 fixed colors sampled from the reference 12x10
+ * swatch sheet (row-major: grayscale ramp first, then hue ramps getting
+ * lighter downward). Order is the sheet order.
  */
+const DEFAULT_PALETTE_HEX = [
+  "#ffffff", "#eaebeb", "#d5d6d6", "#c2c2c3", "#adadad", "#999999", "#858685", "#6f7070", "#5c5c5d", "#474748", "#323233", "#000000",
+  "#00374b", "#001c57", "#13053b", "#2f053e", "#3c071b", "#5c0602", "#591d01", "#583301", "#563e00", "#656100", "#4f5505", "#263d10",
+  "#014d66", "#01307c", "#1b0a51", "#450c5a", "#531028", "#841100", "#7c2900", "#7a4a01", "#795802", "#8d8601", "#6f770a", "#38571a",
+  "#026e8f", "#0141aa", "#2d0978", "#5f187b", "#791a3c", "#b51901", "#ae3f01", "#aa6900", "#a57b02", "#c4bb04", "#9ba510", "#4e7927",
+  "#058cb5", "#0056d7", "#371a94", "#7a229e", "#992450", "#e22500", "#da5100", "#d48204", "#d19d00", "#f6ed07", "#c3d117", "#669d38",
+  "#00a0d9", "#0261fd", "#4d21b2", "#992bbe", "#b82c5d", "#fe4016", "#fd6a00", "#feab06", "#fcc604", "#fffb40", "#d9ec39", "#77bb40",
+  "#02c6fc", "#3b88fd", "#5f30eb", "#be37f3", "#e43c7a", "#fe6251", "#fe8649", "#ffb43f", "#fecb3e", "#fdf76c", "#e4ef65", "#97d45f",
+  "#53d6fc", "#73a7ff", "#854ffc", "#d257fe", "#ef719f", "#fe8c82", "#fea47c", "#ffc877", "#ffd978", "#fef993", "#ebf28e", "#b2dd8b",
+  "#93e3fe", "#a7c6ff", "#b18cfe", "#e192fe", "#f4a4c2", "#feb5af", "#fec4ab", "#fed9a8", "#fee4a8", "#fffcb8", "#f2f7b7", "#cde8b6",
+  "#cbf0ff", "#d3e3ff", "#d9c9fe", "#eecafe", "#f9d3e1", "#fedbd7", "#fee3d6", "#feecd4", "#fff2d5", "#fefbdc", "#f6fadb", "#e0eed5",
+];
+
 export function defaultHslPalette(): GnumarusPaletteEntry[] {
-  const out: GnumarusPaletteEntry[] = [];
-  for (let h = 0; h < 360; h += 30) {
-    for (const l of DEFAULT_PALETTE_LIGHTNESS) {
-      const rgb = hslToRgb01(h, 1, l);
-      const r = Math.round(rgb.r * 255);
-      const g = Math.round(rgb.g * 255);
-      const b = Math.round(rgb.b * 255);
-      out.push({ hex: rgbaBytesToHex({ r, g, b, a: 255 }), r, g, b, count: 1 });
-    }
-  }
-  return out;
+  return DEFAULT_PALETTE_HEX.map((hex) => {
+    const r = Number.parseInt(hex.slice(1, 3), 16);
+    const g = Number.parseInt(hex.slice(3, 5), 16);
+    const b = Number.parseInt(hex.slice(5, 7), 16);
+    return { hex, r, g, b, count: 1 };
+  });
 }
 
 /**
