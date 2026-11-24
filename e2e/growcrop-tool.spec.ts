@@ -113,6 +113,69 @@ test("shrinking commits a smaller texture and undoes cleanly @recent", async ({ 
   expect(await countRedIn(page, 0, 0, 64, 64)).toBe(64 * 64);
 });
 
+test("growcrop snaps fractional drags to whole pixels @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await paintLayerRect(page, "#ff0000", 0, 0, 63, 63);
+  await selectTool(page, "Grow or Crop");
+  // High zoom separates snapped from unsnapped handle spots: a 0.6px
+  // image gap is ~5 screen px at zoom 8. (layerScreenTarget maps pixel
+  // centers, so hitting image float f needs target f - 0.5.)
+  await setZoom(page, 8);
+  const a = await layerScreenTarget(page, 52.1, 52.1);
+  const b = await layerScreenTarget(page, 66.9, 66.9);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 8 });
+  // Snapped box is (52,52)-(68,68): handles sit on the pixel corners,
+  // like the auto-created box, not on the fractional drag points.
+  const want0 = await layerScreenTarget(page, 51.5, 51.5);
+  const want3 = await layerScreenTarget(page, 67.5, 67.5);
+  const corner0 = await handleCenter(page, 0);
+  const corner3 = await handleCenter(page, 3);
+  expect(Math.abs(corner0.x - want0.x)).toBeLessThanOrEqual(2);
+  expect(Math.abs(corner0.y - want0.y)).toBeLessThanOrEqual(2);
+  expect(Math.abs(corner3.x - want3.x)).toBeLessThanOrEqual(2);
+  expect(Math.abs(corner3.y - want3.y)).toBeLessThanOrEqual(2);
+  await page.mouse.up();
+  await blurActiveElement(page);
+  await page.keyboard.press("Enter");
+  // The outward snap matches the commit: 16x16, red overlap 12x12.
+  await expect(page.locator("gnumarus-shell")).toContainText("16 x 16");
+  expect(await countRedIn(page, 0, 0, 16, 16)).toBe(12 * 12);
+});
+
+test("crop tool draws the thin white box and snaps to whole pixels @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await paintLayerRect(page, "#ff0000", 0, 0, 63, 63);
+  await selectTool(page, "Crop");
+  await setZoom(page, 2);
+  // Hold the drag open: the preview uses the same thin white outline as
+  // the grow-or-crop box (not the brush-colored shape width). Targets are
+  // offset by -0.5 because layerScreenTarget maps pixel centers.
+  const a = await layerScreenTarget(page, 16.1, 16.1);
+  const b = await layerScreenTarget(page, 30.9, 30.9);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 8 });
+  const preview = page.locator('gnumarus-shell [data-testid="line-preview"] rect[stroke="#ffffff"]');
+  await expect(preview).toHaveAttribute("stroke", "#ffffff");
+  await expect(preview).toHaveAttribute("stroke-width", "1.5");
+  // Snapped box is (16,16)-(32,32): 32 content px wide at zoom 2 (plus
+  // the 1.5px outline stroke in the bounding box), while the raw
+  // fractional drag would render 29.6px wide.
+  const box = await preview.boundingBox();
+  expect(box?.width).toBeGreaterThan(33);
+  expect(box?.width).toBeLessThan(34);
+  await page.mouse.up();
+  // The outward snap matches the commit: a 16x16 texture.
+  expect(await countRedIn(page, 0, 0, 16, 16)).toBe(16 * 16);
+  expect(await readPixel(page, 16, 16)).toBeNull();
+});
+
 test("empty cell shows no box and Esc clears a drawn one @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

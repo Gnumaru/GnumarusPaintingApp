@@ -11,6 +11,7 @@ import {
   packSheetRects,
   rotatePixels90CW,
   uniformCropBox,
+  type GnumarusSheetCell,
   type GnumarusSheetPacking,
   type GnumarusSheetStrip,
 } from "../src/export/GnumarusSpritesheet";
@@ -289,6 +290,64 @@ describe("GnumarusSpritesheet", () => {
     expect(data.frames).toEqual({
       "1": { x: 0, y: 0, w: 16, h: 16, ox: 3, oy: 4, rotated: false },
       "2": { x: 16, y: 0, w: 16, h: 16, ox: 3, oy: 4, rotated: false },
+    });
+  });
+
+  it("emits crop offsets and the rotation flag on every frame for every layout", () => {
+    const geometries: GnumarusSheetCell[][] = [
+      computeSheetGeometry(strips([0, 1]), "line", 1, true).cells,
+      computeSheetGeometry(strips([0, 1]), "column", 1, true).cells,
+      computeSheetGeometry(strips([0, 1], [2]), "per-line", 1, true).cells,
+      computeSheetGeometry(strips([0, 1], [2]), "per-column", 1, true).cells,
+      computeSheetGeometry(strips([0, 1, 2]), "packed", 1, true).cells,
+      computeSheetGeometry(strips([0, 1]), "fixed-rows", 2, true).cells,
+      computeSheetGeometry(strips([0, 1]), "fixed-cols", 2, true).cells,
+    ];
+    for (const cells of geometries) {
+      // No trim at all: offsets default to zero and nothing is rotated.
+      const plain = buildSheetAnimationData({
+        sheetWidth: 64,
+        sheetHeight: 64,
+        frameWidth: 16,
+        frameHeight: 16,
+        cells,
+        animations: [],
+      });
+      expect(Object.keys(plain.frames).length).toBeGreaterThan(0);
+      for (const entry of Object.values(plain.frames)) {
+        expect(entry).toEqual({ x: entry.x, y: entry.y, w: entry.w, h: entry.h, ox: 0, oy: 0, rotated: false });
+      }
+      // Partial offsets: listed frames keep theirs, the rest default to zero.
+      const firstKey = String((cells[0]?.frame ?? 0) + 1);
+      const offset = buildSheetAnimationData({
+        sheetWidth: 64,
+        sheetHeight: 64,
+        frameWidth: 16,
+        frameHeight: 16,
+        cells,
+        animations: [],
+        offsets: { [firstKey]: { ox: 5, oy: 7 } },
+      });
+      expect(offset.frames[firstKey]).toMatchObject({ ox: 5, oy: 7, rotated: false });
+      for (const [key, entry] of Object.entries(offset.frames)) {
+        if (key !== firstKey) {
+          expect(entry).toMatchObject({ ox: 0, oy: 0, rotated: false });
+        }
+      }
+    }
+    // Individually trimmed sheets flag each frame, rotated or not.
+    const packed = buildPackedSheetAnimationData({
+      sheetWidth: 70,
+      sheetHeight: 60,
+      placements: [
+        { frame: 0, x: 0, y: 0, w: 60, h: 10, ox: 2, oy: 3, rotated: false },
+        { frame: 1, x: 0, y: 10, w: 60, h: 10, ox: 4, oy: 5, rotated: true },
+      ],
+      animations: [],
+    });
+    expect(packed.frames).toEqual({
+      "1": { x: 0, y: 0, w: 60, h: 10, ox: 2, oy: 3, rotated: false },
+      "2": { x: 0, y: 10, w: 60, h: 10, ox: 4, oy: 5, rotated: true },
     });
   });
 });

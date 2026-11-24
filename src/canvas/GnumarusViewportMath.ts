@@ -539,6 +539,32 @@ export function clampCropBoxToMin1(box: GnumarusCropBox): GnumarusCropBox {
   };
 }
 
+/**
+ * Snap a crop-box drag to whole pixels (floor the min corner, ceil the max
+ * corner), so box edges and handles always sit on pixel boundaries instead
+ * of arbitrary floats. This matches the outward snap the commit paths
+ * already apply, so the dragged preview and the committed texture agree.
+ * Corner identity is preserved (no min/max swap), so reversing the drag
+ * direction keeps tracking the original press anchor.
+ */
+export function snapCropBox(x0: number, y0: number, x1: number, y1: number): {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+} {
+  const minX = Math.floor(Math.min(x0, x1));
+  const maxX = Math.ceil(Math.max(x0, x1));
+  const minY = Math.floor(Math.min(y0, y1));
+  const maxY = Math.ceil(Math.max(y0, y1));
+  return {
+    x0: x0 <= x1 ? minX : maxX,
+    y0: y0 <= y1 ? minY : maxY,
+    x1: x0 <= x1 ? maxX : minX,
+    y1: y0 <= y1 ? maxY : minY,
+  };
+}
+
 /** Grow-or-crop box corner/edge handle ids (same set as pending selection). */
 export type GnumarusGrowBoxHandle = "nw" | "ne" | "sw" | "se" | "n" | "s" | "e" | "w";
 

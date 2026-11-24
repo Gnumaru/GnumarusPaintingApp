@@ -242,6 +242,7 @@ import {
   growTextureBoxForPlacement,
   hitGrowBoxHandles,
   normalizeGrowBox,
+  snapCropBox,
   GNUMARUS_MAX_LAYER_SKEW,
   IDENTITY_LAYER_TRANSFORM,
   layerImageToProject,
@@ -8671,7 +8672,7 @@ export class GnumarusCanvasEngine {
     return id === "n" || id === "s" ? "ns-resize" : "ew-resize";
   }
 
-  /** Apply a grow-box border/edge drag at the given layer-image point. */
+  /** Apply a grow-box border/edge drag at the given layer-image point (snapped to whole pixels). */
   private resizeGrowBox(edge: GnumarusGrowBoxHandle | "new", x: number, y: number): void {
     const box = this.growBox;
     if (box === null) {
@@ -8680,20 +8681,25 @@ export class GnumarusCanvasEngine {
     if (edge === "new") {
       box.x1 = x;
       box.y1 = y;
-      return;
+    } else {
+      if (edge === "n" || edge === "nw" || edge === "ne") {
+        box.y0 = y;
+      }
+      if (edge === "s" || edge === "sw" || edge === "se") {
+        box.y1 = y;
+      }
+      if (edge === "w" || edge === "nw" || edge === "sw") {
+        box.x0 = x;
+      }
+      if (edge === "e" || edge === "ne" || edge === "se") {
+        box.x1 = x;
+      }
     }
-    if (edge === "n" || edge === "nw" || edge === "ne") {
-      box.y0 = y;
-    }
-    if (edge === "s" || edge === "sw" || edge === "se") {
-      box.y1 = y;
-    }
-    if (edge === "w" || edge === "nw" || edge === "sw") {
-      box.x0 = x;
-    }
-    if (edge === "e" || edge === "ne" || edge === "se") {
-      box.x1 = x;
-    }
+    const snapped = snapCropBox(box.x0, box.y0, box.x1, box.y1);
+    box.x0 = snapped.x0;
+    box.y0 = snapped.y0;
+    box.x1 = snapped.x1;
+    box.y1 = snapped.y1;
   }
 
   cropCellTextureToCanvas(layerId: string, frame: number): "cropped" | "unchanged" | "outside" {
@@ -15550,11 +15556,6 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
-  private colorCss(): string {
-    const alpha = Math.round((this.color.a / 255) * 100) / 100;
-    return `rgba(${this.color.r}, ${this.color.g}, ${this.color.b}, ${alpha})`;
-  }
-
   /** Position the stabilizer focus dot and rope line for the brush tool. */
   private updateStabilizerOverlay(): void {
     const mouse = this.lastMouseClient;
@@ -16831,8 +16832,9 @@ export class GnumarusCanvasEngine {
         this.previewShapeRect.setAttribute("y", String(Math.min(a.y, b.y)));
         this.previewShapeRect.setAttribute("width", String(Math.abs(b.x - a.x)));
         this.previewShapeRect.setAttribute("height", String(Math.abs(b.y - a.y)));
-        this.previewShapeRect.setAttribute("stroke", this.colorCss());
-        this.previewShapeRect.setAttribute("stroke-width", String(Math.max(1, this.shapeWidth * this.zoom)));
+        // Same thin white outline as the grow-or-crop box (not the brush-colored shape width).
+        this.previewShapeRect.setAttribute("stroke", "#ffffff");
+        this.previewShapeRect.setAttribute("stroke-width", "1.5");
         return;
       }
     }
@@ -19673,8 +19675,12 @@ export class GnumarusCanvasEngine {
       if (this.cropDrag !== null) {
         const target = this.clientToLayerImageFloat(event.clientX, event.clientY);
         if (target !== null) {
-          this.cropDrag.x1 = target.x;
-          this.cropDrag.y1 = target.y;
+          // Snap the whole box outward so the preview and the commit agree.
+          const snapped = snapCropBox(this.cropDrag.x0, this.cropDrag.y0, target.x, target.y);
+          this.cropDrag.x1 = snapped.x1;
+          this.cropDrag.y1 = snapped.y1;
+          this.cropDrag.x0 = snapped.x0;
+          this.cropDrag.y0 = snapped.y0;
           this.lastMouseClient = { x: event.clientX, y: event.clientY };
           this.updatePreviews();
         }

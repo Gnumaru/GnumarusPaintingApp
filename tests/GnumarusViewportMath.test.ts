@@ -10,6 +10,7 @@ import {
   growTextureBoxForPlacement,
   hitGrowBoxHandles,
   normalizeGrowBox,
+  snapCropBox,
   imageToScreenPixel,
   layerImageToProject,
   layerLinearMatrix,
@@ -586,6 +587,16 @@ describe("grow-or-crop box helpers", () => {
     expect(normalizeGrowBox(5, 5, 5, 5)).toEqual({ left: 5, top: 5, width: 1, height: 1 });
     // Negative origins (growing past the texture edge) survive.
     expect(normalizeGrowBox(-3.2, -3.7, 1, 1)).toEqual({ left: -4, top: -4, width: 5, height: 5 });
+  });
+
+  it("snaps crop-box drags outward to whole pixels", () => {
+    // Forward drags: min floors, max ceils (the commit behavior).
+    expect(snapCropBox(10.4, 20.2, 30.6, 40.9)).toEqual({ x0: 10, y0: 20, x1: 31, y1: 41 });
+    expect(snapCropBox(10, 20, 30, 40)).toEqual({ x0: 10, y0: 20, x1: 30, y1: 40 });
+    // Reversed drags keep the press anchor: corners are not swapped.
+    expect(snapCropBox(30.6, 40.9, 10.4, 20.2)).toEqual({ x0: 31, y0: 41, x1: 10, y1: 20 });
+    // Negative origins (growing past the texture edge) survive.
+    expect(snapCropBox(1, 1, -3.2, -3.7)).toEqual({ x0: 1, y0: 1, x1: -4, y1: -4 });
   });
 
   it("hits corners before edges and edges before the interior", () => {
