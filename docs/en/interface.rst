@@ -65,7 +65,7 @@ canvas and ``Cancel`` always reverts.
 Action palette
 --------------
 
-``Ctrl+Shift+P`` (``Cmd+Shift+P`` on macOS) opens the run-action dialog.
+``Ctrl+K`` (``Cmd+K`` on macOS) opens the run-action dialog.
 Type a few letters — every menu item, tool (``tool-brush`` and
 friends) and filter (``filter-levels`` and friends) is listed and runs
 on ``Enter``. ``0`` resets the canvas transform; ``Tab`` hides the

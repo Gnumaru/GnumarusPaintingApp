@@ -95,7 +95,7 @@ test("the Show Licenses action opens the licenses modal @recent", async ({ page 
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   const palette = page.locator("gnumarus-shell dialog#actionPaletteDialog");
   await expect(palette).toBeVisible();
   await palette.locator("input").fill("Show Licenses");

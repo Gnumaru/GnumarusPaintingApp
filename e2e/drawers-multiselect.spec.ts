@@ -256,7 +256,7 @@ test("unlink cell content action dissociates selected cells @recent", async ({ p
     matrix.locator(`[data-testid="anim-cell"][data-matrix-layer="layer0"][data-matrix-frame="${frame}"]`);
   await cell(0).click();
   await cell(1).click({ modifiers: ["Control"] });
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   const dialog = page.locator("gnumarus-shell dialog#actionPaletteDialog");
   await dialog.locator('[data-testid="action-palette-input"]').fill("unlink");
   await dialog.locator('[data-testid="action-palette-item"][data-action-id="unlink-cell-content"]').click();
@@ -264,13 +264,13 @@ test("unlink cell content action dissociates selected cells @recent", async ({ p
   matrixState = await getMatrix(page);
   expect(matrixState.rows[0]?.cells.map((entry) => entry.contentId)).toEqual([null, null]);
   // Nothing left to unlink across the still-selected cells.
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   await dialog.locator('[data-testid="action-palette-input"]').fill("unlink");
   await dialog.locator('[data-testid="action-palette-item"][data-action-id="unlink-cell-content"]').click();
   await expect(page.locator("gnumarus-shell")).toContainText("Nothing to unlink");
   // A single empty current cell reports the empty-cell error.
   await cell(0).click();
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   await dialog.locator('[data-testid="action-palette-input"]').fill("unlink");
   await dialog.locator('[data-testid="action-palette-item"][data-action-id="unlink-cell-content"]').click();
   await expect(page.locator("gnumarus-shell")).toContainText("Cell is already empty");
@@ -288,7 +288,7 @@ test("relink cell content action shares one content across cells @recent", async
     matrix.locator(`[data-testid="anim-cell"][data-matrix-layer="layer0"][data-matrix-frame="${frame}"]`);
   // Orphan the frame-0 content so neither target uses it afterwards.
   await cell(0).click();
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   const palette = page.locator("gnumarus-shell dialog#actionPaletteDialog");
   await palette.locator('[data-testid="action-palette-input"]').fill("unlink");
   await palette.locator('[data-testid="action-palette-item"][data-action-id="unlink-cell-content"]').click();
@@ -296,7 +296,7 @@ test("relink cell content action shares one content across cells @recent", async
   expect(matrixState.rows[0]?.cells.map((entry) => entry.contentId)).toEqual([null, null]);
   await cell(0).click();
   await cell(1).click({ modifiers: ["Control"] });
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   await palette.locator('[data-testid="action-palette-input"]').fill("relink");
   await palette.locator('[data-testid="action-palette-item"][data-action-id="relink-cell-content"]').click();
   const picker = page.locator("gnumarus-shell dialog#contentPickerDialog");

@@ -72,7 +72,7 @@ mostram a prévia no canvas e ``Cancelar`` sempre reverte.
 Paleta de ações
 ---------------
 
-``Ctrl+Shift+P`` (``Cmd+Shift+P`` no macOS) abre o diálogo de ações.
+``Ctrl+K`` (``Cmd+K`` no macOS) abre o diálogo de ações.
 Digite algumas letras — todo item de menu, ferramenta (``tool-brush``
 e outros) e filtro (``filter-levels`` e outros) aparece na lista e
 executa com ``Enter``. ``0`` redefine a transformação do canvas;

@@ -80,9 +80,10 @@ const NONE = k("");
 
 /** Factory defaults mirroring the historic hard-coded behavior. */
 export const GNUMARUS_DEFAULT_SHORTCUTS: GnumarusShortcutDef[] = [
-  // File (save keeps Ctrl+S; new/open keep Ctrl+N/Ctrl+O).
-  { id: "file-new", keyboard: k("n", { ctrl: true }), mouse: "" },
-  { id: "file-open", keyboard: k("o", { ctrl: true }), mouse: "" },
+  // File (save keeps Ctrl+S; new/open keep Ctrl+Alt+N/Ctrl+Alt+O since
+  // browsers reserve Ctrl+N/Ctrl+O — see FORBIDEN_KEYBOARD_SHORTCUTS.md).
+  { id: "file-new", keyboard: k("n", { ctrl: true, alt: true }), mouse: "" },
+  { id: "file-open", keyboard: k("o", { ctrl: true, alt: true }), mouse: "" },
   { id: "file-save", keyboard: k("s", { ctrl: true }), mouse: "" },
   { id: "file-save-as", keyboard: NONE, mouse: "" },
   { id: "file-upload", keyboard: NONE, mouse: "" },
@@ -118,7 +119,7 @@ export const GNUMARUS_DEFAULT_SHORTCUTS: GnumarusShortcutDef[] = [
   { id: "edit-cancel", keyboard: k("Escape"), mouse: "" },
   { id: "edit-merge-floating", keyboard: k("Enter"), mouse: "", allowOverlap: true },
   { id: "edit-delete-cell", keyboard: k("Delete"), mouse: "" },
-  { id: "edit-quick-search", keyboard: k("p", { ctrl: true, shift: true }), mouse: "" },
+  { id: "edit-quick-search", keyboard: k("k", { ctrl: true }), mouse: "" },
   { id: "edit-hide-chrome", keyboard: k("Tab"), mouse: "" },
   // Layers.
   { id: "layer-above", keyboard: k("PageUp"), mouse: "" },

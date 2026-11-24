@@ -203,7 +203,7 @@ test("embedded save-as, save and open round-trip pixels @recent", async ({ page 
   // Fresh canvas, then reopen from OPFS: the red dot comes back.
   await loadBlankProject(page, 64);
   expect(await readPixel(page, 32, 32)).toBeNull();
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   const palette = page.locator("gnumarus-shell dialog#actionPaletteDialog");
   await expect(palette).toBeVisible();
   await palette.locator('[data-testid="action-palette-input"]').fill("open embedded project");

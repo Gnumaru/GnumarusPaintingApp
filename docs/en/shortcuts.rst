@@ -27,7 +27,7 @@ Actions
 
 * ``Ctrl+Z``/``Ctrl+Y`` undo/redo, ``Ctrl+X/C/V`` cut/copy/paste,
   ``Ctrl+Shift+C`` copy merged, ``Ctrl+E`` merge down
-* ``Ctrl+S`` save, ``Ctrl+Shift+P`` action palette, ``0`` reset canvas
+* ``Ctrl+S`` save, ``Ctrl+K`` action palette, ``0`` reset canvas
   transform, ``Tab`` hide interface, ``F`` bucket, ``Z`` loupe
 
 Every binding above is a factory default: open **Edit > Shortcuts**

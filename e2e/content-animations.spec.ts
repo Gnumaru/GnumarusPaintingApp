@@ -38,7 +38,7 @@ test("content manager search filters by name similarity @recent", async ({ page 
   await setBrushColor(page, "#ff0000");
   await page.getByRole("button", { name: "Bucket fill" }).click();
   await paintCenter(page);
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   const palette = page.locator("gnumarus-shell dialog#actionPaletteDialog");
   await palette.locator('[data-testid="action-palette-input"]').fill("content manager");
   await palette.locator('[data-testid="action-palette-item"][data-action-id="content-manager"]').click();
@@ -99,7 +99,7 @@ test("content manager shows on-disk sizes for saved textures @recent", async ({ 
 test("new project starts with no textures or contents @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   const palette = page.locator("gnumarus-shell dialog#actionPaletteDialog");
   await palette.locator('[data-testid="action-palette-input"]').fill("content manager");
   await palette.locator('[data-testid="action-palette-item"][data-action-id="content-manager"]').click();
@@ -117,7 +117,7 @@ test("adding layers and frames creates no textures or contents @recent", async (
   await paintCenter(page);
   await page.getByRole("button", { name: "Add layer" }).click();
   await page.getByRole("button", { name: "Add frame", exact: true }).click();
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   const palette = page.locator("gnumarus-shell dialog#actionPaletteDialog");
   await palette.locator('[data-testid="action-palette-input"]').fill("content manager");
   await palette.locator('[data-testid="action-palette-item"][data-action-id="content-manager"]').click();
@@ -270,7 +270,7 @@ test("new animation from the run action palette @recent", async ({ page }) => {
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
   await page.getByRole("button", { name: "Add frame", exact: true }).click();
   await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click();
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   const palette = page.locator("gnumarus-shell dialog#actionPaletteDialog");
   await palette.locator('[data-testid="action-palette-input"]').fill("new animation");
   await palette.locator('[data-testid="action-palette-item"][data-action-id="new-animation"]').click();

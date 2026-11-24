@@ -8,7 +8,7 @@ test("quick action palette filters and runs actions", async ({ page }) => {
     const root = window as unknown as { __gnumarus?: { engine?: { setZoom(z: number): void } } };
     root.__gnumarus?.engine?.setZoom(16);
   });
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   const dialog = page.locator("gnumarus-shell dialog#actionPaletteDialog");
   await expect(dialog).toBeVisible();
   const input = dialog.locator('[data-testid="action-palette-input"]');
@@ -92,13 +92,13 @@ test("quick action palette runs the clicked action and closes on Escape", async 
     const root = window as unknown as { __gnumarus?: { engine?: { setZoom(z: number): void } } };
     root.__gnumarus?.engine?.setZoom(16);
   });
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   const dialog = page.locator("gnumarus-shell dialog#actionPaletteDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator('[data-testid="action-palette-item"][data-action-id="reset-canvas-transform"]').click();
   await expect(dialog).toBeHidden();
   await expect(page.locator("gnumarus-shell")).toContainText("Canvas transform reset");
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   await expect(dialog).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
@@ -122,7 +122,7 @@ test("Fit All Textures to Size fits every texture at once", async ({ page }) => 
   await setBrushColor(page, "#ff0000");
   await paintCenter(page);
   await page.getByRole("button", { name: "Add layer" }).click();
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   const dialog = page.locator("gnumarus-shell dialog#actionPaletteDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator('[data-testid="action-palette-input"]').fill("fit all");
@@ -164,7 +164,7 @@ test("Crop All Cells to Canvas crops shared textures sequentially", async ({ pag
     const root = window as unknown as { __gnumarus?: { engine?: { setLayerTransform(id: string, t: unknown): boolean } } };
     root.__gnumarus?.engine?.setLayerTransform("layer0", { x: 10, y: 0 });
   });
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   const dialog = page.locator("gnumarus-shell dialog#actionPaletteDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator('[data-testid="action-palette-input"]').fill("crop all");
@@ -199,7 +199,7 @@ test("Crop All Cells to Canvas crops every cell at once", async ({ page }) => {
   let state = await getLayers(page);
   expect(state.layers[1]?.transform).toMatchObject({ x: 2, y: 2 });
   expect(state.layers[1]?.width).toBe(4);
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   const dialog = page.locator("gnumarus-shell dialog#actionPaletteDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator('[data-testid="action-palette-input"]').fill("crop all");

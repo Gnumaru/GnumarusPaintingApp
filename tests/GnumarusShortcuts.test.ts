@@ -58,14 +58,52 @@ describe("GnumarusShortcuts", () => {
     expect([...findShortcutConflicts(effective)]).toEqual([]);
   });
 
-  test("new/open project default to Ctrl+N and Ctrl+O", () => {
+  test("new/open project avoid browser-reserved Ctrl+N and Ctrl+O", () => {
     const byId = new Map(GNUMARUS_DEFAULT_SHORTCUTS.map((entry) => [entry.id, entry.keyboard]));
-    expect(byId.get("file-new")).toMatchObject({ key: "n", ctrl: true });
-    expect(byId.get("file-open")).toMatchObject({ key: "o", ctrl: true });
+    expect(byId.get("file-new")).toMatchObject({ key: "n", ctrl: true, alt: true });
+    expect(byId.get("file-open")).toMatchObject({ key: "o", ctrl: true, alt: true });
+    expect(byId.get("edit-quick-search")).toMatchObject({ key: "k", ctrl: true });
     const effective = resolveEffectiveShortcuts({});
-    expect(effective["file-new"]?.keyboard).toMatchObject({ key: "n", ctrl: true });
-    expect(effective["file-open"]?.keyboard).toMatchObject({ key: "o", ctrl: true });
+    expect(effective["file-new"]?.keyboard).toMatchObject({ key: "n", ctrl: true, alt: true });
+    expect(effective["file-open"]?.keyboard).toMatchObject({ key: "o", ctrl: true, alt: true });
+    expect(effective["edit-quick-search"]?.keyboard).toMatchObject({ key: "k", ctrl: true });
     expect([...findShortcutConflicts(effective)]).toEqual([]);
+  });
+
+  test("factory defaults contain no browser-reserved chords (see FORBIDEN_KEYBOARD_SHORTCUTS.md)", () => {
+    // Hard-reserved in Chromium (N/T/W/Shift-variants/Tab/Shift+Q) or
+    // Firefox (N/T/W, Shift+P private, Shift+Q quit) or Safari (N/W/T/Q/R/L/O/E).
+    const forbidden: Array<[string, { ctrl?: boolean; alt?: boolean; shift?: boolean; super?: boolean }]> = [
+      ["n", { ctrl: true }],
+      ["t", { ctrl: true }],
+      ["w", { ctrl: true }],
+      ["q", { ctrl: true, shift: true }],
+      ["p", { ctrl: true, shift: true }],
+      ["n", { ctrl: true, shift: true }],
+      ["t", { ctrl: true, shift: true }],
+      ["w", { ctrl: true, shift: true }],
+      ["Tab", { ctrl: true }],
+      ["o", { ctrl: true }],
+    ];
+    const lowerKey = (key: string): string => (key.length === 1 ? key.toLowerCase() : key);
+    const isForbidden = (kb: GnumarusShortcutKeyboard): boolean => {
+      // Alt modifiers are checked exactly; Ctrl also matches Cmd (super) for the audit.
+      const ctrlish = kb.ctrl || kb.super;
+      return forbidden.some(
+        ([key, mods]) =>
+          lowerKey(key) === lowerKey(kb.key) &&
+          (mods.ctrl ?? false) === ctrlish &&
+          (mods.alt ?? false) === kb.alt &&
+          (mods.shift ?? false) === kb.shift &&
+          (mods.super ?? false) === false,
+      );
+    };
+    const offenders = GNUMARUS_DEFAULT_SHORTCUTS.filter(
+      (def) =>
+        (def.keyboard.key !== "" || def.keyboard.ctrl || def.keyboard.alt || def.keyboard.shift || def.keyboard.super || def.keyboard.space || def.mouse !== "") &&
+        isForbidden(def.keyboard),
+    ).map((def) => def.id);
+    expect(offenders).toEqual([]);
   });
 
   test("display strings match the requested examples", () => {

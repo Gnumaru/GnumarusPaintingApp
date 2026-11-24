@@ -834,14 +834,14 @@ test("file menu shows renamed import items with tooltips @recent", async ({ page
 test("run action dialog lists and runs the new menu actions @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   const dialog = page.locator("gnumarus-shell dialog#actionPaletteDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator('[data-testid="action-palette-input"]').fill("undo");
   await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveText(["Undo"]);
   await page.keyboard.press("Enter");
   await expect(page.locator("gnumarus-shell")).toContainText("Nothing to undo");
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   await expect(dialog).toBeVisible();
   await dialog.locator('[data-testid="action-palette-input"]').fill("settings");
   await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveText(["Settings"]);
@@ -923,7 +923,7 @@ test("save project as lists its action and tooltip @recent", async ({ page }) =>
   await expect(
     page.locator("gnumarus-shell .menubar .dropdown").getByRole("button", { name: "Save project as" }),
   ).toHaveAttribute("title", "Save the project into a new directory");
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   const dialog = page.locator("gnumarus-shell dialog#actionPaletteDialog");
   await dialog.locator('[data-testid="action-palette-input"]').fill("save project as");
   await expect(dialog.locator('[data-testid="action-palette-item"]')).toHaveText([

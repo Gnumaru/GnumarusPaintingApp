@@ -615,7 +615,7 @@ export async function stubDirectoryWithFileStore(page: import("@playwright/test"
 }
 
 export async function runPaletteAction(page: import("@playwright/test").Page, query: string): Promise<void> {
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   const dialog = page.locator("gnumarus-shell dialog#actionPaletteDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator('[data-testid="action-palette-input"]').fill(query);
@@ -3076,7 +3076,7 @@ export async function removeEmbeddedProject(page: import("@playwright/test").Pag
 }
 
 export async function saveEmbeddedAs(page: import("@playwright/test").Page, name: string): Promise<void> {
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   const palette = page.locator("gnumarus-shell dialog#actionPaletteDialog");
   await expect(palette).toBeVisible();
   await palette.locator('[data-testid="action-palette-input"]').fill("save embedded project as");

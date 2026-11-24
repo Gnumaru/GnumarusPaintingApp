@@ -26,7 +26,7 @@ The action palette lists tools and filters too
 ----------------------------------------------
 
 Yes — every ``tool-<name>`` and ``filter-<id>`` runs from
-``Ctrl+Shift+P`` by name, including the floating-selection-gated ones
+``Ctrl+K`` by name, including the floating-selection-gated ones
 (which report why they are blocked).
 
 An import failed

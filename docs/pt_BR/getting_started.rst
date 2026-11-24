@@ -65,6 +65,6 @@ Onde fica o quê
 * Embaixo: a barra de status (ferramenta, cor, pixel do cursor,
   tamanhos do canvas e da camada, zoom, rotação, nome do projeto).
 
-Pressione ``Ctrl+Shift+P`` em qualquer lugar para abrir a paleta de
+Pressione ``Ctrl+K`` em qualquer lugar para abrir a paleta de
 ações: todo item de menu, ferramenta e filtro pode ser invocado pelo
 nome. Veja :doc:`interface`.

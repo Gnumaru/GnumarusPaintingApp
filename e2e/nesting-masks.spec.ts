@@ -91,7 +91,7 @@ test("make root layer works from context menu and run action @recent", async ({ 
   // Run action palette path on the active layer.
   expect(await engineReparent(page, "layer1", "layer2")).toBe(true);
   await page.locator('gnumarus-shell [data-layer-id="layer1"] .layer-name').click();
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   const dialog = page.locator("gnumarus-shell dialog#actionPaletteDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator('[data-testid="action-palette-input"]').fill("make root");
@@ -302,7 +302,7 @@ test("masks never render alone and reject nesting and merges @recent", async ({ 
   await paintCenter(page);
   // Toggle via the run action palette.
   await page.locator('gnumarus-shell [data-layer-id="layer2"] .layer-name').click();
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   const dialog = page.locator("gnumarus-shell dialog#actionPaletteDialog");
   await expect(dialog).toBeVisible();
   await dialog.locator('[data-testid="action-palette-input"]').fill("toggle layer mask");
@@ -488,7 +488,7 @@ test("Set total duration splits evenly across contiguous and scattered frames @r
   await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
   await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
   // The run action needs at least two selected frames.
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   const palette = page.locator("gnumarus-shell dialog#actionPaletteDialog");
   await expect(palette).toBeVisible();
   await palette.locator('[data-testid="action-palette-input"]').fill("total duration");
@@ -514,7 +514,7 @@ test("Set total duration splits evenly across contiguous and scattered frames @r
   // Same split through the run action palette on another pair.
   await matrix.locator('[data-testid="anim-frame"][data-frame="1"]').click();
   await matrix.locator('[data-testid="anim-frame"][data-frame="2"]').click({ modifiers: ["Control"] });
-  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.press("Control+K");
   await expect(palette).toBeVisible();
   await palette.locator('[data-testid="action-palette-input"]').fill("total duration");
   await palette.locator('[data-testid="action-palette-item"]').click();

@@ -62,5 +62,5 @@ Where things are
 * Bottom: the status bar (tool, color, cursor pixel, canvas and layer
   sizes, zoom, rotation, project name).
 
-Press ``Ctrl+Shift+P`` anywhere to open the action palette: every menu
+Press ``Ctrl+K`` anywhere to open the action palette: every menu
 item, tool and filter is invokable by name. See :doc:`interface`.

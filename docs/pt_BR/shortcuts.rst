@@ -30,7 +30,7 @@ Ações
 * ``Ctrl+Z``/``Ctrl+Y`` desfazer/refazer, ``Ctrl+X/C/V``
   recortar/copiar/colar, ``Ctrl+Shift+C`` copiar fundido, ``Ctrl+E``
   fundir abaixo
-* ``Ctrl+S`` salvar, ``Ctrl+Shift+P`` paleta de ações, ``0``
+* ``Ctrl+S`` salvar, ``Ctrl+K`` paleta de ações, ``0``
   redefinir transformação, ``Tab`` ocultar interface, ``F`` balde,
   ``Z`` lupa
 

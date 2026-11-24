@@ -25,7 +25,7 @@ A paleta lista ferramentas e filtros também
 -------------------------------------------
 
 Sim — toda ação ``tool-<nome>`` e ``filter-<id>`` roda pelo
-``Ctrl+Shift+P`` pelo nome, inclusive as exigentes de seleção
+``Ctrl+K`` pelo nome, inclusive as exigentes de seleção
 flutuante (que informam o motivo do bloqueio).
 
 Uma importação falhou
