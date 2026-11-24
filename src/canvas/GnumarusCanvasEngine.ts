@@ -9336,57 +9336,75 @@ export class GnumarusCanvasEngine {
     let rectIndex = 0;
     let cornerIndex = 0;
     const seen = new Set<string>();
+    const drawQuad = (
+      corners: { nw: { x: number; y: number }; ne: { x: number; y: number }; sw: { x: number; y: number }; se: { x: number; y: number } },
+      dashed: boolean,
+    ): void => {
+      let rect = this.previewRegionRects[rectIndex];
+      if (rect === undefined) {
+        rect = document.createElementNS("http://www.w3.org/2000/svg", "polygon") as SVGPolygonElement;
+        rect.setAttribute("data-testid", "region-rect");
+        rect.setAttribute("fill", "none");
+        rect.setAttribute("stroke", "#66ccff");
+        rect.setAttribute("stroke-width", "1.5");
+        rect.setAttribute("opacity", "0.95");
+        rect.style.display = "none";
+        rect.style.pointerEvents = "none";
+        this.previewSvg.appendChild(rect);
+        this.previewRegionRects.push(rect);
+      }
+      rect.setAttribute(
+        "points",
+        `${corners.nw.x},${corners.nw.y} ${corners.ne.x},${corners.ne.y} ${corners.se.x},${corners.se.y} ${corners.sw.x},${corners.sw.y}`,
+      );
+      rect.style.display = "block";
+      rect.setAttribute("stroke-dasharray", dashed ? "6 4" : "none");
+      rectIndex += 1;
+      for (const corner of [corners.nw, corners.ne, corners.sw, corners.se]) {
+        let dot = this.previewRegionCorners[cornerIndex];
+        if (dot === undefined) {
+          dot = document.createElementNS("http://www.w3.org/2000/svg", "circle") as SVGCircleElement;
+          dot.setAttribute("data-testid", "region-corner");
+          dot.setAttribute("r", "4");
+          dot.setAttribute("fill", "#66ccff");
+          dot.setAttribute("stroke", "#000000");
+          dot.setAttribute("stroke-width", "1.5");
+          dot.setAttribute("opacity", "0.95");
+          dot.style.display = "none";
+          dot.style.pointerEvents = "none";
+          this.previewSvg.appendChild(dot);
+          this.previewRegionCorners.push(dot);
+        }
+        dot.setAttribute("cx", String(corner.x));
+        dot.setAttribute("cy", String(corner.y));
+        dot.style.display = "block";
+        cornerIndex += 1;
+      }
+    };
     if (active) {
       for (const { region, layer } of this.regionOverlayTargets()) {
         const corners = this.regionClientCorners(region, layer);
         const box = this.regionClientBox(region, layer);
-        let rect = this.previewRegionRects[rectIndex];
-        if (rect === undefined) {
-          rect = document.createElementNS("http://www.w3.org/2000/svg", "polygon") as SVGPolygonElement;
-          rect.setAttribute("data-testid", "region-rect");
-          rect.setAttribute("fill", "none");
-          rect.setAttribute("stroke", "#66ccff");
-          rect.setAttribute("stroke-width", "1.5");
-          rect.setAttribute("opacity", "0.95");
-          rect.style.display = "none";
-          rect.style.pointerEvents = "none";
-          this.previewSvg.appendChild(rect);
-          this.previewRegionRects.push(rect);
-        }
-        rect.setAttribute(
-          "points",
-          `${corners.nw.x},${corners.nw.y} ${corners.ne.x},${corners.ne.y} ${corners.se.x},${corners.se.y} ${corners.sw.x},${corners.sw.y}`,
-        );
-        rect.style.display = "block";
-        if (this.regionDraw !== null || this.regionGesture !== null) {
-          rect.setAttribute("stroke-dasharray", "none");
-        } else {
-          rect.setAttribute("stroke-dasharray", "6 4");
-        }
-        rectIndex += 1;
-        const dots = [corners.nw, corners.ne, corners.sw, corners.se];
-        for (const corner of dots) {
-          let dot = this.previewRegionCorners[cornerIndex];
-          if (dot === undefined) {
-            dot = document.createElementNS("http://www.w3.org/2000/svg", "circle") as SVGCircleElement;
-            dot.setAttribute("data-testid", "region-corner");
-            dot.setAttribute("r", "4");
-            dot.setAttribute("fill", "#66ccff");
-            dot.setAttribute("stroke", "#000000");
-            dot.setAttribute("stroke-width", "1.5");
-            dot.setAttribute("opacity", "0.95");
-            dot.style.display = "none";
-            dot.style.pointerEvents = "none";
-            this.previewSvg.appendChild(dot);
-            this.previewRegionCorners.push(dot);
-          }
-          dot.setAttribute("cx", String(corner.x));
-          dot.setAttribute("cy", String(corner.y));
-          dot.style.display = "block";
-          cornerIndex += 1;
-        }
+        drawQuad(corners, this.regionDraw === null && this.regionGesture === null);
         seen.add(region.id);
         this.syncRegionInput(region, box, locked);
+      }
+      // In-progress draw (not a committed region yet): same thin outline,
+      // solid while the gesture is armed, like crop and grow-or-crop.
+      if (this.regionDraw !== null) {
+        const layer = this.findLayer(this.regionDraw.layerId);
+        if (layer !== null) {
+          const draft: GnumarusRegion = {
+            id: "",
+            name: "",
+            textureId: this.regionDraw.textureId,
+            x: Math.min(this.regionDraw.x0, this.regionDraw.x1),
+            y: Math.min(this.regionDraw.y0, this.regionDraw.y1),
+            w: Math.abs(this.regionDraw.x1 - this.regionDraw.x0),
+            h: Math.abs(this.regionDraw.y1 - this.regionDraw.y0),
+          };
+          drawQuad(this.regionClientCorners(draft, layer), false);
+        }
       }
     }
     for (let index = rectIndex; index < this.previewRegionRects.length; index += 1) {

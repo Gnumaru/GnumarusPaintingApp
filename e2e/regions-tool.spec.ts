@@ -13,12 +13,14 @@ test("regions tool draws a named box with editor @recent", async ({ page }) => {
   await openRegions(page);
   const overlay = page.locator('gnumarus-shell [data-testid="region-overlay"]');
   await expect(overlay).toBeVisible();
-  await expect(page.locator('gnumarus-shell [data-testid="region-rect"]')).toHaveCount(0);
+  await expect(page.locator('gnumarus-shell [data-testid="region-rect"]').first()).toBeHidden();
   const a = await layerScreenTarget(page, 10, 10);
   const b = await layerScreenTarget(page, 30, 30);
   await page.mouse.move(a.x, a.y);
   await page.mouse.down();
   await page.mouse.move(b.x, b.y, { steps: 8 });
+  // The box already shows while the button is still held, like crop.
+  await expect(page.locator('gnumarus-shell [data-testid="region-rect"]').first()).toBeVisible();
   await page.mouse.up();
   await expect(page.locator('gnumarus-shell [data-testid="region-rect"]')).toHaveCount(1);
   const input = page.locator('gnumarus-shell [data-testid="region-name-input"]');
