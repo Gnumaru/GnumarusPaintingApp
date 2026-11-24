@@ -1231,13 +1231,49 @@ export function drawImagePatternStamp(
 }
 
 /**
+ * Tip footprint along a stroke direction, in pixels. A line tip is only 1px
+ * wide across its direction, so spacing dabs by `tip * 0.15` stamps every
+ * 1.5px (at size 10) while covering 1px -> visible gaps whenever the stroke
+ * runs across the tip. Spacing by the projected footprint keeps every
+ * orientation continuous; circle keeps the old diameter and square keeps it
+ * along axes (extending on diagonals, which only adds overlap).
+ */
+function tipFootprintAlongSegment(
+  tip: number,
+  shape: GnumarusBrushShape,
+  angleDeg: number,
+  dx: number,
+  dy: number,
+): number {
+  const length = Math.sqrt(dx * dx + dy * dy);
+  if (!(length > 0)) {
+    return 1;
+  }
+  if (shape === "circle") {
+    return tip;
+  }
+  const angle = (clampBrushAngle(angleDeg) * Math.PI) / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const along = Math.abs((dx * cos + dy * sin) / length);
+  if (shape === "line") {
+    return along * (tip - 1) + 1;
+  }
+  const across = Math.abs((-dx * sin + dy * cos) / length);
+  return (tip - 1) * (along + across) + 1;
+}
+
+/**
  * Brush stroke along a Bresenham path, stamping the tip at every path pixel.
  * Preserves the 1px brush path exactly when size is 1 (either shape).
  *
  * Distance-based dab spacing (idea from Krita's effectiveSpacing): large tips
- * are stamped every `tip * 0.15` px along the path instead of at every pixel,
- * so a 512px tip over 200px needs ~3 stamps instead of ~200 overlapping ones.
- * Small tips (step < 1) keep the legacy per-pixel behavior bit-for-bit.
+ * are stamped every `footprint * 0.15` px along the path instead of at every
+ * pixel, so a 512px tip over 200px needs ~3 stamps instead of ~200
+ * overlapping ones. Small tips (step < 1) keep the legacy per-pixel behavior
+ * bit-for-bit. The footprint is the tip extent projected onto the stroke
+ * direction: a line tip stroked across its direction still stamps every
+ * pixel even at large sizes.
  */
 export function drawBrushLine(
   buffer: Uint8ClampedArray,
@@ -1262,7 +1298,7 @@ export function drawBrushLine(
     drawPixelLine(buffer, width, height, x0, y0, x1, y1, color, locked, blend, wrap, gate);
     return;
   }
-  const step = tip * 0.15;
+  const step = tipFootprintAlongSegment(tip, shape, angleDeg, x1 - x0, y1 - y0) * 0.15;
   const stepSquared = step * step;
   const useSpacing = stepSquared > 1;
   let x = x0;
@@ -1822,8 +1858,8 @@ export function stampSegmentCoverage(
       return;
     }
     // Distance-based dab spacing for large tips (same idea as drawBrushLine):
-    // stamp every tip*0.15 px so a 512px tip needs a handful of stamps.
-    const step = thick * 0.15;
+    // stamp every footprint*0.15 px so a 512px tip needs a handful of stamps.
+    const step = tipFootprintAlongSegment(thick, shape, angleDeg, endX - x, endY - y) * 0.15;
     const stepSquared = step * step;
     if (!(stepSquared > 1)) {
       const dx = Math.abs(endX - x);

@@ -370,6 +370,40 @@ describe("GnumarusPixelBuffer", () => {
     expect(getPixel(diagonal, 7, 7, 6, 0)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   });
 
+  it("stamps line tips without gaps when stroking across the tip", () => {
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    // Horizontal stroke across a vertical 10px line tip: every path pixel
+    // stays painted (dab spacing follows the 1px across-tip footprint,
+    // not the 10px tip length).
+    const across = createPixelBuffer(60, 20);
+    drawBrushLine(across, 60, 20, 5, 10, 54, 10, 10, "line", red, undefined, "normal", "off", undefined, undefined, 90);
+    for (let x = 5; x <= 54; x += 1) {
+      expect(getPixel(across, 60, 20, x, 10)).toEqual(red);
+    }
+    // Vertical stroke across a horizontal 10px line tip: full column.
+    const down = createPixelBuffer(20, 60);
+    drawBrushLine(down, 20, 60, 10, 5, 10, 54, 10, "line", red, undefined, "normal", "off", undefined, undefined, 0);
+    for (let y = 5; y <= 54; y += 1) {
+      expect(getPixel(down, 20, 60, 10, y)).toEqual(red);
+    }
+    // Along the tip the long footprint still paints a solid band.
+    const along = createPixelBuffer(60, 20);
+    drawBrushLine(along, 60, 20, 5, 10, 54, 10, 10, "line", red, undefined, "normal", "off", undefined, undefined, 0);
+    for (let x = 5; x <= 54; x += 1) {
+      expect(getPixel(along, 60, 20, x, 10)).toEqual(red);
+    }
+  });
+
+  it("stamps mask coverage without gaps when stroking across the tip", () => {
+    const width = 60;
+    const height = 20;
+    const mask = new Uint8Array(width * height);
+    stampSegmentCoverage(mask, width, height, 5, 10, 54, 10, 10, "line", false, "off", undefined, undefined, 90);
+    for (let x = 5; x <= 54; x += 1) {
+      expect(mask[10 * width + x]).toBe(255);
+    }
+  });
+
   it("rotates single square dabs", () => {
     const red = { r: 255, g: 0, b: 0, a: 255 };
     const straight = createPixelBuffer(9, 9);
