@@ -2,6 +2,7 @@ import { LitElement, css, html } from "lit";
 import {
   blackSwitchModelValues,
   defaultHslPalette,
+  formatAxisValue,
   getColorModelDef,
   GNUMARUS_PALETTE_MAX_COLORS,
   hsvToRgbBytes,
@@ -464,6 +465,13 @@ export class GnumarusColorPicker extends LitElement {
   private suppressPaletteClick = false;
   /** Swallow the document pointerdown that opened the popup programmatically. */
   private ignoreNextDocPointerDown = false;
+  /**
+   * Raw text of the axis input the user is typing in. Live-applying every
+   * keystroke re-renders the inputs with formatted values (e.g. "1" becomes
+   * "1.0"), which fights multi-digit typing; the draft is restored after
+   * each render until the edit commits (change/blur) or focus leaves.
+   */
+  private axisDraft: { axisKey: string; text: string } | null = null;
 
   constructor() {
     super();
@@ -710,6 +718,30 @@ export class GnumarusColorPicker extends LitElement {
     if (changed.get("open") === false && this.open) {
       this.maybeSwitchOutOfBlack();
     }
+    this.restoreAxisDraft();
+  }
+
+  /**
+   * Re-apply the in-progress axis text after a re-render: Lit's `.value`
+   * binding would otherwise overwrite what the user just typed with the
+   * formatted model value (typing "123" becomes "1.0" + "23"). Only the
+   * focused input is restored; anything else is a genuine programmatic
+   * change (bar drag, model switch) and keeps the formatted value.
+   */
+  private restoreAxisDraft(): void {
+    const draft = this.axisDraft;
+    if (draft === null) {
+      return;
+    }
+    const root = this.shadowRoot;
+    const input = root?.querySelector(`input.axis-input[data-axis="${draft.axisKey}"]`) as HTMLInputElement | null;
+    if (input === null || root?.activeElement !== input) {
+      this.axisDraft = null;
+      return;
+    }
+    if (input.value !== draft.text) {
+      input.value = draft.text;
+    }
   }
 
   /** Apply the black switch-out for the current model, if applicable. */
@@ -751,16 +783,21 @@ export class GnumarusColorPicker extends LitElement {
       return;
     }
     // Live feedback while typing: apply valid values, ignore the rest.
+    // The raw text is kept as a draft so the re-render below does not
+    // overwrite the keystroke with the formatted value (see updated()).
     const parsed = parseAxisInput(target.value, axis);
     if (parsed === null) {
+      this.axisDraft = null;
       return;
     }
+    this.axisDraft = { axisKey: axis.key, text: target.value };
     const next = [...this.modelValues];
     next[axisIndex] = parsed;
     this.applyModelValues(next);
   }
 
   private onAxisChange(axisIndex: number, event: Event): void {
+    this.axisDraft = null;
     const def = this.def;
     const axis = def.axes[axisIndex];
     if (axis === undefined) {
@@ -771,14 +808,18 @@ export class GnumarusColorPicker extends LitElement {
       return;
     }
     // Commit on blur/Enter: snap invalid text back to the current value.
+    // The formatted value is written directly because Lit skips the
+    // `.value` binding when its expression did not change since the last
+    // render (exactly the case after draft-preserving keystrokes).
     const parsed = parseAxisInput(target.value, axis);
     if (parsed === null) {
-      target.value = (this.modelValues[axisIndex] ?? axis.min).toFixed(axis.decimals);
+      target.value = formatAxisValue(this.modelValues[axisIndex] ?? axis.min, axis);
       return;
     }
     const next = [...this.modelValues];
     next[axisIndex] = parsed;
     this.applyModelValues(next);
+    target.value = formatAxisValue(parsed, axis);
     this.emitCommit();
   }
 
