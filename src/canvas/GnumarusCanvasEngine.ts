@@ -3943,7 +3943,9 @@ export class GnumarusCanvasEngine {
     if (this.textCanvas === null) {
       this.textCanvas = document.createElement("canvas");
     }
-    return this.textCanvas.getContext("2d");
+    // Read on every keystroke (previewTextEdit -> rasterize -> getImageData),
+    // so opt into the software-backed path Chrome suggests via this warning.
+    return this.textCanvas.getContext("2d", { willReadFrequently: true });
   }
 
   /**
