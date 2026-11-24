@@ -4,13 +4,13 @@ export interface GnumarusToastSettings {
 }
 
 export const DEFAULT_TOAST_SETTINGS: GnumarusToastSettings = {
-  durationSec: 1.0,
+  durationSec: 2.0,
 };
 
 export const TOAST_SETTINGS_STORAGE_KEY = "gnumarus.settings.toast.v1";
 
 export const GNUMARUS_MIN_TOAST_DURATION_SEC = 0.5;
-export const GNUMARUS_MAX_TOAST_DURATION_SEC = 2.0;
+export const GNUMARUS_MAX_TOAST_DURATION_SEC = 10.0;
 
 export class GnumarusToastSettingsError extends Error {
   constructor(message: string) {

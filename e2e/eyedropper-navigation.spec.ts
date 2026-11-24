@@ -310,31 +310,31 @@ test("clicking layers and frames also shows the toast", async ({ page }) => {
   await expect(toast).toBeVisible();
 });
 
-test("toast display time is configurable between 0.5 and 2 seconds", async ({ page }) => {
+test("toast display time is configurable between 0.5 and 10 seconds", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.getByRole("button", { name: "Edit" }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   const input = page.locator("gnumarus-shell input#toastDuration");
   await expect(input).toBeVisible();
-  await expect(input).toHaveValue("1");
+  await expect(input).toHaveValue("2");
   await input.fill("0.1");
   await expect(page.locator("gnumarus-shell")).toContainText("Toast display time: 0.5 s");
   await expect(input).toHaveValue("0.5");
-  await input.fill("5");
-  await expect(page.locator("gnumarus-shell")).toContainText("Toast display time: 2 s");
-  await expect(input).toHaveValue("2");
+  await input.fill("50");
+  await expect(page.locator("gnumarus-shell")).toContainText("Toast display time: 10 s");
+  await expect(input).toHaveValue("10");
   await input.fill("1.5");
   await expect(page.locator("gnumarus-shell")).toContainText("Toast display time: 1.5 s");
   await expect(page.locator('gnumarus-shell button[aria-label="Reset toast display time to default"]')).toBeVisible();
   await page.locator('gnumarus-shell button[aria-label="Reset toast display time to default"]').click();
-  await expect(input).toHaveValue("1");
+  await expect(input).toHaveValue("2");
   await page.getByRole("button", { name: "Close" }).click();
   const duration = await page.evaluate(() => {
     const root = window as unknown as { __gnumarus?: { shell?: { toastDurationSec: number } } };
     return root.__gnumarus?.shell?.toastDurationSec ?? -1;
   });
-  expect(duration).toBe(1);
+  expect(duration).toBe(2);
 });
 
 test("automatic layer names start at 1", async ({ page }) => {

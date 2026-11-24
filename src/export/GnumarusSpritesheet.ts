@@ -155,8 +155,7 @@ export function computeSheetGeometry(
  * Blit composited per-frame images into the sheet buffer (transparent
  * background). Every referenced frame must map to an exact
  * `frameWidth * frameHeight * 4` buffer; anything else throws.
- */
-export function composeSheet(
+ */export function composeSheet(
   framePixels: ReadonlyMap<number, Uint8ClampedArray>,
   geometry: GnumarusSheetGeometry,
   frameWidth: number,
@@ -189,4 +188,59 @@ export function composeSheet(
     }
   }
   return { buffer: sheet, width, height };
+}
+
+/** One exported animation for the sheet JSON: playback order with seconds. */
+export interface GnumarusSheetAnimationSource {
+  name: string;
+  /** Playback order: 0-based project frame plus effective duration in seconds. */
+  sequence: Array<{ frame: number; secs: number }>;
+}
+
+/** Serializable spritesheet sidecar: texture size, frame rects, animations. */
+export interface GnumarusSheetAnimationData {
+  texture: { w: number; h: number };
+  /** 1-based project frame number to top-left rect in texture pixels. */
+  frames: Record<string, { x: number; y: number; w: number; h: number }>;
+  animations: Record<string, { name: string; frames: number[]; frame_times: Array<{ frame: number; secs: number }> }>;
+}
+
+/**
+ * Build the spritesheet JSON sidecar. Frame rects come from the geometry
+ * cells (first occurrence wins when a frame repeats); animation frame
+ * numbers are 1-based in playback order with per-position durations.
+ */
+export function buildSheetAnimationData(input: {
+  sheetWidth: number;
+  sheetHeight: number;
+  frameWidth: number;
+  frameHeight: number;
+  cells: GnumarusSheetCell[];
+  animations: GnumarusSheetAnimationSource[];
+}): GnumarusSheetAnimationData {
+  const fw = Math.floor(input.frameWidth);
+  const fh = Math.floor(input.frameHeight);
+  if (!Number.isInteger(fw) || !Number.isInteger(fh) || fw < 1 || fh < 1) {
+    throw new Error(`Invalid spritesheet frame size ${input.frameWidth}x${input.frameHeight}.`);
+  }
+  const frames: Record<string, { x: number; y: number; w: number; h: number }> = {};
+  for (const cell of input.cells) {
+    const key = String(cell.frame + 1);
+    if (frames[key] === undefined) {
+      frames[key] = { x: cell.col * fw, y: cell.row * fh, w: fw, h: fh };
+    }
+  }
+  const animations: GnumarusSheetAnimationData["animations"] = {};
+  for (const animation of input.animations) {
+    animations[animation.name] = {
+      name: animation.name,
+      frames: animation.sequence.map((entry) => entry.frame + 1),
+      frame_times: animation.sequence.map((entry) => ({ frame: entry.frame + 1, secs: entry.secs })),
+    };
+  }
+  return {
+    texture: { w: input.sheetWidth, h: input.sheetHeight },
+    frames,
+    animations,
+  };
 }

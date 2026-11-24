@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildSheetAnimationData,
   composeSheet,
   computeSheetGeometry,
   GNUMARUS_SHEET_LAYOUTS,
@@ -191,5 +192,79 @@ describe("GnumarusSpritesheet", () => {
     ).toThrow(/Invalid pixels/);
     expect(() => composeSheet(new Map(), geometry, 0, 2)).toThrow(/frame size/);
     expect(() => composeSheet(new Map(), { cols: 0, rows: 1, cells: [] }, 2, 2)).toThrow(/geometry/);
+  });
+
+  it("builds the animation-data sidecar with 1-based frames", () => {
+    const geometry = computeSheetGeometry(strips([0, 1, 2]), "line", 1, true);
+    const data = buildSheetAnimationData({
+      sheetWidth: 48,
+      sheetHeight: 16,
+      frameWidth: 16,
+      frameHeight: 16,
+      cells: geometry.cells,
+      animations: [
+        {
+          name: "walk",
+          sequence: [
+            { frame: 0, secs: 0.2 },
+            { frame: 1, secs: 0.25 },
+            { frame: 0, secs: 0.2 },
+          ],
+        },
+      ],
+    });
+    expect(data).toEqual({
+      texture: { w: 48, h: 16 },
+      frames: {
+        "1": { x: 0, y: 0, w: 16, h: 16 },
+        "2": { x: 16, y: 0, w: 16, h: 16 },
+        "3": { x: 32, y: 0, w: 16, h: 16 },
+      },
+      animations: {
+        walk: {
+          name: "walk",
+          frames: [1, 2, 1],
+          frame_times: [
+            { frame: 1, secs: 0.2 },
+            { frame: 2, secs: 0.25 },
+            { frame: 1, secs: 0.2 },
+          ],
+        },
+      },
+    });
+    expect(() => JSON.parse(JSON.stringify(data))).not.toThrow();
+  });
+
+  it("keeps the first cell when a frame repeats and allows empty animations", () => {
+    const data = buildSheetAnimationData({
+      sheetWidth: 32,
+      sheetHeight: 16,
+      frameWidth: 16,
+      frameHeight: 16,
+      cells: [
+        { col: 0, row: 0, frame: 0 },
+        { col: 1, row: 0, frame: 1 },
+        { col: 0, row: 1, frame: 0 },
+      ],
+      animations: [],
+    });
+    expect(data.frames).toEqual({
+      "1": { x: 0, y: 0, w: 16, h: 16 },
+      "2": { x: 16, y: 0, w: 16, h: 16 },
+    });
+    expect(data.animations).toEqual({});
+  });
+
+  it("rejects degenerate frame sizes for the sidecar", () => {
+    expect(() =>
+      buildSheetAnimationData({
+        sheetWidth: 16,
+        sheetHeight: 16,
+        frameWidth: 0,
+        frameHeight: 16,
+        cells: [],
+        animations: [],
+      }),
+    ).toThrow(/frame size/);
   });
 });

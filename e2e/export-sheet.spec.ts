@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { addAnimation, addFrames, exportedFile, exportedSheetPixels, loadBlankProject, paintCenter, setEmptyCellHold, stubSaveFilePicker } from "./e2e-helpers";
+import { addAnimation, addFrames, exportedFile, exportedSheetPixels, loadBlankProject, paintCenter, setEmptyCellHold, stubProjectDirectory, stubSaveFilePicker } from "./e2e-helpers";
 
 async function openSheetTab(page: import("@playwright/test").Page): Promise<import("@playwright/test").Locator> {
   await page.getByRole("button", { name: "File" }).click();
@@ -30,6 +30,7 @@ test("spritesheet animations select through a multi-select", async ({ page }) =>
   await expect(dialog.locator("#exportSheetAll")).toBeVisible();
   await select.selectOption(["a", "b"]);
   await dialog.locator("select#exportSheetLayout").selectOption("per-line");
+  await dialog.getByRole("checkbox", { name: "Export animation data" }).uncheck();
   await dialog.locator("#exportSheetOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("Exported");
   const sheet = await exportedSheetPixels(page);
@@ -56,6 +57,7 @@ test("wide spritesheet packs round columns up, narrow packs down", async ({ page
     await dialog.locator('[data-testid="export-tab-sheet"]').click();
     await dialog.getByRole("checkbox", { name: "All frames" }).check();
     await dialog.locator("select#exportSheetLayout").selectOption("packed");
+    await dialog.getByRole("checkbox", { name: "Export animation data" }).uncheck();
     await dialog.locator("#exportSheetOk").click();
     await expect(page.locator("gnumarus-shell")).toContainText("Exported");
     return exportedFile(page);
@@ -99,6 +101,7 @@ test("fixed columns shrink to content unless full size is ensured", async ({ pag
   const dialog = page.locator('gnumarus-shell dialog#exportDialog');
   await expect(dialog.getByRole("checkbox", { name: "Ensure full size" })).not.toBeChecked();
   await expect(dialog.getByRole("checkbox", { name: "Ensure full size" })).toBeVisible();
+  await dialog.getByRole("checkbox", { name: "Export animation data" }).uncheck();
   await dialog.locator("#exportSheetOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("Exported");
   expect((await exportedFile(page))?.width).toBe(64);
@@ -110,9 +113,86 @@ test("fixed columns shrink to content unless full size is ensured", async ({ pag
     .locator('gnumarus-shell dialog#exportDialog')
     .getByRole("checkbox", { name: "Ensure full size" })
     .check();
+  await dialog.getByRole("checkbox", { name: "Export animation data" }).uncheck();
   await page.locator('gnumarus-shell dialog#exportDialog').locator("#exportSheetOk").click();
   await expect
     .poll(async () => (await exportedFile(page))?.width, { timeout: 15000 })
     .toBe(576);
   expect((await exportedFile(page))?.height).toBe(64);
+});
+
+test("animation data defaults checked and hides for individual frames", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  const dialog = await openSheetTab(page);
+  const box = dialog.getByRole("checkbox", { name: "Export animation data" });
+  await expect(box).toBeVisible();
+  await expect(box).toBeChecked();
+  await dialog.locator("select#exportSheetLayout").selectOption("individual");
+  await expect(box).toBeHidden();
+  await dialog.locator("select#exportSheetLayout").selectOption("line");
+  await expect(box).toBeVisible();
+});
+
+test("checked animation data saves the sheet plus a JSON sidecar", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await setEmptyCellHold(page, false);
+  await addFrames(page, 2);
+  await addAnimation(page, "walk,none,1-3");
+  await page.locator('gnumarus-shell [data-testid="anim-frame"][data-frame="0"]').click();
+  await paintCenter(page);
+  // Explicit duration on frame 2 (1-based) exercises the override path.
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { setFrameDuration(f: number, s: number | null): boolean } } };
+    root.__gnumarus?.engine?.setFrameDuration(1, 0.5);
+  });
+  const project = await stubProjectDirectory(page, "SheetDir");
+  page.on("dialog", (dialog) => void dialog.accept("my-sheet"));
+  const dialog = await openSheetTab(page);
+  await expect(dialog.getByRole("checkbox", { name: "Export animation data" })).toBeChecked();
+  await dialog.locator("#exportSheetAnimations").selectOption(["walk"]);
+  await dialog.locator("select#exportSheetLayout").selectOption("line");
+  await dialog.locator("#exportSheetOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported 2 files to SheetDir");
+  const written = await project.writtenBlobs();
+  expect(Object.keys(written).sort()).toEqual(["my-sheet.json", "my-sheet.png"]);
+  const sidecar = JSON.parse(new TextDecoder().decode(new Uint8Array(written["my-sheet.json"] ?? []))) as {
+    texture: { w: number; h: number };
+    frames: Record<string, { x: number; y: number; w: number; h: number }>;
+    animations: Record<string, { name: string; frames: number[]; frame_times: Array<{ frame: number; secs: number }> }>;
+  };
+  expect(sidecar.texture).toEqual({ w: 192, h: 64 });
+  expect(sidecar.frames).toEqual({
+    "1": { x: 0, y: 0, w: 64, h: 64 },
+    "2": { x: 64, y: 0, w: 64, h: 64 },
+    "3": { x: 128, y: 0, w: 64, h: 64 },
+  });
+  expect(sidecar.animations.walk).toEqual({
+    name: "walk",
+    frames: [1, 2, 3],
+    frame_times: [
+      { frame: 1, secs: 0.25 },
+      { frame: 2, secs: 0.5 },
+      { frame: 3, secs: 0.25 },
+    ],
+  });
+  // The PNG went to the same directory with the prompted stem.
+  expect((written["my-sheet.png"] ?? []).length).toBeGreaterThan(100);
+});
+
+test("dismissing the sheet name prompt cancels without writing", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await paintCenter(page);
+  const project = await stubProjectDirectory(page, "SheetDir");
+  page.on("dialog", (dialog) => void dialog.dismiss());
+  const dialog = await openSheetTab(page);
+  await dialog.getByRole("checkbox", { name: "All frames" }).check();
+  await dialog.locator("#exportSheetOk").click();
+  await expect(page.locator("gnumarus-shell dialog#exportDialog")).toBeHidden();
+  expect(await project.writtenBlobs()).toEqual({});
 });

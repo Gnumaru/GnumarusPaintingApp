@@ -310,6 +310,7 @@ import {
   withTailFrame,
 } from "../export/GnumarusVideoMux";
 import {
+  buildSheetAnimationData,
   composeSheet,
   computeSheetGeometry,
   GNUMARUS_SHEET_LAYOUTS,
@@ -2268,7 +2269,7 @@ export class GnumarusShell extends LitElement {
     exportAnimatedQuality: { type: Number },
     exportAnimatedLossless: { type: Boolean },
     exportSheetLayout: { type: String },
-    exportSheetFormat: { type: String },
+    exportSheetAnimationData: { type: Boolean },    exportSheetFormat: { type: String },
     exportSheetCount: { type: Number },
     exportSheetFullSize: { type: Boolean },
     exportSheetAll: { type: Boolean },
@@ -2556,6 +2557,7 @@ export class GnumarusShell extends LitElement {
   declare exportAnimatedQuality: number;
   declare exportAnimatedLossless: boolean;
   declare exportSheetLayout: string;
+  declare exportSheetAnimationData: boolean;
   declare exportSheetFormat: string;
   declare exportSheetCount: number;
   declare exportSheetFullSize: boolean;
@@ -2889,6 +2891,7 @@ export class GnumarusShell extends LitElement {
     this.videoSupportWebm = true;
     this.videoSupportMp4 = true;
     this.exportSheetLayout = "line";
+    this.exportSheetAnimationData = true;
     this.exportSheetFormat = "image/png";
     this.exportSheetCount = 2;
     this.exportSheetFullSize = false;
@@ -5250,7 +5253,7 @@ export class GnumarusShell extends LitElement {
               type="number"
               id="toastDuration"
               min="0.5"
-              max="2"
+              max="10"
               step="0.1"
               .value=${String(this.toastDurationSec)}
               @input=${(): void => this.applyToastFromDialog()}
@@ -6016,6 +6019,18 @@ export class GnumarusShell extends LitElement {
               this.exportSheetFullSize = (event.target as HTMLInputElement).checked;
             }}
           />${tr("dialog.sheetFullSize")}</label
+        >
+        <label
+          title=${tr("dialog.exportAnimationDataTitle")}
+          ?hidden=${this.exportSheetLayout === "individual"}
+          ><input
+            type="checkbox"
+            id="exportSheetAnimationData"
+            .checked=${this.exportSheetAnimationData}
+            @change=${(event: Event): void => {
+              this.exportSheetAnimationData = (event.target as HTMLInputElement).checked;
+            }}
+          />${tr("dialog.exportAnimationData")}</label
         >
         <label title=${tr("dialog.formatTitle")}
           >${tr("dialog.format")}
@@ -10773,7 +10788,7 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.onionOff");
   }
 
-  /** Test hook: set the toast display time in seconds (0.5..2.0, clamped). */
+  /** Test hook: set the toast display time in seconds (0.5..10.0, clamped). */
   setToastDurationSec(value: number): void {
     this.toastDurationSec = clampToastDurationSec(value);
     this.persistToast();
@@ -17945,6 +17960,9 @@ export class GnumarusShell extends LitElement {
     this.exportSheetCount = Number.isFinite(countRaw) ? countRaw : 0;
     const fullInput = this.shadowRoot?.getElementById("exportSheetFull") as HTMLInputElement | null;
     this.exportSheetFullSize = fullInput?.checked === true;
+    const dataInput = this.shadowRoot?.getElementById("exportSheetAnimationData") as HTMLInputElement | null;
+    this.exportSheetAnimationData = dataInput?.checked === true;
+    const withAnimationData = this.exportSheetAnimationData && layoutValue !== "individual";
     const fail = (message: string): void => {
       this.closeExportDialog();
       this.statusMessage = message;
@@ -18029,6 +18047,19 @@ export class GnumarusShell extends LitElement {
         return;
       }
       const fileName = `${base}-sheet.${format.ext}`;
+      if (withAnimationData) {
+        await this.confirmSheetWithAnimationData(
+          blob,
+          format.ext,
+          geometry.cells,
+          size.width,
+          size.height,
+          sheet.width,
+          sheet.height,
+          base,
+        );
+        return;
+      }
       this.closeExportDialog();
       if (await this.saveExportBlob(blob, fileName, `${format.label} image`)) {
         this.statusMessage = tr("status.exported", { file: fileName });
@@ -18037,6 +18068,94 @@ export class GnumarusShell extends LitElement {
     } catch (error) {
       fail(error instanceof Error ? error.message : tr("status.exportBadSheet"));
     }
+  }
+
+  /**
+   * Spritesheet + JSON sidecar export: prompt for a file stem (no
+   * extension), pick a directory, then save the sheet texture and a
+   * `<stem>.json` with the texture size, frame rects and the selected
+   * named animations (playback order with effective per-frame seconds).
+   */
+  private async confirmSheetWithAnimationData(
+    blob: Blob,
+    ext: string,
+    cells: Array<{ col: number; row: number; frame: number }>,
+    frameWidth: number,
+    frameHeight: number,
+    sheetWidth: number,
+    sheetHeight: number,
+    base: string,
+  ): Promise<void> {
+    const engine = this.engine;
+    if (engine === null) {
+      this.closeExportDialog();
+      return;
+    }
+    const fail = (message: string): void => {
+      this.closeExportDialog();
+      this.statusMessage = message;
+      this.showToast(message);
+    };
+    const asked = window.prompt(tr("dialog.sheetNamePrompt"), base);
+    if (asked === null) {
+      this.closeExportDialog();
+      return;
+    }
+    const cleaned = asked.trim().replace(/[\\/]/g, "_");
+    const stem = cleaned === "" ? base : cleaned;
+    const names = new Set<string>();
+    const select = this.shadowRoot?.getElementById("exportSheetAnimations") as HTMLSelectElement | null;
+    if (select !== null) {
+      for (const option of Array.from(select.selectedOptions)) {
+        if (option.value !== "") {
+          names.add(option.value);
+        }
+      }
+    }
+    const animations: Array<{ name: string; sequence: Array<{ frame: number; secs: number }> }> = [];
+    for (const animation of engine.getNamedAnimations()) {
+      if (!names.has(animation.name)) {
+        continue;
+      }
+      animations.push({
+        name: animation.name,
+        sequence: resolveExportSequence(animation).map((entry) => ({
+          frame: entry.frame,
+          secs: entry.duration ?? engine.getEffectiveFrameDuration(entry.frame),
+        })),
+      });
+    }
+    const data = buildSheetAnimationData({
+      sheetWidth,
+      sheetHeight,
+      frameWidth,
+      frameHeight,
+      cells,
+      animations,
+    });
+    const textureName = `${stem}.${ext}`;
+    const jsonName = `${stem}.json`;
+    const jsonBlob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    this.closeExportDialog();
+    try {
+      if (isFileSystemAccessSupported()) {
+        const dir = await pickProjectDirectory();
+        await writeBlobToDirectory(dir, textureName, blob);
+        await writeBlobToDirectory(dir, jsonName, jsonBlob);
+        this.statusMessage = tr("status.exportedMany", { count: 2, dir: dir.name });
+        this.showToast(tr("status.exportedMany", { count: 2, dir: dir.name }));
+        return;
+      }
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        fail(error instanceof Error ? error.message : tr("status.exportBadSheet"));
+      }
+      return;
+    }
+    downloadBlob(blob, textureName);
+    downloadBlob(jsonBlob, jsonName);
+    this.statusMessage = tr("status.exportedManyNoDir", { count: 2 });
+    this.showToast(tr("status.exportedManyNoDir", { count: 2 }));
   }
 
   private confirmFrameDuration(): void {

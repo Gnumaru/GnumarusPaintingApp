@@ -19,7 +19,13 @@ checkerboard); unticked keeps transparency where the format supports
 it. Spritesheet animations are picked from a multi-select list (plus
 an all-frames checkbox and extra frame lists); the packed layout
 follows the "Wide spritesheet packs" setting (columns rounded up for
-wide packs, down for tall ones). Fit-all-textures and crop-all-cells batch jobs
+wide packs, down for tall ones). Tick **Export animation data** (on by
+default, hidden for individual frames) to save a JSON sidecar next to
+the sheet: after a file-name prompt (defaulting to the project name)
+and a directory pick, the sheet texture and a same-named ``.json``
+with the texture size, per-frame rects and the selected animations'
+frame order plus per-frame seconds are written into that directory.
+Fit-all-textures and crop-all-cells batch jobs
 normalize the project first; reload-all-textures restores files edited
 externally, skipping new textures (undoable).
 

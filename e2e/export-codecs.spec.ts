@@ -203,6 +203,7 @@ test("File > Export saves an animation as a WebP spritesheet", async ({ page }) 
   await dialog.locator("#exportSheetAnimations").selectOption("go");
   await expect(dialog.locator("select#exportSheetLayout")).toHaveValue("line");
   await dialog.locator("select#exportSheetFormat").selectOption("image/webp");
+  await dialog.getByRole("checkbox", { name: "Export animation data" }).uncheck();
   await dialog.locator("#exportSheetOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("Exported");
   const file = await exportedJxlBytes(page);
@@ -234,6 +235,7 @@ test("File > Export saves an animation as a JXL spritesheet", async ({ page }) =
   await dialog.locator("#exportSheetAnimations").selectOption("go");
   await expect(dialog.locator("select#exportSheetLayout")).toHaveValue("line");
   await dialog.locator("select#exportSheetFormat").selectOption("image/jxl");
+  await dialog.getByRole("checkbox", { name: "Export animation data" }).uncheck();
   await dialog.locator("#exportSheetOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("Exported");
   const file = await exportedJxlBytes(page);
@@ -339,6 +341,7 @@ test("File > Export saves an animation as a single-line spritesheet", async ({ p
   await dialog.locator('[data-testid="export-tab-sheet"]').click();
   await dialog.locator("#exportSheetAnimations").selectOption("go");
   await expect(dialog.locator("select#exportSheetLayout")).toHaveValue("line");
+  await dialog.getByRole("checkbox", { name: "Export animation data" }).uncheck();
   await dialog.locator("#exportSheetOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("Exported");
   const file = await exportedFile(page);
@@ -369,6 +372,7 @@ test("File > Export saves one animation per line with ragged rows", async ({ pag
   await dialog.locator('[data-testid="export-tab-sheet"]').click();
   await dialog.locator("#exportSheetAnimations").selectOption(["a", "b"]);
   await dialog.locator("select#exportSheetLayout").selectOption("per-line");
+  await dialog.getByRole("checkbox", { name: "Export animation data" }).uncheck();
   await dialog.locator("#exportSheetOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("Exported");
   const sheet = await exportedSheetPixels(page);
@@ -433,6 +437,7 @@ test("sheet all frames hides extra frames and ignores its value @recent", async 
   await dialog.locator("#exportSheetFrames").fill("1");
   await dialog.getByRole("checkbox", { name: "All frames" }).check();
   await expect(extraLabel).toBeHidden();
+  await dialog.getByRole("checkbox", { name: "Export animation data" }).uncheck();
   await dialog.locator("#exportSheetOk").click();
   await expect(page.locator("gnumarus-shell")).toContainText("Exported");
   // All three frames made the line sheet (192px), so the "1" was ignored.

@@ -21,7 +21,14 @@ suporta. As animações do spritesheet são escolhidas numa lista de
 seleção múltipla (mais um checkbox de todos os quadros e listas
 extras de quadros); o layout packed segue a configuração
 "Pacotes largos de spritesheet" (colunas arredondadas para cima em
-pacotes largos, para baixo nos altos). As ações em massa de ajustar/cortar normalizam
+pacotes largos, para baixo nos altos). Marque **Exportar dados de
+animação** (marcado por padrão, oculto em quadros individuais) para
+salvar um JSON auxiliar junto da folha: após informar o nome do
+arquivo (padrão é o nome do projeto) e escolher um diretório, a
+textura da folha e um ``.json`` de mesmo nome com o tamanho da
+textura, os retângulos dos quadros e a ordem dos quadros mais os
+segundos por quadro das animações selecionadas são gravados nesse
+diretório. As ações em massa de ajustar/cortar normalizam
 antes; recarregar texturas restaura edições externas, pulando
 texturas novas (desfazível).
 
