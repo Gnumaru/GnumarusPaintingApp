@@ -8928,6 +8928,16 @@ export class GnumarusShell extends LitElement {
       void this.runAction(this.fsSupported ? "save-project" : "save-embedded-project");
       return;
     }
+    if (this.matchesShortcut("file-new", event)) {
+      event.preventDefault();
+      void this.runAction("new-project");
+      return;
+    }
+    if (this.matchesShortcut("file-open", event)) {
+      event.preventDefault();
+      void this.runAction("open-project");
+      return;
+    }
     if (this.matchesShortcut("edit-merge-down", event)) {
       event.preventDefault();
       this.mergeActiveLayerDown();

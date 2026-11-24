@@ -50,6 +50,53 @@ test("new/open project default to Ctrl+Alt+N and Ctrl+Alt+O in the shortcuts edi
   await page.keyboard.press("Escape");
 });
 
+test("Ctrl+Alt+N opens the New Project dialog and Ctrl+Alt+O runs the open action", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell: { runAction(id: string): boolean } };
+      __gnumarusTestCalls?: string[];
+    };
+    const calls: string[] = [];
+    root.__gnumarusTestCalls = calls;
+    const shell = root.__gnumarus?.shell;
+    if (shell !== undefined) {
+      const original = shell.runAction.bind(shell);
+      shell.runAction = (id: string): boolean => {
+        calls.push(id);
+        return original(id);
+      };
+    }
+    (window as unknown as { showDirectoryPicker?: () => Promise<unknown> }).showDirectoryPicker =
+      async () => {
+        throw new DOMException("User cancelled", "AbortError");
+      };
+  });
+  const newDialog = page.locator("gnumarus-shell dialog#newDialog");
+  await page.keyboard.press("Control+Alt+N");
+  await expect(newDialog).toBeVisible();
+  await expect
+    .poll(async () => {
+      return page.evaluate(() => {
+        const root = window as unknown as { __gnumarusTestCalls?: string[] };
+        return root.__gnumarusTestCalls ?? [];
+      });
+    })
+    .toContain("new-project");
+  await page.keyboard.press("Escape");
+  await expect(newDialog).toBeHidden();
+  await page.keyboard.press("Control+Alt+O");
+  await expect
+    .poll(async () => {
+      return page.evaluate(() => {
+        const root = window as unknown as { __gnumarusTestCalls?: string[] };
+        return root.__gnumarusTestCalls ?? [];
+      });
+    })
+    .toContain("open-project");
+});
+
 test("Tab hides and shows the interface, toast still works", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
