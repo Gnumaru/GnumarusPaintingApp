@@ -2339,6 +2339,7 @@ export class GnumarusShell extends LitElement {
     exportAnimatedLossless: { type: Boolean },
     exportSheetLayout: { type: String },
     exportSheetTrim: { type: String },
+    exportSheetAllowRotation: { type: Boolean },
     exportSheetAnimationData: { type: Boolean },
     exportSheetAnimations: { type: Array },
     exportSheetFrames: { type: String },
@@ -2635,6 +2636,7 @@ export class GnumarusShell extends LitElement {
   declare exportAnimatedLossless: boolean;
   declare exportSheetLayout: string;
   declare exportSheetTrim: GnumarusSheetTrim;
+  declare exportSheetAllowRotation: boolean;
   declare exportSheetAnimationData: boolean;
   declare exportSheetAnimations: string[];
   declare exportSheetFrames: string;
@@ -2978,6 +2980,7 @@ export class GnumarusShell extends LitElement {
     this.videoSupportMp4 = true;
     this.exportSheetLayout = "line";
     this.exportSheetTrim = "none";
+    this.exportSheetAllowRotation = true;
     this.exportSheetAnimationData = true;
     this.exportSheetAnimations = [];
     this.exportSheetFrames = "";
@@ -6136,6 +6139,19 @@ export class GnumarusShell extends LitElement {
             )}
           </select>
         </label>
+        <label
+          title=${tr("dialog.allowRotationTitle")}
+          ?hidden=${this.exportSheetLayout === "individual" || this.exportSheetTrim !== "individual"}
+          ><input
+            type="checkbox"
+            id="exportSheetRotation"
+            data-testid="export-sheet-rotation"
+            .checked=${this.exportSheetAllowRotation}
+            @change=${(event: Event): void => {
+              this.exportSheetAllowRotation = (event.target as HTMLInputElement).checked;
+            }}
+          />${tr("dialog.allowRotation")}</label
+        >
         <label
           title=${tr("dialog.linesCountTitle")}
           ?hidden=${this.exportSheetLayout !== "fixed-rows" && this.exportSheetLayout !== "fixed-cols"}
@@ -18297,6 +18313,9 @@ export class GnumarusShell extends LitElement {
     const trimRaw = trimSelect?.value ?? this.exportSheetTrim;
     const trimValue: GnumarusSheetTrim = trimRaw === "uniform" || trimRaw === "individual" ? trimRaw : "none";
     this.exportSheetTrim = trimValue;
+    const rotationInput = this.shadowRoot?.getElementById("exportSheetRotation") as HTMLInputElement | null;
+    this.exportSheetAllowRotation = rotationInput?.checked ?? true;
+    const allowRotation = trimValue === "individual" && layoutValue !== "individual" && this.exportSheetAllowRotation;
     const formatSelect = this.shadowRoot?.getElementById("exportSheetFormat") as HTMLSelectElement | null;
     const formatValue = formatSelect?.value ?? this.exportSheetFormat;
     this.exportSheetFormat = formatValue;
@@ -18408,6 +18427,8 @@ export class GnumarusShell extends LitElement {
             const box = boxes.get(frame) as { w: number; h: number };
             return { frame, w: box.w, h: box.h };
           }),
+          undefined,
+          allowRotation,
         );
         const sheet = composePackedSheet(crops, packing);
         const blob = await this.encodeExportStill(

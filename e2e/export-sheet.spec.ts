@@ -166,9 +166,9 @@ test("checked animation data saves the sheet plus a JSON sidecar", async ({ page
   };
   expect(sidecar.texture).toEqual({ w: 192, h: 64 });
   expect(sidecar.frames).toEqual({
-    "1": { x: 0, y: 0, w: 64, h: 64, ox: 0, oy: 0 },
-    "2": { x: 64, y: 0, w: 64, h: 64, ox: 0, oy: 0 },
-    "3": { x: 128, y: 0, w: 64, h: 64, ox: 0, oy: 0 },
+    "1": { x: 0, y: 0, w: 64, h: 64, ox: 0, oy: 0, rotated: false },
+    "2": { x: 64, y: 0, w: 64, h: 64, ox: 0, oy: 0, rotated: false },
+    "3": { x: 128, y: 0, w: 64, h: 64, ox: 0, oy: 0, rotated: false },
   });
   expect(sidecar.animations.walk).toEqual({
     name: "walk",
@@ -198,7 +198,7 @@ test("dismissing the sheet name prompt cancels without writing", async ({ page }
 
 type SheetSidecar = {
   texture: { w: number; h: number };
-  frames: Record<string, { x: number; y: number; w: number; h: number; ox: number; oy: number }>;
+  frames: Record<string, { x: number; y: number; w: number; h: number; ox: number; oy: number; rotated: boolean }>;
   animations: Record<string, { name: string; frames: Array<{ frame: number; secs: number }> }>;
 };
 
@@ -330,11 +330,12 @@ test("individual trim packs each cropped frame with its own offset", async ({ pa
   // All three frames are listed, each with its own crop offset.
   expect(Object.keys(sidecar.frames).sort()).toEqual(["1", "2", "3"]);
   for (const key of ["1", "2", "3"]) {
-    const entry = sidecar.frames[key] as { ox: number; oy: number; w: number; h: number };
+    const entry = sidecar.frames[key] as { ox: number; oy: number; w: number; h: number; rotated: boolean };
     expect(Number.isInteger(entry.ox)).toBe(true);
     expect(Number.isInteger(entry.oy)).toBe(true);
     expect(entry.w).toBeGreaterThanOrEqual(1);
     expect(entry.h).toBeGreaterThanOrEqual(1);
+    expect(typeof entry.rotated).toBe("boolean");
   }
   // The untouched frame collapses to a single transparent pixel.
   expect(sidecar.frames["2"]?.w).toBe(1);
@@ -359,4 +360,70 @@ test("individual trim packs each cropped frame with its own offset", async ({ pa
   const empty = sidecar.frames["2"] as { x: number; y: number };
   const [emptyAlpha] = await sampleSheetAlpha(page, written, "packed-sheet", [[empty.x, empty.y]]);
   expect(emptyAlpha).toBe(0);
+});
+
+test("allow rotation defaults on and only shows for individual trim", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  const dialog = await openSheetTab(page);
+  const rotation = dialog.getByRole("checkbox", { name: "Allow rotation" });
+  // No trim: the checkbox stays out of the way.
+  await expect(rotation).toBeHidden();
+  await dialog.locator("#exportSheetTrim").selectOption("uniform");
+  await expect(rotation).toBeHidden();
+  await dialog.locator("#exportSheetTrim").selectOption("individual");
+  await expect(rotation).toBeVisible();
+  await expect(rotation).toBeChecked();
+  // Individual per-frame files ignore trim entirely.
+  await dialog.locator("select#exportSheetLayout").selectOption("individual");
+  await expect(rotation).toBeHidden();
+  await dialog.locator("select#exportSheetLayout").selectOption("line");
+  await expect(rotation).toBeVisible();
+});
+
+test("individual trim exports valid sheets with rotation on and off", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await setEmptyCellHold(page, false);
+  await addFrames(page, 2);
+  await page.locator('gnumarus-shell [data-testid="anim-frame"][data-frame="0"]').click();
+  await paintCenter(page);
+  await page.locator('gnumarus-shell [data-testid="anim-frame"][data-frame="2"]').click();
+  await paintCenter(page);
+  const project = await stubProjectDirectory(page, "SheetDir");
+  // Rotation on (default): square dots pack unrotated with boolean flags.
+  page.once("dialog", (dialog) => void dialog.accept("rot-on"));
+  let dialog = await openSheetTab(page);
+  await dialog.getByRole("checkbox", { name: "All frames" }).check();
+  await dialog.locator("#exportSheetTrim").selectOption("individual");
+  await expect(dialog.getByRole("checkbox", { name: "Allow rotation" })).toBeChecked();
+  await dialog.locator("#exportSheetOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported 2 files to SheetDir");
+  let written = await project.writtenBlobs();
+  let sidecar = parseSidecar(written, "rot-on");
+  expect(Object.keys(sidecar.frames).sort()).toEqual(["1", "2", "3"]);
+  for (const entry of Object.values(sidecar.frames)) {
+    expect(typeof entry.rotated).toBe("boolean");
+    expect(entry.x + entry.w).toBeLessThanOrEqual(sidecar.texture.w);
+    expect(entry.y + entry.h).toBeLessThanOrEqual(sidecar.texture.h);
+  }
+  await expect(page.locator('gnumarus-shell [data-testid="toast"]')).toBeHidden();
+  // Rotation off: same content still exports a valid sheet.
+  page.once("dialog", (dialog) => void dialog.accept("rot-off"));
+  dialog = await openSheetTab(page);
+  await dialog.getByRole("checkbox", { name: "All frames" }).check();
+  await dialog.locator("#exportSheetTrim").selectOption("individual");
+  await dialog.getByRole("checkbox", { name: "Allow rotation" }).uncheck();
+  await dialog.locator("#exportSheetOk").click();
+  await expect
+    .poll(async () => Object.keys(await project.writtenBlobs()), { timeout: 15000 })
+    .toContain("rot-off.json");
+  written = await project.writtenBlobs();
+  sidecar = parseSidecar(written, "rot-off");
+  expect(Object.keys(sidecar.frames).sort()).toEqual(["1", "2", "3"]);
+  for (const entry of Object.values(sidecar.frames)) {
+    expect(entry.rotated).toBe(false);
+  }
 });

@@ -9,6 +9,7 @@ import {
   frameContentBox,
   GNUMARUS_SHEET_LAYOUTS,
   packSheetRects,
+  rotatePixels90CW,
   uniformCropBox,
   type GnumarusSheetPacking,
   type GnumarusSheetStrip,
@@ -223,9 +224,9 @@ describe("GnumarusSpritesheet", () => {
     expect(data).toEqual({
       texture: { w: 48, h: 16 },
       frames: {
-        "1": { x: 0, y: 0, w: 16, h: 16, ox: 0, oy: 0 },
-        "2": { x: 16, y: 0, w: 16, h: 16, ox: 0, oy: 0 },
-        "3": { x: 32, y: 0, w: 16, h: 16, ox: 0, oy: 0 },
+        "1": { x: 0, y: 0, w: 16, h: 16, ox: 0, oy: 0, rotated: false },
+        "2": { x: 16, y: 0, w: 16, h: 16, ox: 0, oy: 0, rotated: false },
+        "3": { x: 32, y: 0, w: 16, h: 16, ox: 0, oy: 0, rotated: false },
       },
       animations: {
         walk: {
@@ -255,8 +256,8 @@ describe("GnumarusSpritesheet", () => {
       animations: [],
     });
     expect(data.frames).toEqual({
-      "1": { x: 0, y: 0, w: 16, h: 16, ox: 0, oy: 0 },
-      "2": { x: 16, y: 0, w: 16, h: 16, ox: 0, oy: 0 },
+      "1": { x: 0, y: 0, w: 16, h: 16, ox: 0, oy: 0, rotated: false },
+      "2": { x: 16, y: 0, w: 16, h: 16, ox: 0, oy: 0, rotated: false },
     });
     expect(data.animations).toEqual({});
   });
@@ -286,8 +287,8 @@ describe("GnumarusSpritesheet", () => {
       offsets: { "1": { ox: 3, oy: 4 }, "2": { ox: 3, oy: 4 } },
     });
     expect(data.frames).toEqual({
-      "1": { x: 0, y: 0, w: 16, h: 16, ox: 3, oy: 4 },
-      "2": { x: 16, y: 0, w: 16, h: 16, ox: 3, oy: 4 },
+      "1": { x: 0, y: 0, w: 16, h: 16, ox: 3, oy: 4, rotated: false },
+      "2": { x: 16, y: 0, w: 16, h: 16, ox: 3, oy: 4, rotated: false },
     });
   });
 });
@@ -459,15 +460,15 @@ describe("GnumarusSpritesheetTrim", () => {
       sheetWidth: 147,
       sheetHeight: 98,
       placements: [
-        { frame: 0, x: 0, y: 0, w: 98, h: 98, ox: 1, oy: 1 },
-        { frame: 1, x: 98, y: 0, w: 49, h: 49, ox: 50, oy: 50 },
+        { frame: 0, x: 0, y: 0, w: 98, h: 98, ox: 1, oy: 1, rotated: false },
+        { frame: 1, x: 98, y: 0, w: 49, h: 49, ox: 50, oy: 50, rotated: false },
       ],
       animations: [{ name: "spin", sequence: [{ frame: 1, secs: 0.5 }, { frame: 0, secs: 0.5 }] }],
     });
     expect(data.texture).toEqual({ w: 147, h: 98 });
     expect(data.frames).toEqual({
-      "1": { x: 0, y: 0, w: 98, h: 98, ox: 1, oy: 1 },
-      "2": { x: 98, y: 0, w: 49, h: 49, ox: 50, oy: 50 },
+      "1": { x: 0, y: 0, w: 98, h: 98, ox: 1, oy: 1, rotated: false },
+      "2": { x: 98, y: 0, w: 49, h: 49, ox: 50, oy: 50, rotated: false },
     });
     expect(data.animations.spin?.frames).toEqual([
       { frame: 2, secs: 0.5 },
@@ -476,5 +477,108 @@ describe("GnumarusSpritesheetTrim", () => {
     expect(() => buildPackedSheetAnimationData({ sheetWidth: 0, sheetHeight: 8, placements: [], animations: [] })).toThrow(
       /packed spritesheet size/,
     );
+  });
+
+  it("rotates pixels 90 degrees clockwise exactly", () => {
+    // 2x3 source with distinct red values: rotation yields 3x2.
+    const pixels = new Uint8ClampedArray([
+      1, 0, 0, 255, 2, 0, 0, 255,
+      3, 0, 0, 255, 4, 0, 0, 255,
+      5, 0, 0, 255, 6, 0, 0, 255,
+    ]);
+    const turned = rotatePixels90CW(pixels, 2, 3);
+    expect(turned.width).toBe(3);
+    expect(turned.height).toBe(2);
+    expect(Array.from(turned.pixels).filter((_, index) => index % 4 === 0)).toEqual([5, 3, 1, 6, 4, 2]);
+    for (const value of Array.from(turned.pixels).filter((_, index) => index % 4 === 3)) {
+      expect(value).toBe(255);
+    }
+    // Four quarter turns round-trip to the original bytes.
+    let roundTrip: { pixels: Uint8ClampedArray; width: number; height: number } = { pixels, width: 2, height: 3 };
+    for (let i = 0; i < 4; i += 1) {
+      roundTrip = rotatePixels90CW(roundTrip.pixels, roundTrip.width, roundTrip.height);
+    }
+    expect(roundTrip.width).toBe(2);
+    expect(roundTrip.height).toBe(3);
+    expect(Array.from(roundTrip.pixels)).toEqual(Array.from(pixels));
+    const single = rotatePixels90CW(new Uint8ClampedArray([9, 8, 7, 255]), 1, 1);
+    expect([single.width, single.height]).toEqual([1, 1]);
+    expect(Array.from(single.pixels)).toEqual([9, 8, 7, 255]);
+    expect(() => rotatePixels90CW(new Uint8ClampedArray(8), 2, 2)).toThrow(/rotation/);
+  });
+
+  it("packs complementary bars smaller with rotation allowed", () => {
+    const rects = [
+      { frame: 0, w: 60, h: 10 },
+      { frame: 1, w: 10, h: 60 },
+    ];
+    const turned = packSheetRects(rects, 2000, true);
+    expectValidPacking(turned, [
+      { frame: 0, w: 60, h: 10 },
+      { frame: 1, w: 60, h: 10 },
+    ]);
+    // Both bars share one 60x20 texture: one of them must be rotated.
+    expect(turned.width * turned.height).toBe(1200);
+    expect(turned.placements.filter((placement) => placement.rotated)).toHaveLength(1);
+    const straight = packSheetRects(rects);
+    expect(straight.placements.every((placement) => !placement.rotated)).toBe(true);
+    expect(straight.width * straight.height).toBeGreaterThan(1200);
+    expectValidPacking(straight, rects);
+    // Rotation never changes square placements.
+    const squares = packSheetRects(
+      [0, 1, 2, 3].map((frame) => ({ frame, w: 10, h: 10 })),
+      2000,
+      true,
+    );
+    expect(squares.width * squares.height).toBe(400);
+    expect(squares.placements.every((placement) => !placement.rotated)).toBe(true);
+    // Deterministic with rotation on.
+    expect(packSheetRects(rects, 2000, true)).toEqual(turned);
+  });
+
+  it("blits rotated placements transposed and flags them in the sidecar", () => {
+    const packing = packSheetRects(
+      [
+        { frame: 0, w: 60, h: 10 },
+        { frame: 1, w: 10, h: 60 },
+      ],
+      2000,
+      true,
+    );
+    expect(packing.width * packing.height).toBe(1200);
+    const frames = new Map([
+      [0, { pixels: solidFrame(60, 10, 10), w: 60, h: 10 }],
+      // Tall crop stored pre-rotation; the packer turned it into 60x10.
+      [1, { pixels: solidFrame(10, 60, 200), w: 10, h: 60 }],
+    ]);
+    const sheet = composePackedSheet(frames, packing);
+    expect(sheet.width).toBe(packing.width);
+    expect(sheet.height).toBe(packing.height);
+    // Every texture pixel round-trips from its (possibly rotated) source.
+    for (const placement of packing.placements) {
+      const entry = frames.get(placement.frame) as { pixels: Uint8ClampedArray; w: number; h: number };
+      const source = placement.rotated ? rotatePixels90CW(entry.pixels, entry.w, entry.h).pixels : entry.pixels;
+      for (let y = 0; y < placement.h; y += 1) {
+        for (let x = 0; x < placement.w; x += 1) {
+          const expected = Array.from(source.slice((y * placement.w + x) * 4, (y * placement.w + x) * 4 + 4));
+          const actual = Array.from(
+            sheet.buffer.slice(
+              ((placement.y + y) * sheet.width + placement.x + x) * 4,
+              ((placement.y + y) * sheet.width + placement.x + x) * 4 + 4,
+            ),
+          );
+          expect(actual).toEqual(expected);
+        }
+      }
+    }
+    const data = buildPackedSheetAnimationData({
+      sheetWidth: packing.width,
+      sheetHeight: packing.height,
+      placements: packing.placements.map((placement) => ({ ...placement, ox: 7, oy: 9 })),
+      animations: [],
+    });
+    const rotatedFlags = Object.values(data.frames).map((entry) => entry.rotated);
+    expect(rotatedFlags.filter(Boolean)).toHaveLength(1);
+    expect(rotatedFlags).toHaveLength(2);
   });
 });

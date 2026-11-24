@@ -45,7 +45,8 @@ test("export sheet tab remembers animations, frames, layout and data checkbox", 
   await dialog.locator("#exportSheetAnimations").selectOption(["walk"]);
   await dialog.locator("#exportSheetFrames").fill("1,2");
   await dialog.locator("select#exportSheetLayout").selectOption("per-line");
-  await dialog.locator("select#exportSheetTrim").selectOption("uniform");
+  await dialog.locator("select#exportSheetTrim").selectOption("individual");
+  await dialog.getByRole("checkbox", { name: "Allow rotation" }).uncheck();
   await dialog.getByRole("checkbox", { name: "Export animation data" }).uncheck();
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await expect(dialog).toBeHidden();
@@ -54,7 +55,8 @@ test("export sheet tab remembers animations, frames, layout and data checkbox", 
   await expect(dialog.locator("#exportSheetAnimations")).toHaveValues(["walk"]);
   await expect(dialog.locator("#exportSheetFrames")).toHaveValue("1,2");
   await expect(dialog.locator("select#exportSheetLayout")).toHaveValue("per-line");
-  await expect(dialog.locator("select#exportSheetTrim")).toHaveValue("uniform");
+  await expect(dialog.locator("select#exportSheetTrim")).toHaveValue("individual");
+  await expect(dialog.getByRole("checkbox", { name: "Allow rotation" })).not.toBeChecked();
   await expect(dialog.getByRole("checkbox", { name: "Export animation data" })).not.toBeChecked();
 });
 

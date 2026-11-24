@@ -32,7 +32,11 @@ transparent pixels before arranging: uniform crops every frame to the
 smallest box holding all frames (same size and offsets for all),
 individual crops each frame to its own box and packs the crops into the
 smallest texture found within 2 seconds (each frame keeps its own
-offset).
+offset). With individual trim, **Allow rotation** (on by default) also
+lets the packer turn non-square crops 90 degrees clockwise for an even
+smaller texture; rotated frames are flagged with ``"rotated": true`` in
+the JSON (``w``/``h`` are the on-texture dimensions), so readers must
+turn them back counter-clockwise.
 Fit-all-textures and crop-all-cells batch jobs
 normalize the project first; reload-all-textures restores files edited
 externally, skipping new textures (undoable).

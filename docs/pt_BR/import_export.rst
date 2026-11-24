@@ -36,7 +36,12 @@ uniforme corta todos os quadros na menor caixa que contém todos eles
 (mesmo tamanho e deslocamentos para todos), individual corta cada
 quadro na sua própria caixa e empacota os recortes na menor textura
 encontrada em até 2 segundos (cada quadro guarda seu próprio
-deslocamento). As ações em massa de ajustar/cortar normalizam
+deslocamento). No recorte individual, **Permitir rotação** (marcado por
+padrão) também deixa o empacotador girar recortes não-quadrados 90 graus
+no sentido horário para uma textura ainda menor; os quadros girados vêm
+marcados com ``"rotated": true`` no JSON (``w``/``h`` são as dimensões na
+textura), então quem lê precisa girá-los de volta no sentido
+anti-horário. As ações em massa de ajustar/cortar normalizam
 antes; recarregar texturas restaura edições externas, pulando
 texturas novas (desfazível).
 

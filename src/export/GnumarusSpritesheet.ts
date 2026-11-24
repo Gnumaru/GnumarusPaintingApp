@@ -213,9 +213,12 @@ export interface GnumarusSheetAnimationData {
   /**
    * 1-based project frame number to rect in texture pixels. `ox`/`oy`
    * is the crop offset relative to the full frame's top-left corner
-   * (0,0 when no trim was applied).
+   * (0,0 when no trim was applied); `rotated` is true when the crop was
+   * turned 90 degrees clockwise into the texture (individual trim with
+   * rotation allowed) and the reader must turn it back counter-clockwise.
+   * `w`/`h` are the texture (post-rotation) dimensions.
    */
-  frames: Record<string, { x: number; y: number; w: number; h: number; ox: number; oy: number }>;
+  frames: Record<string, { x: number; y: number; w: number; h: number; ox: number; oy: number; rotated: boolean }>;
   animations: Record<string, { name: string; frames: Array<{ frame: number; secs: number }> }>;
 }
 
@@ -245,7 +248,15 @@ export function buildSheetAnimationData(input: {
     const key = String(cell.frame + 1);
     if (frames[key] === undefined) {
       const offset = input.offsets?.[key];
-      frames[key] = { x: cell.col * fw, y: cell.row * fh, w: fw, h: fh, ox: offset?.ox ?? 0, oy: offset?.oy ?? 0 };
+      frames[key] = {
+        x: cell.col * fw,
+        y: cell.row * fh,
+        w: fw,
+        h: fh,
+        ox: offset?.ox ?? 0,
+        oy: offset?.oy ?? 0,
+        rotated: false,
+      };
     }
   }
   const animations: GnumarusSheetAnimationData["animations"] = {};
@@ -392,7 +403,7 @@ export function cropPixels(
 }
 
 /* ------------------------------------------------------------------ */
-/* Individual trim: MaxRects 2D packing (no rotation).                 */
+/* Individual trim: MaxRects 2D packing (optional 90-degree rotation). */
 /* ------------------------------------------------------------------ */
 
 /** One cropped frame to place: unique project frame plus its crop size. */
@@ -409,8 +420,12 @@ export interface GnumarusSheetPlacement {
   frame: number;
   x: number;
   y: number;
+  /** Width in texture pixels (post-rotation). */
   w: number;
+  /** Height in texture pixels (post-rotation). */
   h: number;
+  /** True when the crop was rotated 90 degrees clockwise to fit. */
+  rotated: boolean;
 }
 
 /** Packed texture size with one placement per input rect. */
@@ -565,29 +580,59 @@ function shelfPack(rects: GnumarusSheetPackRect[]): GnumarusSheetPacking {
   const placements: GnumarusSheetPlacement[] = [];
   for (const rect of rects) {
     width = Math.max(width, rect.w);
-    placements.push({ frame: rect.frame, x: 0, y, w: rect.w, h: rect.h });
+    placements.push({ frame: rect.frame, x: 0, y, w: rect.w, h: rect.h, rotated: false });
     y += rect.h;
   }
   return { width, height: Math.max(1, y), placements };
 }
 
+/** Rotate frame pixels 90 degrees clockwise (lossless transpose). */
+export function rotatePixels90CW(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+): { pixels: Uint8ClampedArray; width: number; height: number } {
+  const w = Math.floor(width);
+  const h = Math.floor(height);
+  if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1 || pixels.length !== w * h * 4) {
+    throw new Error(`Invalid spritesheet pixels for rotation: ${width}x${height}.`);
+  }
+  const out = new Uint8ClampedArray(pixels.length);
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const srcStart = (y * w + x) * 4;
+      const dstStart = (x * h + (h - 1 - y)) * 4;
+      out[dstStart] = pixels[srcStart] as number;
+      out[dstStart + 1] = pixels[srcStart + 1] as number;
+      out[dstStart + 2] = pixels[srcStart + 2] as number;
+      out[dstStart + 3] = pixels[srcStart + 3] as number;
+    }
+  }
+  return { pixels: out, width: h, height: w };
+}
+
 /**
  * One MaxRects attempt: place `order` into a growing bin. Returns null
  * when the bin hits the trivial (total width x total height) bound without
- * fitting everything (the caller falls back to the shelf layout).
+ * fitting everything (the caller falls back to the shelf layout). With
+ * `allowRotation` every non-square rect is scored in both orientations and
+ * placed rotated only when that scores strictly better.
  */
 function tryPackPlacement(
   order: GnumarusSheetPackRect[],
   heuristic: GnumarusSheetPackHeuristic,
   preferGrowRight: boolean,
+  allowRotation: boolean,
+  initW: number,
+  initH: number,
 ): GnumarusSheetPacking | null {
-  let binW = 1;
-  let binH = 1;
+  // Seeds already fit every rect in some orientation; undersized bins
+  // simply grow on the first failure, so only guard against degeneracy.
+  let binW = Math.max(1, initW);
+  let binH = Math.max(1, initH);
   let totalW = 0;
   let totalH = 0;
   for (const rect of order) {
-    binW = Math.max(binW, rect.w);
-    binH = Math.max(binH, rect.h);
     totalW += rect.w;
     totalH += rect.h;
   }
@@ -598,11 +643,27 @@ function tryPackPlacement(
     for (const rect of order) {
       let bestScore: [number, number] | null = null;
       let bestFree: GnumarusSheetFreeRect | null = null;
+      let bestRotated = false;
       for (const candidate of free) {
-        const score = scoreFreeRect(candidate, rect.w, rect.h, heuristic, placed, binW, binH);
-        if (score !== null && (bestScore === null || lessScore(score, bestScore))) {
-          bestScore = score;
+        const straight = scoreFreeRect(candidate, rect.w, rect.h, heuristic, placed, binW, binH);
+        if (straight !== null && (bestScore === null || lessScore(straight, bestScore))) {
+          bestScore = straight;
           bestFree = candidate;
+          bestRotated = false;
+        }
+        // Squares gain nothing from rotation; rotated wins only when
+        // strictly better, keeping output stable and unsurprising.
+        if (allowRotation && rect.w !== rect.h) {
+          const turned = scoreFreeRect(candidate, rect.h, rect.w, heuristic, placed, binW, binH);
+          if (turned !== null && bestScore !== null && lessScore(turned, bestScore)) {
+            bestScore = turned;
+            bestFree = candidate;
+            bestRotated = true;
+          } else if (turned !== null && bestScore === null) {
+            bestScore = turned;
+            bestFree = candidate;
+            bestRotated = true;
+          }
         }
       }
       if (bestFree === null) {
@@ -611,33 +672,35 @@ function tryPackPlacement(
       }
       const atX = bestFree.x;
       const atY = bestFree.y;
-      placed.push({ frame: rect.frame, x: atX, y: atY, w: rect.w, h: rect.h });
+      const pw = bestRotated ? rect.h : rect.w;
+      const ph = bestRotated ? rect.w : rect.h;
+      placed.push({ frame: rect.frame, x: atX, y: atY, w: pw, h: ph, rotated: bestRotated });
       const next: GnumarusSheetFreeRect[] = [];
       for (const candidate of free) {
-        if (!rectsIntersect(candidate, atX, atY, rect.w, rect.h)) {
+        if (!rectsIntersect(candidate, atX, atY, pw, ph)) {
           next.push(candidate);
           continue;
         }
         if (atX > candidate.x) {
           next.push({ x: candidate.x, y: candidate.y, w: atX - candidate.x, h: candidate.h });
         }
-        if (atX + rect.w < candidate.x + candidate.w) {
+        if (atX + pw < candidate.x + candidate.w) {
           next.push({
-            x: atX + rect.w,
+            x: atX + pw,
             y: candidate.y,
-            w: candidate.x + candidate.w - atX - rect.w,
+            w: candidate.x + candidate.w - atX - pw,
             h: candidate.h,
           });
         }
         if (atY > candidate.y) {
           next.push({ x: candidate.x, y: candidate.y, w: candidate.w, h: atY - candidate.y });
         }
-        if (atY + rect.h < candidate.y + candidate.h) {
+        if (atY + ph < candidate.y + candidate.h) {
           next.push({
             x: candidate.x,
-            y: atY + rect.h,
+            y: atY + ph,
             w: candidate.w,
-            h: candidate.y + candidate.h - atY - rect.h,
+            h: candidate.y + candidate.h - atY - ph,
           });
         }
       }
@@ -650,15 +713,28 @@ function tryPackPlacement(
       return null;
     }
     // Grow toward the smaller area; ties alternate direction per attempt
-    // so different attempts explore different bin shapes.
-    const rightArea = (binW + failed.w) * binH;
-    const downArea = binW * (binH + failed.h);
-    const growRight =
-      rightArea !== downArea ? rightArea < downArea : preferGrowRight;
-    if (growRight) {
-      binW = Math.min(binW + failed.w, totalW);
+    // so different attempts explore different bin shapes. Rotation adds
+    // the turned growth options to the same comparison.
+    const options = [
+      { w: binW + failed.w, h: binH, right: true },
+      { w: binW, h: binH + failed.h, right: false },
+    ];
+    if (allowRotation && failed.w !== failed.h) {
+      options.push({ w: binW + failed.h, h: binH, right: true });
+      options.push({ w: binW, h: binH + failed.w, right: false });
+    }
+    let choice = options[0] as { w: number; h: number; right: boolean };
+    for (const option of options) {
+      const area = option.w * option.h;
+      const bestArea = choice.w * choice.h;
+      if (area < bestArea || (area === bestArea && option.right === preferGrowRight && choice.right !== preferGrowRight)) {
+        choice = option;
+      }
+    }
+    if (choice.right) {
+      binW = Math.min(choice.w, totalW);
     } else {
-      binH = Math.min(binH + failed.h, totalH);
+      binH = Math.min(choice.h, totalH);
     }
   }
   return null;
@@ -690,8 +766,9 @@ function sortPackRects(rects: GnumarusSheetPackRect[], key: "area" | "perimeter"
 
 /**
  * Pack cropped frames into the smallest-area texture with MaxRects (no
- * rotation, so rects never need un-rotating on import). Every combination
- * of size ordering and placement heuristic is tried and the smallest area
+ * rotation unless `allowRotation` is set, which also tries every
+ * non-square rect turned 90 degrees clockwise). Every combination of
+ * size ordering and placement heuristic is tried and the smallest area
  * wins (ties prefer the squarer bin); a shelf fallback guarantees a valid
  * result. `timeBudgetMs` caps the search (default 2s): attempts run in a
  * fixed quality order, so an early stop still returns the best packing
@@ -700,6 +777,7 @@ function sortPackRects(rects: GnumarusSheetPackRect[], key: "area" | "perimeter"
 export function packSheetRects(
   rects: ReadonlyArray<GnumarusSheetPackRect>,
   timeBudgetMs = 2000,
+  allowRotation = false,
 ): GnumarusSheetPacking {
   for (const rect of rects) {
     if (!Number.isInteger(rect.frame) || !Number.isInteger(rect.w) || !Number.isInteger(rect.h) || rect.w < 1 || rect.h < 1) {
@@ -714,6 +792,26 @@ export function packSheetRects(
   if (best.width * best.height === totalArea) {
     return best;
   }
+  // Bin seeds: the minimal square plus fixed-width / fixed-height strips.
+  // Seeds only change where the growth starts; oversized seeds (e.g. a
+  // 60x60 square for two complementary bars) would otherwise never shrink
+  // to the optimum (60x20) even though every placement fits.
+  let maxW = 1;
+  let maxH = 1;
+  let minDim = 1;
+  for (const rect of rects) {
+    maxW = Math.max(maxW, allowRotation ? Math.max(rect.w, rect.h) : rect.w);
+    maxH = Math.max(maxH, allowRotation ? Math.max(rect.w, rect.h) : rect.h);
+    minDim = Math.max(minDim, Math.min(rect.w, rect.h));
+  }
+  // With rotation every rect fits when the bin covers its long side on one
+  // axis and its short side on the other, so strip seeds guard height (or
+  // width) with the largest short side instead of the largest long side.
+  const stripH = allowRotation ? Math.max(minDim, Math.ceil(totalArea / maxW)) : Math.max(maxH, Math.ceil(totalArea / maxW));
+  const stripW = allowRotation ? Math.max(minDim, Math.ceil(totalArea / maxH)) : Math.max(maxW, Math.ceil(totalArea / maxH));
+  const seeds = [{ w: maxW, h: maxH }, { w: maxW, h: stripH }, { w: stripW, h: maxH }].filter(
+    (seed, index, all) => all.findIndex((other) => other.w === seed.w && other.h === seed.h) === index,
+  );
   const orders = [
     sortPackRects([...rects], "area"),
     sortPackRects([...rects], "perimeter"),
@@ -725,17 +823,19 @@ export function packSheetRects(
   const budget = Number.isFinite(timeBudgetMs) && timeBudgetMs > 0 ? timeBudgetMs : 0;
   const deadline = Date.now() + budget;
   let attempts = 0;
-  for (const order of orders) {
-    for (const heuristic of heuristics) {
-      if (attempts > 0 && Date.now() > deadline) {
-        return best;
-      }
-      const result = tryPackPlacement(order, heuristic, attempts % 2 === 0);
-      attempts += 1;
-      if (result !== null && isBetterPacking(result, best)) {
-        best = result;
-        if (best.width * best.height === totalArea) {
+  for (const seed of seeds) {
+    for (const order of orders) {
+      for (const heuristic of heuristics) {
+        if (attempts > 0 && Date.now() > deadline) {
           return best;
+        }
+        const result = tryPackPlacement(order, heuristic, attempts % 2 === 0, allowRotation, seed.w, seed.h);
+        attempts += 1;
+        if (result !== null && isBetterPacking(result, best)) {
+          best = result;
+          if (best.width * best.height === totalArea) {
+            return best;
+          }
         }
       }
     }
@@ -745,7 +845,9 @@ export function packSheetRects(
 
 /**
  * Blit cropped per-frame pixels at their packed positions (transparent
- * background). Every placement needs an exact `w * h * 4` buffer.
+ * background). Rotated placements are turned 90 degrees clockwise during
+ * the blit. Every placement needs a matching entry: pre-rotation pixels
+ * for rotated placements, exact `w * h * 4` buffers otherwise.
  */
 export function composePackedSheet(
   frames: ReadonlyMap<number, { pixels: Uint8ClampedArray; w: number; h: number }>,
@@ -762,16 +864,19 @@ export function composePackedSheet(
     if (entry === undefined) {
       throw new Error(`Missing pixels for packed spritesheet frame ${placement.frame + 1}.`);
     }
-    if (entry.w !== placement.w || entry.h !== placement.h || entry.pixels.length !== placement.w * placement.h * 4) {
+    const expectW = placement.rotated ? placement.h : placement.w;
+    const expectH = placement.rotated ? placement.w : placement.h;
+    if (entry.w !== expectW || entry.h !== expectH || entry.pixels.length !== expectW * expectH * 4) {
       throw new Error(`Invalid pixels for packed spritesheet frame ${placement.frame + 1}.`);
     }
+    const source = placement.rotated ? rotatePixels90CW(entry.pixels, entry.w, entry.h).pixels : entry.pixels;
     if (placement.x < 0 || placement.y < 0 || placement.x + placement.w > width || placement.y + placement.h > height) {
       throw new Error(`Packed spritesheet frame ${placement.frame + 1} falls outside the texture.`);
     }
     for (let y = 0; y < placement.h; y += 1) {
       const srcStart = y * placement.w * 4;
       const dstStart = ((placement.y + y) * width + placement.x) * 4;
-      sheet.set(entry.pixels.subarray(srcStart, srcStart + placement.w * 4), dstStart);
+      sheet.set(source.subarray(srcStart, srcStart + placement.w * 4), dstStart);
     }
   }
   return { buffer: sheet, width, height };
@@ -783,17 +888,22 @@ export interface GnumarusSheetPackedPlacement {
   frame: number;
   x: number;
   y: number;
+  /** Width in texture pixels (post-rotation). */
   w: number;
+  /** Height in texture pixels (post-rotation). */
   h: number;
   /** Crop offset relative to the full frame's top-left corner. */
   ox: number;
   oy: number;
+  /** True when the crop was rotated 90 degrees clockwise into the texture. */
+  rotated: boolean;
 }
 
 /**
  * Build the spritesheet JSON sidecar for individually trimmed frames:
  * per-frame rects come from the packing (first occurrence wins), sizes
- * may differ per frame, and every frame carries its crop offset.
+ * may differ per frame, and every frame carries its crop offset plus
+ * whether its crop was rotated 90 degrees clockwise into the texture.
  */
 export function buildPackedSheetAnimationData(input: {
   sheetWidth: number;
@@ -817,6 +927,7 @@ export function buildPackedSheetAnimationData(input: {
         h: placement.h,
         ox: placement.ox,
         oy: placement.oy,
+        rotated: placement.rotated,
       };
     }
   }
