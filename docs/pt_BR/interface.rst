@@ -30,7 +30,10 @@ Logo abaixo da barra de menus, ela segue a ferramenta ativa: o pincel
 mostra tamanho, forma, tipo de ponta, dinâmicas, estabilizador e modo
 de mesclagem; linha/curva/balde e as demais mostram suas próprias
 configurações. Ferramentas sem nada a configurar dizem isso
-explicitamente.
+explicitamente. O botão **Opções da ferramenta** à extrema esquerda
+abre as mesmas configurações numa janela flutuante arrastável,
+empilhadas na vertical; edições valem na hora na barra. A barra geral
+acima tem repetição, simetria e **Iluminação 3D**.
 
 Barra de ferramentas
 --------------------

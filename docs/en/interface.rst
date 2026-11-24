@@ -25,7 +25,10 @@ Tool options bar
 Directly below the menu bar, it follows the active tool: the brush
 shows brush size, shape, tip kind, dynamics, stabilizer and blend mode;
 line/curve/bucket and the other tools show their own settings. Tools
-with nothing to configure say so explicitly.
+with nothing to configure say so explicitly. The leftmost **Tool
+options** button opens the same settings in a draggable floating
+window, stacked vertically; edits apply live to the bar. The general
+options bar above holds wrap, symmetry and **3D Lighting**.
 
 Left toolbar
 ------------

@@ -202,12 +202,12 @@ export interface GnumarusSheetAnimationData {
   texture: { w: number; h: number };
   /** 1-based project frame number to top-left rect in texture pixels. */
   frames: Record<string, { x: number; y: number; w: number; h: number }>;
-  animations: Record<string, { name: string; frames: number[]; frame_times: Array<{ frame: number; secs: number }> }>;
+  animations: Record<string, { name: string; frames: Array<{ frame: number; secs: number }> }>;
 }
 
 /**
  * Build the spritesheet JSON sidecar. Frame rects come from the geometry
- * cells (first occurrence wins when a frame repeats); animation frame
+ * cells (first occurrence wins when a frame repeats); per-animation frame
  * numbers are 1-based in playback order with per-position durations.
  */
 export function buildSheetAnimationData(input: {
@@ -234,8 +234,7 @@ export function buildSheetAnimationData(input: {
   for (const animation of input.animations) {
     animations[animation.name] = {
       name: animation.name,
-      frames: animation.sequence.map((entry) => entry.frame + 1),
-      frame_times: animation.sequence.map((entry) => ({ frame: entry.frame + 1, secs: entry.secs })),
+      frames: animation.sequence.map((entry) => ({ frame: entry.frame + 1, secs: entry.secs })),
     };
   }
   return {

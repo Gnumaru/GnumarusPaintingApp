@@ -223,8 +223,7 @@ describe("GnumarusSpritesheet", () => {
       animations: {
         walk: {
           name: "walk",
-          frames: [1, 2, 1],
-          frame_times: [
+          frames: [
             { frame: 1, secs: 0.2 },
             { frame: 2, secs: 0.25 },
             { frame: 1, secs: 0.2 },

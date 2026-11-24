@@ -1394,6 +1394,12 @@ export class GnumarusShell extends LitElement {
     .preview-header button:hover {
       background: #3a3a3a;
     }
+    [data-testid="tool-options-window"] {
+      flex-direction: column;
+      align-items: stretch;
+      white-space: normal;
+      border-bottom: none;
+    }
     .preview-toolbar {
       display: flex;
       align-items: center;
@@ -2217,8 +2223,11 @@ export class GnumarusShell extends LitElement {
     texturePickerContentId: { type: String },
     texturePickerTileset: { type: Boolean },
     tileWindowOpen: { type: Boolean },
+    toolOptionsWindowOpen: { type: Boolean },
     tileWindowX: { type: Number },
+    toolOptionsWindowX: { type: Number },
     tileWindowY: { type: Number },
+    toolOptionsWindowY: { type: Number },
     textPickerTarget: { type: Object },
     textEditor: { type: Object },
     textEditorColor: { type: String },
@@ -2269,7 +2278,10 @@ export class GnumarusShell extends LitElement {
     exportAnimatedQuality: { type: Number },
     exportAnimatedLossless: { type: Boolean },
     exportSheetLayout: { type: String },
-    exportSheetAnimationData: { type: Boolean },    exportSheetFormat: { type: String },
+    exportSheetAnimationData: { type: Boolean },
+    exportSheetAnimations: { type: Array },
+    exportSheetFrames: { type: String },
+    exportSheetFormat: { type: String },
     exportSheetCount: { type: Number },
     exportSheetFullSize: { type: Boolean },
     exportSheetAll: { type: Boolean },
@@ -2488,7 +2500,10 @@ export class GnumarusShell extends LitElement {
   declare texturePickerContentId: string | null;
   declare texturePickerTileset: boolean;
   declare tileWindowOpen: boolean;
+  declare toolOptionsWindowOpen: boolean;
   declare tileWindowX: number;
+  declare toolOptionsWindowX: number;
+  declare toolOptionsWindowY: number;
   declare tileWindowY: number;
   declare textPickerTarget: { layerId: string; frame: number } | null;
   declare textEditor: {
@@ -2558,6 +2573,8 @@ export class GnumarusShell extends LitElement {
   declare exportAnimatedLossless: boolean;
   declare exportSheetLayout: string;
   declare exportSheetAnimationData: boolean;
+  declare exportSheetAnimations: string[];
+  declare exportSheetFrames: string;
   declare exportSheetFormat: string;
   declare exportSheetCount: number;
   declare exportSheetFullSize: boolean;
@@ -2716,6 +2733,8 @@ export class GnumarusShell extends LitElement {
    */
   private embeddedProjectName: string | null = null;
   private playTimer: number | null = null;
+  /** True once the export dialog has seeded its first-open defaults (frame + background). */
+  private exportDialogTouched = false;
   private playbackAnimation: GnumarusNamedAnimation | null = null;
   private playbackIndex = 0;
   private playbackDirection: 1 | -1 = 1;
@@ -2833,6 +2852,9 @@ export class GnumarusShell extends LitElement {
     this.lastSizeSpan = null;
     this.tileWindowOpen = false;
     this.tileWindowX = 280;
+    this.toolOptionsWindowOpen = false;
+    this.toolOptionsWindowX = 8;
+    this.toolOptionsWindowY = 132;
     this.tileWindowY = 120;
     this.fitTextureTarget = null;
     this.fitThreshold = 0;
@@ -2892,6 +2914,8 @@ export class GnumarusShell extends LitElement {
     this.videoSupportMp4 = true;
     this.exportSheetLayout = "line";
     this.exportSheetAnimationData = true;
+    this.exportSheetAnimations = [];
+    this.exportSheetFrames = "";
     this.exportSheetFormat = "image/png";
     this.exportSheetCount = 2;
     this.exportSheetFullSize = false;
@@ -5815,6 +5839,13 @@ export class GnumarusShell extends LitElement {
             max=${this.engine?.getFrameCount() ?? 1}
             step="1"
             .value=${String(this.exportFrame)}
+            @input=${(event: Event): void => {
+              const raw = Math.floor(Number((event.target as HTMLInputElement).value));
+              if (Number.isFinite(raw)) {
+                const count = this.engine?.getFrameCount() ?? raw;
+                this.exportFrame = Math.min(count, Math.max(1, raw));
+              }
+            }}
           />
         </label>
         <label title=${tr("dialog.formatTitle")}
@@ -5856,10 +5887,11 @@ export class GnumarusShell extends LitElement {
                 max="100"
                 step="1"
                 .value=${String(this.exportQuality)}
-                @change=${(event: Event): void => {
-                  this.exportQuality = normalizeStillQualityPercent(
-                    Number((event.target as HTMLInputElement).value),
-                  );
+                @input=${(event: Event): void => {
+                  const raw = Number((event.target as HTMLInputElement).value);
+                  if (Number.isFinite(raw)) {
+                    this.exportQuality = normalizeStillQualityPercent(raw);
+                  }
                 }}
               />
             </label>`}
@@ -5932,10 +5964,11 @@ export class GnumarusShell extends LitElement {
                 max="100"
                 step="1"
                 .value=${String(this.exportAnimatedQuality)}
-                @change=${(event: Event): void => {
-                  this.exportAnimatedQuality = normalizeStillQualityPercent(
-                    Number((event.target as HTMLInputElement).value),
-                  );
+                @input=${(event: Event): void => {
+                  const raw = Number((event.target as HTMLInputElement).value);
+                  if (Number.isFinite(raw)) {
+                    this.exportAnimatedQuality = normalizeStillQualityPercent(raw);
+                  }
                 }}
               />
             </label>`}
@@ -5968,9 +6001,15 @@ export class GnumarusShell extends LitElement {
               size=${Math.min(6, Math.max(3, (this.engine?.getNamedAnimations().length ?? 0) + 1))}
               title=${tr("dialog.sheetAnimationsHint")}
               ?disabled=${this.exportSheetAll}
+              @change=${(event: Event): void => {
+                const select = event.target as HTMLSelectElement | null;
+                this.exportSheetAnimations = select === null
+                  ? []
+                  : Array.from(select.selectedOptions).map((option) => option.value).filter((value) => value !== "");
+              }}
             >
               ${this.engine?.getNamedAnimations().map(
-                (animation) => html`<option value=${animation.name}>${animation.name}</option>`,
+                (animation) => html`<option value=${animation.name} ?selected=${this.exportSheetAnimations.includes(animation.name)}>${animation.name}</option>`,
               ) ?? html``}
             </select>
           </label>
@@ -5979,7 +6018,15 @@ export class GnumarusShell extends LitElement {
           title=${tr("dialog.extraFramesTitle")}
           ?hidden=${this.exportSheetAll}
           >${tr("dialog.extraFrames")}
-          <input type="text" id="exportSheetFrames" placeholder=${tr("dialog.extraFrames")} />
+          <input
+            type="text"
+            id="exportSheetFrames"
+            placeholder=${tr("dialog.extraFrames")}
+            .value=${this.exportSheetFrames}
+            @input=${(event: Event): void => {
+              this.exportSheetFrames = (event.target as HTMLInputElement).value;
+            }}
+          />
         </label>
         <label title=${tr("dialog.sheetLayoutTitle")}
           >${tr("dialog.layout")}
@@ -6006,6 +6053,12 @@ export class GnumarusShell extends LitElement {
             min="1"
             step="1"
             .value=${String(this.exportSheetCount)}
+            @input=${(event: Event): void => {
+              const raw = Math.floor(Number((event.target as HTMLInputElement).value));
+              if (Number.isFinite(raw)) {
+                this.exportSheetCount = raw;
+              }
+            }}
           />
         </label>
         <label
@@ -6071,10 +6124,11 @@ export class GnumarusShell extends LitElement {
                 max="100"
                 step="1"
                 .value=${String(this.exportSheetQuality)}
-                @change=${(event: Event): void => {
-                  this.exportSheetQuality = normalizeStillQualityPercent(
-                    Number((event.target as HTMLInputElement).value),
-                  );
+                @input=${(event: Event): void => {
+                  const raw = Number((event.target as HTMLInputElement).value);
+                  if (Number.isFinite(raw)) {
+                    this.exportSheetQuality = normalizeStillQualityPercent(raw);
+                  }
                 }}
               />
             </label>`}
@@ -6124,6 +6178,7 @@ export class GnumarusShell extends LitElement {
       ${this.contentManagerOpen ? this.renderContentManagerDialog() : html``}
       ${this.texturePickerContentId !== null || this.texturePickerTileset ? this.renderTexturePickerDialog() : html``}
       ${this.tileWindowOpen && this.tool === "tilebrush" ? this.renderTileWindow() : html``}
+      ${this.toolOptionsWindowOpen ? this.renderToolOptionsWindow() : html``}
       ${this.textPickerTarget !== null ? this.renderTextPickerDialog() : html``}
       ${this.textEditor !== null ? this.renderTextEditorDialog() : html``}
     `;
@@ -6798,7 +6853,7 @@ export class GnumarusShell extends LitElement {
     this.refreshLayers();
   }
 
-  private renderBlendModeOption(sfx: "" | "Panel" = "") {
+  private renderBlendModeOption(sfx: "" | "Panel" | "Window" = "") {
     return html`
       <label title=${tr("opt.blendHint")}
         >${tr("opt.blend")}
@@ -6811,7 +6866,7 @@ export class GnumarusShell extends LitElement {
     `;
   }
 
-  private renderAccumulateOption(sfx: "" | "Panel" = "") {
+  private renderAccumulateOption(sfx: "" | "Panel" | "Window" = "") {
     return html`
       <label title=${tr("opt.accumulateHint")}
         ><input
@@ -6825,7 +6880,7 @@ export class GnumarusShell extends LitElement {
     `;
   }
 
-  private renderStabilizerOption(sfx: "" | "Panel" = "") {
+  private renderStabilizerOption(sfx: "" | "Panel" | "Window" = "") {
     return html`
       <label title=${tr("opt.stabilizerHint")}
         >${tr("opt.stabilizer")}
@@ -6882,6 +6937,15 @@ export class GnumarusShell extends LitElement {
   private renderEditorOptions() {
     return html`
       <div class="tool-options" data-testid="editor-options" aria-label=${tr("opt.editorAria")} ?hidden=${this.uiHidden}>
+        <button
+          data-testid="tool-options-button"
+          title=${tr("opt.toolOptionsHint")}
+          @click=${(): void => {
+            this.toolOptionsWindowOpen = !this.toolOptionsWindowOpen;
+          }}
+        >
+          ${tr("opt.toolOptions")}
+        </button>
         <label title=${tr("opt.wrapHint")}
           >${tr("opt.wrap")}
           <select id="wrapMode" .value=${this.wrapMode} @change=${(): void => this.applyWrapModeFromDialog()}>
@@ -6912,7 +6976,7 @@ export class GnumarusShell extends LitElement {
   }
 
   /** Shared brush settings (toolbar bar, picker side panel, preset dialog uses its own). */
-  private renderBrushPresetRow(sfx: "" | "Panel" | "Dialog") {
+  private renderBrushPresetRow(sfx: "" | "Panel" | "Dialog" | "Window") {
     return html`
               <label title=${tr("opt.presetHint")}
                 >${tr("opt.preset")}
@@ -6928,7 +6992,7 @@ export class GnumarusShell extends LitElement {
   }
 
   /** Brush size, tip, dynamics, pressure, AA, pixel-perfect, stabilizer, blend, accumulate. */
-  private renderBrushTipOptions(sfx: "" | "Panel") {
+  private renderBrushTipOptions(sfx: "" | "Panel" | "Window") {
     return html`
               <label title=${tr("opt.brushSizeHint")}
                 >${tr("opt.brushSize")}
@@ -7280,44 +7344,44 @@ export class GnumarusShell extends LitElement {
     `;
   }
 
-  private renderToolOptions() {
+  private renderToolOptions(sfx: "" | "Window" = "") {
     if (this.tool === "brush") {      return html`
-        <div class="tool-options" data-testid="tool-options" aria-label=${tr("opt.brushAria")} ?hidden=${this.uiHidden}>
-          ${this.renderBrushPresetRow("")}
-          ${this.renderBrushTipOptions("")}
+        <div class="tool-options" data-testid=${sfx === "" ? "tool-options" : "tool-options-window"} aria-label=${tr("opt.brushAria")} ?hidden=${this.uiHidden}>
+          ${this.renderBrushPresetRow(sfx)}
+          ${this.renderBrushTipOptions(sfx)}
         </div>
       `;
     }
     if (this.tool === "line") {
       return html`
-        <div class="tool-options" data-testid="tool-options" aria-label=${tr("opt.lineAria")} ?hidden=${this.uiHidden}>
+        <div class="tool-options" data-testid=${sfx === "" ? "tool-options" : "tool-options-window"} aria-label=${tr("opt.lineAria")} ?hidden=${this.uiHidden}>
           <label
             >${tr("opt.lineWidth")}
             <input
               type="number"
-              id="lineWidth"
+              id="lineWidth${sfx}"
               min="0.1"
               max=${String(this.maxBrushSize)}
               step="0.1"
               .value=${String(this.lineWidth)}
-              @input=${(): void => this.applyLineWidthFromDialog()}
+              @input=${(): void => this.applyLineWidthFromDialog(sfx)}
             />
           </label>
           <label title=${tr("opt.lineWidthMinHint")}
             >${tr("opt.lineWidthMin")}
             <input
               type="number"
-              id="lineWidthMin"
+              id="lineWidthMin${sfx}"
               min="0.1"
               max=${String(this.maxBrushSize)}
               step="0.1"
               .value=${String(this.lineWidthMin)}
-              @input=${(): void => this.applyLineWidthMinFromDialog()}
+              @input=${(): void => this.applyLineWidthMinFromDialog(sfx)}
             />
           </label>
           <label
             >${tr("opt.lineShape")}
-            <select id="lineShape" .value=${this.lineShape} @change=${(): void => this.applyLineShapeFromDialog()}>
+            <select id="lineShape${sfx}" .value=${this.lineShape} @change=${(): void => this.applyLineShapeFromDialog(sfx)}>
               <option value="square">${tr("val.square")}</option>
               <option value="circle">${tr("val.circle")}</option>
             </select>
@@ -7325,46 +7389,46 @@ export class GnumarusShell extends LitElement {
           <label title=${tr("opt.lineAntialiasHint")}
             ><input
               type="checkbox"
-              id="lineAntialias"
+              id="lineAntialias${sfx}"
               .checked=${this.lineAntialias}
-              @change=${(): void => this.applyLineAntialiasFromDialog()}
+              @change=${(): void => this.applyLineAntialiasFromDialog(sfx)}
             />
             ${tr("opt.antialias")}
           </label>
-          ${this.renderBlendModeOption()} ${this.renderAccumulateOption()}
+          ${this.renderBlendModeOption(sfx)} ${this.renderAccumulateOption(sfx)}
         </div>
       `;
     }
     if (this.tool === "curve") {
       return html`
-        <div class="tool-options" data-testid="tool-options" aria-label=${tr("opt.curveAria")} ?hidden=${this.uiHidden}>
+        <div class="tool-options" data-testid=${sfx === "" ? "tool-options" : "tool-options-window"} aria-label=${tr("opt.curveAria")} ?hidden=${this.uiHidden}>
           <label
             >${tr("opt.curveWidth")}
             <input
               type="number"
-              id="curveWidth"
+              id="curveWidth${sfx}"
               min="0.1"
               max=${String(this.maxBrushSize)}
               step="0.1"
               .value=${String(this.curveWidth)}
-              @input=${(): void => this.applyCurveWidthFromDialog()}
+              @input=${(): void => this.applyCurveWidthFromDialog(sfx)}
             />
           </label>
           <label title=${tr("opt.curveWidthMinHint")}
             >${tr("opt.curveWidthMin")}
             <input
               type="number"
-              id="curveWidthMin"
+              id="curveWidthMin${sfx}"
               min="0.1"
               max=${String(this.maxBrushSize)}
               step="0.1"
               .value=${String(this.curveWidthMin)}
-              @input=${(): void => this.applyCurveWidthMinFromDialog()}
+              @input=${(): void => this.applyCurveWidthMinFromDialog(sfx)}
             />
           </label>
           <label
             >${tr("opt.curveShape")}
-            <select id="curveShape" .value=${this.curveShape} @change=${(): void => this.applyCurveShapeFromDialog()}>
+            <select id="curveShape${sfx}" .value=${this.curveShape} @change=${(): void => this.applyCurveShapeFromDialog(sfx)}>
               <option value="square">${tr("val.square")}</option>
               <option value="circle">${tr("val.circle")}</option>
             </select>
@@ -7372,35 +7436,35 @@ export class GnumarusShell extends LitElement {
           <label title=${tr("opt.curveAntialiasHint")}
             ><input
               type="checkbox"
-              id="curveAntialias"
+              id="curveAntialias${sfx}"
               .checked=${this.curveAntialias}
-              @change=${(): void => this.applyCurveAntialiasFromDialog()}
+              @change=${(): void => this.applyCurveAntialiasFromDialog(sfx)}
             />
             ${tr("opt.antialias")}
           </label>
           <label title=${tr("opt.curvePixelPerfectHint")}
             ><input
               type="checkbox"
-              id="curvePixelPerfect"
+              id="curvePixelPerfect${sfx}"
               .checked=${this.curvePixelPerfect}
-              @change=${(): void => this.applyCurvePixelPerfectFromDialog()}
+              @change=${(): void => this.applyCurvePixelPerfectFromDialog(sfx)}
             />
             ${tr("opt.pixelPerfect")}
           </label>
-          ${this.renderBlendModeOption()} ${this.renderAccumulateOption()}
+          ${this.renderBlendModeOption(sfx)} ${this.renderAccumulateOption(sfx)}
         </div>
       `;
     }
     if (this.tool === "bucket") {
       return html`
-        <div class="tool-options" data-testid="tool-options" aria-label=${tr("opt.bucketAria")} ?hidden=${this.uiHidden}>
-          ${this.renderBlendModeOption()}
+        <div class="tool-options" data-testid=${sfx === "" ? "tool-options" : "tool-options-window"} aria-label=${tr("opt.bucketAria")} ?hidden=${this.uiHidden}>
+          ${this.renderBlendModeOption(sfx)}
         </div>
       `;
     }
     if (this.tool === "destransform" || this.tool === "destransform3d") {
       return html`
-        <div class="tool-options" data-testid="tool-options" aria-label=${tr("opt.destransformAria")} ?hidden=${this.uiHidden}>
+        <div class="tool-options" data-testid=${sfx === "" ? "tool-options" : "tool-options-window"} aria-label=${tr("opt.destransformAria")} ?hidden=${this.uiHidden}>
           <button
             ?disabled=${!this.floatingActive}
             title=${tr("opt.commitSelectionHint")}
@@ -7412,15 +7476,15 @@ export class GnumarusShell extends LitElement {
             >${tr("opt.feather")}
             <input
               type="number"
-              id="featherRadius"
-              data-testid="feather-radius"
+              id="featherRadius${sfx}"
+              data-testid="feather-radius${sfx}"
               min="0"
               max="32"
               step="1"
               .value=${String(this.featherRadius)}
               ?disabled=${!this.floatingActive}
               @change=${(): void => {
-                void this.applyFeatherFromDialog();
+                void this.applyFeatherFromDialog(sfx);
               }}
             />
           </label>
@@ -7428,23 +7492,23 @@ export class GnumarusShell extends LitElement {
             >${tr("opt.growShrink")}
             <input
               type="number"
-              id="growShrinkPx"
-              data-testid="grow-shrink-px"
+              id="growShrinkPx${sfx}"
+              data-testid="grow-shrink-px${sfx}"
               min="1"
               max="64"
               step="1"
               .value=${String(this.growShrinkPx)}
               ?disabled=${!this.floatingActive}
-              @change=${(): void => this.applyGrowShrinkFromDialog()}
+              @change=${(): void => this.applyGrowShrinkFromDialog(sfx)}
             />
           </label>
-          <button data-testid="selection-grow" ?disabled=${!this.floatingActive} title=${tr("opt.growHint")} @click=${(): void => {
-            void this.reshapeFloatingSelection(1);
+          <button data-testid="selection-grow${sfx}" ?disabled=${!this.floatingActive} title=${tr("opt.growHint")} @click=${(): void => {
+            void this.reshapeFloatingSelection(1, sfx);
           }}>
             ${tr("opt.grow")}
           </button>
-          <button data-testid="selection-shrink" ?disabled=${!this.floatingActive} title=${tr("opt.shrinkHint")} @click=${(): void => {
-            void this.reshapeFloatingSelection(-1);
+          <button data-testid="selection-shrink${sfx}" ?disabled=${!this.floatingActive} title=${tr("opt.shrinkHint")} @click=${(): void => {
+            void this.reshapeFloatingSelection(-1, sfx);
           }}>
             ${tr("opt.shrink")}
           </button>
@@ -7453,7 +7517,7 @@ export class GnumarusShell extends LitElement {
     }
     if (this.tool === "text") {
       return html`
-        <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
+        <div class="tool-options" data-testid=${sfx === "" ? "tool-options" : "tool-options-window"} aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
           <span class="tool-options-empty">${tr("opt.textHint")}</span>
         </div>
       `;
@@ -7486,14 +7550,14 @@ export class GnumarusShell extends LitElement {
     }
     if (this.tool === "crop") {
       return html`
-        <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
+        <div class="tool-options" data-testid=${sfx === "" ? "tool-options" : "tool-options-window"} aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
           <span class="tool-options-empty">${tr("opt.cropHint")}</span>
         </div>
       `;
     }
     if (this.tool === "growcrop") {
       return html`
-        <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
+        <div class="tool-options" data-testid=${sfx === "" ? "tool-options" : "tool-options-window"} aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
           <span class="tool-options-empty">${tr("opt.growcropHint")}</span>
         </div>
       `;
@@ -7506,26 +7570,26 @@ export class GnumarusShell extends LitElement {
       this.tool === "colorselect"
     ) {
       return html`
-        <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
+        <div class="tool-options" data-testid=${sfx === "" ? "tool-options" : "tool-options-window"} aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
           ${this.tool === "colorselect"
             ? html`<label title=${tr("opt.colorThresholdHint")}
                 >${tr("opt.colorThreshold")}
                 <input
                   type="number"
-                  id="colorThreshold"
+                  id="colorThreshold${sfx}"
                   min="0"
                   max="100"
                   step="1"
                   .value=${String(this.colorThreshold)}
-                  @input=${(): void => this.applyColorThresholdFromDialog()}
+                  @input=${(): void => this.applyColorThresholdFromDialog(sfx)}
                 />
               </label>
               <label title=${tr("opt.contiguousHint")}
                 ><input
                   type="checkbox"
-                  id="colorContiguous"
+                  id="colorContiguous${sfx}"
                   .checked=${this.colorContiguous}
-                  @change=${(): void => this.applyColorContiguousFromDialog()}
+                  @change=${(): void => this.applyColorContiguousFromDialog(sfx)}
                 />
                 ${tr("opt.contiguous")}
               </label>`
@@ -7534,7 +7598,7 @@ export class GnumarusShell extends LitElement {
       `;
     }
     return html`
-      <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
+      <div class="tool-options" data-testid=${sfx === "" ? "tool-options" : "tool-options-window"} aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
         <span class="tool-options-empty"
           >${tr("options.empty", { tool: this.toolDisplayName(this.tool) })}</span
         >
@@ -11987,16 +12051,16 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = this.brushSizeStatus();
   }
 
-  private applyColorThresholdFromDialog(): void {
-    const input = this.shadowRoot?.getElementById("colorThreshold") as HTMLInputElement | null;
+  private applyColorThresholdFromDialog(scope = ""): void {
+    const input = this.shadowRoot?.getElementById(`colorThreshold${scope}`) as HTMLInputElement | null;
     const raw = Math.floor(Number(input?.value));
     const value = Number.isFinite(raw) ? Math.min(100, Math.max(0, raw)) : this.colorThreshold;
     this.colorThreshold = value;
     this.engine?.setColorThreshold(value);
   }
 
-  private applyColorContiguousFromDialog(): void {
-    const input = this.shadowRoot?.getElementById("colorContiguous") as HTMLInputElement | null;
+  private applyColorContiguousFromDialog(scope = ""): void {
+    const input = this.shadowRoot?.getElementById(`colorContiguous${scope}`) as HTMLInputElement | null;
     const value = input?.checked ?? this.colorContiguous;
     this.colorContiguous = value;
     this.engine?.setColorContiguous(value);
@@ -12891,8 +12955,8 @@ export class GnumarusShell extends LitElement {
     return input?.checked === true;
   }
 
-  private currentDialogCurvePixelPerfect(): boolean {
-    const input = this.shadowRoot?.getElementById("curvePixelPerfect") as HTMLInputElement | null;
+  private currentDialogCurvePixelPerfect(scope = ""): boolean {
+    const input = this.shadowRoot?.getElementById(`curvePixelPerfect${scope}`) as HTMLInputElement | null;
     return input?.checked === true;
   }
 
@@ -12909,8 +12973,8 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.brushPixelPerfect", { value: this.onOffLabel(enabled) });
   }
 
-  private applyCurvePixelPerfectFromDialog(): void {
-    const enabled = this.currentDialogCurvePixelPerfect();
+  private applyCurvePixelPerfectFromDialog(scope = ""): void {
+    const enabled = this.currentDialogCurvePixelPerfect(scope);
     if (enabled) {
       this.curveWidth = 1;
       this.curveWidthMin = 1;
@@ -13070,24 +13134,24 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.lineAntialias", { value: this.onOffLabel(next) });
   }
 
-  private currentDialogLineWidth(): number {
-    const input = this.shadowRoot?.getElementById("lineWidth") as HTMLInputElement | null;
+  private currentDialogLineWidth(scope = ""): number {
+    const input = this.shadowRoot?.getElementById(`lineWidth${scope}`) as HTMLInputElement | null;
     const parsed = Number(input?.value ?? "1");
     return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1, this.maxBrushSize);
   }
 
-  private currentDialogLineShape(): GnumarusBrushShape {
-    const select = this.shadowRoot?.getElementById("lineShape") as HTMLSelectElement | null;
+  private currentDialogLineShape(scope = ""): GnumarusBrushShape {
+    const select = this.shadowRoot?.getElementById(`lineShape${scope}`) as HTMLSelectElement | null;
     return parseBrushShape(select?.value ?? "square");
   }
 
-  private currentDialogLineAntialias(): boolean {
-    const input = this.shadowRoot?.getElementById("lineAntialias") as HTMLInputElement | null;
+  private currentDialogLineAntialias(scope = ""): boolean {
+    const input = this.shadowRoot?.getElementById(`lineAntialias${scope}`) as HTMLInputElement | null;
     return input?.checked === true;
   }
 
-  private applyLineWidthFromDialog(): void {
-    const size = this.currentDialogLineWidth();
+  private applyLineWidthFromDialog(scope = ""): void {
+    const size = this.currentDialogLineWidth(scope);
     this.lineWidth = size;
     if (this.lineWidthMin > size) {
       this.lineWidthMin = size;
@@ -13097,28 +13161,28 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = this.lineWidthStatus();
   }
 
-  private currentDialogLineWidthMin(): number {
-    const input = this.shadowRoot?.getElementById("lineWidthMin") as HTMLInputElement | null;
+  private currentDialogLineWidthMin(scope = ""): number {
+    const input = this.shadowRoot?.getElementById(`lineWidthMin${scope}`) as HTMLInputElement | null;
     const parsed = Number(input?.value ?? "1");
     return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1, this.maxBrushSize);
   }
 
-  private applyLineWidthMinFromDialog(): void {
-    const size = Math.min(this.currentDialogLineWidthMin(), this.lineWidth);
+  private applyLineWidthMinFromDialog(scope = ""): void {
+    const size = Math.min(this.currentDialogLineWidthMin(scope), this.lineWidth);
     this.lineWidthMin = size;
     this.engine?.setLineWidthMin(size);
     this.statusMessage = this.lineWidthStatus();
   }
 
-  private applyLineShapeFromDialog(): void {
-    const shape = this.currentDialogLineShape();
+  private applyLineShapeFromDialog(scope = ""): void {
+    const shape = this.currentDialogLineShape(scope);
     this.lineShape = shape;
     this.engine?.setLineShape(shape);
     this.statusMessage = tr("status.lineShape", { value: this.shapeLabel(shape) });
   }
 
-  private applyLineAntialiasFromDialog(): void {
-    const enabled = this.currentDialogLineAntialias();
+  private applyLineAntialiasFromDialog(scope = ""): void {
+    const enabled = this.currentDialogLineAntialias(scope);
     this.lineAntialias = enabled;
     this.engine?.setLineAntialias(enabled);
     this.statusMessage = tr("status.lineAntialias", { value: this.onOffLabel(enabled) });
@@ -13160,24 +13224,24 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.curveAntialias", { value: this.onOffLabel(next) });
   }
 
-  private currentDialogCurveWidth(): number {
-    const input = this.shadowRoot?.getElementById("curveWidth") as HTMLInputElement | null;
+  private currentDialogCurveWidth(scope = ""): number {
+    const input = this.shadowRoot?.getElementById(`curveWidth${scope}`) as HTMLInputElement | null;
     const parsed = Number(input?.value ?? "1");
     return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1, this.maxBrushSize);
   }
 
-  private currentDialogCurveShape(): GnumarusBrushShape {
-    const select = this.shadowRoot?.getElementById("curveShape") as HTMLSelectElement | null;
+  private currentDialogCurveShape(scope = ""): GnumarusBrushShape {
+    const select = this.shadowRoot?.getElementById(`curveShape${scope}`) as HTMLSelectElement | null;
     return parseBrushShape(select?.value ?? "square");
   }
 
-  private currentDialogCurveAntialias(): boolean {
-    const input = this.shadowRoot?.getElementById("curveAntialias") as HTMLInputElement | null;
+  private currentDialogCurveAntialias(scope = ""): boolean {
+    const input = this.shadowRoot?.getElementById(`curveAntialias${scope}`) as HTMLInputElement | null;
     return input?.checked === true;
   }
 
-  private applyCurveWidthFromDialog(): void {
-    const size = this.currentDialogCurveWidth();
+  private applyCurveWidthFromDialog(scope = ""): void {
+    const size = this.currentDialogCurveWidth(scope);
     this.curveWidth = size;
     if (this.curveWidthMin > size) {
       this.curveWidthMin = size;
@@ -13187,77 +13251,77 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = this.curveWidthStatus();
   }
 
-  private currentDialogCurveWidthMin(): number {
-    const input = this.shadowRoot?.getElementById("curveWidthMin") as HTMLInputElement | null;
+  private currentDialogCurveWidthMin(scope = ""): number {
+    const input = this.shadowRoot?.getElementById(`curveWidthMin${scope}`) as HTMLInputElement | null;
     const parsed = Number(input?.value ?? "1");
     return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1, this.maxBrushSize);
   }
 
-  private applyCurveWidthMinFromDialog(): void {
-    const size = Math.min(this.currentDialogCurveWidthMin(), this.curveWidth);
+  private applyCurveWidthMinFromDialog(scope = ""): void {
+    const size = Math.min(this.currentDialogCurveWidthMin(scope), this.curveWidth);
     this.curveWidthMin = size;
     this.engine?.setCurveWidthMin(size);
     this.statusMessage = this.curveWidthStatus();
   }
 
-  private applyCurveShapeFromDialog(): void {
-    const shape = this.currentDialogCurveShape();
+  private applyCurveShapeFromDialog(scope = ""): void {
+    const shape = this.currentDialogCurveShape(scope);
     this.curveShape = shape;
     this.engine?.setCurveShape(shape);
     this.statusMessage = tr("status.curveShape", { value: this.shapeLabel(shape) });
   }
 
-  private applyCurveAntialiasFromDialog(): void {
-    const enabled = this.currentDialogCurveAntialias();
+  private applyCurveAntialiasFromDialog(scope = ""): void {
+    const enabled = this.currentDialogCurveAntialias(scope);
     this.curveAntialias = enabled;
     this.engine?.setCurveAntialias(enabled);
     this.statusMessage = tr("status.curveAntialias", { value: this.onOffLabel(enabled) });
   }
 
-  private currentDialogShapeWidth(): number {
-    const input = this.shadowRoot?.getElementById("shapeWidth") as HTMLInputElement | null;
+  private currentDialogShapeWidth(scope = ""): number {
+    const input = this.shadowRoot?.getElementById(`shapeWidth${scope}`) as HTMLInputElement | null;
     const parsed = Number(input?.value ?? "1");
     return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 1);
   }
 
-  private applyShapeWidthFromDialog(): void {
-    const size = this.currentDialogShapeWidth();
+  private applyShapeWidthFromDialog(scope = ""): void {
+    const size = this.currentDialogShapeWidth(scope);
     this.shapeWidth = size;
     this.engine?.setShapeWidth(size);
     this.statusMessage = tr("status.brushSize", { value: size });
   }
 
-  private applyShapeFilledFromDialog(): void {
-    const input = this.shadowRoot?.getElementById("shapeFilled") as HTMLInputElement | null;
+  private applyShapeFilledFromDialog(scope = ""): void {
+    const input = this.shadowRoot?.getElementById(`shapeFilled${scope}`) as HTMLInputElement | null;
     const filled = input?.checked === true;
     this.shapeFilled = filled;
     this.engine?.setShapeFilled(filled);
     this.refreshLayers();
   }
 
-  private applyShapeAntialiasFromDialog(): void {
-    const input = this.shadowRoot?.getElementById("shapeAntialias") as HTMLInputElement | null;
+  private applyShapeAntialiasFromDialog(scope = ""): void {
+    const input = this.shadowRoot?.getElementById(`shapeAntialias${scope}`) as HTMLInputElement | null;
     const enabled = input?.checked === true;
     this.shapeAntialias = enabled;
     this.engine?.setShapeAntialias(enabled);
     this.refreshLayers();
   }
 
-  private currentDialogRetouchSize(): number {
-    const input = this.shadowRoot?.getElementById("retouchSize") as HTMLInputElement | null;
+  private currentDialogRetouchSize(scope = ""): number {
+    const input = this.shadowRoot?.getElementById(`retouchSize${scope}`) as HTMLInputElement | null;
     const parsed = Number(input?.value ?? "8");
     return clampBrushSizeFloat(Number.isFinite(parsed) ? parsed : 8);
   }
 
-  private applyRetouchSizeFromDialog(): void {
-    const size = this.currentDialogRetouchSize();
+  private applyRetouchSizeFromDialog(scope = ""): void {
+    const size = this.currentDialogRetouchSize(scope);
     this.retouchSize = size;
     this.engine?.setRetouchSize(size);
     this.statusMessage = tr("status.brushSize", { value: size });
   }
 
-  private applyShadeModeFromDialog(): void {
-    const select = this.shadowRoot?.getElementById("shadeMode") as HTMLSelectElement | null;
+  private applyShadeModeFromDialog(scope = ""): void {
+    const select = this.shadowRoot?.getElementById(`shadeMode${scope}`) as HTMLSelectElement | null;
     const raw = select?.value ?? "lighten";
     const mode = raw === "darken" ? "darken" : raw === "hue" ? "hue" : "lighten";
     this.shadeMode = mode;
@@ -13265,8 +13329,8 @@ export class GnumarusShell extends LitElement {
     this.refreshLayers();
   }
 
-  private applyShadeAmountFromDialog(): void {
-    const input = this.shadowRoot?.getElementById("shadeAmount") as HTMLInputElement | null;
+  private applyShadeAmountFromDialog(scope = ""): void {
+    const input = this.shadowRoot?.getElementById(`shadeAmount${scope}`) as HTMLInputElement | null;
     const parsed = Math.round(Number(input?.value ?? "20"));
     const amount = (Number.isFinite(parsed) ? Math.min(100, Math.max(1, parsed)) : 20) / 100;
     this.shadeAmount = amount;
@@ -13274,16 +13338,16 @@ export class GnumarusShell extends LitElement {
     this.refreshLayers();
   }
 
-  private applyBlurModeFromDialog(): void {
-    const select = this.shadowRoot?.getElementById("blurMode") as HTMLSelectElement | null;
+  private applyBlurModeFromDialog(scope = ""): void {
+    const select = this.shadowRoot?.getElementById(`blurMode${scope}`) as HTMLSelectElement | null;
     const mode = select?.value === "sharpen" ? "sharpen" : "blur";
     this.blurMode = mode;
     this.engine?.setBlurMode(mode);
     this.refreshLayers();
   }
 
-  private applyRecolorToleranceFromDialog(): void {
-    const input = this.shadowRoot?.getElementById("recolorTolerance") as HTMLInputElement | null;
+  private applyRecolorToleranceFromDialog(scope = ""): void {
+    const input = this.shadowRoot?.getElementById(`recolorTolerance${scope}`) as HTMLInputElement | null;
     const parsed = Math.round(Number(input?.value ?? "30"));
     const tolerance = Number.isFinite(parsed) ? Math.min(100, Math.max(0, parsed)) : 30;
     this.recolorTolerance = tolerance;
@@ -13291,16 +13355,16 @@ export class GnumarusShell extends LitElement {
     this.refreshLayers();
   }
 
-  private applyGradientModeFromDialog(): void {
-    const select = this.shadowRoot?.getElementById("gradientMode") as HTMLSelectElement | null;
+  private applyGradientModeFromDialog(scope = ""): void {
+    const select = this.shadowRoot?.getElementById(`gradientMode${scope}`) as HTMLSelectElement | null;
     const mode = select?.value === "radial" ? "radial" : "linear";
     this.gradientMode = mode;
     this.engine?.setGradientMode(mode);
     this.refreshLayers();
   }
 
-  private applyGradientDitherFromDialog(): void {
-    const input = this.shadowRoot?.getElementById("gradientDither") as HTMLInputElement | null;
+  private applyGradientDitherFromDialog(scope = ""): void {
+    const input = this.shadowRoot?.getElementById(`gradientDither${scope}`) as HTMLInputElement | null;
     const enabled = input?.checked === true;
     this.gradientDither = enabled;
     this.engine?.setGradientDither(enabled);
@@ -16303,7 +16367,7 @@ export class GnumarusShell extends LitElement {
   }
 
   /** Tile-brush tool options: tileset picker, tile size, tiles window toggle, hints. */
-  private renderTileBrushOptions() {
+  private renderTileBrushOptions(sfx: "" | "Window" = "") {
     const brush = this.engine?.getTileBrush() ?? null;
     const size = this.engine?.getTileBrushTileSize() ?? { w: 16, h: 16 };
     const tilesetEntry =
@@ -16312,36 +16376,36 @@ export class GnumarusShell extends LitElement {
         : (this.engine.getAnimationMatrix().textures.find((entry) => entry.id === brush?.tilesetId) ?? undefined);
     const tilesetName = tilesetEntry === null || tilesetEntry === undefined ? tr("dialog.noTexture") : tilesetEntry.name;
     return html`
-      <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
+      <div class="tool-options" data-testid=${sfx === "" ? "tool-options" : "tool-options-window"} aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
         <label>${tr("opt.tileset")}
-          <button data-testid="tile-tileset" title=${tr("dialog.selectTileset")} @click=${(): void => void this.openTexturePickerForTileset()}>
+          <button data-testid="tile-tileset${sfx}" title=${tr("dialog.selectTileset")} @click=${(): void => void this.openTexturePickerForTileset()}>
             ${tilesetName}
           </button>
         </label>
         <label title=${tr("opt.tileWidth")}>${tr("opt.tileWidth")}
           <input
             type="number"
-            data-testid="tile-width"
+            data-testid="tile-width${sfx}"
             min="1"
             max="1024"
             step="1"
             .value=${String(size.w)}
-            @change=${(): void => this.applyTileSizeFromDialog()}
+            @change=${(): void => this.applyTileSizeFromDialog(sfx)}
           />
         </label>
         <label title=${tr("opt.tileHeight")}>${tr("opt.tileHeight")}
           <input
             type="number"
-            data-testid="tile-height"
+            data-testid="tile-height${sfx}"
             min="1"
             max="1024"
             step="1"
             .value=${String(size.h)}
-            @change=${(): void => this.applyTileSizeFromDialog()}
+            @change=${(): void => this.applyTileSizeFromDialog(sfx)}
           />
         </label>
         <button
-          data-testid="tile-window-toggle"
+          data-testid="tile-window-toggle${sfx}"
           class=${this.tileWindowOpen ? "active" : ""}
           title=${tr("opt.tilesHint")}
           @click=${(): void => {
@@ -16355,15 +16419,15 @@ export class GnumarusShell extends LitElement {
     `;
   }
 
-  private applyTileSizeFromDialog(): void {
+  private applyTileSizeFromDialog(scope = ""): void {
     if (this.denyEditWhilePlaying()) {
       return;
     }
     if (this.engine === null) {
       return;
     }
-    const widthInput = this.shadowRoot?.querySelector('[data-testid="tile-width"]') as HTMLInputElement | null;
-    const heightInput = this.shadowRoot?.querySelector('[data-testid="tile-height"]') as HTMLInputElement | null;
+    const widthInput = this.shadowRoot?.querySelector(`[data-testid="tile-width${scope}"]`) as HTMLInputElement | null;
+    const heightInput = this.shadowRoot?.querySelector(`[data-testid="tile-height${scope}"]`) as HTMLInputElement | null;
     const w = Math.min(1024, Math.max(1, Math.round(Number(widthInput?.value) || 0)));
     const h = Math.min(1024, Math.max(1, Math.round(Number(heightInput?.value) || 0)));
     if (!Number.isFinite(w) || !Number.isFinite(h) || w < 1 || h < 1) {
@@ -16482,6 +16546,59 @@ export class GnumarusShell extends LitElement {
 
   private tileWindowDragState: { startX: number; startY: number; originX: number; originY: number } | null = null;
 
+  /** Floating window with the active tool's options, stacked vertically. */
+  private renderToolOptionsWindow() {
+    return html`
+      <div
+        class="preview-window"
+        style="left: ${this.toolOptionsWindowX}px; top: ${this.toolOptionsWindowY}px;"
+        data-testid="tool-options-float"
+        ?hidden=${this.uiHidden}
+      >
+        <div class="preview-header" @pointerdown=${(event: PointerEvent): void => this.onToolOptionsWindowDragStart(event)}>
+          <span>${this.toolDisplayName(this.tool)}</span>
+          <span class="spacer"></span>
+          <button
+            aria-label=${tr("btn.close")}
+            title=${tr("btn.close")}
+            @click=${(): void => {
+              this.toolOptionsWindowOpen = false;
+            }}
+          >
+            ×
+          </button>
+        </div>
+        ${this.renderToolOptions("Window")}
+      </div>
+    `;
+  }
+
+  private toolOptionsWindowDragState: { startX: number; startY: number; originX: number; originY: number } | null = null;
+
+  private onToolOptionsWindowDragStart(event: PointerEvent): void {
+    const target = event.target as HTMLElement | null;
+    if (target !== null && target.closest("button") !== null) {
+      return;
+    }
+    this.toolOptionsWindowDragState = { startX: event.clientX, startY: event.clientY, originX: this.toolOptionsWindowX, originY: this.toolOptionsWindowY };
+    const move = (moveEvent: PointerEvent): void => {
+      if (this.toolOptionsWindowDragState === null) {
+        return;
+      }
+      this.toolOptionsWindowX = Math.max(0, this.toolOptionsWindowDragState.originX + (moveEvent.clientX - this.toolOptionsWindowDragState.startX));
+      this.toolOptionsWindowY = Math.max(0, this.toolOptionsWindowDragState.originY + (moveEvent.clientY - this.toolOptionsWindowDragState.startY));
+    };
+    const up = (): void => {
+      this.toolOptionsWindowDragState = null;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  }
+
   private onTileWindowDragStart(event: PointerEvent): void {
     const target = event.target as HTMLElement | null;
     if (target !== null && target.closest("button") !== null) {
@@ -16505,7 +16622,7 @@ export class GnumarusShell extends LitElement {
   }
 
   /** Fly-camera options bar: live pose readout plus reset. */
-  private renderFlycamOptions() {
+  private renderFlycamOptions(sfx: "" | "Window" = "") {
     const fly = this.engine?.getFlycam() ?? null;
     const readout =
       fly === null
@@ -16518,12 +16635,12 @@ export class GnumarusShell extends LitElement {
             z: Math.round(fly.z * 100) / 100,
           });
     return html`
-      <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
+      <div class="tool-options" data-testid=${sfx === "" ? "tool-options" : "tool-options-window"} aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
         ${fly === null
           ? html`<span class="tool-options-empty">${tr("opt.flycamNoCell")}</span>`
           : html`
-              <span class="tool-options-readout" data-testid="flycam-readout">${readout}</span>
-              <button data-testid="flycam-reset" title=${tr("opt.modelResetHint")} @click=${(): void => this.handleFlycamReset()}>
+              <span class="tool-options-readout" data-testid="flycam-readout${sfx}">${readout}</span>
+              <button data-testid="flycam-reset${sfx}" title=${tr("opt.modelResetHint")} @click=${(): void => this.handleFlycamReset()}>
                 ${tr("opt.modelReset")}
               </button>
             `}
@@ -16533,26 +16650,26 @@ export class GnumarusShell extends LitElement {
   }
 
   /** Retouch tool options: shared dab size plus per-tool mode controls. */
-  private renderRetouchOptions() {
+  private renderRetouchOptions(sfx: "" | "Window" = "") {
     return html`
-      <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
+      <div class="tool-options" data-testid=${sfx === "" ? "tool-options" : "tool-options-window"} aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
         <label title=${tr("opt.retouchSizeHint")}
           >${tr("opt.retouchSize")}
           <input
             type="number"
-            id="retouchSize"
+            id="retouchSize${sfx}"
             min="0.1"
             max="64"
             step="0.1"
             .value=${String(this.retouchSize)}
-            @input=${(): void => this.applyRetouchSizeFromDialog()}
+            @input=${(): void => this.applyRetouchSizeFromDialog(sfx)}
           />
         </label>
         ${this.tool === "shading"
           ? html`
               <label title=${tr("opt.shadeModeHint")}
                 >${tr("opt.shadeMode")}
-                <select id="shadeMode" .value=${this.shadeMode} @change=${(): void => this.applyShadeModeFromDialog()}>
+                <select id="shadeMode${sfx}" .value=${this.shadeMode} @change=${(): void => this.applyShadeModeFromDialog(sfx)}>
                   <option value="lighten">${tr("opt.shadeLighten")}</option>
                   <option value="darken">${tr("opt.shadeDarken")}</option>
                   <option value="hue">${tr("opt.shadeHue")}</option>
@@ -16562,12 +16679,12 @@ export class GnumarusShell extends LitElement {
                 >${tr("opt.shadeAmount")}
                 <input
                   type="number"
-                  id="shadeAmount"
+                  id="shadeAmount${sfx}"
                   min="1"
                   max="100"
                   step="1"
                   .value=${String(Math.round(this.shadeAmount * 100))}
-                  @input=${(): void => this.applyShadeAmountFromDialog()}
+                  @input=${(): void => this.applyShadeAmountFromDialog(sfx)}
                 />
               </label>
             `
@@ -16576,7 +16693,7 @@ export class GnumarusShell extends LitElement {
           ? html`
               <label title=${tr("opt.blurModeHint")}
                 >${tr("opt.blurMode")}
-                <select id="blurMode" .value=${this.blurMode} @change=${(): void => this.applyBlurModeFromDialog()}>
+                <select id="blurMode${sfx}" .value=${this.blurMode} @change=${(): void => this.applyBlurModeFromDialog(sfx)}>
                   <option value="blur">${tr("opt.blurBlur")}</option>
                   <option value="sharpen">${tr("opt.blurSharpen")}</option>
                 </select>
@@ -16589,12 +16706,12 @@ export class GnumarusShell extends LitElement {
                 >${tr("opt.recolorTolerance")}
                 <input
                   type="number"
-                  id="recolorTolerance"
+                  id="recolorTolerance${sfx}"
                   min="0"
                   max="100"
                   step="1"
                   .value=${String(this.recolorTolerance)}
-                  @input=${(): void => this.applyRecolorToleranceFromDialog()}
+                  @input=${(): void => this.applyRecolorToleranceFromDialog(sfx)}
                 />
               </label>
             `
@@ -16606,14 +16723,14 @@ export class GnumarusShell extends LitElement {
   }
 
   /** Shape + gradient tool options: shared width/fill/AA for shapes, mode/dither for gradients. */
-  private renderShapeOptions() {
+  private renderShapeOptions(sfx: "" | "Window" = "") {
     return html`
-      <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
+      <div class="tool-options" data-testid=${sfx === "" ? "tool-options" : "tool-options-window"} aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
         ${this.tool === "gradient"
           ? html`
               <label title=${tr("opt.gradientModeHint")}
                 >${tr("opt.gradientMode")}
-                <select id="gradientMode" .value=${this.gradientMode} @change=${(): void => this.applyGradientModeFromDialog()}>
+                <select id="gradientMode${sfx}" .value=${this.gradientMode} @change=${(): void => this.applyGradientModeFromDialog(sfx)}>
                   <option value="linear">${tr("opt.gradientLinear")}</option>
                   <option value="radial">${tr("opt.gradientRadial")}</option>
                 </select>
@@ -16621,9 +16738,9 @@ export class GnumarusShell extends LitElement {
               <label title=${tr("opt.gradientDitherHint")}
                 ><input
                   type="checkbox"
-                  id="gradientDither"
+                  id="gradientDither${sfx}"
                   .checked=${this.gradientDither}
-                  @change=${(): void => this.applyGradientDitherFromDialog()}
+                  @change=${(): void => this.applyGradientDitherFromDialog(sfx)}
                 />
                 ${tr("opt.gradientDither")}
               </label>
@@ -16633,29 +16750,29 @@ export class GnumarusShell extends LitElement {
                 >${tr("opt.shapeWidth")}
                 <input
                   type="number"
-                  id="shapeWidth"
+                  id="shapeWidth${sfx}"
                   min="0.1"
                   max="64"
                   step="0.1"
                   .value=${String(this.shapeWidth)}
-                  @input=${(): void => this.applyShapeWidthFromDialog()}
+                  @input=${(): void => this.applyShapeWidthFromDialog(sfx)}
                 />
               </label>
               <label title=${tr("opt.shapeFillHint")}
                 ><input
                   type="checkbox"
-                  id="shapeFilled"
+                  id="shapeFilled${sfx}"
                   .checked=${this.shapeFilled}
-                  @change=${(): void => this.applyShapeFilledFromDialog()}
+                  @change=${(): void => this.applyShapeFilledFromDialog(sfx)}
                 />
                 ${tr("opt.shapeFill")}
               </label>
               <label title=${tr("opt.shapeAntialiasHint")}
                 ><input
                   type="checkbox"
-                  id="shapeAntialias"
+                  id="shapeAntialias${sfx}"
                   .checked=${this.shapeAntialias}
-                  @change=${(): void => this.applyShapeAntialiasFromDialog()}
+                  @change=${(): void => this.applyShapeAntialiasFromDialog(sfx)}
                 />
                 ${tr("opt.shapeAntialias")}
               </label>
@@ -16676,27 +16793,27 @@ export class GnumarusShell extends LitElement {
   }
 
   /** 3D model transform options: live view readout plus reset/commit/cancel. */
-  private renderModelTransformOptions() {
+  private renderModelTransformOptions(sfx: "" | "Window" = "") {
     const view = this.engine?.getModelViewForActiveCell() ?? null;
     return html`
-      <div class="tool-options" data-testid="tool-options" aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
+      <div class="tool-options" data-testid=${sfx === "" ? "tool-options" : "tool-options-window"} aria-label=${tr("options.suffix", { tool: this.toolDisplayName(this.tool) })} ?hidden=${this.uiHidden}>
         ${view === null
           ? html`<span class="tool-options-empty">${tr("opt.modelNoCell")}</span>`
           : html`
-              <span class="tool-options-readout" data-testid="model-view-readout">
+              <span class="tool-options-readout" data-testid="model-view-readout${sfx}">
                 ${tr("opt.modelView", {
                   azimuth: Math.round(view.azimuth),
                   elevation: Math.round(view.elevation),
                   distance: view.distance.toFixed(2),
                 })}
               </span>
-              <button data-testid="model-view-reset" title=${tr("opt.modelResetHint")} @click=${(): void => this.commitModelViewEdit("reset")}>
+              <button data-testid="model-view-reset${sfx}" title=${tr("opt.modelResetHint")} @click=${(): void => this.commitModelViewEdit("reset")}>
                 ${tr("opt.modelReset")}
               </button>
-              <button data-testid="model-view-commit" title=${tr("opt.modelCommitHint")} @click=${(): void => this.commitModelViewEdit("commit")}>
+              <button data-testid="model-view-commit${sfx}" title=${tr("opt.modelCommitHint")} @click=${(): void => this.commitModelViewEdit("commit")}>
                 ${tr("btn.ok")}
               </button>
-              <button data-testid="model-view-cancel" title=${tr("opt.modelCancelHint")} @click=${(): void => this.commitModelViewEdit("cancel")}>
+              <button data-testid="model-view-cancel${sfx}" title=${tr("opt.modelCancelHint")} @click=${(): void => this.commitModelViewEdit("cancel")}>
                 ${tr("btn.cancel")}
               </button>
             `}
@@ -17134,7 +17251,20 @@ export class GnumarusShell extends LitElement {
       return;
     }
     this.fileMenuOpen = false;
-    this.exportFrame = this.engine.getCurrentFrame() + 1;
+    // Every field below is remembered across opens: only seed frame and
+    // background on the very first open, and only fall back formats or
+    // the animation when the stored value vanished.
+    if (!this.exportDialogTouched) {
+      this.exportDialogTouched = true;
+      this.exportFrame = this.engine.getCurrentFrame() + 1;
+      const projectBackground = this.engine.getBackgroundSettings();
+      this.exportSolidColor = projectBackground.color;
+      const projectChecker = this.engine.getCheckerSettings();
+      this.exportCheckerWidth = projectChecker.sizeX;
+      this.exportCheckerHeight = projectChecker.sizeY;
+      this.exportCheckerColorA = projectChecker.colorA;
+      this.exportCheckerColorB = projectChecker.colorB;
+    }
     this.exportFormats = detectStillFormats();
     if (findStillFormat(this.exportFormats, JXL_MIME) === null) {
       // Browsers never encode JXL through a canvas; our WASM codec does.
@@ -17147,13 +17277,10 @@ export class GnumarusShell extends LitElement {
     if (findStillFormat(this.exportFormats, this.exportFormat) === null) {
       this.exportFormat = this.exportFormats[0]?.mime ?? "image/png";
     }
-    this.exportAnimation = this.engine.getActiveAnimationName() ?? "";
-    if (
-      this.exportAnimation !== "" &&
-      !this.engine.getNamedAnimations().some((animation) => animation.name === this.exportAnimation)
-    ) {
-      this.exportAnimation = "";
-    }
+    this.exportAnimation = this.exportAnimation !== "" &&
+      this.engine.getNamedAnimations().some((animation) => animation.name === this.exportAnimation)
+      ? this.exportAnimation
+      : (this.engine.getActiveAnimationName() ?? "");
     if (
       this.exportAnimatedFormat !== "gif" &&
       this.exportAnimatedFormat !== "jxl" &&
@@ -17165,17 +17292,6 @@ export class GnumarusShell extends LitElement {
     if (findStillFormat(this.exportFormats, this.exportSheetFormat) === null) {
       this.exportSheetFormat = this.exportFormats[0]?.mime ?? "image/png";
     }
-    this.exportSheetAll = false;
-    this.exportTab = "frame";
-    this.exportBackground = false;
-    this.exportBackgroundType = "project";
-    const projectBackground = this.engine.getBackgroundSettings();
-    this.exportSolidColor = projectBackground.color;
-    const projectChecker = this.engine.getCheckerSettings();
-    this.exportCheckerWidth = projectChecker.sizeX;
-    this.exportCheckerHeight = projectChecker.sizeY;
-    this.exportCheckerColorA = projectChecker.colorA;
-    this.exportCheckerColorB = projectChecker.colorB;
     try {
       const support = await queryVideoCodecSupport(this.engine.size.width, this.engine.size.height);
       this.videoSupportWebm = support.vp9;
@@ -19025,7 +19141,7 @@ export class GnumarusShell extends LitElement {
   }
 
   /** Feather the floating mask by the dialog radius (no undo until merge). */
-  private async applyFeatherFromDialog(): Promise<void> {
+  private async applyFeatherFromDialog(scope = ""): Promise<void> {
     if (this.denyEditWhilePlaying()) {
       return;
     }
@@ -19036,7 +19152,7 @@ export class GnumarusShell extends LitElement {
     if (this.engine === null) {
       return;
     }
-    const input = this.shadowRoot?.getElementById("featherRadius") as HTMLInputElement | null;
+    const input = this.shadowRoot?.getElementById(`featherRadius${scope}`) as HTMLInputElement | null;
     const parsed = Math.floor(Number(input?.value ?? "0"));
     const radius = Number.isFinite(parsed) ? Math.min(32, Math.max(0, parsed)) : 0;
     this.featherRadius = radius;
@@ -19046,7 +19162,7 @@ export class GnumarusShell extends LitElement {
   }
 
   /** Grow (+1) or shrink (-1) the floating mask by the dialog pixel count. */
-  private async reshapeFloatingSelection(direction: 1 | -1): Promise<void> {
+  private async reshapeFloatingSelection(direction: 1 | -1, scope = ""): Promise<void> {
     if (this.denyEditWhilePlaying()) {
       return;
     }
@@ -19057,7 +19173,7 @@ export class GnumarusShell extends LitElement {
     if (this.engine === null) {
       return;
     }
-    const input = this.shadowRoot?.getElementById("growShrinkPx") as HTMLInputElement | null;
+    const input = this.shadowRoot?.getElementById(`growShrinkPx${scope}`) as HTMLInputElement | null;
     const parsed = Math.floor(Number(input?.value ?? "1"));
     const px = Number.isFinite(parsed) ? Math.min(64, Math.max(1, parsed)) : 1;
     this.growShrinkPx = px;
@@ -19067,8 +19183,8 @@ export class GnumarusShell extends LitElement {
     });
   }
 
-  private applyGrowShrinkFromDialog(): void {
-    const input = this.shadowRoot?.getElementById("growShrinkPx") as HTMLInputElement | null;
+  private applyGrowShrinkFromDialog(scope = ""): void {
+    const input = this.shadowRoot?.getElementById(`growShrinkPx${scope}`) as HTMLInputElement | null;
     const parsed = Math.floor(Number(input?.value ?? "1"));
     this.growShrinkPx = Number.isFinite(parsed) ? Math.min(64, Math.max(1, parsed)) : 1;
   }

@@ -162,7 +162,7 @@ test("checked animation data saves the sheet plus a JSON sidecar", async ({ page
   const sidecar = JSON.parse(new TextDecoder().decode(new Uint8Array(written["my-sheet.json"] ?? []))) as {
     texture: { w: number; h: number };
     frames: Record<string, { x: number; y: number; w: number; h: number }>;
-    animations: Record<string, { name: string; frames: number[]; frame_times: Array<{ frame: number; secs: number }> }>;
+    animations: Record<string, { name: string; frames: Array<{ frame: number; secs: number }> }>;
   };
   expect(sidecar.texture).toEqual({ w: 192, h: 64 });
   expect(sidecar.frames).toEqual({
@@ -172,8 +172,7 @@ test("checked animation data saves the sheet plus a JSON sidecar", async ({ page
   });
   expect(sidecar.animations.walk).toEqual({
     name: "walk",
-    frames: [1, 2, 3],
-    frame_times: [
+    frames: [
       { frame: 1, secs: 0.25 },
       { frame: 2, secs: 0.5 },
       { frame: 3, secs: 0.25 },
