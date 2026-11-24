@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { canvasScreenPixel, dragRect, engineBrushSize, floatingRect, getFloatingSelection, getPendingResizeHandle, getViewState, layerScreenTarget, loadBlankProject, paintCenter, paintDot, readFloatingPixel, readPixel, selectTool, selectionMaskDisplay, selectionMaskMoves, selectionOverlayDisplay, setBrushColor } from "./e2e-helpers";
+import { canvasScreenPixel, dragRect, engineBrushSize, floatingRect, getFloatingSelection, getPendingResizeHandle, getViewState, layerScreenTarget, loadBlankProject, paintCenter, paintDot, paintLayerRect, readFloatingPixel, readPixel, selectTool, selectionMaskDisplay, selectionMaskMoves, selectionOverlayDisplay, setBrushColor } from "./e2e-helpers";
 
 test("final preview shows the canvas background", async ({ page }) => {
   await page.goto("/");
@@ -795,4 +795,38 @@ test("rect and ellipse select on empty and textureless cells @recent", async ({ 
   await selectTool(page, "Rectangular selection");
   await dragRect(page, 12, 12, 22, 22);
   expect(await getFloatingSelection(page)).toEqual({ x: 12, y: 12, width: 11, height: 11, selected: 121 });
+});
+
+test("rectangular selection can start outside the texture @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await paintLayerRect(page, "#ff0000", 0, 0, 63, 63);
+  await selectTool(page, "Rectangular selection");
+  // From outside the left edge into the texture: only the valid area
+  // stays selected, like an inside-out drag.
+  await dragRect(page, -5, 10, 20, 20);
+  expect(await getFloatingSelection(page)).toEqual({ x: 0, y: 10, width: 21, height: 11, selected: 231 });
+});
+
+test("floating selection renders above lower layers while destransform-dragging @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await paintLayerRect(page, "#ff0000", 0, 0, 63, 63);
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await paintLayerRect(page, "#00ff00", 0, 0, 63, 63);
+  await page.getByRole("button", { name: "Add layer" }).click();
+  await paintLayerRect(page, "#0000ff", 10, 10, 20, 20);
+  await selectTool(page, "Rectangular selection");
+  await dragRect(page, 10, 10, 20, 20);
+  expect(await getFloatingSelection(page)).toEqual({ x: 10, y: 10, width: 11, height: 11, selected: 121 });
+  await selectTool(page, "Destructive selection transform");
+  const from = await layerScreenTarget(page, 15, 15);
+  const to = await layerScreenTarget(page, 40, 40);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 5 });
+  expect(await canvasScreenPixel(page, to.x, to.y)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+  await page.mouse.up();
 });

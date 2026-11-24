@@ -15749,6 +15749,10 @@ export class GnumarusCanvasEngine {
     elements[14] = this.layers.length * 0.01 + 0.01;
     elements[15] = 1;
     this.floatingPlane.matrixWorldNeedsUpdate = true;
+    // Always composite above every layer plane: transparent passes sort by
+    // renderOrder first, and the default 0 would sink the selection below
+    // higher layers. Reassert every sync: layers come and go under it.
+    this.floatingPlane.renderOrder = this.layers.length;
     this.floatingPlane.visible = true;
   }
 
@@ -19663,15 +19667,14 @@ export class GnumarusCanvasEngine {
         }
         // Float mapping (no rendered-texture requirement): selecting an
         // empty or textureless cell must work; the texture materializes
-        // on release if needed.
+        // on release if needed. Drags may start outside the texture so
+        // edges and corners stay easy to select; the commit clamps to the
+        // valid area.
         const cursor = this.clientToLayerImageFloat(event.clientX, event.clientY);
         if (cursor === null) {
           return;
         }
         const pixel = { x: Math.floor(cursor.x), y: Math.floor(cursor.y) };
-        if (pixel.x < 0 || pixel.y < 0 || pixel.x >= layer.width || pixel.y >= layer.height) {
-          return;
-        }
         this.rectDrag = { x0: pixel.x, y0: pixel.y, x1: pixel.x, y1: pixel.y };
         this.lastMouseClient = { x: event.clientX, y: event.clientY };
         canvas.setPointerCapture(event.pointerId);

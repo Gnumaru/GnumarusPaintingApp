@@ -7678,13 +7678,13 @@ export class GnumarusShell extends LitElement {
       `;
     }
     if (this.tool === "tilebrush") {
-      return this.renderTileBrushOptions();
+      return this.renderTileBrushOptions(sfx);
     }
     if (this.tool === "modeltransform") {
-      return this.renderModelTransformOptions();
+      return this.renderModelTransformOptions(sfx);
     }
     if (this.tool === "flycam") {
-      return this.renderFlycamOptions();
+      return this.renderFlycamOptions(sfx);
     }
     if (
       this.tool === "rectangle" ||
@@ -7692,7 +7692,7 @@ export class GnumarusShell extends LitElement {
       this.tool === "polygon" ||
       this.tool === "gradient"
     ) {
-      return this.renderShapeOptions();
+      return this.renderShapeOptions(sfx);
     }
     if (
       this.tool === "shading" ||
@@ -7701,7 +7701,7 @@ export class GnumarusShell extends LitElement {
       this.tool === "recolor" ||
       this.tool === "jumble"
     ) {
-      return this.renderRetouchOptions();
+      return this.renderRetouchOptions(sfx);
     }
     if (this.tool === "crop") {
       return html`

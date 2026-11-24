@@ -63,3 +63,33 @@ test("tool options window drags by its header and closes", async ({ page }) => {
   await bar.getByRole("button", { name: "Tool options" }).click();
   await expect(win).toBeVisible();
 });
+
+test("every tool stacks its options vertically in the window, rows stay in the bar @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  const runAction = (id: string): Promise<boolean> =>
+    page.evaluate((actionId: string) => {
+      const root = window as unknown as { __gnumarus?: { shell?: { runAction(actionId: string): boolean } } };
+      return root.__gnumarus?.shell?.runAction(actionId) ?? false;
+    }, id);
+  // Delegated option groups (shapes, retouch, tile brush) used to lose the
+  // window testid and fall back to the horizontal bar layout.
+  for (const action of ["tool-rectangle", "tool-shading", "tool-tilebrush"]) {
+    expect(await runAction(action)).toBe(true);
+    await page.locator('gnumarus-shell [data-testid="tool-options-button"]').click();
+    const win = page.locator('gnumarus-shell [data-testid="tool-options-window"]');
+    await expect(win).toBeVisible();
+    await expect(win).toHaveCSS("flex-direction", "column");
+    const first = await win.locator(":scope > *").nth(0).boundingBox();
+    const second = await win.locator(":scope > *").nth(1).boundingBox();
+    if (first === null || second === null) {
+      throw new Error(`dialog options have no boxes for ${action}`);
+    }
+    expect(second.y).toBeGreaterThan(first.y);
+    await page.locator('gnumarus-shell [data-testid="tool-options-float"]').getByRole("button", { name: "Close" }).click();
+    await expect(win).toBeHidden();
+  }
+  // The bar itself keeps the horizontal row layout.
+  await expect(page.locator('gnumarus-shell [data-testid="tool-options"]')).toHaveCSS("flex-direction", "row");
+});
