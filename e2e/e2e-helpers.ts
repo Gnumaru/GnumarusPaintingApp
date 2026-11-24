@@ -825,6 +825,7 @@ export const DRAWER_FOR_TOOL: Record<string, string> = {
   "Color selection": "selection",
   "Destructive selection transform": "destructive",
   "Destructive selection 3D rotation": "destructive",
+  "Regions": "selection",
   "Non-destructive cell transform": "transform",
   "Non-destructive cell 3D rotation": "transform",
   "3D model transform": "model",

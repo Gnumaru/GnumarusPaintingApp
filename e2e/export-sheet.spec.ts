@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { addAnimation, addFrames, exportedFile, exportedSheetPixels, loadBlankProject, paintCenter, setEmptyCellHold, stubProjectDirectory, stubSaveFilePicker } from "./e2e-helpers";
+import { addAnimation, addFrames, exportedFile, exportedSheetPixels, layerScreenTarget, loadBlankProject, paintCenter, paintLayerRect, selectTool, setEmptyCellHold, stubProjectDirectory, stubSaveFilePicker } from "./e2e-helpers";
 
 async function openSheetTab(page: import("@playwright/test").Page): Promise<import("@playwright/test").Locator> {
   await page.getByRole("button", { name: "File" }).click();
@@ -25,9 +25,9 @@ test("spritesheet animations select through a multi-select", async ({ page }) =>
   const select = dialog.locator("#exportSheetAnimations");
   await expect(select).toHaveJSProperty("multiple", true);
   await expect(select.locator("option")).toHaveText(["a", "b"]);
-  // The old per-animation checkbox list is gone; the all-frames checkbox stays.
+  // The old per-animation checkbox list is gone; the source dropdown picks the scope.
   await expect(dialog.locator("#exportSheetAnimations option")).toHaveCount(2);
-  await expect(dialog.locator("#exportSheetAll")).toBeVisible();
+  await expect(dialog.locator("#exportSheetSource")).toHaveValue("animations");
   await select.selectOption(["a", "b"]);
   await dialog.locator("select#exportSheetLayout").selectOption("per-line");
   await dialog.getByRole("checkbox", { name: "Export animation data" }).uncheck();
@@ -55,7 +55,7 @@ test("wide spritesheet packs round columns up, narrow packs down", async ({ page
     const dialog = page.locator("gnumarus-shell dialog#exportDialog");
     await expect(dialog).toBeVisible();
     await dialog.locator('[data-testid="export-tab-sheet"]').click();
-    await dialog.getByRole("checkbox", { name: "All frames" }).check();
+    await dialog.locator("#exportSheetSource").selectOption("all");
     await dialog.locator("select#exportSheetLayout").selectOption("packed");
     await dialog.getByRole("checkbox", { name: "Export animation data" }).uncheck();
     await dialog.locator("#exportSheetOk").click();
@@ -92,7 +92,7 @@ test("fixed columns shrink to content unless full size is ensured", async ({ pag
   await stubSaveFilePicker(page);
   const exportFixed = async (): Promise<void> => {
     const dialog = await openSheetTab(page);
-    await dialog.getByRole("checkbox", { name: "All frames" }).check();
+    await dialog.locator("#exportSheetSource").selectOption("all");
     await dialog.locator("select#exportSheetLayout").selectOption("fixed-cols");
     await dialog.locator("#exportSheetCount").fill("9");
   };
@@ -162,6 +162,7 @@ test("checked animation data saves the sheet plus a JSON sidecar", async ({ page
   const sidecar = JSON.parse(new TextDecoder().decode(new Uint8Array(written["my-sheet.json"] ?? []))) as {
     texture: { w: number; h: number };
     frames: Record<string, { x: number; y: number; w: number; h: number; ox: number; oy: number }>;
+    regions: Record<string, { x: number; y: number; w: number; h: number; ox: number; oy: number; rotated: boolean }>;
     animations: Record<string, { name: string; frames: Array<{ frame: number; secs: number }> }>;
   };
   expect(sidecar.texture).toEqual({ w: 192, h: 64 });
@@ -170,6 +171,7 @@ test("checked animation data saves the sheet plus a JSON sidecar", async ({ page
     "2": { x: 64, y: 0, w: 64, h: 64, ox: 0, oy: 0, rotated: false },
     "3": { x: 128, y: 0, w: 64, h: 64, ox: 0, oy: 0, rotated: false },
   });
+  expect(sidecar.regions).toEqual({});
   expect(sidecar.animations.walk).toEqual({
     name: "walk",
     frames: [
@@ -182,6 +184,109 @@ test("checked animation data saves the sheet plus a JSON sidecar", async ({ page
   expect((written["my-sheet.png"] ?? []).length).toBeGreaterThan(100);
 });
 
+async function drawRegion(
+  page: import("@playwright/test").Page,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  name: string,
+): Promise<void> {
+  // layerScreenTarget maps pixel centers, so subtract 0.5 for exact floats.
+  const a = await layerScreenTarget(page, x0 - 0.5, y0 - 0.5);
+  const b = await layerScreenTarget(page, x1 - 0.5, y1 - 0.5);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 8 });
+  await page.mouse.up();
+  const input = page.locator('gnumarus-shell [data-testid="region-name-input"]').last();
+  await expect(input).toBeVisible();
+  await input.fill(name);
+  await input.press("Enter");
+  await expect(input).toHaveValue(name);
+}
+
+test("sheet source defaults to animations and offers regions scopes", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  const dialog = await openSheetTab(page);
+  const source = dialog.locator("#exportSheetSource");
+  await expect(source).toBeVisible();
+  await expect(source).toHaveValue("animations");
+  await expect(source.locator("option")).toHaveCount(4);
+  expect(
+    await source.evaluate((select: HTMLSelectElement) => Array.from(select.options).map((option) => option.value)),
+  ).toEqual(["all", "animations", "regions", "both"]);
+  // Regions-only scope disables the animation picker and extra frames.
+  await source.selectOption("regions");
+  await expect(dialog.locator("#exportSheetAnimations")).toBeDisabled();
+  await expect(dialog.locator("#exportSheetFrames")).toBeHidden();
+  await source.selectOption("both");
+  await expect(dialog.locator("#exportSheetAnimations")).toBeEnabled();
+  await expect(dialog.locator("#exportSheetFrames")).toBeVisible();
+});
+
+test("regions scope exports only named regions with a regions section", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await paintLayerRect(page, "#ff0000", 0, 0, 63, 63);
+  await selectTool(page, "Regions");
+  await drawRegion(page, 10, 10, 30, 30, "Head");
+  await drawRegion(page, 40, 40, 50, 50, "Body");
+  const project = await stubProjectDirectory(page, "SheetDir");
+  page.on("dialog", (dialog) => void dialog.accept("region-sheet"));
+  const dialog = await openSheetTab(page);
+  await dialog.locator("#exportSheetSource").selectOption("regions");
+  await expect(dialog.getByRole("checkbox", { name: "Export animation data" })).toBeChecked();
+  await dialog.locator("#exportSheetOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported 2 files to SheetDir");
+  const written = await project.writtenBlobs();
+  expect(Object.keys(written).sort()).toEqual(["region-sheet.json", "region-sheet.png"]);
+  const sidecar = parseSidecar(written, "region-sheet");
+  // No animation frames: only the two named regions, each padded to the
+  // common 20px grid cell.
+  expect(sidecar.frames).toEqual({});
+  expect(sidecar.animations).toEqual({});
+  expect(sidecar.regions).toEqual({
+    Head: { x: 0, y: 0, w: 20, h: 20, ox: 0, oy: 0, rotated: false },
+    Body: { x: 20, y: 0, w: 20, h: 20, ox: 0, oy: 0, rotated: false },
+  });
+  expect(sidecar.texture).toEqual({ w: 40, h: 20 });
+});
+
+test("animations and regions scope mixes frames with region cells", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await setEmptyCellHold(page, false);
+  await addFrames(page, 2);
+  await addAnimation(page, "walk,none,1-3");
+  await page.locator('gnumarus-shell [data-testid="anim-frame"][data-frame="0"]').click();
+  await paintCenter(page);
+  await selectTool(page, "Regions");
+  await drawRegion(page, 10, 10, 30, 30, "Head");
+  const project = await stubProjectDirectory(page, "SheetDir");
+  page.on("dialog", (dialog) => void dialog.accept("mixed-sheet"));
+  const dialog = await openSheetTab(page);
+  await dialog.locator("#exportSheetSource").selectOption("both");
+  await dialog.locator("#exportSheetAnimations").selectOption(["walk"]);
+  await dialog.locator("select#exportSheetLayout").selectOption("line");
+  await dialog.locator("#exportSheetOk").click();
+  await expect(page.locator("gnumarus-shell")).toContainText("Exported 2 files to SheetDir");
+  const written = await project.writtenBlobs();
+  const sidecar = parseSidecar(written, "mixed-sheet");
+  // Three animation frames plus the region, packed in one line.
+  expect(Object.keys(sidecar.frames).sort()).toEqual(["1", "2", "3"]);
+  expect(Object.keys(sidecar.regions)).toEqual(["Head"]);
+  expect(sidecar.texture).toEqual({ w: 256, h: 64 });
+  expect(sidecar.frames["1"]).toMatchObject({ x: 0, y: 0, w: 64, h: 64, ox: 0, oy: 0, rotated: false });
+  // Regions ride in padded grid cells like frames do.
+  expect(sidecar.regions["Head"]).toMatchObject({ x: 192, y: 0, w: 64, h: 64, ox: 0, oy: 0, rotated: false });
+  expect(sidecar.animations.walk?.frames).toHaveLength(3);
+});
+
 test("dismissing the sheet name prompt cancels without writing", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
@@ -190,7 +295,7 @@ test("dismissing the sheet name prompt cancels without writing", async ({ page }
   const project = await stubProjectDirectory(page, "SheetDir");
   page.on("dialog", (dialog) => void dialog.dismiss());
   const dialog = await openSheetTab(page);
-  await dialog.getByRole("checkbox", { name: "All frames" }).check();
+  await dialog.locator("#exportSheetSource").selectOption("all");
   await dialog.locator("#exportSheetOk").click();
   await expect(page.locator("gnumarus-shell dialog#exportDialog")).toBeHidden();
   expect(await project.writtenBlobs()).toEqual({});
@@ -199,6 +304,7 @@ test("dismissing the sheet name prompt cancels without writing", async ({ page }
 type SheetSidecar = {
   texture: { w: number; h: number };
   frames: Record<string, { x: number; y: number; w: number; h: number; ox: number; oy: number; rotated: boolean }>;
+  regions: Record<string, { x: number; y: number; w: number; h: number; ox: number; oy: number; rotated: boolean }>;
   animations: Record<string, { name: string; frames: Array<{ frame: number; secs: number }> }>;
 };
 
@@ -258,7 +364,7 @@ test("uniform trim crops every frame to the common box with shared offsets", asy
   const project = await stubProjectDirectory(page, "SheetDir");
   page.on("dialog", (dialog) => void dialog.accept("uniform-sheet"));
   const dialog = await openSheetTab(page);
-  await dialog.getByRole("checkbox", { name: "All frames" }).check();
+  await dialog.locator("#exportSheetSource").selectOption("all");
   await dialog.locator("#exportSheetTrim").selectOption("uniform");
   await expect(dialog.getByRole("checkbox", { name: "Export animation data" })).toBeChecked();
   await dialog.locator("#exportSheetOk").click();
@@ -319,7 +425,7 @@ test("individual trim packs each cropped frame with its own offset", async ({ pa
   const project = await stubProjectDirectory(page, "SheetDir");
   page.on("dialog", (dialog) => void dialog.accept("packed-sheet"));
   const dialog = await openSheetTab(page);
-  await dialog.getByRole("checkbox", { name: "All frames" }).check();
+  await dialog.locator("#exportSheetSource").selectOption("all");
   await dialog.locator("#exportSheetTrim").selectOption("individual");
   await expect(dialog.getByRole("checkbox", { name: "Export animation data" })).toBeChecked();
   await dialog.locator("#exportSheetOk").click();
@@ -396,7 +502,7 @@ test("individual trim exports valid sheets with rotation on and off", async ({ p
   // Rotation on (default): square dots pack unrotated with boolean flags.
   page.once("dialog", (dialog) => void dialog.accept("rot-on"));
   let dialog = await openSheetTab(page);
-  await dialog.getByRole("checkbox", { name: "All frames" }).check();
+  await dialog.locator("#exportSheetSource").selectOption("all");
   await dialog.locator("#exportSheetTrim").selectOption("individual");
   await expect(dialog.getByRole("checkbox", { name: "Allow rotation" })).toBeChecked();
   await dialog.locator("#exportSheetOk").click();
@@ -413,7 +519,7 @@ test("individual trim exports valid sheets with rotation on and off", async ({ p
   // Rotation off: same content still exports a valid sheet.
   page.once("dialog", (dialog) => void dialog.accept("rot-off"));
   dialog = await openSheetTab(page);
-  await dialog.getByRole("checkbox", { name: "All frames" }).check();
+  await dialog.locator("#exportSheetSource").selectOption("all");
   await dialog.locator("#exportSheetTrim").selectOption("individual");
   await dialog.getByRole("checkbox", { name: "Allow rotation" }).uncheck();
   await dialog.locator("#exportSheetOk").click();

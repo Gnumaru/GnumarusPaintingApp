@@ -77,6 +77,20 @@ export interface GnumarusTilemapMeta {
   tiles: GnumarusTilePlacement[];
 }
 
+/** Named texture sub-rectangle (Aseprite-style slice). Unique names project-wide. */
+export interface GnumarusRegionMeta {
+  id: string;
+  name: string;
+  /** Texture holding the region (texture pixels). */
+  textureId: string;
+  /** Top-left corner in texture pixels. */
+  x: number;
+  y: number;
+  /** Size in texture pixels (at least 1x1). */
+  w: number;
+  h: number;
+}
+
 export interface GnumarusContentMeta {
   id: string;
   name: string;
@@ -139,6 +153,8 @@ export interface GnumarusAnimationMeta {
   svgs: GnumarusSvgMeta[];
   models3d: GnumarusModel3dMeta[];
   tilemaps: GnumarusTilemapMeta[];
+  /** Named texture regions (absent in legacy files means none). */
+  regions?: GnumarusRegionMeta[];
   contents: GnumarusContentMeta[];
   cells: GnumarusMatrixCellRef[];
 }
@@ -390,6 +406,7 @@ export function createDefaultProject(width: number, height: number): GnumarusPro
       frameNames: [defaultFrameName(0)],
       namedAnimations: [],
       activeAnimation: null,
+      regions: [],
       textures: [{ id: "layer0", name: "t1", width, height, file: textureFilePath("layer0") }],
       texts: [],
       svgs: [],
@@ -622,7 +639,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
   if (!isRecord(value)) {
     throw new GnumarusProjectError("project.json has an invalid animation section");
   }
-  const { frames, currentFrame, defaultFrameDuration, frameDurations, frameNames, namedAnimations, activeAnimation, textures, texts, svgs, models3d, tilemaps, contents, cells } = value;
+  const { frames, currentFrame, defaultFrameDuration, frameDurations, frameNames, namedAnimations, activeAnimation, textures, texts, svgs, models3d, tilemaps, regions, contents, cells } = value;
   if (!Number.isInteger(frames) || (frames as number) < 1) {
     throw new GnumarusProjectError("project.json has an invalid frame count");
   }
@@ -812,6 +829,8 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
     }
   }
   const checkedAnimations = parseNamedAnimationMetas(namedAnimations, frameCount, durationsInMs);
+  const textureDims = new Map(checkedTextures.map((entry) => [entry.id, { width: entry.width, height: entry.height }]));
+  const checkedRegions = parseRegionMetas(regions, textureDims);
   return {
     frames: frameCount,
     currentFrame: startFrame,
@@ -825,6 +844,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
     svgs: checkedSvgs,
     models3d: checkedModels3d,
     tilemaps: checkedTilemaps,
+    regions: checkedRegions,
     contents: checkedContents,
     cells: checkedCells,
   };
@@ -968,6 +988,53 @@ function parseTilemapMetas(value: unknown, textureIds: Set<string>): GnumarusTil
       checkedTiles.push({ ...placement });
     }
     checked.push({ id, name: checkedName(name, "tilemap"), tilesetId, tileWidth, tileHeight, tiles: checkedTiles });
+  }
+  return checked;
+}
+
+/** Strict region list (absent in legacy files means none). Names are unique project-wide. */
+function parseRegionMetas(
+  value: unknown,
+  textureDims: Map<string, { width: number; height: number }>,
+): GnumarusRegionMeta[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new GnumarusProjectError("project.json has invalid regions");
+  }
+  const checked: GnumarusRegionMeta[] = [];
+  const seenIds = new Set<string>();
+  const seenNames = new Set<string>();
+  for (const entry of value) {
+    if (!isRecord(entry)) {
+      throw new GnumarusProjectError("project.json has an invalid region");
+    }
+    const id = checkedId(entry.id, "region");
+    if (seenIds.has(id)) {
+      throw new GnumarusProjectError("project.json has duplicate region ids");
+    }
+    seenIds.add(id);
+    const name = checkedName(entry.name, "region");
+    if (seenNames.has(name)) {
+      throw new GnumarusProjectError("project.json has duplicate region names");
+    }
+    seenNames.add(name);
+    const { textureId, x, y, w, h } = entry;
+    if (typeof textureId !== "string" || !textureDims.has(textureId)) {
+      throw new GnumarusProjectError("project.json has a region with an unknown texture");
+    }
+    const dims = textureDims.get(textureId) as { width: number; height: number };
+    for (const edge of [x, y, w, h]) {
+      if (typeof edge !== "number" || !Number.isInteger(edge)) {
+        throw new GnumarusProjectError("project.json has a region with a non-integer box");
+      }
+    }
+    const box = { x: x as number, y: y as number, w: w as number, h: h as number };
+    if (box.w < 1 || box.h < 1 || box.x < 0 || box.y < 0 || box.x + box.w > dims.width || box.y + box.h > dims.height) {
+      throw new GnumarusProjectError("project.json has a region outside its texture");
+    }
+    checked.push({ id, name, textureId, ...box });
   }
   return checked;
 }
@@ -1118,6 +1185,7 @@ function migrateLegacyLayersToAnimation(
     frameNames: [defaultFrameName(0)],
     namedAnimations: [],
     activeAnimation: null,
+    regions: [],
     textures,
     texts: [],
     svgs: [],

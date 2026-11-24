@@ -9,6 +9,7 @@ import {
   frameContentBox,
   GNUMARUS_SHEET_LAYOUTS,
   packSheetRects,
+  padSheetPixels,
   rotatePixels90CW,
   uniformCropBox,
   type GnumarusSheetCell,
@@ -229,6 +230,7 @@ describe("GnumarusSpritesheet", () => {
         "2": { x: 16, y: 0, w: 16, h: 16, ox: 0, oy: 0, rotated: false },
         "3": { x: 32, y: 0, w: 16, h: 16, ox: 0, oy: 0, rotated: false },
       },
+      regions: {},
       animations: {
         walk: {
           name: "walk",
@@ -260,6 +262,7 @@ describe("GnumarusSpritesheet", () => {
       "1": { x: 0, y: 0, w: 16, h: 16, ox: 0, oy: 0, rotated: false },
       "2": { x: 16, y: 0, w: 16, h: 16, ox: 0, oy: 0, rotated: false },
     });
+    expect(data.regions).toEqual({});
     expect(data.animations).toEqual({});
   });
 
@@ -348,6 +351,73 @@ describe("GnumarusSpritesheet", () => {
     expect(packed.frames).toEqual({
       "1": { x: 0, y: 0, w: 60, h: 10, ox: 2, oy: 3, rotated: false },
       "2": { x: 0, y: 10, w: 60, h: 10, ox: 4, oy: 5, rotated: true },
+    });
+    expect(packed.regions).toEqual({});
+  });
+
+  it("pads smaller items to a common grid cell with top-left content", () => {
+    const small = solidFrame(2, 1, 200);
+    const same = padSheetPixels(small, 2, 1, 2, 1);
+    expect(same.pixels).toBe(small);
+    const padded = padSheetPixels(small, 2, 1, 4, 3);
+    expect(padded.width).toBe(4);
+    expect(padded.height).toBe(3);
+    expect(Array.from(padded.pixels.slice(0, 8))).toEqual([200, 200, 200, 255, 200, 200, 200, 255]);
+    expect(Array.from(padded.pixels.slice(8, 12))).toEqual([0, 0, 0, 0]);
+    expect(Array.from(padded.pixels.slice(16, 20))).toEqual([0, 0, 0, 0]);
+    expect(() => padSheetPixels(small, 2, 1, 1, 1)).toThrow(/pad target/);
+    expect(() => padSheetPixels(new Uint8ClampedArray(4), 2, 1, 2, 1)).toThrow(/padding/);
+  });
+
+  it("splits frame and region slots into sidecar sections", () => {
+    // Slots 0-1 are frames (repeats collapse), slots 2-3 are regions.
+    const resolve = (slot: number): { section: "frames" | "regions"; key: string } => {
+      if (slot === 2) {
+        return { section: "regions", key: "Head" };
+      }
+      if (slot === 3) {
+        return { section: "regions", key: "Body" };
+      }
+      return { section: "frames", key: String(slot + 1) };
+    };
+    const data = buildSheetAnimationData({
+      sheetWidth: 64,
+      sheetHeight: 32,
+      frameWidth: 16,
+      frameHeight: 16,
+      cells: [
+        { col: 0, row: 0, frame: 0 },
+        { col: 1, row: 0, frame: 1 },
+        { col: 2, row: 0, frame: 0 },
+        { col: 3, row: 0, frame: 2 },
+        { col: 0, row: 1, frame: 3 },
+      ],
+      animations: [],
+      resolve,
+    });
+    expect(data.frames).toEqual({
+      "1": { x: 0, y: 0, w: 16, h: 16, ox: 0, oy: 0, rotated: false },
+      "2": { x: 16, y: 0, w: 16, h: 16, ox: 0, oy: 0, rotated: false },
+    });
+    expect(data.regions).toEqual({
+      Head: { x: 48, y: 0, w: 16, h: 16, ox: 0, oy: 0, rotated: false },
+      Body: { x: 0, y: 16, w: 16, h: 16, ox: 0, oy: 0, rotated: false },
+    });
+    const packed = buildPackedSheetAnimationData({
+      sheetWidth: 32,
+      sheetHeight: 32,
+      placements: [
+        { frame: 0, x: 0, y: 0, w: 10, h: 10, ox: 1, oy: 2, rotated: false },
+        { frame: 2, x: 10, y: 0, w: 8, h: 6, ox: 3, oy: 4, rotated: true },
+      ],
+      animations: [],
+      resolve,
+    });
+    expect(packed.frames).toEqual({
+      "1": { x: 0, y: 0, w: 10, h: 10, ox: 1, oy: 2, rotated: false },
+    });
+    expect(packed.regions).toEqual({
+      Head: { x: 10, y: 0, w: 8, h: 6, ox: 3, oy: 4, rotated: true },
     });
   });
 });

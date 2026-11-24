@@ -16,16 +16,22 @@ Export writes PNG, JPEG, WebP stills and spritesheets (rows/columns,
 per-frame painting). Tick **Export background** to bake a background
 under the image (same as project, a solid color, or a custom
 checkerboard); unticked keeps transparency where the format supports
-it. Spritesheet animations are picked from a multi-select list (plus
-an all-frames checkbox and extra frame lists); the packed layout
+it. The **Source** dropdown (default animations) replaces the old
+all-frames checkbox: all exports every project frame, animations exports
+the selected animations plus the extra frame list, regions exports only
+the named texture regions drawn with the Regions tool (each region counts
+as a single-frame animation for the layout), and both exports animations
+and regions together. Spritesheet animations are picked from a
+multi-select list (plus extra frame lists); the packed layout
 follows the "Wide spritesheet packs" setting (columns rounded up for
 wide packs, down for tall ones). Tick **Export animation data** (on by
 default, hidden for individual frames) to save a JSON sidecar next to
 the sheet: after a file-name prompt (defaulting to the project name)
 and a directory pick, the sheet texture and a same-named ``.json``
 with the texture size, per-frame rects (including the ``ox``/``oy``
-crop offset of each frame relative to the full frame's top-left corner)
-and the selected animations'
+crop offset of each frame relative to the full frame's top-left corner),
+a ``regions`` section with one same-shaped entry per exported region
+name, and the selected animations'
 frame order plus per-frame seconds are written into that directory. The
 **Trim** dropdown (default none, hidden for individual frames) removes
 transparent pixels before arranging: uniform crops every frame to the

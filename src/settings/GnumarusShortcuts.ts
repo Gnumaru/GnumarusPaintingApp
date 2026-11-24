@@ -166,6 +166,7 @@ export const GNUMARUS_DEFAULT_SHORTCUTS: GnumarusShortcutDef[] = [
   { id: "tool-lasso", keyboard: k("l"), mouse: "" },
   { id: "tool-polylasso", keyboard: k("p"), mouse: "" },
   { id: "tool-colorselect", keyboard: k("w"), mouse: "" },
+  { id: "tool-regions", keyboard: NONE, mouse: "" },
   { id: "tool-text", keyboard: NONE, mouse: "" },
   { id: "tool-tilebrush", keyboard: NONE, mouse: "" },
   { id: "tool-modeltransform", keyboard: NONE, mouse: "" },

@@ -101,6 +101,8 @@ export interface GnumarusMergedLayerSnapshot {
   cells: Array<{ frame: number; content: string }>;
   /** Contents that referenced the removed texture and were detached by the merge. */
   detachedContents: string[];
+  /** Named texture regions of the removed layer's texture, if any. */
+  regions?: GnumarusRegionSnapshot[];
 }
 
 export interface GnumarusMergeRecord {
@@ -144,6 +146,8 @@ export interface GnumarusFitRecord {
   afterHeight: number;
   afterBuffer: Uint8ClampedArray;
   transforms: GnumarusFitTransformRecord[];
+  /** Region boxes shifted with the pixels (empty when untouched). */
+  regions?: GnumarusRegionChange[];
 }
 
 export interface GnumarusReloadRecord {
@@ -172,6 +176,28 @@ export interface GnumarusModelViewRecord {
   after: GnumarusModel3dView;
 }
 
+/** Named texture region snapshot (null = absent) for region undo/redo. */
+export interface GnumarusRegionSnapshot {
+  id: string;
+  name: string;
+  textureId: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** One region change; before/after share the region id (null = absent). */
+export interface GnumarusRegionChange {
+  id: string;
+  before: GnumarusRegionSnapshot | null;
+  after: GnumarusRegionSnapshot | null;
+}
+
+export interface GnumarusRegionRecord {
+  regions: GnumarusRegionChange[];
+}
+
 export type GnumarusHistoryEntry =
   | { type: "stroke"; layerId: string; diff: GnumarusImageDiff }
   | { type: "merge"; merge: GnumarusMergeRecord }
@@ -181,7 +207,8 @@ export type GnumarusHistoryEntry =
   | { type: "reloadBatch"; reloads: GnumarusReloadRecord[] }
   | { type: "text"; text: GnumarusTextRecord }
   | { type: "tilemap"; tilemap: GnumarusTilemapRecord }
-  | { type: "model3d-view"; view: GnumarusModelViewRecord };
+  | { type: "model3d-view"; view: GnumarusModelViewRecord }
+  | { type: "region"; region: GnumarusRegionRecord };
 
 export interface GnumarusHistoryLayer {
   buffer: Uint8ClampedArray;
@@ -243,6 +270,7 @@ export class GnumarusHistory {
     applyText?: (textId: string, document: GnumarusTextDocument) => boolean,
     applyTilemap?: (tilemapId: string, tiles: GnumarusTilePlacement[]) => boolean,
     applyModelView?: (modelId: string, view: GnumarusModel3dView) => boolean,
+    applyRegion?: (snapshots: Array<{ id: string; snapshot: GnumarusRegionSnapshot | null }>) => boolean,
   ): boolean {
     for (;;) {
       const entry = this.undoStack.pop();
@@ -359,6 +387,21 @@ export class GnumarusHistory {
         this.redoStack.push(entry);
         return true;
       }
+      if (entry.type === "region") {
+        if (
+          applyRegion === undefined ||
+          !applyRegion(
+            entry.region.regions.map((change) => ({
+              id: change.id,
+              snapshot: change.before === null ? null : { ...change.before },
+            })),
+          )
+        ) {
+          continue;
+        }
+        this.redoStack.push(entry);
+        return true;
+      }
       const needsAssociate = !entry.merge.removedLayer;
       if (needsAssociate && associateCell === undefined) {
         continue;
@@ -420,6 +463,7 @@ export class GnumarusHistory {
     applyText?: (textId: string, document: GnumarusTextDocument) => boolean,
     applyTilemap?: (tilemapId: string, tiles: GnumarusTilePlacement[]) => boolean,
     applyModelView?: (modelId: string, view: GnumarusModel3dView) => boolean,
+    applyRegion?: (snapshots: Array<{ id: string; snapshot: GnumarusRegionSnapshot | null }>) => boolean,
   ): boolean {
     for (;;) {
       const entry = this.redoStack.pop();
@@ -516,6 +560,21 @@ export class GnumarusHistory {
       }
       if (entry.type === "tilemap") {
         if (applyTilemap === undefined || !applyTilemap(entry.tilemap.tilemapId, entry.tilemap.after)) {
+          continue;
+        }
+        this.undoStack.push(entry);
+        return true;
+      }
+      if (entry.type === "region") {
+        if (
+          applyRegion === undefined ||
+          !applyRegion(
+            entry.region.regions.map((change) => ({
+              id: change.id,
+              snapshot: change.after === null ? null : { ...change.after },
+            })),
+          )
+        ) {
           continue;
         }
         this.undoStack.push(entry);

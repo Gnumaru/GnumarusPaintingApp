@@ -208,26 +208,47 @@ export interface GnumarusSheetAnimationSource {
 }
 
 /** Serializable spritesheet sidecar: texture size, frame rects, animations. */
+export interface GnumarusSheetFrameData {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Crop offset relative to the exported item's top-left corner. */
+  ox: number;
+  oy: number;
+  /** True when the crop was rotated 90 degrees clockwise into the texture. */
+  rotated: boolean;
+}
+
 export interface GnumarusSheetAnimationData {
   texture: { w: number; h: number };
   /**
-   * 1-based project frame number to rect in texture pixels. `ox`/`oy`
-   * is the crop offset relative to the full frame's top-left corner
-   * (0,0 when no trim was applied); `rotated` is true when the crop was
-   * turned 90 degrees clockwise into the texture (individual trim with
-   * rotation allowed) and the reader must turn it back counter-clockwise.
-   * `w`/`h` are the texture (post-rotation) dimensions.
+   * 1-based project frame number to rect in texture pixels (`frames`);
+   * region name to rect in texture pixels (`regions`). `ox`/`oy` is the
+   * crop offset relative to the exported item's top-left corner (0,0 when
+   * no trim was applied); `rotated` marks 90-degree-clockwise crops that
+   * the reader must turn back counter-clockwise. `w`/`h` are the texture
+   * (post-rotation) dimensions.
    */
-  frames: Record<string, { x: number; y: number; w: number; h: number; ox: number; oy: number; rotated: boolean }>;
+  frames: Record<string, GnumarusSheetFrameData>;
+  regions: Record<string, GnumarusSheetFrameData>;
   animations: Record<string, { name: string; frames: Array<{ frame: number; secs: number }> }>;
 }
 
+/** Which sidecar section one export slot lands in, and under which key. */
+export interface GnumarusSheetSlotRef {
+  section: "frames" | "regions";
+  key: string;
+}
+
 /**
- * Build the spritesheet JSON sidecar. Frame rects come from the geometry
- * cells (first occurrence wins when a frame repeats); per-animation frame
- * numbers are 1-based in playback order with per-position durations.
- * `offsets` carries the crop offset per 1-based frame key and defaults
- * to { ox: 0, oy: 0 } everywhere (no trim).
+ * Build the spritesheet JSON sidecar. Cells reference export slots (frame
+ * occurrences and regions in layout order); `resolve` maps each slot to
+ * its sidecar section and key (default: every slot is a 1-based frame).
+ * Frame rects use first occurrence wins when a frame repeats; per-animation
+ * frame numbers are 1-based in playback order with per-position durations.
+ * `offsets` carries the crop offset per resolved key and defaults to
+ * { ox: 0, oy: 0 } everywhere (no trim).
  */
 export function buildSheetAnimationData(input: {
   sheetWidth: number;
@@ -237,18 +258,22 @@ export function buildSheetAnimationData(input: {
   cells: GnumarusSheetCell[];
   animations: GnumarusSheetAnimationSource[];
   offsets?: Readonly<Record<string, { ox: number; oy: number }>>;
+  resolve?: (slot: number) => GnumarusSheetSlotRef;
 }): GnumarusSheetAnimationData {
   const fw = Math.floor(input.frameWidth);
   const fh = Math.floor(input.frameHeight);
   if (!Number.isInteger(fw) || !Number.isInteger(fh) || fw < 1 || fh < 1) {
     throw new Error(`Invalid spritesheet frame size ${input.frameWidth}x${input.frameHeight}.`);
   }
-  const frames: GnumarusSheetAnimationData["frames"] = {};
+  const resolve = input.resolve ?? ((slot: number): GnumarusSheetSlotRef => ({ section: "frames", key: String(slot + 1) }));
+  const frames: Record<string, GnumarusSheetFrameData> = {};
+  const regions: Record<string, GnumarusSheetFrameData> = {};
   for (const cell of input.cells) {
-    const key = String(cell.frame + 1);
-    if (frames[key] === undefined) {
-      const offset = input.offsets?.[key];
-      frames[key] = {
+    const ref = resolve(cell.frame);
+    const target = ref.section === "regions" ? regions : frames;
+    if (target[ref.key] === undefined) {
+      const offset = input.offsets?.[ref.key];
+      target[ref.key] = {
         x: cell.col * fw,
         y: cell.row * fh,
         w: fw,
@@ -269,6 +294,7 @@ export function buildSheetAnimationData(input: {
   return {
     texture: { w: input.sheetWidth, h: input.sheetHeight },
     frames,
+    regions,
     animations,
   };
 }
@@ -400,6 +426,42 @@ export function cropPixels(
     out.set(pixels.subarray(srcStart, srcStart + box.w * 4), y * box.w * 4);
   }
   return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Mixed-size grid cells (frame + region exports share one cell size). */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Pad a smaller item buffer with transparent pixels to a common grid cell
+ * size (top-left anchored). Buffers already at the target size pass
+ * through untouched.
+ */
+export function padSheetPixels(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  targetWidth: number,
+  targetHeight: number,
+): { pixels: Uint8ClampedArray; width: number; height: number } {
+  const w = Math.floor(width);
+  const h = Math.floor(height);
+  const tw = Math.floor(targetWidth);
+  const th = Math.floor(targetHeight);
+  if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1 || pixels.length !== w * h * 4) {
+    throw new Error(`Invalid spritesheet pixels for padding: ${width}x${height}.`);
+  }
+  if (!Number.isInteger(tw) || !Number.isInteger(th) || tw < w || th < h) {
+    throw new Error(`Invalid spritesheet pad target: ${targetWidth}x${targetHeight}.`);
+  }
+  if (tw === w && th === h) {
+    return { pixels, width: w, height: h };
+  }
+  const out = new Uint8ClampedArray(tw * th * 4);
+  for (let y = 0; y < h; y += 1) {
+    out.set(pixels.subarray(y * w * 4, (y + 1) * w * 4), y * tw * 4);
+  }
+  return { pixels: out, width: tw, height: th };
 }
 
 /* ------------------------------------------------------------------ */
@@ -904,23 +966,29 @@ export interface GnumarusSheetPackedPlacement {
  * per-frame rects come from the packing (first occurrence wins), sizes
  * may differ per frame, and every frame carries its crop offset plus
  * whether its crop was rotated 90 degrees clockwise into the texture.
+ * `resolve` maps each placement slot to its section and key (default:
+ * every slot is a 1-based frame); region placements land in `regions`.
  */
 export function buildPackedSheetAnimationData(input: {
   sheetWidth: number;
   sheetHeight: number;
   placements: GnumarusSheetPackedPlacement[];
   animations: GnumarusSheetAnimationSource[];
+  resolve?: (slot: number) => GnumarusSheetSlotRef;
 }): GnumarusSheetAnimationData {
   const width = Math.floor(input.sheetWidth);
   const height = Math.floor(input.sheetHeight);
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
     throw new Error(`Invalid packed spritesheet size ${input.sheetWidth}x${input.sheetHeight}.`);
   }
-  const frames: GnumarusSheetAnimationData["frames"] = {};
+  const resolve = input.resolve ?? ((slot: number): GnumarusSheetSlotRef => ({ section: "frames", key: String(slot + 1) }));
+  const frames: Record<string, GnumarusSheetFrameData> = {};
+  const regions: Record<string, GnumarusSheetFrameData> = {};
   for (const placement of input.placements) {
-    const key = String(placement.frame + 1);
-    if (frames[key] === undefined) {
-      frames[key] = {
+    const ref = resolve(placement.frame);
+    const target = ref.section === "regions" ? regions : frames;
+    if (target[ref.key] === undefined) {
+      target[ref.key] = {
         x: placement.x,
         y: placement.y,
         w: placement.w,
@@ -941,6 +1009,7 @@ export function buildPackedSheetAnimationData(input: {
   return {
     texture: { w: width, h: height },
     frames,
+    regions,
     animations,
   };
 }

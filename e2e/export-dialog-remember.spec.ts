@@ -32,7 +32,7 @@ test("export frame tab remembers every field across close and reopen", async ({ 
   await expect(dialog.getByRole("checkbox", { name: "Export background" })).toBeChecked();
 });
 
-test("export sheet tab remembers animations, frames, layout and data checkbox", async ({ page }) => {
+test("export sheet tab remembers source, animations, frames, layout and data checkbox", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await loadBlankProject(page, 64);
@@ -42,6 +42,7 @@ test("export sheet tab remembers animations, frames, layout and data checkbox", 
   await stubSaveFilePicker(page);
   let dialog = await openExport(page);
   await dialog.locator('[data-testid="export-tab-sheet"]').click();
+  await dialog.locator("#exportSheetSource").selectOption("both");
   await dialog.locator("#exportSheetAnimations").selectOption(["walk"]);
   await dialog.locator("#exportSheetFrames").fill("1,2");
   await dialog.locator("select#exportSheetLayout").selectOption("per-line");
@@ -52,6 +53,7 @@ test("export sheet tab remembers animations, frames, layout and data checkbox", 
   await expect(dialog).toBeHidden();
   dialog = await openExport(page);
   await dialog.locator('[data-testid="export-tab-sheet"]').click();
+  await expect(dialog.locator("#exportSheetSource")).toHaveValue("both");
   await expect(dialog.locator("#exportSheetAnimations")).toHaveValues(["walk"]);
   await expect(dialog.locator("#exportSheetFrames")).toHaveValue("1,2");
   await expect(dialog.locator("select#exportSheetLayout")).toHaveValue("per-line");

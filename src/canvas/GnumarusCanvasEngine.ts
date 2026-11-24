@@ -360,6 +360,8 @@ import {
   type GnumarusFitRecord,
   type GnumarusHistoryEntry,
   type GnumarusMergedLayerSnapshot,
+  type GnumarusRegionChange,
+  type GnumarusRegionSnapshot,
   type GnumarusReloadRecord,
 } from "../history/GnumarusHistory";
 
@@ -392,6 +394,7 @@ export type GnumarusCanvasTool =
   | "lasso"
   | "polylasso"
   | "colorselect"
+  | "regions"
   | "text"
   | "tilebrush"
   | "modeltransform"
@@ -614,6 +617,17 @@ interface GnumarusCellContent {
   transform: GnumarusLayerTransform;
 }
 
+/** Named texture sub-rectangle (Aseprite-style slice) in texture pixels. */
+export interface GnumarusRegion {
+  id: string;
+  name: string;
+  textureId: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export interface GnumarusMatrixCellView {
   layerId: string;
   frame: number;
@@ -675,6 +689,7 @@ export interface GnumarusAnimationProjectData {
   frameNames: string[];
   namedAnimations: GnumarusNamedAnimation[];
   activeAnimation: string | null;
+  regions: GnumarusRegion[];
 }
 
 export interface GnumarusProjectLayerInput {
@@ -825,7 +840,7 @@ export interface GnumarusEngineOptions {
   /** Fired when the crop tool resolves a drag (for status/toast display). */
   onCropOutcome?: (outcome: "cropped" | "unchanged" | "outside" | "empty", width: number, height: number) => void;
   /** Fired for user-facing notices that need a toast (blocked paint on derived cells). */
-  onNotice?: (kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked" | "tilemap-paint-blocked" | "tile-rot-needs-square" | "model3d-needs-cell" | "edits-locked") => void;
+  onNotice?: (kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked" | "tilemap-paint-blocked" | "tile-rot-needs-square" | "model3d-needs-cell" | "region-needs-texture" | "region-name-taken" | "region-name-empty" | "edits-locked") => void;
   /** Tile-brush click outcomes for shell status/toast display. */
   onTileBrushOutcome?: (outcome: "placed" | "erased" | "no-tileset" | "occupied" | "nothing") => void;
   checker?: GnumarusCheckerSettings;
@@ -1015,6 +1030,9 @@ export class GnumarusCanvasEngine {
   private frameNames: string[] = [defaultFrameName(0)];
   private namedAnimations: GnumarusNamedAnimation[] = [];
   private activeAnimationName: string | null = null;
+  /** Named texture regions (Aseprite-style slices), insertion-ordered. */
+  private regions = new Map<string, GnumarusRegion>();
+  private regionCounter = 1;
   private frameNameCounter = 2;
   private contentCounter = 1;
   private textureCounter = 1;
@@ -1289,6 +1307,26 @@ export class GnumarusCanvasEngine {
   private readonly previewMarkers: SVGCircleElement[];
   /** Grow-or-crop corner handles (screen-space squares over the box). */
   private readonly previewGrowHandles: SVGCircleElement[];
+  /** Region overlay rectangles (one pooled rect per displayed region). */
+  private readonly previewRegionRects: SVGRectElement[] = [];
+  /** Region corner dots (four pooled circles per displayed region). */
+  private readonly previewRegionCorners: SVGCircleElement[] = [];
+  /** Floating region-name editor layer (HTML inputs above the canvas). */
+  private readonly regionOverlay: HTMLDivElement;
+  private readonly regionInputs = new Map<string, { wrap: HTMLDivElement; input: HTMLInputElement; del: HTMLButtonElement }>();
+  /** In-progress region draw on the active cell texture, or null. */
+  private regionDraw: { textureId: string; layerId: string; x0: number; y0: number; x1: number; y1: number } | null = null;
+  /** Active region resize/move gesture, or null. */
+  private regionGesture: {
+    id: string;
+    layerId: string;
+    edge: GnumarusGrowBoxHandle | "move";
+    orig: GnumarusRegion;
+    downX: number;
+    downY: number;
+  } | null = null;
+  /** Last region hover cursor (avoids DOM churn). */
+  private regionHoverCursor = "";
   private drawing = false;
   private panning = false;
   private spaceDown = false;
@@ -1468,7 +1506,7 @@ export class GnumarusCanvasEngine {
   private readonly onTextEditRequested:
     | ((info: { layerId: string; frame: number; contentId: string; textId: string }) => void)
     | undefined;
-  private readonly onNotice: ((kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked" | "tilemap-paint-blocked" | "tile-rot-needs-square" | "model3d-needs-cell" | "edits-locked") => void) | undefined;
+  private readonly onNotice: ((kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked" | "tilemap-paint-blocked" | "tile-rot-needs-square" | "model3d-needs-cell" | "region-needs-texture" | "region-name-taken" | "region-name-empty" | "edits-locked") => void) | undefined;
   private readonly onTileBrushOutcome:
     | ((outcome: "placed" | "erased" | "no-tileset" | "occupied" | "nothing") => void)
     | undefined;
@@ -1852,6 +1890,16 @@ export class GnumarusCanvasEngine {
       this.previewGrowHandles.push(handle);
     }
     container.appendChild(this.previewSvg);
+
+    this.regionOverlay = document.createElement("div");
+    this.regionOverlay.setAttribute("data-testid", "region-overlay");
+    this.regionOverlay.style.position = "absolute";
+    this.regionOverlay.style.inset = "0";
+    this.regionOverlay.style.pointerEvents = "none";
+    this.regionOverlay.style.display = "none";
+    this.regionOverlay.style.zIndex = "7";
+    this.regionOverlay.style.overflow = "hidden";
+    container.appendChild(this.regionOverlay);
 
     this.symmetrySvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     this.symmetrySvg.style.position = "absolute";
@@ -2510,6 +2558,8 @@ export class GnumarusCanvasEngine {
     this.resetBrushPixelPerfect();
     this.growBox = null;
     this.growDrag = null;
+    this.regionDraw = null;
+    this.regionGesture = null;
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
     this.render();
@@ -2763,6 +2813,325 @@ export class GnumarusCanvasEngine {
       color: normalizeAnimationColor(animation.color),
       frames: animation.frames.map((entry) => ({ frame: entry.frame, duration: entry.duration })),
     }));
+  }
+
+  /** Named texture regions (deep copies, in creation order). */
+  getAllRegions(): GnumarusRegion[] {
+    return [...this.regions.values()].map((region) => ({ ...region }));
+  }
+
+  /** One named texture region by id, or null. */
+  getRegion(id: string): GnumarusRegion | null {
+    const region = this.regions.get(id);
+    return region === undefined ? null : { ...region };
+  }
+
+  /** Regions of one texture (deep copies, in creation order). */
+  getTextureRegions(textureId: string): GnumarusRegion[] {
+    const out: GnumarusRegion[] = [];
+    for (const region of this.regions.values()) {
+      if (region.textureId === textureId) {
+        out.push({ ...region });
+      }
+    }
+    return out;
+  }
+
+  /** True when a region name is taken (names are unique project-wide). */
+  hasRegionName(name: string): boolean {
+    for (const region of this.regions.values()) {
+      if (region.name === name) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** First free "Region N" name for newly drawn regions. */
+  suggestRegionName(): string {
+    let index = 1;
+    while (this.hasRegionName(`Region ${index}`)) {
+      index += 1;
+    }
+    return `Region ${index}`;
+  }
+
+  private nextRegionId(): string {
+    return `region${this.regionCounter++}`;
+  }
+
+  private regionSnapshot(region: GnumarusRegion): GnumarusRegionSnapshot {
+    return { ...region };
+  }
+
+  private pushRegionHistory(changes: GnumarusRegionChange[]): void {
+    if (changes.length === 0) {
+      return;
+    }
+    this.pushHistory({ type: "region", region: { regions: changes } });
+  }
+
+  private applyRegionForHistory(snapshots: Array<{ id: string; snapshot: GnumarusRegionSnapshot | null }>): boolean {
+    for (const { id, snapshot } of snapshots) {
+      if (snapshot === null) {
+        this.regions.delete(id);
+      } else {
+        this.regions.set(id, { ...snapshot });
+      }
+    }
+    this.updatePreviews();
+    this.onLayersChanged?.();
+    return true;
+  }
+
+  /**
+   * Create a named region on a texture. The box is clamped to the texture
+   * (empty results are rejected); names must be unique project-wide and
+   * default to the first free "Region N". Undoable.
+   */
+  createRegion(textureId: string, x: number, y: number, w: number, h: number, name?: string): GnumarusRegion | null {
+    if (this.denyEditsLocked()) {
+      return null;
+    }
+    const entry = this.textures.get(textureId);
+    if (entry === undefined) {
+      return null;
+    }
+    const box = this.clampRegionBox(entry.width, entry.height, x, y, w, h);
+    if (box === null) {
+      return null;
+    }
+    const wanted = (name ?? "").trim();
+    const finalName = wanted === "" ? this.suggestRegionName() : wanted;
+    if (this.hasRegionName(finalName)) {
+      return null;
+    }
+    const region: GnumarusRegion = { id: this.nextRegionId(), name: finalName, textureId, ...box };
+    this.regions.set(region.id, region);
+    this.pushRegionHistory([{ id: region.id, before: null, after: this.regionSnapshot(region) }]);
+    this.updatePreviews();
+    this.onLayersChanged?.();
+    this.onPixelsChanged?.();
+    return { ...region };
+  }
+
+  /**
+   * Rename a region. Empty and duplicate names are rejected (names are
+   * unique project-wide). Undoable.
+   */
+  renameRegion(id: string, name: string): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
+    const region = this.regions.get(id);
+    const wanted = name.trim();
+    if (region === undefined || wanted === "" || (wanted !== region.name && this.hasRegionName(wanted))) {
+      return false;
+    }
+    if (wanted === region.name) {
+      return true;
+    }
+    const before = this.regionSnapshot(region);
+    region.name = wanted;
+    this.pushRegionHistory([{ id, before, after: this.regionSnapshot(region) }]);
+    this.updatePreviews();
+    this.onLayersChanged?.();
+    this.onPixelsChanged?.();
+    return true;
+  }
+
+  /**
+   * Move/resize a region, clamped to its texture (empty results rejected).
+   * Undoable.
+   */
+  setRegionBox(id: string, x: number, y: number, w: number, h: number): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
+    const region = this.regions.get(id);
+    if (region === undefined) {
+      return false;
+    }
+    const entry = this.textures.get(region.textureId);
+    if (entry === undefined) {
+      return false;
+    }
+    const box = this.clampRegionBox(entry.width, entry.height, x, y, w, h);
+    if (box === null) {
+      return false;
+    }
+    if (box.x === region.x && box.y === region.y && box.w === region.w && box.h === region.h) {
+      return true;
+    }
+    const before = this.regionSnapshot(region);
+    region.x = box.x;
+    region.y = box.y;
+    region.w = box.w;
+    region.h = box.h;
+    this.pushRegionHistory([{ id, before, after: this.regionSnapshot(region) }]);
+    this.updatePreviews();
+    this.onLayersChanged?.();
+    this.onPixelsChanged?.();
+    return true;
+  }
+
+  /** Delete a region by id. Undoable. */
+  deleteRegion(id: string): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
+    const region = this.regions.get(id);
+    if (region === undefined) {
+      return false;
+    }
+    this.regions.delete(id);
+    this.pushRegionHistory([{ id, before: this.regionSnapshot(region), after: null }]);
+    this.updatePreviews();
+    this.onLayersChanged?.();
+    this.onPixelsChanged?.();
+    return true;
+  }
+
+  /** Cropped pixels of a named region (native texture resolution), or null. */
+  readRegionPixels(id: string): { buffer: Uint8ClampedArray; width: number; height: number } | null {
+    const region = this.regions.get(id);
+    if (region === undefined) {
+      return null;
+    }
+    const entry = this.textures.get(region.textureId);
+    if (entry === undefined) {
+      return null;
+    }
+    const x = Math.min(Math.max(0, region.x), entry.width);
+    const y = Math.min(Math.max(0, region.y), entry.height);
+    const w = Math.min(region.w, entry.width - x);
+    const h = Math.min(region.h, entry.height - y);
+    if (w < 1 || h < 1) {
+      return null;
+    }
+    const buffer = new Uint8ClampedArray(w * h * 4);
+    for (let row = 0; row < h; row += 1) {
+      buffer.set(entry.buffer.subarray(((y + row) * entry.width + x) * 4, ((y + row) * entry.width + x + w) * 4), row * w * 4);
+    }
+    return { buffer, width: w, height: h };
+  }
+
+  /** Validate and load one parsed region (project open). False when invalid. */
+  addLoadedRegion(region: {
+    id: unknown;
+    name: unknown;
+    textureId: unknown;
+    x: unknown;
+    y: unknown;
+    w: unknown;
+    h: unknown;
+  }): boolean {
+    if (this.denyEditsLocked()) {
+      return false;
+    }
+    if (
+      typeof region.id !== "string" ||
+      region.id === "" ||
+      typeof region.name !== "string" ||
+      region.name === "" ||
+      typeof region.textureId !== "string" ||
+      this.regions.has(region.id) ||
+      this.hasRegionName(region.name)
+    ) {
+      return false;
+    }
+    const entry = this.textures.get(region.textureId);
+    if (entry === undefined) {
+      return false;
+    }
+    const box = this.clampRegionBox(entry.width, entry.height, region.x as number, region.y as number, region.w as number, region.h as number);
+    if (
+      box === null ||
+      !Number.isInteger(region.x) ||
+      !Number.isInteger(region.y) ||
+      !Number.isInteger(region.w) ||
+      !Number.isInteger(region.h) ||
+      box.x !== region.x ||
+      box.y !== region.y ||
+      box.w !== region.w ||
+      box.h !== region.h
+    ) {
+      return false;
+    }
+    this.regions.set(region.id, { id: region.id, name: region.name, textureId: region.textureId, ...box });
+    const match = /^region(\d+)$/.exec(region.id);
+    if (match?.[1] !== undefined) {
+      this.regionCounter = Math.max(this.regionCounter, Number.parseInt(match[1], 10) + 1);
+    }
+    return true;
+  }
+
+  /** Drop every region of a texture (texture deletion is structural, no history). */
+  private dropTextureRegions(textureId: string): void {
+    let dropped = false;
+    for (const [id, region] of this.regions) {
+      if (region.textureId === textureId) {
+        this.regions.delete(id);
+        dropped = true;
+      }
+    }
+    if (dropped) {
+      this.updatePreviews();
+    }
+  }
+
+  /** Clamp a region box to texture bounds, or null when nothing remains. */
+  private clampRegionBox(
+    textureWidth: number,
+    textureHeight: number,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+  ): { x: number; y: number; w: number; h: number } | null {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(w) || !Number.isFinite(h)) {
+      return null;
+    }
+    const left = Math.max(0, Math.floor(Math.min(x, x + w)));
+    const top = Math.max(0, Math.floor(Math.min(y, y + h)));
+    const right = Math.min(textureWidth, Math.ceil(Math.max(x, x + w)));
+    const bottom = Math.min(textureHeight, Math.ceil(Math.max(y, y + h)));
+    if (right <= left || bottom <= top) {
+      return null;
+    }
+    return { x: left, y: top, w: right - left, h: bottom - top };
+  }
+
+  /**
+   * Shift region boxes after their texture is cropped/grown: boxes move
+   * with the pixels and shrink at the new bounds; regions fully outside
+   * are dropped. Returns the history changes (empty when untouched).
+   */
+  private shiftTextureRegions(textureId: string, box: { left: number; top: number; width: number; height: number }): GnumarusRegionChange[] {
+    const changes: GnumarusRegionChange[] = [];
+    for (const region of this.regions.values()) {
+      if (region.textureId !== textureId) {
+        continue;
+      }
+      const before = this.regionSnapshot(region);
+      const left = Math.max(0, region.x - box.left);
+      const top = Math.max(0, region.y - box.top);
+      const right = Math.min(box.width, region.x + region.w - box.left);
+      const bottom = Math.min(box.height, region.y + region.h - box.top);
+      if (right <= left || bottom <= top) {
+        this.regions.delete(region.id);
+        changes.push({ id: region.id, before, after: null });
+        continue;
+      }
+      if (left !== region.x || top !== region.y || right - left !== region.w || bottom - top !== region.h) {
+        region.x = left;
+        region.y = top;
+        region.w = right - left;
+        region.h = bottom - top;
+        changes.push({ id: region.id, before, after: this.regionSnapshot(region) });
+      }
+    }
+    return changes;
   }
 
   /**
@@ -4094,6 +4463,7 @@ export class GnumarusCanvasEngine {
           }
         }
         if (!shared) {
+          this.dropTextureRegions(content.textureId);
           this.textures.delete(content.textureId);
         }
         content.textureId = null;
@@ -4185,6 +4555,7 @@ export class GnumarusCanvasEngine {
           }
         }
         if (!shared) {
+          this.dropTextureRegions(content.textureId);
           this.textures.delete(content.textureId);
         }
         content.textureId = null;
@@ -4393,6 +4764,7 @@ export class GnumarusCanvasEngine {
           }
         }
         if (!shared) {
+          this.dropTextureRegions(content.textureId);
           this.textures.delete(content.textureId);
         }
         content.textureId = null;
@@ -6177,6 +6549,7 @@ export class GnumarusCanvasEngine {
           }
         }
         if (!shared) {
+          this.dropTextureRegions(content.textureId);
           this.textures.delete(content.textureId);
         }
         content.textureId = null;
@@ -7040,6 +7413,7 @@ export class GnumarusCanvasEngine {
       frameNames: [...this.frameNames],
       namedAnimations: this.getNamedAnimations(),
       activeAnimation: this.activeAnimationName,
+      regions: [...this.regions.values()].map((region) => ({ ...region })),
     };
   }
 
@@ -7074,6 +7448,8 @@ export class GnumarusCanvasEngine {
     this.resetBrushPixelPerfect();
     this.growBox = null;
     this.growDrag = null;
+    this.regionDraw = null;
+    this.regionGesture = null;
     this.syncWrapTiles();
     this.syncSymmetryOverlay();
     this.updateGrid();
@@ -7621,6 +7997,7 @@ export class GnumarusCanvasEngine {
       removed.texture.dispose();
       removed.maskTexture?.dispose();
     }
+    this.dropTextureRegions(id);
     this.textures.delete(id);
     if (this.activeLayerId === id) {
       const next = this.layers[Math.min(index, this.layers.length - 1)];
@@ -7672,6 +8049,9 @@ export class GnumarusCanvasEngine {
       if (content !== undefined) {
         content.textureId = snapshot.id;
       }
+    }
+    for (const region of snapshot.regions ?? []) {
+      this.regions.set(region.id, { ...region });
     }
     this.activeLayerId = snapshot.id;
     this.syncAllLayerRenders();
@@ -7808,6 +8188,7 @@ export class GnumarusCanvasEngine {
       const collected = this.collectMergeSnapshotCells(id);
       snapshot.cells = collected.cells;
       snapshot.detachedContents = collected.detachedContents;
+      snapshot.regions = this.getTextureRegions(id).map((region) => ({ ...region }));
       this.removeLayerFull(id);
       this.activeLayerId = lower.id;
       this.pushHistory({
@@ -7948,6 +8329,7 @@ export class GnumarusCanvasEngine {
       const collected = this.collectMergeSnapshotCells(upperId);
       snapshot.cells = collected.cells;
       snapshot.detachedContents = collected.detachedContents;
+      snapshot.regions = this.getTextureRegions(upperId).map((region) => ({ ...region }));
       this.removeLayerFull(upperId);
       this.activeLayerId = lowerId;
       this.pushHistory({
@@ -8702,6 +9084,431 @@ export class GnumarusCanvasEngine {
     box.y1 = snapped.y1;
   }
 
+  /* ---------------------------------------------------------------- */
+  /* Named texture regions (regions tool overlay + gestures).          */
+  /* ---------------------------------------------------------------- */
+
+  /** Active cell's texture id (draw target for new regions), or null. */
+  private activeCellTextureId(): string | null {
+    const layer = this.activeLayer();
+    if (layer === null) {
+      return null;
+    }
+    const contentId = this.cells.get(animationCellKey(layer.id, this.currentFrame));
+    const content = contentId === undefined ? undefined : this.contents.get(contentId);
+    const textureId = content?.textureId ?? null;
+    if (textureId === null || !this.textures.has(textureId)) {
+      return null;
+    }
+    return textureId;
+  }
+
+  /** Client point in one layer's image pixels (active-layer variant below). */
+  private layerImagePoint(
+    layer: { width: number; height: number; transform: GnumarusLayerTransform },
+    clientX: number,
+    clientY: number,
+  ): { x: number; y: number } | null {
+    if (layer.width < 1 || layer.height < 1) {
+      return null;
+    }
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const project = screenToProject(
+      clientX,
+      clientY,
+      { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      this.viewTransform(),
+    );
+    if (project === null) {
+      return null;
+    }
+    const mapped = projectToLayerImageFloat(project.x, project.y, layer.width, layer.height, layer.transform);
+    if (mapped === null) {
+      return null;
+    }
+    return { x: mapped.x, y: mapped.y };
+  }
+
+  /** Content texture of a layer cell, or null for empty/derived cells. */
+  private cellTextureId(layerId: string, frame: number): string | null {
+    const contentId = this.cells.get(animationCellKey(layerId, frame));
+    const content = contentId === undefined ? undefined : this.contents.get(contentId);
+    const textureId = content?.textureId ?? null;
+    if (textureId === null || !this.textures.has(textureId)) {
+      return null;
+    }
+    return textureId;
+  }
+
+  /** Regions on textures used by current-frame cells, with their layers. */
+  private regionOverlayTargets(): Array<{ region: GnumarusRegion; layer: GnumarusLayer }> {
+    const seen = new Set<string>();
+    const targets: Array<{ region: GnumarusRegion; layer: GnumarusLayer }> = [];
+    for (const layer of this.layers) {
+      const textureId = this.cellTextureId(layer.id, this.currentFrame);
+      if (textureId === null) {
+        continue;
+      }
+      for (const region of this.getTextureRegions(textureId)) {
+        if (seen.has(region.id)) {
+          continue;
+        }
+        seen.add(region.id);
+        targets.push({ region, layer });
+      }
+    }
+    return targets;
+  }
+
+  /** Screen rect of a region through its layer (container-relative). */
+  private regionClientBox(
+    region: GnumarusRegion,
+    layer: GnumarusLayer,
+  ): { minX: number; minY: number; maxX: number; maxY: number } {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const toClient = (imageX: number, imageY: number): { x: number; y: number } => {
+      const project = layerImageToProject(imageX, imageY, layer.width, layer.height, layer.transform);
+      const client = projectToScreen(
+        project.x,
+        project.y,
+        { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+        this.viewTransform(),
+      );
+      return { x: client.x - rect.left, y: client.y - rect.top };
+    };
+    const a = toClient(region.x, region.y);
+    const b = toClient(region.x + region.w, region.y + region.h);
+    return { minX: Math.min(a.x, b.x), minY: Math.min(a.y, b.y), maxX: Math.max(a.x, b.x), maxY: Math.max(a.y, b.y) };
+  }
+
+  /** Apply a region box without history (callers record one entry per gesture). */
+  private applyRegionBoxSilent(id: string, box: { x: number; y: number; w: number; h: number }): boolean {
+    const region = this.regions.get(id);
+    if (region === undefined) {
+      return false;
+    }
+    region.x = box.x;
+    region.y = box.y;
+    region.w = box.w;
+    region.h = box.h;
+    return true;
+  }
+
+  /** Hit-test the displayed regions (topmost first): edge, interior, or null. */
+  private hitRegion(
+    clientX: number,
+    clientY: number,
+  ): { id: string; layer: GnumarusLayer; edge: GnumarusGrowBoxHandle | "move" } | null {
+    const view = this.renderer.domElement.getBoundingClientRect();
+    const px = clientX - view.left;
+    const py = clientY - view.top;
+    const targets = this.regionOverlayTargets();
+    for (let index = targets.length - 1; index >= 0; index -= 1) {
+      const target = targets[index];
+      if (target === undefined) {
+        continue;
+      }
+      const box = this.regionClientBox(target.region, target.layer);
+      const edge = hitGrowBoxHandles(box.minX, box.minY, box.maxX, box.maxY, px, py);
+      if (edge !== null) {
+        return { id: target.region.id, layer: target.layer, edge };
+      }
+      const point = this.layerImagePoint(target.layer, clientX, clientY);
+      if (point === null) {
+        continue;
+      }
+      const region = target.region;
+      if (point.x >= region.x && point.x < region.x + region.w && point.y >= region.y && point.y < region.y + region.h) {
+        return { id: region.id, layer: target.layer, edge: "move" };
+      }
+    }
+    return null;
+  }
+
+  /** Cursor for a region resize edge (matches the grow-box cursors). */
+  private regionEdgeCursor(edge: GnumarusGrowBoxHandle | "move"): string {
+    if (edge === "move") {
+      return "move";
+    }
+    if (edge === "nw" || edge === "se") {
+      return "nwse-resize";
+    }
+    if (edge === "ne" || edge === "sw") {
+      return "nesw-resize";
+    }
+    return edge === "n" || edge === "s" ? "ns-resize" : "ew-resize";
+  }
+
+  /** Advance an in-progress region draw/resize/move (snapped to pixels). */
+  private moveRegionGesture(clientX: number, clientY: number): void {
+    if (this.regionGesture !== null) {
+      const gesture = this.regionGesture;
+      const region = this.regions.get(gesture.id);
+      const layer = this.findLayer(gesture.layerId);
+      if (region === undefined || layer === null) {
+        this.regionGesture = null;
+        return;
+      }
+      const point = this.layerImagePoint(layer, clientX, clientY);
+      if (point === null) {
+        return;
+      }
+      const entry = this.textures.get(region.textureId);
+      if (entry === undefined) {
+        this.regionGesture = null;
+        return;
+      }
+      if (gesture.edge === "move") {
+        const nx = Math.round(gesture.orig.x + (point.x - gesture.downX));
+        const ny = Math.round(gesture.orig.y + (point.y - gesture.downY));
+        const cx = Math.min(Math.max(0, nx), Math.max(0, entry.width - gesture.orig.w));
+        const cy = Math.min(Math.max(0, ny), Math.max(0, entry.height - gesture.orig.h));
+        this.applyRegionBoxSilent(gesture.id, { x: cx, y: cy, w: gesture.orig.w, h: gesture.orig.h });
+      } else {
+        const box = { x0: region.x, y0: region.y, x1: region.x + region.w, y1: region.y + region.h };
+        if (gesture.edge === "n" || gesture.edge === "nw" || gesture.edge === "ne") {
+          box.y0 = point.y;
+        }
+        if (gesture.edge === "s" || gesture.edge === "sw" || gesture.edge === "se") {
+          box.y1 = point.y;
+        }
+        if (gesture.edge === "w" || gesture.edge === "nw" || gesture.edge === "sw") {
+          box.x0 = point.x;
+        }
+        if (gesture.edge === "e" || gesture.edge === "ne" || gesture.edge === "se") {
+          box.x1 = point.x;
+        }
+        const snapped = snapCropBox(box.x0, box.y0, box.x1, box.y1);
+        const clamped = this.clampRegionBox(entry.width, entry.height, snapped.x0, snapped.y0, snapped.x1 - snapped.x0, snapped.y1 - snapped.y0);
+        if (clamped !== null) {
+          this.applyRegionBoxSilent(gesture.id, clamped);
+        }
+      }
+      this.lastMouseClient = { x: clientX, y: clientY };
+      this.updatePreviews();
+      return;
+    }
+    if (this.regionDraw !== null) {
+      const layer = this.findLayer(this.regionDraw.layerId);
+      const point = layer === null ? null : this.layerImagePoint(layer, clientX, clientY);
+      if (point === null) {
+        return;
+      }
+      const snapped = snapCropBox(this.regionDraw.x0, this.regionDraw.y0, point.x, point.y);
+      this.regionDraw.x0 = snapped.x0;
+      this.regionDraw.y0 = snapped.y0;
+      this.regionDraw.x1 = snapped.x1;
+      this.regionDraw.y1 = snapped.y1;
+      this.lastMouseClient = { x: clientX, y: clientY };
+      this.updatePreviews();
+    }
+  }
+
+  /** Sync the region overlay (rects + name editors) with the tool and data. */
+  private syncRegionOverlay(): void {
+    const active = this.tool === "regions";
+    const locked = this.denyEditsLocked();
+    this.regionOverlay.style.display = active ? "block" : "none";
+    let rectIndex = 0;
+    let cornerIndex = 0;
+    const seen = new Set<string>();
+    if (active) {
+      for (const { region, layer } of this.regionOverlayTargets()) {
+        const box = this.regionClientBox(region, layer);
+        let rect = this.previewRegionRects[rectIndex];
+        if (rect === undefined) {
+          rect = document.createElementNS("http://www.w3.org/2000/svg", "rect") as SVGRectElement;
+          rect.setAttribute("data-testid", "region-rect");
+          rect.setAttribute("fill", "none");
+          rect.setAttribute("stroke", "#66ccff");
+          rect.setAttribute("stroke-width", "1.5");
+          rect.setAttribute("opacity", "0.95");
+          rect.style.display = "none";
+          rect.style.pointerEvents = "none";
+          this.previewSvg.appendChild(rect);
+          this.previewRegionRects.push(rect);
+        }
+        rect.setAttribute("x", String(box.minX));
+        rect.setAttribute("y", String(box.minY));
+        rect.setAttribute("width", String(Math.max(0, box.maxX - box.minX)));
+        rect.setAttribute("height", String(Math.max(0, box.maxY - box.minY)));
+        rect.style.display = "block";
+        if (this.regionDraw !== null || this.regionGesture !== null) {
+          rect.setAttribute("stroke-dasharray", "none");
+        } else {
+          rect.setAttribute("stroke-dasharray", "6 4");
+        }
+        rectIndex += 1;
+        const corners = [
+          { x: box.minX, y: box.minY },
+          { x: box.maxX, y: box.minY },
+          { x: box.minX, y: box.maxY },
+          { x: box.maxX, y: box.maxY },
+        ];
+        for (const corner of corners) {
+          let dot = this.previewRegionCorners[cornerIndex];
+          if (dot === undefined) {
+            dot = document.createElementNS("http://www.w3.org/2000/svg", "circle") as SVGCircleElement;
+            dot.setAttribute("data-testid", "region-corner");
+            dot.setAttribute("r", "4");
+            dot.setAttribute("fill", "#66ccff");
+            dot.setAttribute("stroke", "#000000");
+            dot.setAttribute("stroke-width", "1.5");
+            dot.setAttribute("opacity", "0.95");
+            dot.style.display = "none";
+            dot.style.pointerEvents = "none";
+            this.previewSvg.appendChild(dot);
+            this.previewRegionCorners.push(dot);
+          }
+          dot.setAttribute("cx", String(corner.x));
+          dot.setAttribute("cy", String(corner.y));
+          dot.style.display = "block";
+          cornerIndex += 1;
+        }
+        seen.add(region.id);
+        this.syncRegionInput(region, box, locked);
+      }
+    }
+    for (let index = rectIndex; index < this.previewRegionRects.length; index += 1) {
+      const rect = this.previewRegionRects[index];
+      if (rect !== undefined) {
+        rect.style.display = "none";
+      }
+    }
+    for (let index = cornerIndex; index < this.previewRegionCorners.length; index += 1) {
+      const dot = this.previewRegionCorners[index];
+      if (dot !== undefined) {
+        dot.style.display = "none";
+      }
+    }
+    if (active && (rectIndex > 0 || this.regionDraw !== null)) {
+      this.previewSvg.style.display = "block";
+    }
+    for (const [id, entry] of this.regionInputs) {
+      if (!seen.has(id)) {
+        entry.wrap.remove();
+        this.regionInputs.delete(id);
+      }
+    }
+  }
+
+  /** Sync (or create) the floating name editor of one region. */
+  private syncRegionInput(
+    region: GnumarusRegion,
+    box: { minX: number; minY: number; maxX: number; maxY: number },
+    locked: boolean,
+  ): void {
+    let entry = this.regionInputs.get(region.id);
+    if (entry === undefined) {
+      const wrap = document.createElement("div");
+      wrap.style.position = "absolute";
+      wrap.style.display = "flex";
+      wrap.style.gap = "2px";
+      wrap.style.alignItems = "center";
+      wrap.style.pointerEvents = "auto";
+      const input = document.createElement("input");
+      input.setAttribute("data-testid", "region-name-input");
+      input.setAttribute("data-region", region.id);
+      input.setAttribute("aria-label", "Region name");
+      input.spellcheck = false;
+      input.style.width = "104px";
+      input.style.fontSize = "12px";
+      input.style.color = "#e6e6e6";
+      input.style.background = "#1e1e1e";
+      input.style.border = "1px solid #66ccff";
+      input.style.borderRadius = "3px";
+      input.style.padding = "1px 4px";
+      input.addEventListener("change", () => {
+        this.commitRegionRename(region.id, input.value);
+      });
+      input.addEventListener("keydown", (event: KeyboardEvent) => {
+        if (event.key === "Enter") {
+          this.commitRegionRename(region.id, input.value);
+          input.blur();
+        } else if (event.key === "Escape") {
+          const current = this.regions.get(region.id);
+          input.value = current?.name ?? "";
+          input.blur();
+        }
+        event.stopPropagation();
+      });
+      // Canvas gestures must not start from the editor.
+      input.addEventListener("pointerdown", (event: PointerEvent) => {
+        event.stopPropagation();
+      });
+      const del = document.createElement("button");
+      del.setAttribute("data-testid", "region-delete");
+      del.setAttribute("data-region", region.id);
+      del.textContent = "×";
+      del.title = "Delete region";
+      del.style.cursor = "pointer";
+      del.style.color = "#e6e6e6";
+      del.style.background = "#1e1e1e";
+      del.style.border = "1px solid #66ccff";
+      del.style.borderRadius = "3px";
+      del.style.padding = "0 5px";
+      del.style.fontSize = "12px";
+      del.style.lineHeight = "18px";
+      del.addEventListener("click", () => {
+        this.deleteRegion(region.id);
+      });
+      del.addEventListener("pointerdown", (event: PointerEvent) => {
+        event.stopPropagation();
+      });
+      wrap.append(input, del);
+      this.regionOverlay.appendChild(wrap);
+      entry = { wrap, input, del };
+      this.regionInputs.set(region.id, entry);
+    }
+    entry.wrap.style.left = `${Math.max(2, box.minX)}px`;
+    entry.wrap.style.top = `${Math.max(2, box.minY - 26)}px`;
+    entry.del.title = `Delete region ${region.name}`;
+    entry.input.disabled = locked;
+    entry.del.disabled = locked;
+    // Never clobber the text being typed; update only when unfocused.
+    // (matches(":focus") pierces shadow DOM; ownerDocument.activeElement
+    // would only report the shell host.)
+    if (!entry.input.matches(":focus") && entry.input.value !== region.name) {
+      entry.input.value = region.name;
+    }
+  }
+
+  /** Commit a name edit from a floating editor (empty/duplicates rejected). */
+  private commitRegionRename(id: string, raw: string): void {
+    const region = this.regions.get(id);
+    if (region === undefined) {
+      return;
+    }
+    const wanted = raw.trim();
+    if (wanted === "") {
+      this.onNotice?.("region-name-empty");
+      const entry = this.regionInputs.get(id);
+      if (entry !== undefined) {
+        entry.input.value = region.name;
+      }
+      return;
+    }
+    if (wanted !== region.name && this.hasRegionName(wanted)) {
+      this.onNotice?.("region-name-taken");
+      const entry = this.regionInputs.get(id);
+      if (entry !== undefined) {
+        entry.input.value = region.name;
+      }
+      return;
+    }
+    this.renameRegion(id, wanted);
+  }
+
+  /** Focus the floating editor of a region (used after creating one). */
+  focusRegionInput(id: string): void {
+    const entry = this.regionInputs.get(id);
+    if (entry === undefined) {
+      return;
+    }
+    entry.input.focus();
+    entry.input.select();
+  }
+
   cropCellTextureToCanvas(layerId: string, frame: number): "cropped" | "unchanged" | "outside" {
     if (this.denyEditsLocked()) {
       return "unchanged";
@@ -8830,6 +9637,7 @@ export class GnumarusCanvasEngine {
       type: "fit",
       fit: record,
     });
+    this.pushRegionHistory(record.regions ?? []);
     this.markTextureViewsDirty(textureId);
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
@@ -8879,7 +9687,13 @@ export class GnumarusCanvasEngine {
         before: { ...content.transform },
         after: shiftTransformForCrop(content.transform, beforeWidth, beforeHeight, box),
       }));
+    // Shift region boxes with the pixels (clamped to the new bounds);
+    // callers record them for undo (or roll them back with the pixels).
+    const regionChanges = this.shiftTextureRegions(textureId, box);
     if (!this.setTexturePixels(textureId, box.width, box.height, afterBuffer)) {
+      this.applyRegionForHistory(
+        regionChanges.map((change) => ({ id: change.id, snapshot: change.before === null ? null : { ...change.before } })),
+      );
       return null;
     }
     for (const record of transforms) {
@@ -8897,6 +9711,7 @@ export class GnumarusCanvasEngine {
       afterHeight: box.height,
       afterBuffer: afterBuffer.slice(),
       transforms,
+      regions: regionChanges,
     };
   }
 
@@ -8950,6 +9765,7 @@ export class GnumarusCanvasEngine {
       return { fitted: 0, unchanged };
     }
     this.pushHistory({ type: "fitBatch", fits: records });
+    this.pushRegionHistory(records.flatMap((record) => record.regions ?? []));
     this.refreshAfterBatchCrop(touched);
     return { fitted: records.length, unchanged };
   }
@@ -9019,6 +9835,7 @@ export class GnumarusCanvasEngine {
       return { cropped: 0, unchanged, outside };
     }
     this.pushHistory({ type: "fitBatch", fits: records });
+    this.pushRegionHistory(records.flatMap((record) => record.regions ?? []));
     this.refreshAfterBatchCrop(touched);
     return { cropped: records.length, unchanged, outside };
   }
@@ -9211,6 +10028,7 @@ export class GnumarusCanvasEngine {
         isMask?: boolean;
       }>;
       textures: GnumarusTexturePixels[];
+      regions?: GnumarusRegion[];
       texts?: Array<{ id: string; name: string; document: GnumarusTextDocument }>;
       svgs?: Array<{ id: string; name: string; svg: string }>;
       models3d?: Array<{ id: string; name: string; ext: string; bytes: Uint8Array; view?: GnumarusModel3dView; lighting?: GnumarusModelLighting }>;
@@ -9459,9 +10277,16 @@ export class GnumarusCanvasEngine {
     }
     this.namedAnimations = [];
     this.activeAnimationName = null;
+    this.regions.clear();
+    this.regionCounter = 1;
     for (const animation of data.namedAnimations ?? []) {
       if (!this.addNamedAnimation(animation)) {
         throw new Error(`Invalid named animation: ${typeof animation.name === "string" ? animation.name : "?"}`);
+      }
+    }
+    for (const region of data.regions ?? []) {
+      if (!this.addLoadedRegion(region)) {
+        throw new Error(`Invalid region: ${typeof region.name === "string" ? region.name : "?"}`);
       }
     }
     if (data.activeAnimation !== undefined && data.activeAnimation !== null) {
@@ -9619,6 +10444,8 @@ export class GnumarusCanvasEngine {
     this.frameNameCounter = 2;
     this.namedAnimations = [];
     this.activeAnimationName = null;
+    this.regions.clear();
+    this.regionCounter = 1;
   }
 
   newProject(width: number, height: number): void {
@@ -13745,6 +14572,12 @@ export class GnumarusCanvasEngine {
             content.transform = { ...entry.before };
           }
         }
+        this.applyRegionForHistory(
+          (record.regions ?? []).map((change) => ({
+            id: change.id,
+            snapshot: change.before === null ? null : { ...change.before },
+          })),
+        );
       }
       floating.cx += left;
       floating.cy += top;
@@ -13760,6 +14593,7 @@ export class GnumarusCanvasEngine {
     this.clearTransformGestures();
     this.disposeFloatingPlane();
     this.pushHistory({ type: "fit", fit: record });
+    this.pushRegionHistory(record.regions ?? []);
     this.markTextureViewsDirty(tex.id);
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
@@ -16256,7 +17090,8 @@ export class GnumarusCanvasEngine {
       this.previewSelectWhite.style.display !== "block" &&
       this.previewSelectMaskWhite.style.display !== "block" &&
       this.previewTileRubber.style.display !== "block" &&
-      this.previewGrowHandles.every((handle) => handle.style.display !== "block")
+      this.previewGrowHandles.every((handle) => handle.style.display !== "block") &&
+      this.previewRegionRects.every((rect) => rect.style.display !== "block")
     ) {
       this.previewSvg.style.display = "none";
     }
@@ -16717,6 +17552,7 @@ export class GnumarusCanvasEngine {
       }
     }
     this.eraserBadge.style.display = this.blendMode === "eraser" ? "block" : "none";
+    this.syncRegionOverlay();
     this.updateTilePreview(mouse);
     this.syncTileRubber();
     this.previewShapeRect.style.display = "none";
@@ -17651,6 +18487,9 @@ export class GnumarusCanvasEngine {
     this.shapeDrag = null;
     this.shapePolygon = null;
     this.cropDrag = null;
+    this.regionDraw = null;
+    this.regionGesture = null;
+    this.regionHoverCursor = "";
     if (tool !== "growcrop") {
       this.growBox = null;
       this.growDrag = null;
@@ -17747,6 +18586,7 @@ export class GnumarusCanvasEngine {
       (textId, document) => this.applyTextForHistory(textId, document),
       (tilemapId, tiles) => this.applyTilemapForHistory(tilemapId, tiles),
       (modelId, view) => this.applyModelViewForHistory(modelId, view),
+      (snapshots) => this.applyRegionForHistory(snapshots),
     );
     if (!applied) {
       return false;
@@ -17781,6 +18621,7 @@ export class GnumarusCanvasEngine {
       (textId, document) => this.applyTextForHistory(textId, document),
       (tilemapId, tiles) => this.applyTilemapForHistory(tilemapId, tiles),
       (modelId, view) => this.applyModelViewForHistory(modelId, view),
+      (snapshots) => this.applyRegionForHistory(snapshots),
     );
     if (!applied) {
       return false;
@@ -19094,6 +19935,55 @@ export class GnumarusCanvasEngine {
         this.updatePreviews();
         return;
       }
+      if (this.tool === "regions") {
+        // Drag edges to resize a region, inside to move it, elsewhere to
+        // draw a new region on the active cell's texture.
+        if (event.button !== 0) {
+          return;
+        }
+        if (this.denyEditsLocked()) {
+          this.onNotice?.("edits-locked");
+          return;
+        }
+        const layer = this.activeLayer();
+        if (layer === null) {
+          return;
+        }
+        const hit = this.hitRegion(event.clientX, event.clientY);
+        if (hit !== null) {
+          const region = this.regions.get(hit.id);
+          if (region === undefined) {
+            return;
+          }
+          const point = this.layerImagePoint(hit.layer, event.clientX, event.clientY);
+          if (point === null) {
+            return;
+          }
+          this.regionGesture = {
+            id: hit.id,
+            layerId: hit.layer.id,
+            edge: hit.edge,
+            orig: { ...region },
+            downX: point.x,
+            downY: point.y,
+          };
+        } else {
+          const textureId = this.activeCellTextureId();
+          if (textureId === null) {
+            this.onNotice?.("region-needs-texture");
+            return;
+          }
+          const start = this.clientToLayerImageFloat(event.clientX, event.clientY);
+          if (start === null) {
+            return;
+          }
+          this.regionDraw = { textureId, layerId: layer.id, x0: start.x, y0: start.y, x1: start.x, y1: start.y };
+        }
+        this.lastMouseClient = { x: event.clientX, y: event.clientY };
+        canvas.setPointerCapture(event.pointerId);
+        this.updatePreviews();
+        return;
+      }
       if (this.tool === "tilebrush") {
         // Left button paints (drag stamps every traversed slot), right
         // button erases. Shift+click replays the last stamped cell as a
@@ -19390,6 +20280,26 @@ export class GnumarusCanvasEngine {
         }
       } else if (this.growHoverCursor !== "") {
         this.growHoverCursor = "";
+        canvas.style.cursor = "";
+      }
+      if (
+        event.buttons === 0 &&
+        !event.shiftKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        this.tool === "regions" &&
+        this.regionDraw === null &&
+        this.regionGesture === null
+      ) {
+        const hovered = this.hitRegion(event.clientX, event.clientY);
+        const cursor = hovered === null ? "" : this.regionEdgeCursor(hovered.edge);
+        if (cursor !== this.regionHoverCursor) {
+          this.regionHoverCursor = cursor;
+          canvas.style.cursor = cursor;
+        }
+      } else if (this.regionHoverCursor !== "") {
+        this.regionHoverCursor = "";
         canvas.style.cursor = "";
       }
       const usePaintMapping =
@@ -19695,6 +20605,10 @@ export class GnumarusCanvasEngine {
         }
         return;
       }
+      if (this.regionDraw !== null || this.regionGesture !== null) {
+        this.moveRegionGesture(event.clientX, event.clientY);
+        return;
+      }
       if (this.flyLookDrag !== null) {
         const drag = this.flyLookDrag;
         const dx = event.clientX - drag.x;
@@ -19882,6 +20796,45 @@ export class GnumarusCanvasEngine {
             this.growBox = drag.orig;
           } else if (Math.max(w, h) < 1) {
             this.growBox = null;
+          }
+        }
+        this.updatePreviews();
+        return;
+      }
+      if ((this.regionDraw !== null || this.regionGesture !== null) && event.button === 0) {
+        const draw = this.regionDraw;
+        const gesture = this.regionGesture;
+        this.regionDraw = null;
+        this.regionGesture = null;
+        this.regionHoverCursor = "";
+        canvas.style.cursor = "";
+        if (draw !== null) {
+          // A plain click without a drag creates nothing.
+          const w = Math.abs(draw.x1 - draw.x0);
+          const h = Math.abs(draw.y1 - draw.y0);
+          if (Math.max(w, h) >= 1) {
+            const created = this.createRegion(
+              draw.textureId,
+              Math.min(draw.x0, draw.x1),
+              Math.min(draw.y0, draw.y1),
+              Math.abs(draw.x1 - draw.x0),
+              Math.abs(draw.y1 - draw.y0),
+            );
+            if (created !== null) {
+              this.updatePreviews();
+              this.focusRegionInput(created.id);
+            }
+          }
+        } else if (gesture !== null) {
+          const region = this.regions.get(gesture.id);
+          if (region !== undefined) {
+            const before = { ...gesture.orig };
+            const after = { ...region };
+            if (before.x !== after.x || before.y !== after.y || before.w !== after.w || before.h !== after.h) {
+              this.pushRegionHistory([{ id: gesture.id, before, after }]);
+              this.onLayersChanged?.();
+              this.onPixelsChanged?.();
+            }
           }
         }
         this.updatePreviews();
@@ -20432,6 +21385,26 @@ export class GnumarusCanvasEngine {
           this.growBox = null;
           this.growDrag = null;
           this.growHoverCursor = "";
+          this.updatePreviews();
+          return;
+        }
+        if (
+          this.matchesShortcut("edit-cancel", event) &&
+          this.tool === "regions" &&
+          (this.regionDraw !== null || this.regionGesture !== null)
+        ) {
+          if (this.regionGesture !== null) {
+            // Restore the pre-drag box without history.
+            this.applyRegionBoxSilent(this.regionGesture.id, {
+              x: this.regionGesture.orig.x,
+              y: this.regionGesture.orig.y,
+              w: this.regionGesture.orig.w,
+              h: this.regionGesture.orig.h,
+            });
+          }
+          this.regionDraw = null;
+          this.regionGesture = null;
+          this.regionHoverCursor = "";
           this.updatePreviews();
           return;
         }

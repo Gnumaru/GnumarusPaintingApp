@@ -60,6 +60,52 @@ describe("GnumarusProjectFormat", () => {
     expect(parsed).toEqual(project);
   });
 
+  it("round-trips named texture regions and defaults legacy files to none", () => {
+    const project = createDefaultProject(64, 64);
+    project.animation.regions = [
+      { id: "region1", name: "Head", textureId: "layer0", x: 1, y: 2, w: 10, h: 12 },
+      { id: "region2", name: "Body", textureId: "layer0", x: 20, y: 20, w: 30, h: 30 },
+    ];
+    const parsed = parseProject(serializeProject(project));
+    expect(parsed.animation.regions).toEqual(project.animation.regions);
+    // Legacy files without the regions key load with no regions.
+    const legacy = JSON.parse(serializeProject(project)) as Record<string, unknown>;
+    const animation = legacy["animation"] as Record<string, unknown>;
+    delete animation["regions"];
+    expect(parseProject(JSON.stringify(legacy)).animation.regions).toEqual([]);
+  });
+
+  it("rejects regions with bad ids, names, textures or boxes", () => {
+    const bad = (regions: unknown): string | null => {
+      try {
+        const project = createDefaultProject(64, 64);
+        (project.animation as { regions: unknown }).regions = regions;
+        parseProject(serializeProject(project));
+        return null;
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    };
+    expect(bad([{ id: "region1", name: "A", textureId: "nope", x: 0, y: 0, w: 1, h: 1 }])).toMatch(/unknown texture/);
+    expect(
+      bad([
+        { id: "region1", name: "A", textureId: "layer0", x: 0, y: 0, w: 1, h: 1 },
+        { id: "region1", name: "B", textureId: "layer0", x: 0, y: 0, w: 1, h: 1 },
+      ]),
+    ).toMatch(/duplicate region ids/);
+    expect(
+      bad([
+        { id: "region1", name: "A", textureId: "layer0", x: 0, y: 0, w: 1, h: 1 },
+        { id: "region2", name: "A", textureId: "layer0", x: 0, y: 0, w: 1, h: 1 },
+      ]),
+    ).toMatch(/duplicate region names/);
+    expect(bad([{ id: "region1", name: "", textureId: "layer0", x: 0, y: 0, w: 1, h: 1 }])).toMatch(/invalid region name/);
+    expect(bad([{ id: "region1", name: "A", textureId: "layer0", x: 0.5, y: 0, w: 1, h: 1 }])).toMatch(/non-integer box/);
+    expect(bad([{ id: "region1", name: "A", textureId: "layer0", x: 0, y: 0, w: 0, h: 1 }])).toMatch(/outside its texture/);
+    expect(bad([{ id: "region1", name: "A", textureId: "layer0", x: 60, y: 60, w: 10, h: 10 }])).toMatch(/outside its texture/);
+    expect(bad("regions")).toMatch(/invalid regions/);
+  });
+
   it("round-trips nested layers and sanitizes bad parents to roots", () => {
     const base = createDefaultProject(64, 64);
     const layerTemplate = base.layers[0] as { id: string; name: string };

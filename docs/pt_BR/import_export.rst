@@ -17,9 +17,15 @@ Exportar grava PNG, JPEG, WebP e spritesheets (linhas/colunas,
 pintura por quadro). Marque **Exportar fundo** para assar um fundo
 sob a imagem (igual ao projeto, cor sólida ou quadriculado
 personalizado); desmarcado mantém a transparência onde o formato
-suporta. As animações do spritesheet são escolhidas numa lista de
-seleção múltipla (mais um checkbox de todos os quadros e listas
-extras de quadros); o layout packed segue a configuração
+suporta. O menu **Origem** (padrão animações) substitui o antigo
+checkbox de todos os quadros: todos exporta cada quadro do projeto,
+animações exporta as animações selecionadas mais a lista extra de
+quadros, regiões exporta só as regiões nomeadas desenhadas com a
+ferramenta Regiões (cada região conta como uma animação de um único
+quadro para o layout), e ambos exporta animações e regiões juntas. As
+animações do spritesheet são escolhidas numa lista de
+seleção múltipla (mais listas extras de quadros); o layout packed segue
+a configuração
 "Pacotes largos de spritesheet" (colunas arredondadas para cima em
 pacotes largos, para baixo nos altos). Marque **Exportar dados de
 animação** (marcado por padrão, oculto em quadros individuais) para
@@ -28,7 +34,8 @@ arquivo (padrão é o nome do projeto) e escolher um diretório, a
 textura da folha e um ``.json`` de mesmo nome com o tamanho da
 textura, os retângulos dos quadros (incluindo o deslocamento de corte
 ``ox``/``oy`` de cada quadro em relação ao canto superior esquerdo do
-quadro inteiro) e a ordem dos quadros mais os
+quadro inteiro), uma seção ``regions`` com uma entrada de mesmo formato
+por nome de região exportada, e a ordem dos quadros mais os
 segundos por quadro das animações selecionadas são gravados nesse
 diretório. O menu **Aparar** (padrão nenhum, oculto em quadros
 individuais) remove os pixels transparentes antes de organizar:

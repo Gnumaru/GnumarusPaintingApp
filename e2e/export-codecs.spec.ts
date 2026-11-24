@@ -435,7 +435,7 @@ test("sheet all frames hides extra frames and ignores its value @recent", async 
   const extraLabel = dialog.locator("#exportSheetFrames").locator("xpath=ancestor::label[1]");
   await expect(extraLabel).toBeVisible();
   await dialog.locator("#exportSheetFrames").fill("1");
-  await dialog.getByRole("checkbox", { name: "All frames" }).check();
+  await dialog.locator("#exportSheetSource").selectOption("all");
   await expect(extraLabel).toBeHidden();
   await dialog.getByRole("checkbox", { name: "Export animation data" }).uncheck();
   await dialog.locator("#exportSheetOk").click();
