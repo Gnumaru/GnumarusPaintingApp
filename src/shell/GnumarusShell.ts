@@ -310,11 +310,20 @@ import {
   withTailFrame,
 } from "../export/GnumarusVideoMux";
 import {
+  buildPackedSheetAnimationData,
   buildSheetAnimationData,
+  composePackedSheet,
   composeSheet,
   computeSheetGeometry,
+  cropPixels,
+  frameContentBox,
   GNUMARUS_SHEET_LAYOUTS,
+  GNUMARUS_SHEET_TRIMS,
+  packSheetRects,
+  uniformCropBox,
   type GnumarusSheetLayout,
+  type GnumarusSheetPackedPlacement,
+  type GnumarusSheetTrim,
 } from "../export/GnumarusSpritesheet";
 import { parseFrameList, resolveExportSequence } from "../animation/GnumarusNamedAnimations";
 import { decodePngToBuffer, encodeBufferToPngBlob } from "../project/GnumarusPngCodec";
@@ -2329,6 +2338,7 @@ export class GnumarusShell extends LitElement {
     exportAnimatedQuality: { type: Number },
     exportAnimatedLossless: { type: Boolean },
     exportSheetLayout: { type: String },
+    exportSheetTrim: { type: String },
     exportSheetAnimationData: { type: Boolean },
     exportSheetAnimations: { type: Array },
     exportSheetFrames: { type: String },
@@ -2624,6 +2634,7 @@ export class GnumarusShell extends LitElement {
   declare exportAnimatedQuality: number;
   declare exportAnimatedLossless: boolean;
   declare exportSheetLayout: string;
+  declare exportSheetTrim: GnumarusSheetTrim;
   declare exportSheetAnimationData: boolean;
   declare exportSheetAnimations: string[];
   declare exportSheetFrames: string;
@@ -2966,6 +2977,7 @@ export class GnumarusShell extends LitElement {
     this.videoSupportWebm = true;
     this.videoSupportMp4 = true;
     this.exportSheetLayout = "line";
+    this.exportSheetTrim = "none";
     this.exportSheetAnimationData = true;
     this.exportSheetAnimations = [];
     this.exportSheetFrames = "";
@@ -6107,6 +6119,24 @@ export class GnumarusShell extends LitElement {
           </select>
         </label>
         <label
+          title=${tr("dialog.trimTitle")}
+          ?hidden=${this.exportSheetLayout === "individual"}
+          >${tr("dialog.trim")}
+          <select
+            id="exportSheetTrim"
+            data-testid="export-sheet-trim"
+            .value=${this.exportSheetTrim}
+            @change=${(event: Event): void => {
+              const next = (event.target as HTMLSelectElement).value;
+              this.exportSheetTrim = next === "uniform" || next === "individual" ? next : "none";
+            }}
+          >
+            ${GNUMARUS_SHEET_TRIMS.map(
+              (entry) => html`<option value=${entry.value}>${this.sheetTrimLabel(entry.value)}</option>`,
+            )}
+          </select>
+        </label>
+        <label
           title=${tr("dialog.linesCountTitle")}
           ?hidden=${this.exportSheetLayout !== "fixed-rows" && this.exportSheetLayout !== "fixed-cols"}
           >${tr("dialog.linesCount")}
@@ -6264,6 +6294,20 @@ export class GnumarusShell extends LitElement {
         return tr("dialog.sheetFixedRows");
       case "fixed-cols":
         return tr("dialog.sheetFixedCols");
+      default:
+        return value;
+    }
+  }
+
+  /** Translated spritesheet trim option label for a trim value. */
+  private sheetTrimLabel(value: string): string {
+    switch (value) {
+      case "none":
+        return tr("dialog.trimNone");
+      case "uniform":
+        return tr("dialog.trimUniform");
+      case "individual":
+        return tr("dialog.trimIndividual");
       default:
         return value;
     }
@@ -18249,6 +18293,10 @@ export class GnumarusShell extends LitElement {
     const layoutSelect = this.shadowRoot?.getElementById("exportSheetLayout") as HTMLSelectElement | null;
     const layoutValue = layoutSelect?.value ?? this.exportSheetLayout;
     this.exportSheetLayout = layoutValue;
+    const trimSelect = this.shadowRoot?.getElementById("exportSheetTrim") as HTMLSelectElement | null;
+    const trimRaw = trimSelect?.value ?? this.exportSheetTrim;
+    const trimValue: GnumarusSheetTrim = trimRaw === "uniform" || trimRaw === "individual" ? trimRaw : "none";
+    this.exportSheetTrim = trimValue;
     const formatSelect = this.shadowRoot?.getElementById("exportSheetFormat") as HTMLSelectElement | null;
     const formatValue = formatSelect?.value ?? this.exportSheetFormat;
     this.exportSheetFormat = formatValue;
@@ -18317,9 +18365,18 @@ export class GnumarusShell extends LitElement {
         return;
       }
       const geometry = computeSheetGeometry(strips, layoutValue as GnumarusSheetLayout, this.exportSheetCount, this.wideSpritesheetPacks, this.exportSheetFullSize);
-      const needed = new Set<number>();
-      for (const cell of geometry.cells) {
-        needed.add(cell.frame);
+      // Unique project frames across all strips, in first-seen order.
+      const needed: number[] = [];
+      {
+        const seen = new Set<number>();
+        for (const strip of strips) {
+          for (const frame of strip.frames) {
+            if (!seen.has(frame)) {
+              seen.add(frame);
+              needed.push(frame);
+            }
+          }
+        }
       }
       const pixels = new Map<number, Uint8ClampedArray>();
       for (const frame of needed) {
@@ -18330,7 +18387,94 @@ export class GnumarusShell extends LitElement {
         }
         pixels.set(frame, flatPixels);
       }
-      const sheet = composeSheet(pixels, geometry, size.width, size.height);
+      if (trimValue === "individual") {
+        // Crop every frame to its own content, then pack the crops into
+        // the smallest-area texture. Fully transparent frames become a
+        // single transparent pixel so every frame stays placeable.
+        const boxes = new Map<number, { x: number; y: number; w: number; h: number }>();
+        const crops = new Map<number, { pixels: Uint8ClampedArray; w: number; h: number }>();
+        for (const frame of needed) {
+          const full = pixels.get(frame) as Uint8ClampedArray;
+          const box = frameContentBox(full, size.width, size.height) ?? { x: 0, y: 0, w: 1, h: 1 };
+          const cropped =
+            box.x === 0 && box.y === 0 && box.w === size.width && box.h === size.height
+              ? full
+              : cropPixels(full, size.width, box);
+          boxes.set(frame, box);
+          crops.set(frame, { pixels: cropped, w: box.w, h: box.h });
+        }
+        const packing = packSheetRects(
+          needed.map((frame) => {
+            const box = boxes.get(frame) as { w: number; h: number };
+            return { frame, w: box.w, h: box.h };
+          }),
+        );
+        const sheet = composePackedSheet(crops, packing);
+        const blob = await this.encodeExportStill(
+          sheet.buffer,
+          sheet.width,
+          sheet.height,
+          format,
+          sheetQualityValue,
+          this.exportSheetLossless,
+        );
+        if (blob === null) {
+          fail(tr("status.exportUnsupported", { label: format.label }));
+          return;
+        }
+        const fileName = `${base}-sheet.${format.ext}`;
+        if (withAnimationData) {
+          const placements: GnumarusSheetPackedPlacement[] = packing.placements.map((placement) => {
+            const box = boxes.get(placement.frame) as { x: number; y: number };
+            return { ...placement, ox: box.x, oy: box.y };
+          });
+          await this.confirmSheetWithAnimationData(
+            blob,
+            format.ext,
+            [],
+            0,
+            0,
+            sheet.width,
+            sheet.height,
+            base,
+            placements,
+          );
+          return;
+        }
+        this.closeExportDialog();
+        if (await this.saveExportBlob(blob, fileName, `${format.label} image`)) {
+          this.statusMessage = tr("status.exported", { file: fileName });
+          this.showToast(tr("status.exported", { file: fileName }));
+        }
+        return;
+      }
+      // Grid sheet: `none` keeps full frames, `uniform` crops every frame
+      // to the common content box first. The arrangement is identical.
+      let frameWidth = size.width;
+      let frameHeight = size.height;
+      let framePixels = pixels;
+      let frameOffsets: Record<string, { ox: number; oy: number }> | undefined;
+      if (trimValue === "uniform") {
+        const union = uniformCropBox(
+          needed.map((frame) => frameContentBox(pixels.get(frame) as Uint8ClampedArray, size.width, size.height)),
+          size.width,
+          size.height,
+        );
+        frameWidth = union.w;
+        frameHeight = union.h;
+        if (!(union.x === 0 && union.y === 0 && union.w === size.width && union.h === size.height)) {
+          const cropped = new Map<number, Uint8ClampedArray>();
+          for (const frame of needed) {
+            cropped.set(frame, cropPixels(pixels.get(frame) as Uint8ClampedArray, size.width, union));
+          }
+          framePixels = cropped;
+        }
+        frameOffsets = {};
+        for (const frame of needed) {
+          frameOffsets[String(frame + 1)] = { ox: union.x, oy: union.y };
+        }
+      }
+      const sheet = composeSheet(framePixels, geometry, frameWidth, frameHeight);
       const blob = await this.encodeExportStill(
         sheet.buffer,
         sheet.width,
@@ -18349,11 +18493,13 @@ export class GnumarusShell extends LitElement {
           blob,
           format.ext,
           geometry.cells,
-          size.width,
-          size.height,
+          frameWidth,
+          frameHeight,
           sheet.width,
           sheet.height,
           base,
+          undefined,
+          frameOffsets,
         );
         return;
       }
@@ -18382,6 +18528,8 @@ export class GnumarusShell extends LitElement {
     sheetWidth: number,
     sheetHeight: number,
     base: string,
+    packed?: GnumarusSheetPackedPlacement[],
+    offsets?: Record<string, { ox: number; oy: number }>,
   ): Promise<void> {
     const engine = this.engine;
     if (engine === null) {
@@ -18422,14 +18570,22 @@ export class GnumarusShell extends LitElement {
         })),
       });
     }
-    const data = buildSheetAnimationData({
-      sheetWidth,
-      sheetHeight,
-      frameWidth,
-      frameHeight,
-      cells,
-      animations,
-    });
+    const data = packed !== undefined
+      ? buildPackedSheetAnimationData({
+        sheetWidth,
+        sheetHeight,
+        placements: packed,
+        animations,
+      })
+      : buildSheetAnimationData({
+        sheetWidth,
+        sheetHeight,
+        frameWidth,
+        frameHeight,
+        cells,
+        animations,
+        offsets,
+      });
     const textureName = `${stem}.${ext}`;
     const jsonName = `${stem}.json`;
     const jsonBlob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });

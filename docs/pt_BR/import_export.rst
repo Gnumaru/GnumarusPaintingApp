@@ -26,9 +26,17 @@ animação** (marcado por padrão, oculto em quadros individuais) para
 salvar um JSON auxiliar junto da folha: após informar o nome do
 arquivo (padrão é o nome do projeto) e escolher um diretório, a
 textura da folha e um ``.json`` de mesmo nome com o tamanho da
-textura, os retângulos dos quadros e a ordem dos quadros mais os
+textura, os retângulos dos quadros (incluindo o deslocamento de corte
+``ox``/``oy`` de cada quadro em relação ao canto superior esquerdo do
+quadro inteiro) e a ordem dos quadros mais os
 segundos por quadro das animações selecionadas são gravados nesse
-diretório. As ações em massa de ajustar/cortar normalizam
+diretório. O menu **Aparar** (padrão nenhum, oculto em quadros
+individuais) remove os pixels transparentes antes de organizar:
+uniforme corta todos os quadros na menor caixa que contém todos eles
+(mesmo tamanho e deslocamentos para todos), individual corta cada
+quadro na sua própria caixa e empacota os recortes na menor textura
+encontrada em até 2 segundos (cada quadro guarda seu próprio
+deslocamento). As ações em massa de ajustar/cortar normalizam
 antes; recarregar texturas restaura edições externas, pulando
 texturas novas (desfazível).
 

@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildPackedSheetAnimationData,
   buildSheetAnimationData,
+  composePackedSheet,
   composeSheet,
   computeSheetGeometry,
+  cropPixels,
+  frameContentBox,
   GNUMARUS_SHEET_LAYOUTS,
+  packSheetRects,
+  uniformCropBox,
+  type GnumarusSheetPacking,
   type GnumarusSheetStrip,
 } from "../src/export/GnumarusSpritesheet";
 
@@ -216,9 +223,9 @@ describe("GnumarusSpritesheet", () => {
     expect(data).toEqual({
       texture: { w: 48, h: 16 },
       frames: {
-        "1": { x: 0, y: 0, w: 16, h: 16 },
-        "2": { x: 16, y: 0, w: 16, h: 16 },
-        "3": { x: 32, y: 0, w: 16, h: 16 },
+        "1": { x: 0, y: 0, w: 16, h: 16, ox: 0, oy: 0 },
+        "2": { x: 16, y: 0, w: 16, h: 16, ox: 0, oy: 0 },
+        "3": { x: 32, y: 0, w: 16, h: 16, ox: 0, oy: 0 },
       },
       animations: {
         walk: {
@@ -248,8 +255,8 @@ describe("GnumarusSpritesheet", () => {
       animations: [],
     });
     expect(data.frames).toEqual({
-      "1": { x: 0, y: 0, w: 16, h: 16 },
-      "2": { x: 16, y: 0, w: 16, h: 16 },
+      "1": { x: 0, y: 0, w: 16, h: 16, ox: 0, oy: 0 },
+      "2": { x: 16, y: 0, w: 16, h: 16, ox: 0, oy: 0 },
     });
     expect(data.animations).toEqual({});
   });
@@ -265,5 +272,209 @@ describe("GnumarusSpritesheet", () => {
         animations: [],
       }),
     ).toThrow(/frame size/);
+  });
+
+  it("stores per-frame crop offsets in the sidecar, defaulting to zero", () => {
+    const geometry = computeSheetGeometry(strips([0, 1]), "line", 1, true);
+    const data = buildSheetAnimationData({
+      sheetWidth: 32,
+      sheetHeight: 16,
+      frameWidth: 16,
+      frameHeight: 16,
+      cells: geometry.cells,
+      animations: [],
+      offsets: { "1": { ox: 3, oy: 4 }, "2": { ox: 3, oy: 4 } },
+    });
+    expect(data.frames).toEqual({
+      "1": { x: 0, y: 0, w: 16, h: 16, ox: 3, oy: 4 },
+      "2": { x: 16, y: 0, w: 16, h: 16, ox: 3, oy: 4 },
+    });
+  });
+});
+
+/** Opaque rect frame: transparent everywhere except [x0..x1]x[y0..y1]. */
+function rectFrame(width: number, height: number, x0: number, y0: number, x1: number, y1: number): Uint8ClampedArray {
+  const pixels = new Uint8ClampedArray(width * height * 4);
+  for (let y = y0; y <= y1; y += 1) {
+    for (let x = x0; x <= x1; x += 1) {
+      const offset = (y * width + x) * 4;
+      pixels[offset] = 255;
+      pixels[offset + 1] = 255;
+      pixels[offset + 2] = 255;
+      pixels[offset + 3] = 255;
+    }
+  }
+  return pixels;
+}
+
+/** Packing invariant: every rect inside the bin and pairwise disjoint. */
+function expectValidPacking(packing: GnumarusSheetPacking, rects: Array<{ frame: number; w: number; h: number }>): void {
+  expect(packing.placements).toHaveLength(rects.length);
+  const byFrame = new Map(packing.placements.map((placement) => [placement.frame, placement]));
+  for (const rect of rects) {
+    const placement = byFrame.get(rect.frame);
+    expect(placement).toBeDefined();
+    expect(placement?.w).toBe(rect.w);
+    expect(placement?.h).toBe(rect.h);
+    expect(placement?.x).toBeGreaterThanOrEqual(0);
+    expect(placement?.y).toBeGreaterThanOrEqual(0);
+    expect((placement?.x ?? 0) + (placement?.w ?? 0)).toBeLessThanOrEqual(packing.width);
+    expect((placement?.y ?? 0) + (placement?.h ?? 0)).toBeLessThanOrEqual(packing.height);
+  }
+  for (let i = 0; i < packing.placements.length; i += 1) {
+    for (let j = i + 1; j < packing.placements.length; j += 1) {
+      const a = packing.placements[i] as { x: number; y: number; w: number; h: number };
+      const b = packing.placements[j] as { x: number; y: number; w: number; h: number };
+      const overlap =
+        a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+      expect(overlap).toBe(false);
+    }
+  }
+}
+
+describe("GnumarusSpritesheetTrim", () => {
+  it("finds the tight box of non-transparent pixels", () => {
+    expect(frameContentBox(new Uint8ClampedArray(10 * 10 * 4), 10, 10)).toBeNull();
+    expect(frameContentBox(solidFrame(10, 10, 7), 10, 10)).toEqual({ x: 0, y: 0, w: 10, h: 10 });
+    expect(frameContentBox(rectFrame(10, 10, 2, 3, 2, 3), 10, 10)).toEqual({ x: 2, y: 3, w: 1, h: 1 });
+    expect(frameContentBox(rectFrame(10, 10, 1, 2, 4, 6), 10, 10)).toEqual({ x: 1, y: 2, w: 4, h: 5 });
+    // A single transparent hole does not split the box.
+    const pixels = solidFrame(4, 4, 9);
+    pixels[(1 * 4 + 1) * 4 + 3] = 0;
+    expect(frameContentBox(pixels, 4, 4)).toEqual({ x: 0, y: 0, w: 4, h: 4 });
+    expect(() => frameContentBox(new Uint8ClampedArray(8), 2, 2)).toThrow(/Invalid pixels/);
+  });
+
+  it("unions content boxes across frames for uniform trim", () => {
+    // The spec example: 100x100 project, frame one opaque from (1,1) to
+    // (98,98), frame two opaque from (50,50) to (98,98). The smallest crop
+    // holding both is 98x98 at offset (1,1).
+    const first = frameContentBox(rectFrame(100, 100, 1, 1, 98, 98), 100, 100);
+    const second = frameContentBox(rectFrame(100, 100, 50, 50, 98, 98), 100, 100);
+    expect(first).toEqual({ x: 1, y: 1, w: 98, h: 98 });
+    expect(second).toEqual({ x: 50, y: 50, w: 49, h: 49 });
+    expect(uniformCropBox([first, second], 100, 100)).toEqual({ x: 1, y: 1, w: 98, h: 98 });
+    // Transparent frames contribute nothing; all-empty keeps the frame.
+    expect(uniformCropBox([null, second], 100, 100)).toEqual({ x: 50, y: 50, w: 49, h: 49 });
+    expect(uniformCropBox([null, null], 100, 100)).toEqual({ x: 0, y: 0, w: 100, h: 100 });
+    expect(() => uniformCropBox([], 0, 100)).toThrow(/frame size/);
+  });
+
+  it("crops full-frame pixels to a box with exact bytes", () => {
+    const pixels = rectFrame(10, 10, 1, 2, 4, 6);
+    const cropped = cropPixels(pixels, 10, { x: 1, y: 2, w: 4, h: 5 });
+    expect(cropped).toHaveLength(4 * 5 * 4);
+    expect(Array.from(cropped.slice(0, 4))).toEqual([255, 255, 255, 255]);
+    expect(() => cropPixels(pixels, 10, { x: 8, y: 8, w: 4, h: 4 })).toThrow(/crop box/);
+    expect(() => cropPixels(new Uint8ClampedArray(10), 10, { x: 0, y: 0, w: 1, h: 1 })).toThrow(/pixels/);
+  });
+
+  it("packs four squares into their optimal 20x20 texture", () => {
+    const rects = [0, 1, 2, 3].map((frame) => ({ frame, w: 10, h: 10 }));
+    const packing = packSheetRects(rects);
+    expect(packing.width * packing.height).toBe(400);
+    expectValidPacking(packing, rects);
+  });
+
+  it("packs the two uniform-trim frames without overlap", () => {
+    const rects = [
+      { frame: 0, w: 98, h: 98 },
+      { frame: 1, w: 49, h: 49 },
+    ];
+    const packing = packSheetRects(rects);
+    expectValidPacking(packing, rects);
+    const area = packing.width * packing.height;
+    expect(area).toBeLessThanOrEqual(98 * 196);
+    expect(area).toBeGreaterThanOrEqual(98 * 98 + 49 * 49);
+  });
+
+  it("never packs worse than a shelf and stays deterministic", () => {
+    const rects = [
+      { frame: 0, w: 60, h: 20 },
+      { frame: 1, w: 30, h: 40 },
+      { frame: 2, w: 25, h: 25 },
+      { frame: 3, w: 10, h: 70 },
+      { frame: 4, w: 45, h: 15 },
+    ];
+    const shelfArea = 60 * (20 + 40 + 25 + 70 + 15);
+    const packing = packSheetRects(rects);
+    expectValidPacking(packing, rects);
+    expect(packing.width * packing.height).toBeLessThanOrEqual(shelfArea);
+    expect(packSheetRects(rects)).toEqual(packing);
+  });
+
+  it("packs 200 rects inside the time budget with a valid result", () => {
+    let seed = 123456789;
+    const next = (max: number): number => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return 1 + (seed % max);
+    };
+    const rects = Array.from({ length: 200 }, (_, frame) => ({ frame, w: next(120), h: next(120) }));
+    const started = Date.now();
+    const packing = packSheetRects(rects, 1500);
+    expect(Date.now() - started).toBeLessThan(2000);
+    expectValidPacking(packing, rects);
+  });
+
+  it("rejects bad pack rects and handles the empty set", () => {
+    expect(packSheetRects([])).toEqual({ width: 0, height: 0, placements: [] });
+    expect(() => packSheetRects([{ frame: 0, w: 0, h: 5 }])).toThrow(/pack rect/);
+    expect(() => packSheetRects([{ frame: 0, w: 2.5, h: 5 }])).toThrow(/pack rect/);
+  });
+
+  it("blits packed crops at their placements", () => {
+    const packing = packSheetRects([
+      { frame: 0, w: 2, h: 1 },
+      { frame: 1, w: 1, h: 2 },
+    ]);
+    const frames = new Map([
+      { frame: 0, entry: { pixels: solidFrame(2, 1, 10), w: 2, h: 1 } },
+      { frame: 1, entry: { pixels: solidFrame(1, 2, 200), w: 1, h: 2 } },
+    ].map(({ frame, entry }) => [frame, entry] as const));
+    const sheet = composePackedSheet(frames, packing);
+    expect(sheet.width).toBe(packing.width);
+    expect(sheet.height).toBe(packing.height);
+    // Every placed pixel round-trips through the texture.
+    for (const placement of packing.placements) {
+      const entry = frames.get(placement.frame) as { pixels: Uint8ClampedArray; w: number; h: number };
+      for (let y = 0; y < placement.h; y += 1) {
+        for (let x = 0; x < placement.w; x += 1) {
+          const expected = Array.from(entry.pixels.slice((y * placement.w + x) * 4, (y * placement.w + x) * 4 + 4));
+          const actual = Array.from(
+            sheet.buffer.slice(
+              ((placement.y + y) * sheet.width + placement.x + x) * 4,
+              ((placement.y + y) * sheet.width + placement.x + x) * 4 + 4,
+            ),
+          );
+          expect(actual).toEqual(expected);
+        }
+      }
+    }
+    expect(() => composePackedSheet(new Map(), packing)).toThrow(/Missing pixels/);
+    expect(() => composePackedSheet(frames, { width: 0, height: 4, placements: [] })).toThrow(/packed spritesheet size/);
+  });
+
+  it("builds the packed sidecar with per-frame sizes and offsets", () => {
+    const data = buildPackedSheetAnimationData({
+      sheetWidth: 147,
+      sheetHeight: 98,
+      placements: [
+        { frame: 0, x: 0, y: 0, w: 98, h: 98, ox: 1, oy: 1 },
+        { frame: 1, x: 98, y: 0, w: 49, h: 49, ox: 50, oy: 50 },
+      ],
+      animations: [{ name: "spin", sequence: [{ frame: 1, secs: 0.5 }, { frame: 0, secs: 0.5 }] }],
+    });
+    expect(data.texture).toEqual({ w: 147, h: 98 });
+    expect(data.frames).toEqual({
+      "1": { x: 0, y: 0, w: 98, h: 98, ox: 1, oy: 1 },
+      "2": { x: 98, y: 0, w: 49, h: 49, ox: 50, oy: 50 },
+    });
+    expect(data.animations.spin?.frames).toEqual([
+      { frame: 2, secs: 0.5 },
+      { frame: 1, secs: 0.5 },
+    ]);
+    expect(() => buildPackedSheetAnimationData({ sheetWidth: 0, sheetHeight: 8, placements: [], animations: [] })).toThrow(
+      /packed spritesheet size/,
+    );
   });
 });

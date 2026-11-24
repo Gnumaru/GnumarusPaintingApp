@@ -23,8 +23,16 @@ wide packs, down for tall ones). Tick **Export animation data** (on by
 default, hidden for individual frames) to save a JSON sidecar next to
 the sheet: after a file-name prompt (defaulting to the project name)
 and a directory pick, the sheet texture and a same-named ``.json``
-with the texture size, per-frame rects and the selected animations'
-frame order plus per-frame seconds are written into that directory.
+with the texture size, per-frame rects (including the ``ox``/``oy``
+crop offset of each frame relative to the full frame's top-left corner)
+and the selected animations'
+frame order plus per-frame seconds are written into that directory. The
+**Trim** dropdown (default none, hidden for individual frames) removes
+transparent pixels before arranging: uniform crops every frame to the
+smallest box holding all frames (same size and offsets for all),
+individual crops each frame to its own box and packs the crops into the
+smallest texture found within 2 seconds (each frame keeps its own
+offset).
 Fit-all-textures and crop-all-cells batch jobs
 normalize the project first; reload-all-textures restores files edited
 externally, skipping new textures (undoable).
