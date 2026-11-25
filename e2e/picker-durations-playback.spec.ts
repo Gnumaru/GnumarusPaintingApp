@@ -90,6 +90,8 @@ test("custom picker supports alpha and clamps manual input", async ({ page }) =>
   await page.locator("gnumarus-shell [data-testid='fg-well']").click();
   await picker.locator("select#modelSelect").selectOption("hsv");
   await picker.getByLabel("Saturation", { exact: true }).fill("999");
+  // The draft keeps raw text while typing; blur commits the clamped value.
+  await picker.getByLabel("Saturation", { exact: true }).press("Tab");
   await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("100.0");
   const hueBefore = await picker.getByLabel("Hue", { exact: true }).inputValue();
   await picker.getByLabel("Hue", { exact: true }).fill("");
@@ -145,6 +147,7 @@ test("custom picker sliders and inputs work while value is zero", async ({ page 
   await page.mouse.up();
   await expect(picker.getByLabel("Hue", { exact: true })).not.toHaveValue("0.0");
   await picker.getByLabel("Saturation", { exact: true }).fill("50");
+  await picker.getByLabel("Saturation", { exact: true }).press("Tab");
   await expect(picker.getByLabel("Saturation", { exact: true })).toHaveValue("50.0");
   await picker.getByLabel("Value", { exact: true }).fill("100");
   await expect(page.locator("gnumarus-shell")).not.toContainText("#000000");

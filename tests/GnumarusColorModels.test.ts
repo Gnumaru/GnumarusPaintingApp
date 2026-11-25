@@ -5,6 +5,10 @@ import {
   blackSwitchModelValues,
   cmykToRgb01,
   defaultHslPalette,
+  grayscaleCielab,
+  grayscaleLinear709,
+  grayscaleLuma601,
+  grayscalePixel,
   getColorModelDef,
   hslToRgb01,
   hsvToRgb01,
@@ -351,6 +355,38 @@ describe("GnumarusColorModels hsv triangle and wheel", () => {
     expect(hsvWheelHue(-1, 0)).toBeCloseTo(270, 5);
     expect(hsvWheelHue(0, 0)).toBe(0);
     expect(hsvWheelHue(Number.NaN, 0)).toBe(0);
+  });
+});
+
+describe("grayscale conversions", () => {
+  it("computes BT.601 direct luma", () => {
+    expect(grayscaleLuma601(255, 0, 0)).toBe(76);
+    expect(grayscaleLuma601(0, 255, 0)).toBe(150);
+    expect(grayscaleLuma601(0, 0, 255)).toBe(29);
+    expect(grayscaleLuma601(255, 255, 255)).toBe(255);
+    expect(grayscaleLuma601(0, 0, 0)).toBe(0);
+  });
+
+  it("computes BT.709 relative luminance with re-gamma", () => {
+    expect(grayscaleLinear709(255, 0, 0)).toBe(127);
+    expect(grayscaleLinear709(0, 255, 0)).toBe(220);
+    expect(grayscaleLinear709(0, 0, 255)).toBe(76);
+    expect(grayscaleLinear709(255, 255, 255)).toBe(255);
+    expect(grayscaleLinear709(0, 0, 0)).toBe(0);
+  });
+
+  it("computes CIELAB L* lightness", () => {
+    expect(grayscaleCielab(255, 0, 0)).toBe(136);
+    expect(grayscaleCielab(0, 255, 0)).toBe(224);
+    expect(grayscaleCielab(0, 0, 255)).toBe(82);
+    expect(grayscaleCielab(255, 255, 255)).toBe(255);
+    expect(grayscaleCielab(0, 0, 0)).toBe(0);
+  });
+
+  it("routes pixels through the selected mode", () => {
+    expect(grayscalePixel(255, 0, 0, "luma")).toBe(76);
+    expect(grayscalePixel(255, 0, 0, "linear")).toBe(127);
+    expect(grayscalePixel(255, 0, 0, "cielab")).toBe(136);
   });
 });
 

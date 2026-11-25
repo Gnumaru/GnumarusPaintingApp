@@ -344,7 +344,7 @@ import {
   type GnumarusBackgroundMode,
   type GnumarusBackgroundSettings,
 } from "../settings/GnumarusBackgroundSettings";
-import { rgbaBytesToHex } from "../color/GnumarusColorModels";
+import { rgbaBytesToHex, type GnumarusGrayscaleMode } from "../color/GnumarusColorModels";
 import {
   adjustPixel,
   adjustPixelHsl,
@@ -791,6 +791,26 @@ const LAYER_FRAGMENT_SHADER = [
   "uniform sampler2D uMaskMap;",
   "uniform float uOpacity;",
   "uniform float uUseMask;",
+  "uniform float uGrayscale;",
+  "float grayLuma601(vec3 c) {",
+  "  return dot(c, vec3(0.299, 0.587, 0.114));",
+  "}",
+  "float graySrgbToLinear(float c) {",
+  "  return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);",
+  "}",
+  "float grayLinearToSrgb(float c) {",
+  "  return c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1.0 / 2.4) - 0.055;",
+  "}",
+  "float grayLinear709(vec3 c) {",
+  "  vec3 l = vec3(graySrgbToLinear(c.r), graySrgbToLinear(c.g), graySrgbToLinear(c.b));",
+  "  return grayLinearToSrgb(dot(l, vec3(0.2126, 0.7152, 0.0722)));",
+  "}",
+  "float grayCielab(vec3 c) {",
+  "  vec3 l = vec3(graySrgbToLinear(c.r), graySrgbToLinear(c.g), graySrgbToLinear(c.b));",
+  "  float y = dot(l, vec3(0.2126729, 0.7151522, 0.0721750));",
+  "  float f = y > 0.008856 ? pow(y, 1.0 / 3.0) : 7.787 * y + 16.0 / 116.0;",
+  "  return clamp((116.0 * f - 16.0) / 100.0, 0.0, 1.0);",
+  "}",
   "void main() {",
   "  vec4 tex = texture2D(uMap, vUv);",
   "  float mask = mix(1.0, texture2D(uMaskMap, vUv).r, uUseMask);",
@@ -800,7 +820,11 @@ const LAYER_FRAGMENT_SHADER = [
   // an untouched transparent-black texel would paint black instead of
   // showing the layers below.
   "  if (alpha <= 0.0) { discard; }",
-  "  gl_FragColor = vec4(tex.rgb, alpha);",
+  "  vec3 rgb = tex.rgb;",
+  "  if (uGrayscale > 0.5 && uGrayscale < 1.5) { rgb = vec3(grayLuma601(rgb)); }",
+  "  else if (uGrayscale > 1.5 && uGrayscale < 2.5) { rgb = vec3(grayLinear709(rgb)); }",
+  "  else if (uGrayscale > 2.5) { rgb = vec3(grayCielab(rgb)); }",
+  "  gl_FragColor = vec4(rgb, alpha);",
   "}",
 ].join("\n");
 
@@ -840,7 +864,7 @@ export interface GnumarusEngineOptions {
   /** Fired when the crop tool resolves a drag (for status/toast display). */
   onCropOutcome?: (outcome: "cropped" | "unchanged" | "outside" | "empty", width: number, height: number) => void;
   /** Fired for user-facing notices that need a toast (blocked paint on derived cells). */
-  onNotice?: (kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked" | "tilemap-paint-blocked" | "tile-rot-needs-square" | "model3d-needs-cell" | "region-needs-texture" | "region-name-taken" | "region-name-empty" | "edits-locked") => void;
+  onNotice?: (kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked" | "tilemap-paint-blocked" | "tile-rot-needs-square" | "model3d-needs-cell" | "region-needs-texture" | "region-name-taken" | "region-name-empty" | "edits-locked" | "edits-grayscale") => void;
   /** Tile-brush click outcomes for shell status/toast display. */
   onTileBrushOutcome?: (outcome: "placed" | "erased" | "no-tileset" | "occupied" | "nothing") => void;
   checker?: GnumarusCheckerSettings;
@@ -1055,13 +1079,59 @@ export class GnumarusCanvasEngine {
    */
   private editsLocked = false;
 
+  /** Grayscale preview mode: pure view filter, never baked into textures. */
+  private grayscaleMode: GnumarusGrayscaleMode = "none";
+
   /** Lock or unlock project edits (the shell mirrors playback state here). */
   setEditsLocked(locked: boolean): void {
     this.editsLocked = locked === true;
   }
 
+  /** Whether the grayscale preview is active (edits, frames and playback stay off). */
+  isGrayscaleActive(): boolean {
+    return this.grayscaleMode !== "none";
+  }
+
+  /** Shader selector value for the current grayscale mode (0 = none). */
+  private grayscaleUniformValue(): number {
+    return this.grayscaleMode === "luma" ? 1 : this.grayscaleMode === "linear" ? 2 : this.grayscaleMode === "cielab" ? 3 : 0;
+  }
+
+  /** Switch the grayscale preview, syncing every layer-shader material. */
+  setGrayscaleMode(mode: GnumarusGrayscaleMode): void {
+    this.grayscaleMode = mode;
+    const value = this.grayscaleUniformValue();
+    for (const layer of this.layers) {
+      this.setGrayscaleUniform(layer.material, value);
+    }
+    for (const ghost of this.onionPlanes) {
+      this.setGrayscaleUniform(ghost.mesh.material as THREE.ShaderMaterial, value);
+    }
+    if (this.floatingMaterial !== null) {
+      this.setGrayscaleUniform(this.floatingMaterial, value);
+    }
+    if (this.shapePreview !== null) {
+      this.setGrayscaleUniform(this.shapePreview.material, value);
+    }
+    this.render();
+  }
+
+  /** Point one layer-shader material at a grayscale selector value. */
+  private setGrayscaleUniform(material: THREE.ShaderMaterial, value: number): void {
+    const existing = material.uniforms["uGrayscale"] as { value: number } | undefined;
+    if (existing === undefined) {
+      material.uniforms["uGrayscale"] = { value };
+    } else {
+      existing.value = value;
+    }
+  }
+
   /** Whether project edits are currently locked (toasts explain the block). */
   private denyEditsLocked(): boolean {
+    if (this.grayscaleMode !== "none") {
+      this.onNotice?.("edits-grayscale");
+      return true;
+    }
     if (!this.editsLocked) {
       return false;
     }
@@ -1506,7 +1576,7 @@ export class GnumarusCanvasEngine {
   private readonly onTextEditRequested:
     | ((info: { layerId: string; frame: number; contentId: string; textId: string }) => void)
     | undefined;
-  private readonly onNotice: ((kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked" | "tilemap-paint-blocked" | "tile-rot-needs-square" | "model3d-needs-cell" | "region-needs-texture" | "region-name-taken" | "region-name-empty" | "edits-locked") => void) | undefined;
+  private readonly onNotice: ((kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked" | "tilemap-paint-blocked" | "tile-rot-needs-square" | "model3d-needs-cell" | "region-needs-texture" | "region-name-taken" | "region-name-empty" | "edits-locked" | "edits-grayscale") => void) | undefined;
   private readonly onTileBrushOutcome:
     | ((outcome: "placed" | "erased" | "no-tileset" | "occupied" | "nothing") => void)
     | undefined;
@@ -2000,6 +2070,7 @@ export class GnumarusCanvasEngine {
         uniforms: {
           uMap: { value: blank },
           uOpacity: { value: 1 },
+          uGrayscale: { value: this.grayscaleUniformValue() },
         },
         vertexShader: LAYER_VERTEX_SHADER,
         fragmentShader: LAYER_FRAGMENT_SHADER,
@@ -2133,6 +2204,7 @@ export class GnumarusCanvasEngine {
         uMaskMap: { value: this.sharedWhiteMaskTexture() },
         uOpacity: { value: clampedOpacity },
         uUseMask: { value: 0 },
+        uGrayscale: { value: this.grayscaleUniformValue() },
       },
       vertexShader: LAYER_VERTEX_SHADER,
       fragmentShader: LAYER_FRAGMENT_SHADER,
@@ -2550,6 +2622,11 @@ export class GnumarusCanvasEngine {
       return false;
     }
     if (frame === this.currentFrame) {
+      return false;
+    }
+    // Frame navigation stays off while the grayscale preview is up.
+    if (this.grayscaleMode !== "none") {
+      this.onNotice?.("edits-grayscale");
       return false;
     }
     this.currentFrame = frame;
@@ -15693,6 +15770,7 @@ export class GnumarusCanvasEngine {
         uniforms: {
           uMap: { value: texture },
           uOpacity: { value: 1 },
+          uGrayscale: { value: this.grayscaleUniformValue() },
         },
         vertexShader: LAYER_VERTEX_SHADER,
         fragmentShader: LAYER_FRAGMENT_SHADER,
@@ -17319,6 +17397,7 @@ export class GnumarusCanvasEngine {
       uniforms: {
         uMap: { value: texture },
         uOpacity: { value: 1 },
+        uGrayscale: { value: this.grayscaleUniformValue() },
       },
       vertexShader: LAYER_VERTEX_SHADER,
       fragmentShader: LAYER_FRAGMENT_SHADER,

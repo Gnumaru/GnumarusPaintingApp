@@ -254,6 +254,60 @@ export function linearToSrgbByte(linear: number): number {
   return clampByte(srgb * 255);
 }
 
+/** Grayscale preview mode of the global grayscale dropdown. */
+export type GnumarusGrayscaleMode = "none" | "luma" | "linear" | "cielab";
+
+/** Parse a grayscale mode, defaulting to "none" for missing or invalid input. */
+export function parseGrayscaleMode(value: unknown): GnumarusGrayscaleMode {
+  return value === "luma" || value === "linear" || value === "cielab" ? value : "none";
+}
+
+/** Raw luma bytes (ITU-R BT.601) of an sRGB color, 0..255. */
+export function grayscaleLuma601(r: number, g: number, b: number): number {
+  return clampByte(0.299 * r + 0.587 * g + 0.114 * b);
+}
+
+/**
+ * Relative luminance (ITU-R BT.709) of linearized sRGB, re-encoded with the
+ * sRGB transfer curve for display, 0..255.
+ */
+export function grayscaleLinear709(r: number, g: number, b: number): number {
+  const y =
+    0.2126 * srgbByteToLinear(r) + 0.7152 * srgbByteToLinear(g) + 0.0722 * srgbByteToLinear(b);
+  return linearToSrgbByte(y);
+}
+
+/**
+ * CIE L* lightness (0..100 scaled to 0..255) of an sRGB color under D65.
+ * Linearizes sRGB, converts to XYZ, then applies the CIELAB lightness curve.
+ */
+export function grayscaleCielab(r: number, g: number, b: number): number {
+  const rl = srgbByteToLinear(r);
+  const gl = srgbByteToLinear(g);
+  const bl = srgbByteToLinear(b);
+  const y = 0.2126729 * rl + 0.7151522 * gl + 0.072175 * bl;
+  const fy = y > 0.008856 ? y ** (1 / 3) : 7.787 * y + 16 / 116;
+  return clampByte(((116 * fy - 16) / 100) * 255);
+}
+
+/**
+ * Gray byte (0..255) of an sRGB color under a grayscale mode. Callers must
+ * skip conversion entirely for "none" (the fallback here is a plain average
+ * and must never reach the screen).
+ */
+export function grayscalePixel(r: number, g: number, b: number, mode: GnumarusGrayscaleMode): number {
+  switch (mode) {
+    case "luma":
+      return grayscaleLuma601(r, g, b);
+    case "linear":
+      return grayscaleLinear709(r, g, b);
+    case "cielab":
+      return grayscaleCielab(r, g, b);
+    default:
+      return clampByte((r + g + b) / 3);
+  }
+}
+
 export interface GnumarusHsv {
   h: number;
   s: number;
