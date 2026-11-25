@@ -64,6 +64,22 @@ describe("dropped project directories", () => {
     expect(await getDroppedDirectoryHandle([{ kind: "file" }])).toBeNull();
   });
 
+  it("times out hanging handle probes instead of bricking the drop", async () => {
+    const hanging = { kind: "file", getAsFileSystemHandle: (): Promise<unknown> => new Promise(() => {}) };
+    const started = Date.now();
+    expect(await getDroppedDirectoryHandle([hanging], 20)).toBeNull();
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it("still finds directories listed after a hanging probe", async () => {
+    const dir = fakeDir({});
+    const items = [
+      { kind: "file", getAsFileSystemHandle: (): Promise<unknown> => new Promise(() => {}) },
+      { kind: "file", getAsFileSystemHandle: async (): Promise<unknown> => dir },
+    ];
+    expect(await getDroppedDirectoryHandle(items, 50)).toBe(dir);
+  });
+
   it("detects webkit-only directory drops", () => {
     expect(hasDroppedDirectoryWithoutHandle([])).toBe(false);
     expect(

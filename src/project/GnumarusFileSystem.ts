@@ -95,8 +95,20 @@ export interface GnumarusDroppedDirectory {
   removeEntry(name: string, options?: { recursive?: boolean }): Promise<void>;
 }
 
-/** First dropped directory handle, or null when the drop holds none. */
-export async function getDroppedDirectoryHandle(items: Iterable<unknown>): Promise<GnumarusDroppedDirectory | null> {
+/**
+ * First dropped directory handle, or null when the drop holds none.
+ *
+ * Handle probes run concurrently under a single timeout: some platforms
+ * return a `getAsFileSystemHandle` that never settles for plain file
+ * entries, and awaiting it bare would brick the whole drop (no directory
+ * opens, no file imports, no feedback). Late or hanging entries simply lose
+ * the race so file drops keep their regular path.
+ */
+export async function getDroppedDirectoryHandle(
+  items: Iterable<unknown>,
+  timeoutMs = 1000,
+): Promise<GnumarusDroppedDirectory | null> {
+  const probes: Array<Promise<{ kind?: unknown } | null>> = [];
   for (const item of items) {
     if (item === null || typeof item !== "object") {
       continue;
@@ -105,16 +117,44 @@ export async function getDroppedDirectoryHandle(items: Iterable<unknown>): Promi
     if (typeof getHandle !== "function") {
       continue;
     }
-    try {
-      const handle = (await getHandle.call(item)) as { kind?: unknown } | null;
-      if (handle !== null && typeof handle === "object" && handle.kind === "directory") {
-        return handle as GnumarusDroppedDirectory;
-      }
-    } catch {
-      // Unreadable entries are skipped; files keep the regular drop path.
+    // One entry must never reject the batch; each probe resolves null on
+    // error instead so the scan below only looks for directory handles.
+    probes.push(
+      (async (): Promise<{ kind?: unknown } | null> => {
+        try {
+          return (await getHandle.call(item)) as { kind?: unknown } | null;
+        } catch {
+          // Unreadable entries are skipped; files keep the regular drop path.
+          return null;
+        }
+      })(),
+    );
+  }
+  if (probes.length === 0) {
+    return null;
+  }
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timeoutId = setTimeout(() => resolve(null), Math.max(0, timeoutMs));
+  });
+  try {
+    // Collect by arrival order: a hanging probe must not starve a
+    // directory that resolves behind it.
+    let found: GnumarusDroppedDirectory | null = null;
+    const watchers = probes.map((probe) =>
+      probe.then((handle) => {
+        if (found === null && handle !== null && typeof handle === "object" && handle.kind === "directory") {
+          found = handle as GnumarusDroppedDirectory;
+        }
+      }),
+    );
+    await Promise.race([Promise.all(watchers), timeout]);
+    return found;
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
     }
   }
-  return null;
 }
 
 /** True when a directory was dropped but exposes no file-system handle (non-Chromium). */
