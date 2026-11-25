@@ -21,6 +21,7 @@ import {
   type GnumarusBlendMode,
   type GnumarusBrushShape,
   type GnumarusChannelLock,
+  type GnumarusPixelWriteGate,
   type GnumarusRgba,
 } from "../canvas/GnumarusPixelBuffer";
 import type { GnumarusWrapMode } from "../canvas/GnumarusViewportMath";
@@ -213,6 +214,7 @@ export function gradientRadialT(
 
 /** Paint target: a live cell texture or a zeroed preview scratch buffer. */
 export interface GnumarusShapeTex {
+  id?: string;
   buffer: Uint8ClampedArray;
   width: number;
   height: number;
@@ -238,6 +240,8 @@ export interface GnumarusShapeStyle {
   accumulate: boolean;
   /** Pixel-perfect 1px filter (curve only). */
   pixelPerfect: boolean;
+  /** Optional per-pixel write gate (clips to the floating selection). */
+  gate?: GnumarusPixelWriteGate | undefined;
 }
 
 /** Blend one row span with full coverage, honoring locks and blend mode. */
@@ -249,7 +253,7 @@ function fillShapeRows(
   for (const row of rows) {
     const y = Math.round(row.y);
     for (let x = Math.round(row.x0); x <= Math.round(row.x1); x += 1) {
-      blendPixelCoverage(tex.buffer, tex.width, tex.height, x, y, style.color, 1, style.locked, style.blend, style.wrap);
+      blendPixelCoverage(tex.buffer, tex.width, tex.height, x, y, style.color, 1, style.locked, style.blend, style.wrap, style.gate);
     }
   }
 }
@@ -287,6 +291,7 @@ export function paintRectOutline(
     drawLineSegment(
       tex.buffer, tex.width, tex.height, a.x, a.y, b.x, b.y,
       style.width, "square", style.antialias, style.color, style.locked, style.blend, style.wrap, maxSize,
+      style.gate,
     );
   }
 }
@@ -328,6 +333,7 @@ export function paintEllipseOutline(
     drawLineSegment(
       tex.buffer, tex.width, tex.height, Math.round(a.x), Math.round(a.y), Math.round(b.x), Math.round(b.y),
       style.width, "square", style.antialias, style.color, style.locked, style.blend, style.wrap, maxSize,
+      style.gate,
     );
   }
 }
@@ -368,6 +374,7 @@ export function paintPolygon(
     drawLineSegment(
       tex.buffer, tex.width, tex.height, a.x, a.y, b.x, b.y,
       style.width, "square", style.antialias, style.color, style.locked, style.blend, style.wrap, maxSize,
+      style.gate,
     );
   }
 }
@@ -387,13 +394,14 @@ export function paintLineSegment(
     drawLineSegment(
       tex.buffer, tex.width, tex.height, x0, y0, x1, y1,
       style.width, style.tip, style.antialias, style.color, style.locked, style.blend, style.wrap, maxSize,
+      style.gate,
     );
     return;
   }
   const mask = new Uint8Array(tex.width * tex.height);
   stampSegmentCoverage(
     mask, tex.width, tex.height, x0, y0, x1, y1,
-    style.width, style.tip, style.antialias, style.wrap, maxSize,
+    style.width, style.tip, style.antialias, style.wrap, maxSize, style.gate,
   );
   repaintShapeMask(tex, base, mask, style);
 }
@@ -425,6 +433,9 @@ export function paintCurveStroke(
         if (x < 0 || y < 0 || x >= tex.width || y >= tex.height) {
           return;
         }
+        if (style.gate !== undefined && !style.gate.allow(x, y)) {
+          return;
+        }
         mask[y * tex.width + x] = 255;
       });
       repaintShapeMask(tex, base, mask, style);
@@ -443,7 +454,7 @@ export function paintCurveStroke(
           tex.buffer[at + 3] = base[at + 3] as number;
         }
       }
-      setPixel(tex.buffer, tex.width, tex.height, x, y, style.color, style.locked, style.blend);
+      setPixel(tex.buffer, tex.width, tex.height, x, y, style.color, style.locked, style.blend, undefined, style.gate);
     });
     return;
   }
@@ -451,13 +462,14 @@ export function paintCurveStroke(
     drawCubicBezier(
       tex.buffer, tex.width, tex.height, p0, c1, c2, p3,
       style.width, style.tip, style.antialias, style.color, style.locked, style.blend, style.wrap, maxSize,
+      style.gate,
     );
     return;
   }
   const mask = new Uint8Array(tex.width * tex.height);
   drawCubicBezierCoverage(
     mask, tex.width, tex.height, p0, c1, c2, p3,
-    style.width, style.tip, style.antialias, style.wrap,
+    style.width, style.tip, style.antialias, style.wrap, style.gate,
   );
   repaintShapeMask(tex, base, mask, style);
 }
@@ -495,7 +507,7 @@ export function paintGradient(
       blendPixelCoverage(
         tex.buffer, tex.width, tex.height, x, y, faded,
         style.dither ? 1 : strength,
-        style.locked, style.blend, style.wrap,
+        style.locked, style.blend, style.wrap, style.gate,
       );
     }
   }

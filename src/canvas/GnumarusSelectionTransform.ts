@@ -141,6 +141,73 @@ export function inverseSelectionPoint(
   };
 }
 
+/** Precomputed inverse placement for per-pixel mask tests (no trig per pixel). */
+export interface GnumarusSelectionMaskTester {
+  (x: number, y: number): boolean;
+}
+
+/**
+ * Build a per-pixel inside-selection tester for a stroke: the placement
+ * inverse is computed once, then each pixel costs a few multiplies plus one
+ * mask read. Same convention as the floating merge (pixel centers).
+ */
+export function selectionMaskTester(
+  mask: Uint8Array,
+  maskWidth: number,
+  maskHeight: number,
+  maskFull: boolean,
+  placement: GnumarusSelectionPlacement,
+): GnumarusSelectionMaskTester {
+  const matrix = selectionLinearMatrix(placement);
+  const determinant = matrix.a * matrix.d - matrix.b * matrix.c;
+  if (!(Math.abs(determinant) > 1e-9)) {
+    return (): boolean => false;
+  }
+  const invA = matrix.d / determinant;
+  const invB = -matrix.b / determinant;
+  const invC = -matrix.c / determinant;
+  const invD = matrix.a / determinant;
+  const flipX = placement.flipX ? -1 : 1;
+  const flipY = placement.flipY ? -1 : 1;
+  const { cx, cy } = placement;
+  const halfW = placement.width / 2;
+  const halfH = placement.height / 2;
+  return (x: number, y: number): boolean => {
+    const dx = x + 0.5 - cx;
+    const dy = y + 0.5 - cy;
+    const localX = (invA * dx + invB * dy) / flipX + halfW;
+    const localY = (invC * dx + invD * dy) / flipY + halfH;
+    const sx = Math.floor(localX + GNUMARUS_SELECTION_SAMPLE_EPSILON);
+    const sy = Math.floor(localY + GNUMARUS_SELECTION_SAMPLE_EPSILON);
+    if (sx < 0 || sy < 0 || sx >= maskWidth || sy >= maskHeight) {
+      return false;
+    }
+    if (maskFull) {
+      return true;
+    }
+    return (mask[sy * maskWidth + sx] ?? 0) !== 0;
+  };
+}
+
+/**
+ * True when a home-texture pixel (integer coords) falls inside the
+ * selection: maps the pixel center through the placement (same convention
+ * as the floating merge) and tests the mask bit. `maskFull` skips the mask
+ * lookup (plain rectangles); degenerate placements match nothing, like the
+ * merge. Prefer `selectionMaskTester` inside pixel loops.
+ */
+export function selectionMaskAt(
+  mask: Uint8Array,
+  maskWidth: number,
+  maskHeight: number,
+  maskFull: boolean,
+  placement: GnumarusSelectionPlacement,
+  x: number,
+  y: number,
+): boolean {
+  return selectionMaskTester(mask, maskWidth, maskHeight, maskFull, placement)(x, y);
+}
+
 /** Axis-aligned bounding box of the transformed selection corners. */
 export function selectionCornerBox(placement: GnumarusSelectionPlacement): {
   minX: number;

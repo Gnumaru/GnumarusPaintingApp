@@ -13,6 +13,7 @@ import {
   blendPixelCoverage,
   type GnumarusBlendMode,
   type GnumarusChannelLock,
+  type GnumarusPixelWriteGate,
   type GnumarusRgba,
 } from "./GnumarusPixelBuffer";
 import { wrapLayerPixel, type GnumarusWrapMode } from "./GnumarusViewportMath";
@@ -237,6 +238,7 @@ export function paintSoftDab(  buffer: Uint8ClampedArray,
   tipAngle = 0,
   smudge?: GnumarusPaintSmudge | null,
   wrap: GnumarusWrapMode = "off",
+  gate: GnumarusPixelWriteGate | undefined = undefined,
 ): void {
   if (!(diameter > 0) || !(alpha > 0)) {
     return;
@@ -325,6 +327,9 @@ export function paintSoftDab(  buffer: Uint8ClampedArray,
         if (coverage <= 0) {
           continue;
         }
+        if (gate !== undefined && !gate.allow(x, y)) {
+          continue;
+        }
         const covA = coverage * dabAlpha;
         if (!(covA > 0)) {
           continue;
@@ -402,7 +407,7 @@ export function paintSoftDab(  buffer: Uint8ClampedArray,
           continue;
         }
       }
-      blendPixelCoverage(buffer, width, height, gx, gy, dabColor, coverage * dabAlpha, locked, blend);
+      blendPixelCoverage(buffer, width, height, gx, gy, dabColor, coverage * dabAlpha, locked, blend, wrap, gate);
     }
   }
 }
@@ -428,6 +433,7 @@ export function stampPaintDabCoverage(
   dual?: GnumarusPaintDualTip | null,
   tipAngle = 0,
   wrap: GnumarusWrapMode = "off",
+  gate: GnumarusPixelWriteGate | undefined = undefined,
 ): void {
   if (!(diameter > 0) || !(alpha > 0)) {
     return;
@@ -519,7 +525,7 @@ export function stampPaintDabCoverage(
       }
       const at = gy * width + gx;
       const stamped = Math.round(Math.min(1, coverage * alpha) * 255);
-      if (stamped > (mask[at] ?? 0)) {
+      if (stamped > (mask[at] ?? 0) && (gate === undefined || gate.allow(gx, gy))) {
         mask[at] = stamped;
       }
     }

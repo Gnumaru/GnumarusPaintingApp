@@ -506,14 +506,18 @@ test("undo and redo track the floating selection lifecycle", async ({ page }) =>
   await page.mouse.move(end.x, end.y, { steps: 4 });
   await page.mouse.up();
   expect(await floatingRect(page)).toEqual({ x: 30, y: 30, width: 5, height: 5 });
-  // A later paint is an independent entry: undoing it keeps the selection.
+  // Paint clips to the selection: inside paints, outside is a no-op, and the
+  // paint stays an independent undo entry that keeps the selection.
   await page.keyboard.press("b");
   await setBrushColor(page, "#0000ff");
-  const dot = await layerScreenTarget(page, 10, 10);
-  await page.mouse.click(dot.x, dot.y);
-  expect(await readPixel(page, 10, 10)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
-  await page.keyboard.press("Control+z");
+  const outside = await layerScreenTarget(page, 10, 10);
+  await page.mouse.click(outside.x, outside.y);
   expect(await readPixel(page, 10, 10)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  const inside = await layerScreenTarget(page, 31, 33);
+  await page.mouse.click(inside.x, inside.y);
+  expect(await readPixel(page, 31, 33)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 31, 33)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   expect(await selectionOverlayDisplay(page)).toBe("block");
   // The selection itself was never cut, so undoing the red dot just clears it.
   await page.keyboard.press("Control+z");
@@ -525,7 +529,7 @@ test("undo and redo track the floating selection lifecycle", async ({ page }) =>
   expect(await selectionOverlayDisplay(page)).toBe("block");
   expect(await readPixel(page, 32, 32)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   await page.keyboard.press("Control+y");
-  expect(await readPixel(page, 10, 10)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+  expect(await readPixel(page, 31, 33)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
 });
 
 test("floating selection survives frame switches hidden and merges explicitly", async ({ page }) => {
@@ -829,4 +833,89 @@ test("floating selection renders above lower layers while destransform-dragging 
   await page.mouse.move(to.x, to.y, { steps: 5 });
   expect(await canvasScreenPixel(page, to.x, to.y)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
   await page.mouse.up();
+});
+
+test("brush paints only inside the floating selection", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await selectTool(page, "Rectangular selection");
+  await dragRect(page, 30, 30, 34, 34);
+  expect(await floatingRect(page)).toEqual({ x: 30, y: 30, width: 5, height: 5 });
+  await page.keyboard.press("b");
+  await setBrushColor(page, "#0000ff");
+  // Outside the marching ants: nothing paints and no undo entry is pushed.
+  const outside = await layerScreenTarget(page, 10, 10);
+  await page.mouse.click(outside.x, outside.y);
+  expect(await readPixel(page, 10, 10)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  // Inside: paints normally and undoes cleanly, keeping the selection.
+  const inside = await layerScreenTarget(page, 32, 32);
+  await page.mouse.click(inside.x, inside.y);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await selectionOverlayDisplay(page)).toBe("block");
+  // Without a selection the same click paints again.
+  await page.keyboard.press("Escape");
+  expect(await floatingRect(page)).toBeNull();
+  await page.mouse.click(outside.x, outside.y);
+  expect(await readPixel(page, 10, 10)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+});
+
+test("painting follows a moved (materialized) selection", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await selectTool(page, "Rectangular selection");
+  await dragRect(page, 30, 30, 34, 34);
+  await selectTool(page, "Destructive selection transform");
+  await dragRect(page, 32, 32, 34, 33);
+  expect(await floatingRect(page)).toEqual({ x: 32, y: 31, width: 5, height: 5 });
+  await page.keyboard.press("b");
+  await setBrushColor(page, "#0000ff");
+  const nowOutside = await layerScreenTarget(page, 31, 31);
+  await page.mouse.click(nowOutside.x, nowOutside.y);
+  expect(await readPixel(page, 31, 31)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  const nowInside = await layerScreenTarget(page, 33, 32);
+  await page.mouse.click(nowInside.x, nowInside.y);
+  expect(await readPixel(page, 33, 32)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+});
+
+test("bucket, line and filled shapes clip to the floating selection", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await selectTool(page, "Rectangular selection");
+  await dragRect(page, 30, 30, 34, 34);
+  await setBrushColor(page, "#0000ff");
+  // Bucket: the whole canvas is one contiguous region, but only the
+  // selected box fills.
+  await page.getByRole("button", { name: "Bucket fill" }).click();
+  const outside = await layerScreenTarget(page, 10, 10);
+  await page.mouse.click(outside.x, outside.y);
+  expect(await readPixel(page, 10, 10)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  const inside = await layerScreenTarget(page, 32, 32);
+  await page.mouse.click(inside.x, inside.y);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+  expect(await readPixel(page, 36, 36)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  // Line: only the stretch inside the box paints.
+  await page.keyboard.press("n");
+  await page.mouse.click(outside.x, outside.y);
+  const far = await layerScreenTarget(page, 50, 50);
+  await page.mouse.click(far.x, far.y);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+  expect(await readPixel(page, 20, 20)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  expect(await readPixel(page, 50, 50)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  // Filled rectangle: the box drag paints only its overlap with the selection.
+  await page.keyboard.press("d");
+  await page.locator("gnumarus-shell input#shapeFilled").click();
+  await dragRect(page, 10, 10, 50, 50);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 255, a: 255 });
+  expect(await readPixel(page, 20, 20)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  await page.keyboard.press("Control+z");
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
 });

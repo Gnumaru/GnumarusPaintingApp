@@ -5,6 +5,8 @@ import {
   isSelectionDegenerate,
   selectionCornerBox,
   selectionLinearMatrix,
+  selectionMaskAt,
+  selectionMaskTester,
   selectionMatrixDeterminant,
 } from "../src/canvas/GnumarusSelectionTransform";
 
@@ -127,5 +129,60 @@ describe("GnumarusSelectionTransform", () => {
     expect(right.y).toBeCloseTo(32.5, 9);
     // Edge-on tilt is degenerate.
     expect(isSelectionDegenerate({ ...IDENTITY, rotationX: Math.PI / 2 })).toBe(true);
+  });
+
+  it("clips paint to the selection mask", () => {
+    const mask = new Uint8Array(5 * 5).fill(255);
+    // 5x5 box centered at (32.5, 32.5): layer pixels 30..34 are inside.
+    for (const [x, y] of [[30, 30], [34, 34], [32, 30], [30, 34]] as Array<[number, number]>) {
+      expect(selectionMaskAt(mask, 5, 5, false, IDENTITY, x, y)).toBe(true);
+    }
+    for (const [x, y] of [[29, 30], [30, 29], [35, 34], [34, 35], [0, 0]] as Array<[number, number]>) {
+      expect(selectionMaskAt(mask, 5, 5, false, IDENTITY, x, y)).toBe(false);
+    }
+    // Holes in the mask block paint.
+    mask[2 * 5 + 2] = 0;
+    expect(selectionMaskAt(mask, 5, 5, false, IDENTITY, 32, 32)).toBe(false);
+    expect(selectionMaskAt(mask, 5, 5, false, IDENTITY, 31, 32)).toBe(true);
+    // maskFull skips the lookup.
+    expect(selectionMaskAt(new Uint8Array(25), 5, 5, true, IDENTITY, 32, 32)).toBe(true);
+    expect(selectionMaskAt(new Uint8Array(25), 5, 5, true, IDENTITY, 29, 32)).toBe(false);
+    // Degenerate placements match nothing (like the merge).
+    expect(selectionMaskAt(mask, 5, 5, false, { ...IDENTITY, scaleX: 0 }, 32, 32)).toBe(false);
+  });
+
+  it("maps translated, flipped and rotated selections", () => {
+    const mask = new Uint8Array(5 * 5).fill(255);
+    const moved = { ...IDENTITY, cx: 35.5, cy: 35.5 };
+    expect(selectionMaskAt(mask, 5, 5, false, moved, 33, 33)).toBe(true);
+    expect(selectionMaskAt(mask, 5, 5, false, moved, 30, 30)).toBe(false);
+    // A single top-left bit mirrors to the right edge under flipX.
+    const single = new Uint8Array(25);
+    single[0] = 255;
+    expect(selectionMaskAt(single, 5, 5, false, IDENTITY, 30, 30)).toBe(true);
+    expect(selectionMaskAt(single, 5, 5, false, IDENTITY, 34, 30)).toBe(false);
+    expect(selectionMaskAt(single, 5, 5, false, { ...IDENTITY, flipX: true }, 34, 30)).toBe(true);
+    expect(selectionMaskAt(single, 5, 5, false, { ...IDENTITY, flipX: true }, 30, 30)).toBe(false);
+    // A 90-degree turn of a square box covers the same pixels.
+    const turned = { ...IDENTITY, rotation: Math.PI / 2 };
+    for (let y = 30; y <= 34; y += 1) {
+      for (let x = 30; x <= 34; x += 1) {
+        expect(selectionMaskAt(mask, 5, 5, false, turned, x, y)).toBe(true);
+      }
+    }
+  });
+
+  it("tester agrees with the per-call check on a skewed placement", () => {
+    const mask = new Uint8Array(6 * 4);
+    for (let i = 0; i < mask.length; i += 1) {
+      mask[i] = i % 3 === 0 ? 0 : 255;
+    }
+    const placement = { ...IDENTITY, width: 6, height: 4, skewX: 0.25, rotation: 0.3 };
+    const test = selectionMaskTester(mask, 6, 4, false, placement);
+    for (let y = 25; y <= 40; y += 1) {
+      for (let x = 25; x <= 40; x += 1) {
+        expect(test(x, y)).toBe(selectionMaskAt(mask, 6, 4, false, placement, x, y));
+      }
+    }
   });
 });

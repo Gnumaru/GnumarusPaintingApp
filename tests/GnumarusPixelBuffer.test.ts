@@ -42,6 +42,7 @@ import {
   roundBrushSizeForAliased,
   setPixel,
   stampSegmentCoverage,
+  type GnumarusRgba,
 } from "../src/canvas/GnumarusPixelBuffer";
 
 describe("GnumarusPixelBuffer", () => {
@@ -983,5 +984,30 @@ describe("GnumarusPixelBuffer", () => {
     applyShadeMask(buffer, base, mask, 2, 1, [red, green]);
     expect(getPixel(buffer, 2, 1, 0, 0)).toEqual({ r: 1, g: 2, b: 3, a: 128 });
     expect(getPixel(buffer, 2, 1, 1, 0)).toEqual({ r: 0, g: 255, b: 0, a: 128 });
+  });
+});
+
+describe("selection-clipped flood fill", () => {
+  it("fills only inside the gate while traversing through it", () => {
+    const buffer = createPixelBuffer(6, 6);
+    const red = { r: 255, g: 0, b: 0, a: 255 };
+    // Gate: left half only (x < 3). The fill starts left and the whole
+    // canvas is one contiguous region, but only the left half writes.
+    const gate = {
+      allow: (x: number): boolean => x < 3,
+      colorFor: (_x: number, _y: number, base: GnumarusRgba): GnumarusRgba => base,
+    };
+    const filled = floodFill(buffer, 6, 6, 0, 0, red, undefined, "normal", gate);
+    expect(filled).toBe(18);
+    for (let y = 0; y < 6; y += 1) {
+      for (let x = 0; x < 6; x += 1) {
+        const pixel = getPixel(buffer, 6, 6, x, y);
+        if (x < 3) {
+          expect(pixel).toEqual(red);
+        } else {
+          expect(pixel).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+        }
+      }
+    }
   });
 });

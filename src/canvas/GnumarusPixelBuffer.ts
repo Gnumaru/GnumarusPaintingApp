@@ -519,6 +519,7 @@ export function floodFill(
   color: GnumarusRgba,
   locked: GnumarusChannelLock | undefined = undefined,
   blend: GnumarusBlendMode = "normal",
+  gate: GnumarusPixelWriteGate | undefined = undefined,
 ): number {
   if (!Number.isInteger(startX) || !Number.isInteger(startY)) {
     return 0;
@@ -558,8 +559,14 @@ export function floodFill(
     if (buffer[i] !== targetR || buffer[i + 1] !== targetG || buffer[i + 2] !== targetB || buffer[i + 3] !== targetA) {
       continue;
     }
-    setPixel(buffer, width, height, x, y, color, locked, blend);
-    filled += 1;
+    // The gate clips writes (e.g. to the floating selection) while the
+    // region walk still crosses disallowed pixels, so contiguous areas
+    // beyond the selection edge fill exactly like an unclipped fill
+    // intersected with the selection.
+    if (gate === undefined || gate.allow(x, y)) {
+      setPixel(buffer, width, height, x, y, color, locked, blend);
+      filled += 1;
+    }
     if (x > 0) {
       const neighbor = index - 1;
       if (visited[neighbor] !== 1) {
@@ -1544,12 +1551,13 @@ export function drawCubicBezier(
   blend: GnumarusBlendMode = "normal",
   wrap: GnumarusWrapMode = "off",
   maxSize: number = GNUMARUS_MAX_BRUSH_SIZE,
+  gate: GnumarusPixelWriteGate | undefined = undefined,
 ): void {
   const chord = (a: GnumarusBezierPoint, b: GnumarusBezierPoint): number =>
     Math.sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
   const polygon = chord(p0, p1) + chord(p1, p2) + chord(p2, p3);
   if (!(polygon > 1e-9)) {
-    drawLineSegment(buffer, width, height, p0.x, p0.y, p0.x, p0.y, lineWidth, shape, antialiased, color, locked, blend, wrap, maxSize);
+    drawLineSegment(buffer, width, height, p0.x, p0.y, p0.x, p0.y, lineWidth, shape, antialiased, color, locked, blend, wrap, maxSize, gate);
     return;
   }
   const segments = Math.min(200, Math.max(16, Math.ceil(polygon * 2)));
@@ -1568,7 +1576,7 @@ export function drawCubicBezier(
     const sy0 = antialiased ? prevY : Math.round(prevY);
     const sx1 = antialiased ? x : Math.round(x);
     const sy1 = antialiased ? y : Math.round(y);
-    drawLineSegment(buffer, width, height, sx0, sy0, sx1, sy1, lineWidth, shape, antialiased, color, locked, blend, wrap, maxSize);
+    drawLineSegment(buffer, width, height, sx0, sy0, sx1, sy1, lineWidth, shape, antialiased, color, locked, blend, wrap, maxSize, gate);
     prevX = x;
     prevY = y;
   }
@@ -1954,12 +1962,13 @@ export function drawCubicBezierCoverage(
   shape: GnumarusBrushShape,
   antialiased: boolean,
   wrap: GnumarusWrapMode = "off",
+  gate: GnumarusPixelWriteGate | undefined = undefined,
 ): void {
   const chord = (a: GnumarusBezierPoint, b: GnumarusBezierPoint): number =>
     Math.sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
   const polygon = chord(p0, p1) + chord(p1, p2) + chord(p2, p3);
   if (!(polygon > 1e-9)) {
-    stampSegmentCoverage(mask, width, height, p0.x, p0.y, p0.x, p0.y, lineWidth, shape, antialiased, wrap);
+    stampSegmentCoverage(mask, width, height, p0.x, p0.y, p0.x, p0.y, lineWidth, shape, antialiased, wrap, GNUMARUS_MAX_BRUSH_SIZE, gate);
     return;
   }
   const segments = Math.min(200, Math.max(16, Math.ceil(polygon * 2)));
@@ -1972,7 +1981,7 @@ export function drawCubicBezierCoverage(
       it * it * it * p0.x + 3 * it * it * t * p1.x + 3 * it * t * t * p2.x + t * t * t * p3.x;
     const y =
       it * it * it * p0.y + 3 * it * it * t * p1.y + 3 * it * t * t * p2.y + t * t * t * p3.y;
-    stampSegmentCoverage(mask, width, height, prevX, prevY, x, y, lineWidth, shape, antialiased, wrap);
+    stampSegmentCoverage(mask, width, height, prevX, prevY, x, y, lineWidth, shape, antialiased, wrap, GNUMARUS_MAX_BRUSH_SIZE, gate);
     prevX = x;
     prevY = y;
   }

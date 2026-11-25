@@ -332,3 +332,37 @@ describe("GnumarusShapePaint", () => {
     expect(clipped.buffer[(4 * 8 + 0) * 4 + 3]).toBe(0);
   });
 });
+
+describe("selection-clipped shapes", () => {
+  const leftHalf = {
+    allow: (x: number): boolean => x < 4,
+    colorFor: (_x: number, _y: number, base: { r: number; g: number; b: number; a: number }): { r: number; g: number; b: number; a: number } => base,
+  };
+
+  it("clips filled rects, outlines, gradients and curves to the gate", () => {
+    const filled = makeTex(8, 8);
+    paintRectFilled(filled, styleOf({ filled: true, gate: leftHalf }), 0, 0, 7, 7);
+    expect(filled.buffer[(4 * 8 + 3) * 4 + 3]).toBe(255);
+    expect(filled.buffer[(4 * 8 + 4) * 4 + 3]).toBe(0);
+    const outline = makeTex(8, 8);
+    paintRectOutline(outline, styleOf({ gate: leftHalf }), 2, 2, 6, 6);
+    expect(outline.buffer[(2 * 8 + 3) * 4 + 3]).toBe(255);
+    expect(outline.buffer[(2 * 8 + 6) * 4 + 3]).toBe(0);
+    const gradient = makeTex(8, 8);
+    paintGradient(gradient, styleOf({ gate: leftHalf }), 0, 4, 7, 4);
+    expect(gradient.buffer[(4 * 8 + 0) * 4 + 3]).toBeGreaterThan(0);
+    expect(gradient.buffer[(4 * 8 + 7) * 4 + 3]).toBe(0);
+    const curve = makeTex(8, 8);
+    paintCurveStroke(
+      curve, new Uint8ClampedArray(8 * 8 * 4), styleOf({ gate: leftHalf }),
+      { x: 0, y: 4 }, { x: 2, y: 0 }, { x: 5, y: 7 }, { x: 7, y: 4 },
+    );
+    const leftPainted = curve.buffer.some((v, i) => i % 4 === 3 && (Math.floor(i / 4) % 8) < 4 && v > 0);
+    expect(leftPainted).toBe(true);
+    for (let y = 0; y < 8; y += 1) {
+      for (let x = 4; x < 8; x += 1) {
+        expect(curve.buffer[(y * 8 + x) * 4 + 3]).toBe(0);
+      }
+    }
+  });
+});

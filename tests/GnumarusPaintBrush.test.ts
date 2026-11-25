@@ -51,6 +51,7 @@ import {
   smudgeDabAlpha,
   smudgeMixColor,
   softTipCoverage,
+  stampPaintDabCoverage,
   strokeDabPositions,
   strokeSpeedNorm,
   type GnumarusPaintTipImage,
@@ -464,5 +465,38 @@ describe("GnumarusPaintBrush", () => {
       undefined, "normal", undefined, undefined, 0, { rate: 1, wet: 1 },
     );
     expect(wet[(16 * 32 + 16) * 4 + 2]).toBe(255);
+  });
+});
+
+describe("selection-clipped soft dabs", () => {
+  const leftHalf = {
+    allow: (x: number): boolean => x < 8,
+    colorFor: (_x: number, _y: number, base: { r: number; g: number; b: number; a: number }): { r: number; g: number; b: number; a: number } => base,
+  };
+  const red = { r: 255, g: 0, b: 0, a: 255 };
+
+  it("paintSoftDab writes only inside the gate", () => {
+    const buffer = new Uint8ClampedArray(16 * 16 * 4);
+    paintSoftDab(
+      buffer, 16, 16, 8, 8, 10, "soft", 1, null, red, 1,
+      undefined, "normal", undefined, undefined, 0, undefined, "off", leftHalf,
+    );
+    expect(buffer[(8 * 16 + 7) * 4 + 3]).toBeGreaterThan(0);
+    for (let y = 0; y < 16; y += 1) {
+      for (let x = 8; x < 16; x += 1) {
+        expect(buffer[(y * 16 + x) * 4 + 3]).toBe(0);
+      }
+    }
+  });
+
+  it("stampPaintDabCoverage stamps only inside the gate", () => {
+    const mask = new Uint8Array(16 * 16);
+    stampPaintDabCoverage(mask, 16, 16, 8, 8, 10, "soft", 1, null, 1, undefined, undefined, 0, "off", leftHalf);
+    expect(mask[8 * 16 + 7]).toBeGreaterThan(0);
+    for (let y = 0; y < 16; y += 1) {
+      for (let x = 8; x < 16; x += 1) {
+        expect(mask[y * 16 + x]).toBe(0);
+      }
+    }
   });
 });

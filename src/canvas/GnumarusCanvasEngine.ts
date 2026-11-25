@@ -220,6 +220,7 @@ import {
   isSelectionDegenerate,
   selectionCornerBox,
   selectionLinearMatrix,
+  selectionMaskTester,
   selectionRotate3,
   type GnumarusSelectionPlacement,
 } from "./GnumarusSelectionTransform";
@@ -587,6 +588,19 @@ interface GnumarusTextureEntry {
   width: number;
   height: number;
   buffer: Uint8ClampedArray;
+}
+
+/**
+ * Paint target for every pixel-writing stroke path: live cell textures
+ * carry their registry id (lets the selection gate verify the home
+ * texture); scratch buffers (shape previews) omit it and fall back to a
+ * home dims check.
+ */
+interface GnumarusPaintTarget {
+  id?: string;
+  buffer: Uint8ClampedArray;
+  width: number;
+  height: number;
 }
 
 /** Shareable cell content: optional texture or rich text plus per-cell transform settings. */
@@ -11222,6 +11236,76 @@ export class GnumarusCanvasEngine {
     };
   }
 
+  /**
+   * Per-pixel write gate clipping paint to the floating selection mask, or
+   * undefined when no clipping applies (no active selection, selection
+   * hidden off-home, or the target is not the home texture). The placement
+   * inverse is precomputed once per gate so pixel loops stay cheap; the
+   * default path keeps zero overhead. Wrap modes resolve to the written
+   * pixel first so wrapped dabs clip against the visible selection.
+   * Textures carry their registry id; id-less scratch targets (shape
+   * previews) fall back to a home dims check (previews always target the
+   * active cell, and floatingHomeVisible already pins it to home).
+   */
+  private selectionPaintGate(tex: { id?: string; width: number; height: number }): GnumarusPixelWriteGate | undefined {
+    const floating = this.floating;
+    if (floating === null || !floating.active || !this.floatingHomeVisible()) {
+      return undefined;
+    }
+    if (tex.id !== undefined) {
+      if (tex.id !== floating.textureId) {
+        return undefined;
+      }
+    } else {
+      const layer = this.activeLayer();
+      if (layer === null || layer.width !== tex.width || layer.height !== tex.height) {
+        return undefined;
+      }
+    }
+    const test = selectionMaskTester(
+      floating.mask,
+      floating.width,
+      floating.height,
+      floating.maskFull,
+      this.floatingPlacement(floating),
+    );
+    const wrap = this.wrapMode;
+    if (wrap === "off") {
+      return {
+        allow: (x: number, y: number): boolean => test(x, y),
+        colorFor: (_x: number, _y: number, base: GnumarusRgba): GnumarusRgba => base,
+      };
+    }
+    return {
+      allow: (x: number, y: number): boolean => {
+        const wrapped = wrapLayerPixel(x, y, tex.width, tex.height, wrap);
+        if (wrapped === null) {
+          return false;
+        }
+        return test(wrapped.x, wrapped.y);
+      },
+      colorFor: (_x: number, _y: number, base: GnumarusRgba): GnumarusRgba => base,
+    };
+  }
+
+  /** Combine two optional write gates (both must allow; first color wins). */
+  private combinePaintGates(
+    first: GnumarusPixelWriteGate | undefined,
+    second: GnumarusPixelWriteGate | undefined,
+  ): GnumarusPixelWriteGate | undefined {
+    if (first === undefined) {
+      return second;
+    }
+    if (second === undefined) {
+      return first;
+    }
+    return {
+      allow: (x: number, y: number): boolean => first.allow(x, y) && second.allow(x, y),
+      colorFor: (x: number, y: number, base: GnumarusRgba): GnumarusRgba =>
+        second.colorFor(x, y, first.colorFor(x, y, base)),
+    };
+  }
+
   getPressureSizeCurve(): GnumarusPressureCurve {
     return this.pressureSizeCurve;
   }
@@ -11638,15 +11722,16 @@ export class GnumarusCanvasEngine {
     this.airbrushLastT = now;
     this.airbrushCarry = carryOut;
     const airbrushAngle = this.tipAngleMode === "direction" ? this.strokeDabAngle : 0;
+    const airbrushGate = this.selectionPaintGate(tex);
     for (let i = 0; i < count; i += 1) {
       if (this.brushTipKind === "pixel") {
         if (this.tool === "brush" && this.brushSource === "selection" && this.selectionBrush !== null) {
-          this.stampSelectionDab(tex, layer.lockedChannels, Math.round(at.x), Math.round(at.y), undefined);
+          this.stampSelectionDab(tex, layer.lockedChannels, Math.round(at.x), Math.round(at.y), airbrushGate);
         } else {
           drawBrushStamp(
             tex.buffer, tex.width, tex.height, Math.round(at.x), Math.round(at.y),
             this.brushSize, this.brushShape, this.pressureBrushColor(), layer.lockedChannels, this.blendMode,
-            this.wrapMode, this.maxBrushSize, undefined, this.brushAngle,
+            this.wrapMode, this.maxBrushSize, airbrushGate, this.brushAngle,
           );
         }
         if (this.symmetryMode !== "off") {
@@ -11655,30 +11740,30 @@ export class GnumarusCanvasEngine {
             this.symmetryCenter.x, this.symmetryCenter.y, this.symmetryMode,
           )) {
             if (this.tool === "brush" && this.brushSource === "selection" && this.selectionBrush !== null) {
-              this.stampSelectionDab(tex, layer.lockedChannels, mirror.x0, mirror.y0, undefined);
+              this.stampSelectionDab(tex, layer.lockedChannels, mirror.x0, mirror.y0, airbrushGate);
             } else {
               drawBrushStamp(
                 tex.buffer, tex.width, tex.height, mirror.x0, mirror.y0,
                 this.brushSize, this.brushShape, this.pressureBrushColor(), layer.lockedChannels, this.blendMode,
-                this.wrapMode, this.maxBrushSize, undefined, this.brushAngle,
+                this.wrapMode, this.maxBrushSize, airbrushGate, this.brushAngle,
               );
             }
           }
         }
       } else {
-        this.stampPaintDabAt(tex, layer.lockedChannels, at.x, at.y, airbrushAngle);
+        this.stampPaintDabAt(tex, layer.lockedChannels, at.x, at.y, airbrushAngle, undefined, airbrushGate);
         if (this.symmetryMode !== "off") {
           if (this.symmetryMode === "mirror-x" || this.symmetryMode === "both") {
             const mirrored = this.mirrorDabPoint(at.x, at.y, true, false);
-            this.stampPaintDabAt(tex, layer.lockedChannels, mirrored.x, mirrored.y, Math.PI - airbrushAngle);
+            this.stampPaintDabAt(tex, layer.lockedChannels, mirrored.x, mirrored.y, Math.PI - airbrushAngle, undefined, airbrushGate);
           }
           if (this.symmetryMode === "mirror-y" || this.symmetryMode === "both") {
             const mirrored = this.mirrorDabPoint(at.x, at.y, false, true);
-            this.stampPaintDabAt(tex, layer.lockedChannels, mirrored.x, mirrored.y, -airbrushAngle);
+            this.stampPaintDabAt(tex, layer.lockedChannels, mirrored.x, mirrored.y, -airbrushAngle, undefined, airbrushGate);
           }
           if (this.symmetryMode === "both") {
             const mirrored = this.mirrorDabPoint(at.x, at.y, true, true);
-            this.stampPaintDabAt(tex, layer.lockedChannels, mirrored.x, mirrored.y, Math.PI + airbrushAngle);
+            this.stampPaintDabAt(tex, layer.lockedChannels, mirrored.x, mirrored.y, Math.PI + airbrushAngle, undefined, airbrushGate);
           }
         }
       }
@@ -12670,7 +12755,7 @@ export class GnumarusCanvasEngine {
    * layer is repainted as before.
    */
   private repaintFromMask(
-    tex: { buffer: Uint8ClampedArray; width: number; height: number },
+    tex: GnumarusPaintTarget,
     base: Uint8ClampedArray,
     mask: Uint8Array,
     locked: GnumarusChannelLock,
@@ -12708,7 +12793,7 @@ export class GnumarusCanvasEngine {
    * from base first so repaints stay idempotent across segments and mirrors.
    */
   private repaintShadeFromMask(
-    tex: { buffer: Uint8ClampedArray; width: number; height: number },
+    tex: GnumarusPaintTarget,
     base: Uint8ClampedArray,
     mask: Uint8Array,
     locked: GnumarusChannelLock,
@@ -12785,12 +12870,13 @@ export class GnumarusCanvasEngine {
    * the caller repaints once for the whole segment.
    */
   private stampPaintDabAt(
-    tex: { buffer: Uint8ClampedArray; width: number; height: number },
+    tex: GnumarusPaintTarget,
     locked: GnumarusChannelLock,
     x: number,
     y: number,
     angle: number,
     batch?: { dirty: GnumarusDabDirtyRect | null },
+    gate: GnumarusPixelWriteGate | undefined = undefined,
   ): void {
     const size = this.pressureBrushSize();
     const color = this.pressureBrushColor();
@@ -12823,7 +12909,7 @@ export class GnumarusCanvasEngine {
       stampPaintDabCoverage(
         this.strokeMask, tex.width, tex.height, x + offset.x, y + offset.y, dabSize,
         this.brushTipKind, this.brushHardness, this.paintTipImage, dabAlpha, jitter, dual, tipAngle,
-        this.wrapMode,
+        this.wrapMode, gate,
       );
       if (batch !== undefined) {
         batch.dirty = this.unionDabDirty(batch.dirty, x + offset.x, y + offset.y, dabSize / 2);
@@ -12835,7 +12921,7 @@ export class GnumarusCanvasEngine {
       paintSoftDab(
         tex.buffer, tex.width, tex.height, x + offset.x, y + offset.y, dabSize,
         this.brushTipKind, this.brushHardness, this.paintTipImage, color, dabAlpha,
-        locked, this.blendMode, jitter, dual, tipAngle, smudge, this.wrapMode,
+        locked, this.blendMode, jitter, dual, tipAngle, smudge, this.wrapMode, gate,
       );
     }
     this.strokeDabIndex += 1;
@@ -12849,7 +12935,7 @@ export class GnumarusCanvasEngine {
    * dirty union, not one full-layer repaint per dab). Pixel tips never reach here.
    */
   private paintPaintSegment(
-    tex: { buffer: Uint8ClampedArray; width: number; height: number },
+    tex: GnumarusPaintTarget,
     locked: GnumarusChannelLock,
     x0: number,
     y0: number,
@@ -12877,12 +12963,13 @@ export class GnumarusCanvasEngine {
     }
     const baseAngle = this.strokeDabAngle;
     const batching = !this.accumulate && this.strokeBase !== null && this.strokeMask !== null;
+    const gate = this.selectionPaintGate(tex);
     const batch: { dirty: GnumarusDabDirtyRect | null } = { dirty: null };
     const stampOne = (px: number, py: number, angle: number): void => {
       if (batching) {
-        this.stampPaintDabAt(tex, locked, px, py, angle, batch);
+        this.stampPaintDabAt(tex, locked, px, py, angle, batch, gate);
       } else {
-        this.stampPaintDabAt(tex, locked, px, py, angle);
+        this.stampPaintDabAt(tex, locked, px, py, angle, undefined, gate);
       }
     };
     for (const dab of positions) {
@@ -12914,7 +13001,7 @@ export class GnumarusCanvasEngine {
    * (`destination`, latched on the first dab). Flow scales dab alpha.
    */
   private stampSelectionDab(
-    tex: { buffer: Uint8ClampedArray; width: number; height: number },
+    tex: GnumarusPaintTarget,
     locked: GnumarusChannelLock,
     x: number,
     y: number,
@@ -12959,7 +13046,7 @@ export class GnumarusCanvasEngine {
    * `destination` patterns on first use.
    */
   private paintSelectionStroke(
-    tex: { buffer: Uint8ClampedArray; width: number; height: number },
+    tex: GnumarusPaintTarget,
     locked: GnumarusChannelLock,
     x0: number,
     y0: number,
@@ -13002,7 +13089,7 @@ export class GnumarusCanvasEngine {
    * pixel-perfect filter cannot be shared across mirrored runs).
    */
   private paintBrushLine(
-    tex: { buffer: Uint8ClampedArray; width: number; height: number },
+    tex: GnumarusPaintTarget,
     locked: GnumarusChannelLock,
     x0: number,
     y0: number,
@@ -13029,7 +13116,7 @@ export class GnumarusCanvasEngine {
    * Otherwise uses the standard brush/accumulate paths.
    */
   private paintBrushLineSingle(
-    tex: { buffer: Uint8ClampedArray; width: number; height: number },
+    tex: GnumarusPaintTarget,
     locked: GnumarusChannelLock,
     x0: number,
     y0: number,
@@ -13038,7 +13125,7 @@ export class GnumarusCanvasEngine {
   ): void {
     const size = this.pressureBrushSize();
     const color = this.pressureBrushColor();
-    const gate = this.pixelArtGate(color);
+    const gate = this.combinePaintGates(this.pixelArtGate(color), this.selectionPaintGate(tex));
     // Dithered dabs keep full opacity: pressure already thins the pattern.
     const paint = ditherPaintColor(this.color, color, this.brushDither);
     if (this.tool === "brush" && this.brushSource === "selection" && this.selectionBrush !== null) {
@@ -14869,7 +14956,7 @@ export class GnumarusCanvasEngine {
    * when at least one masked pixel was visited.
    */
   private mergeFloatingIntoTexture(
-    tex: { buffer: Uint8ClampedArray; width: number; height: number },
+    tex: GnumarusPaintTarget,
     floating: GnumarusFloatingSelection,
     placement: GnumarusSelectionPlacement,
     minX: number,
@@ -15981,7 +16068,7 @@ export class GnumarusCanvasEngine {
    * Uses the same brush/AA/blend/accumulate paths as unstabilized strokes.
    */
   private paintStabilizedSegment(
-    tex: { buffer: Uint8ClampedArray; width: number; height: number },
+    tex: GnumarusPaintTarget,
     locked: GnumarusChannelLock,
     from: { x: number; y: number },
     to: { x: number; y: number },
@@ -15993,7 +16080,7 @@ export class GnumarusCanvasEngine {
     const qy1 = this.brushAntialias ? to.y : Math.floor(to.y);
     const size = this.pressureBrushSize();
     const color = this.pressureBrushColor();
-    const gate = this.pixelArtGate(color);
+    const gate = this.combinePaintGates(this.pixelArtGate(color), this.selectionPaintGate(tex));
     // Dithered dabs keep full opacity: pressure already thins the pattern.
     const paint = ditherPaintColor(this.color, color, this.brushDither);
     if (this.tool === "brush" && this.brushSource === "selection" && this.selectionBrush !== null) {
@@ -16226,7 +16313,7 @@ export class GnumarusCanvasEngine {
     const base = tex.buffer.slice();
     paintLineSegment(
       tex, base,
-      this.shapeStyleFor(this.lineWidth, this.lineShape, this.lineAntialias, layer.lockedChannels, false),
+      this.shapeStyleFor(this.lineWidth, this.lineShape, this.lineAntialias, layer.lockedChannels, false, this.selectionPaintGate(tex)),
       this.lineAnchor.x, this.lineAnchor.y, x, y, this.maxBrushSize,
     );
     this.lineAnchor = null;
@@ -16261,6 +16348,7 @@ export class GnumarusCanvasEngine {
     antialias: boolean,
     locked: GnumarusChannelLock,
     filled: boolean,
+    gate: GnumarusPixelWriteGate | undefined = undefined,
   ): GnumarusShapeStyle {
     return {
       color: { ...this.color },
@@ -16275,6 +16363,7 @@ export class GnumarusCanvasEngine {
       radial: this.gradientMode === "radial",
       accumulate: this.accumulate,
       pixelPerfect: this.curvePixelPerfectActive(),
+      gate,
     };
   }
 
@@ -16283,7 +16372,7 @@ export class GnumarusCanvasEngine {
    * into the live texture from a base snapshot; unchanged results still
    * resync without pushing history.
    */
-  private commitShapePaint(paint: (tex: { buffer: Uint8ClampedArray; width: number; height: number }) => void): boolean {
+  private commitShapePaint(paint: (tex: GnumarusPaintTarget) => void): boolean {
     const layer = this.activeLayer();
     if (layer === null) {
       return false;
@@ -16329,10 +16418,12 @@ export class GnumarusCanvasEngine {
     const style = this.shapeStyleFor(this.shapeWidth, "square", this.shapeAntialias, locked, this.shapeFilled);
     if (this.shapeFilled) {
       return this.commitShapePaint((tex) => {
+        style.gate = this.selectionPaintGate(tex);
         paintRectFilled(tex, style, x0, y0, x1, y1);
       });
     }
     return this.commitShapePaint((tex) => {
+      style.gate = this.selectionPaintGate(tex);
       paintRectOutline(tex, style, x0, y0, x1, y1);
     });
   }
@@ -16350,10 +16441,12 @@ export class GnumarusCanvasEngine {
     const style = this.shapeStyleFor(this.shapeWidth, "square", this.shapeAntialias, locked, this.shapeFilled);
     if (this.shapeFilled) {
       return this.commitShapePaint((tex) => {
+        style.gate = this.selectionPaintGate(tex);
         paintEllipseFilled(tex, style, x0, y0, x1, y1);
       });
     }
     return this.commitShapePaint((tex) => {
+      style.gate = this.selectionPaintGate(tex);
       paintEllipseOutline(tex, style, x0, y0, x1, y1);
     });
   }
@@ -16370,6 +16463,7 @@ export class GnumarusCanvasEngine {
     const locked = layer.lockedChannels;
     const style = this.shapeStyleFor(this.shapeWidth, "square", this.shapeAntialias, locked, this.shapeFilled);
     return this.commitShapePaint((tex) => {
+      style.gate = this.selectionPaintGate(tex);
       paintPolygon(tex, style, points);
     });
   }
@@ -16386,6 +16480,7 @@ export class GnumarusCanvasEngine {
     const locked = layer.lockedChannels;
     const style = this.shapeStyleFor(this.shapeWidth, "square", this.shapeAntialias, locked, false);
     return this.commitShapePaint((tex) => {
+      style.gate = this.selectionPaintGate(tex);
       paintGradient(tex, style, ax, ay, bx, by);
     });
   }
@@ -16417,11 +16512,12 @@ export class GnumarusCanvasEngine {
    * clip to the texture (no wrap-around for retouch tools).
    */
   private applyRetouchDab(
-    tex: { buffer: Uint8ClampedArray; width: number; height: number },
+    tex: GnumarusPaintTarget,
     locked: GnumarusChannelLock,
     base: Uint8ClampedArray,
     px: number,
     py: number,
+    gate: GnumarusPixelWriteGate | undefined = undefined,
   ): void {
     const radius = Math.max(0, Math.floor(this.retouchSize / 2));
     const tool = this.tool;
@@ -16435,7 +16531,7 @@ export class GnumarusCanvasEngine {
         if (tool === "shading") {
           const current = this.readBufferPixel(tex.buffer, tex.width, tex.height, x, y);
           const out = shadePixelColor(current, this.color, this.shadeMode, this.shadeAmount);
-          setPixel(tex.buffer, tex.width, tex.height, x, y, out, locked, "copy");
+          setPixel(tex.buffer, tex.width, tex.height, x, y, out, locked, "copy", undefined, gate);
         } else if (tool === "blur") {
           const current = this.readBufferPixel(tex.buffer, tex.width, tex.height, x, y);
           const averaged = blurAverageColor(tex.buffer, tex.width, tex.height, x, y, 1);
@@ -16444,7 +16540,7 @@ export class GnumarusCanvasEngine {
           }
           const out =
             this.blurMode === "sharpen" ? sharpenAround(current, averaged, 0.5) : averaged;
-          setPixel(tex.buffer, tex.width, tex.height, x, y, out, locked, "copy");
+          setPixel(tex.buffer, tex.width, tex.height, x, y, out, locked, "copy", undefined, gate);
         } else if (tool === "clone") {
           if (this.cloneSource === null || this.retouchStart === null) {
             continue;
@@ -16455,19 +16551,24 @@ export class GnumarusCanvasEngine {
             continue;
           }
           const sampled = this.readBufferPixel(base, tex.width, tex.height, sx, sy);
-          setPixel(tex.buffer, tex.width, tex.height, x, y, sampled, locked, "copy");
+          setPixel(tex.buffer, tex.width, tex.height, x, y, sampled, locked, "copy", undefined, gate);
         } else if (tool === "recolor") {
           const current = this.readBufferPixel(tex.buffer, tex.width, tex.height, x, y);
           const out = recolorTowardPaint(current, this.color, this.recolorTolerance / 100);
           if (out === null) {
             continue;
           }
-          setPixel(tex.buffer, tex.width, tex.height, x, y, out, locked, "copy");
+          setPixel(tex.buffer, tex.width, tex.height, x, y, out, locked, "copy", undefined, gate);
         } else {
           const offset = jumbleOffset(radius, Math.random(), Math.random());
           const sx = x + offset.dx;
           const sy = y + offset.dy;
           if (sx < 0 || sy < 0 || sx >= tex.width || sy >= tex.height) {
+            continue;
+          }
+          // Jumble swaps pixel pairs: skip swaps touching the outside of
+          // the selection so shuffling never leaks content across its edge.
+          if (gate !== undefined && (!gate.allow(x, y) || !gate.allow(sx, sy))) {
             continue;
           }
           const here = (y * tex.width + x) * 4;
@@ -16504,7 +16605,7 @@ export class GnumarusCanvasEngine {
     this.retouchStroke = { base: tex.buffer.slice(), layerId: layer.id, textureId: tex.id };
     this.retouchLast = { x, y };
     this.retouchStart = { x, y };
-    this.applyRetouchDab(tex, layer.lockedChannels, tex.buffer.slice(), x, y);
+    this.applyRetouchDab(tex, layer.lockedChannels, tex.buffer.slice(), x, y, this.selectionPaintGate(tex));
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
     this.render();
@@ -16526,8 +16627,9 @@ export class GnumarusCanvasEngine {
     }
     const locked = layer.lockedChannels;
     const base = stroke.base;
+    const gate = this.selectionPaintGate(tex);
     walkBresenhamLinePixels(last.x, last.y, x, y, (px: number, py: number): void => {
-      this.applyRetouchDab(tex, locked, base, px, py);
+      this.applyRetouchDab(tex, locked, base, px, py, gate);
     });
     this.retouchLast = { x, y };
     this.syncAllLayerRenders();
@@ -16623,7 +16725,7 @@ export class GnumarusCanvasEngine {
     const base = tex.buffer.slice();
     paintCurveStroke(
       tex, base,
-      this.shapeStyleFor(this.curveWidth, this.curveShape, this.curveAntialias, layer.lockedChannels, false),
+      this.shapeStyleFor(this.curveWidth, this.curveShape, this.curveAntialias, layer.lockedChannels, false, this.selectionPaintGate(tex)),
       { x: p0.x, y: p0.y },
       { x: c1.x, y: c1.y },
       { x: c2x, y: c2y },
@@ -17459,6 +17561,24 @@ export class GnumarusCanvasEngine {
   }
 
   /**
+   * Selection state signature for the shape preview cache key: any
+   * selection change that could alter paint clipping busts the cached
+   * raster (mask-content edits repaint on the next cursor move at the
+   * latest, since cursor coords are part of the key).
+   */
+  private selectionPreviewKey(): string {
+    const floating = this.floating;
+    if (floating === null || !floating.active || !this.floatingHomeVisible()) {
+      return "sel0";
+    }
+    return (
+      `sel1:${floating.cutDepth}:${floating.cx},${floating.cy},${floating.rotation},` +
+      `${floating.scaleX},${floating.scaleY},${floating.skewX},${floating.skewY},` +
+      `${floating.flipX},${floating.flipY},${floating.width},${floating.height},${floating.maskFull}`
+    );
+  }
+
+  /**
    * Texture dimensions for a shape preview without materializing anything:
    * the live cell texture when the cell already has one, else the size a
    * fresh texture would get. Never creates contents or textures.
@@ -17577,7 +17697,7 @@ export class GnumarusCanvasEngine {
     }
     const mouse = this.lastMouseClient;
     const layer = this.activeLayer();
-    type PaintFn = (tex: { buffer: Uint8ClampedArray; width: number; height: number }, zeros: Uint8ClampedArray) => void;
+    type PaintFn = (tex: GnumarusPaintTarget, zeros: Uint8ClampedArray) => void;
     let paint: PaintFn | null = null;
     let key = "";
     const quantize = (value: number): number => Math.round(value * 1000) / 1000;
@@ -17601,7 +17721,10 @@ export class GnumarusCanvasEngine {
           const ay = this.lineAnchor.y;
           const style = this.shapeStyleFor(this.lineWidth, this.lineShape, this.lineAntialias, layer.lockedChannels, false);
           key = `line|${ax}|${ay}|${pixel.x}|${pixel.y}|${this.shapeStyleKey(style)}`;
-          paint = (tex, zeros) => paintLineSegment(tex, zeros, style, ax, ay, pixel.x, pixel.y, this.maxBrushSize);
+          paint = (tex, zeros) => {
+            style.gate = this.selectionPaintGate(tex);
+            paintLineSegment(tex, zeros, style, ax, ay, pixel.x, pixel.y, this.maxBrushSize);
+          };
         }
       } else if (
         (this.tool === "rectangle" || this.tool === "ellipseShape" || this.tool === "gradient") &&
@@ -17613,17 +17736,28 @@ export class GnumarusCanvasEngine {
           `${drag.tool}|${quantize(drag.x0)}|${quantize(drag.y0)}|${quantize(drag.x1)}|${quantize(drag.y1)}` +
           `|${this.shapeStyleKey(style)}`;
         if (drag.tool === "rectangle") {
-          paint = (tex) => paintRectOutline(tex, style, drag.x0, drag.y0, drag.x1, drag.y1);
-          if (this.shapeFilled) {
-            paint = (tex) => paintRectFilled(tex, style, drag.x0, drag.y0, drag.x1, drag.y1);
-          }
+          paint = (tex) => {
+            style.gate = this.selectionPaintGate(tex);
+            if (this.shapeFilled) {
+              paintRectFilled(tex, style, drag.x0, drag.y0, drag.x1, drag.y1);
+            } else {
+              paintRectOutline(tex, style, drag.x0, drag.y0, drag.x1, drag.y1);
+            }
+          };
         } else if (drag.tool === "ellipseShape") {
-          paint = (tex) => paintEllipseOutline(tex, style, drag.x0, drag.y0, drag.x1, drag.y1);
-          if (this.shapeFilled) {
-            paint = (tex) => paintEllipseFilled(tex, style, drag.x0, drag.y0, drag.x1, drag.y1);
-          }
+          paint = (tex) => {
+            style.gate = this.selectionPaintGate(tex);
+            if (this.shapeFilled) {
+              paintEllipseFilled(tex, style, drag.x0, drag.y0, drag.x1, drag.y1);
+            } else {
+              paintEllipseOutline(tex, style, drag.x0, drag.y0, drag.x1, drag.y1);
+            }
+          };
         } else {
-          paint = (tex) => paintGradient(tex, style, drag.x0, drag.y0, drag.x1, drag.y1);
+          paint = (tex) => {
+            style.gate = this.selectionPaintGate(tex);
+            paintGradient(tex, style, drag.x0, drag.y0, drag.x1, drag.y1);
+          };
         }
       } else if (this.tool === "polygon" && this.shapePolygon !== null && this.shapePolygon.length > 0) {
         const cursor = this.clientToLayerImageFloat(mouse.x, mouse.y);
@@ -17632,7 +17766,10 @@ export class GnumarusCanvasEngine {
           const style = this.shapeStyleFor(this.shapeWidth, "square", this.shapeAntialias, layer.lockedChannels, this.shapeFilled);
           key = `polygon|${points.map((point) => `${quantize(point.x)},${quantize(point.y)}`).join(";")}|${this.shapeStyleKey(style)}`;
           const frozen = points.map((point) => ({ x: point.x, y: point.y }));
-          paint = (tex) => paintPolygon(tex, style, frozen);
+          paint = (tex) => {
+            style.gate = this.selectionPaintGate(tex);
+            paintPolygon(tex, style, frozen);
+          };
         }
       } else if (this.tool === "curve") {
         const style = this.shapeStyleFor(this.curveWidth, this.curveShape, this.curveAntialias, layer.lockedChannels, false);
@@ -17642,8 +17779,10 @@ export class GnumarusCanvasEngine {
           // rubber line on the start point, like the old overlay did.
           const current = this.curveDragCurrent ?? { x: p0.x, y: p0.y };
           key = `curve-drag|${p0.x}|${p0.y}|${current.x}|${current.y}|${this.shapeStyleKey(style)}`;
-          paint = (tex, zeros) =>
+          paint = (tex, zeros) => {
+            style.gate = this.selectionPaintGate(tex);
             paintLineSegment(tex, zeros, style, p0.x, p0.y, current.x, current.y, this.maxBrushSize);
+          };
         } else if (this.curvePhase === "awaitC1" && this.curveP0 !== null && this.curveP3 !== null) {
           const control = this.clientToLayerImageFloat(mouse.x, mouse.y);
           if (control !== null) {
@@ -17653,7 +17792,10 @@ export class GnumarusCanvasEngine {
               `curve-c1|${p0.x}|${p0.y}|${quantize(control.x)}|${quantize(control.y)}|${p3.x}|${p3.y}` +
               `|${this.shapeStyleKey(style)}`;
             const frozen = { x: control.x, y: control.y };
-            paint = (tex, zeros) => paintCurveStroke(tex, zeros, style, p0, frozen, p3, p3, this.maxBrushSize);
+            paint = (tex, zeros) => {
+              style.gate = this.selectionPaintGate(tex);
+              paintCurveStroke(tex, zeros, style, p0, frozen, p3, p3, this.maxBrushSize);
+            };
           }
         } else if (
           this.curvePhase === "awaitC2" &&
@@ -17670,8 +17812,10 @@ export class GnumarusCanvasEngine {
               `curve-c2|${p0.x}|${p0.y}|${c1.x}|${c1.y}|${quantize(control.x)}|${quantize(control.y)}|${p3.x}|${p3.y}` +
               `|${this.shapeStyleKey(style)}`;
             const frozen = { x: control.x, y: control.y };
-            paint = (tex, zeros) =>
+            paint = (tex, zeros) => {
+              style.gate = this.selectionPaintGate(tex);
               paintCurveStroke(tex, zeros, style, p0, c1, frozen, p3, this.maxBrushSize);
+            };
           }
         }
       }
@@ -17681,7 +17825,7 @@ export class GnumarusCanvasEngine {
       return;
     }
     const dims = this.shapePreviewDims(layer.id, this.currentFrame);
-    key += `|${dims.width}x${dims.height}|${layer.id}|${this.currentFrame}`;
+    key += `|${dims.width}x${dims.height}|${layer.id}|${this.currentFrame}|${this.selectionPreviewKey()}`;
     this.ensureShapePreview(dims.width, dims.height);
     const entry = this.shapePreview;
     if (entry === null) {
@@ -18298,6 +18442,7 @@ export class GnumarusCanvasEngine {
       this.color,
       layer.lockedChannels,
       this.blendMode,
+      this.selectionPaintGate(tex),
     );
     if (filled === 0) {
       return 0;
