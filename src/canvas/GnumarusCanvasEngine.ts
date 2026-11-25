@@ -706,6 +706,8 @@ export interface GnumarusAnimationProjectData {
   frameNames: string[];
   namedAnimations: GnumarusNamedAnimation[];
   activeAnimation: string | null;
+  /** Active layer id at export time; absent for fresh imports (top layer). */
+  activeLayer?: string | null;
   regions: GnumarusRegion[];
 }
 
@@ -7517,6 +7519,7 @@ export class GnumarusCanvasEngine {
       frameNames: [...this.frameNames],
       namedAnimations: this.getNamedAnimations(),
       activeAnimation: this.activeAnimationName,
+      activeLayer: this.activeLayerId,
       regions: [...this.regions.values()].map((region) => ({ ...region })),
     };
   }
@@ -10318,6 +10321,7 @@ export class GnumarusCanvasEngine {
       frameNames?: string[];
       namedAnimations?: GnumarusNamedAnimation[];
       activeAnimation?: string | null;
+      activeLayer?: string | null;
     },
   ): void {
     if (this.denyEditsLocked()) {
@@ -10659,8 +10663,9 @@ export class GnumarusCanvasEngine {
     this.tilemapCounter = Math.max(maxTilemap, (data.tilemaps ?? []).length + 1, 1);
     this.tilemapNameCounter = Math.max(maxTilemapName, (data.tilemaps ?? []).length + 1, 1);
     const top = this.layers[this.layers.length - 1];
-    if (top !== undefined) {
-      this.activeLayerId = top.id;
+    const home = this.layers.find((layer) => layer.id === data.activeLayer) ?? top;
+    if (home !== undefined) {
+      this.activeLayerId = home.id;
     }
     this.history.clear();
     this.dropFloating();

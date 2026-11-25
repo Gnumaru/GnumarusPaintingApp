@@ -480,6 +480,24 @@ describe("GnumarusProjectFormat", () => {
     expect(parsed.animation.activeAnimation).toBe("walk");
   });
 
+  it("round-trips the active layer and coerces unknown ids to the top layer", () => {
+    const project = createDefaultProject(8, 8);
+    project.animation.activeLayer = "layer0";
+    expect(parseProject(serializeProject(project)).animation.activeLayer).toBe("layer0");
+    const raw = JSON.parse(serializeProject(createDefaultProject(8, 8))) as {
+      animation: Record<string, unknown>;
+    } & Record<string, unknown>;
+    const animation = raw.animation;
+    delete animation["activeLayer"];
+    expect(parseProject(JSON.stringify(raw)).animation.activeLayer).toBeUndefined();
+    animation["activeLayer"] = "ghost";
+    expect(parseProject(JSON.stringify(raw)).animation.activeLayer).toBeUndefined();
+    animation["activeLayer"] = 42;
+    expect(() => parseProject(JSON.stringify(raw))).toThrow(GnumarusProjectError);
+    animation["activeLayer"] = "";
+    expect(() => parseProject(JSON.stringify(raw))).toThrow(GnumarusProjectError);
+  });
+
   it("rejects malformed named animations but coerces unknown selections", () => {
     const raw = JSON.parse(serializeProject(createDefaultProject(8, 8))) as {
       animation: Record<string, unknown>;

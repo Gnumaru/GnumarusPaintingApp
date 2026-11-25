@@ -21286,6 +21286,7 @@ export class GnumarusShell extends LitElement {
         cells: project.animation.cells.map((cell) => ({ ...cell })),
         frames: project.animation.frames,
         currentFrame: project.animation.currentFrame,
+        activeLayer: project.animation.activeLayer ?? null,
         defaultFrameDuration: project.animation.defaultFrameDuration,
         frameDurations: project.animation.frameDurations.map((entry) => ({ ...entry })),
         frameNames: [...project.animation.frameNames],
@@ -22280,6 +22281,7 @@ export class GnumarusShell extends LitElement {
       animation: {
         frames: exported.frames,
         currentFrame: exported.currentFrame,
+        activeLayer: exported.activeLayer ?? undefined,
         defaultFrameDuration: exported.defaultFrameDuration,
         frameDurations: exported.frameDurations.map((entry) => ({ ...entry })),
         frameNames: [...exported.frameNames],

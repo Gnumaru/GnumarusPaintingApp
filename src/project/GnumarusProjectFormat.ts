@@ -148,6 +148,11 @@ export interface GnumarusAnimationMeta {
   namedAnimations: GnumarusNamedAnimationMeta[];
   /** Selected named animation, or null for the full timeline. */
   activeAnimation: string | null;
+  /**
+   * Active layer id restored on open; absent in legacy files (or unknown
+   * ids) means the top layer.
+   */
+  activeLayer?: string;
   textures: GnumarusTextureMeta[];
   texts: GnumarusTextMeta[];
   svgs: GnumarusSvgMeta[];
@@ -639,7 +644,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
   if (!isRecord(value)) {
     throw new GnumarusProjectError("project.json has an invalid animation section");
   }
-  const { frames, currentFrame, defaultFrameDuration, frameDurations, frameNames, namedAnimations, activeAnimation, textures, texts, svgs, models3d, tilemaps, regions, contents, cells } = value;
+  const { frames, currentFrame, defaultFrameDuration, frameDurations, frameNames, namedAnimations, activeAnimation, activeLayer, textures, texts, svgs, models3d, tilemaps, regions, contents, cells } = value;
   if (!Number.isInteger(frames) || (frames as number) < 1) {
     throw new GnumarusProjectError("project.json has an invalid frame count");
   }
@@ -839,6 +844,7 @@ function parseAnimationMeta(value: unknown, layerIds: Set<string>, durationsInMs
     frameNames: checkedNames,
     namedAnimations: checkedAnimations,
     activeAnimation: parseActiveAnimationName(activeAnimation, checkedAnimations),
+    activeLayer: parseActiveLayerId(activeLayer, layerIds),
     textures: checkedTextures,
     texts: checkedTexts,
     svgs: checkedSvgs,
@@ -1142,6 +1148,21 @@ function parseActiveAnimationName(value: unknown, animations: GnumarusNamedAnima
     throw new GnumarusProjectError("project.json has an invalid active animation");
   }
   return animations.some((entry) => entry.name === value) ? value : null;
+}
+
+/**
+ * Active layer id (absent in legacy files means the top layer). Malformed
+ * values throw; unknown ids resolve to absent so externally edited projects
+ * still open.
+ */
+function parseActiveLayerId(value: unknown, layerIds: Set<string>): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "string" || value.length === 0) {
+    throw new GnumarusProjectError("project.json has an invalid active layer");
+  }
+  return layerIds.has(value) ? value : undefined;
 }
 
 function migrateLegacyLayersToAnimation(
