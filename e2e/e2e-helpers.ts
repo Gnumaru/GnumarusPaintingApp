@@ -2713,11 +2713,17 @@ export async function namedAnimations(page: import("@playwright/test").Page): Pr
     const root = window as unknown as {
       __gnumarus?: {
         engine?: {
-          getNamedAnimations(): Array<{ name: string; loop: string; frames: Array<{ frame: number; duration: number | null }> }>;
+          getNamedAnimations(): Array<{ name: string; loop: string; color?: string; frames: Array<{ frame: number; duration: number | null }> }>;
         };
       };
     };
-    return root.__gnumarus?.engine?.getNamedAnimations() ?? [];
+    // Structural assertions only: tag colors are random per animation and
+    // covered by animation-tags.spec.ts.
+    return (root.__gnumarus?.engine?.getNamedAnimations() ?? []).map((entry) => ({
+      name: entry.name,
+      loop: entry.loop,
+      frames: entry.frames,
+    }));
   });
 }
 
