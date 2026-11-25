@@ -66,6 +66,37 @@ test("dropping a non-image file is ignored @recent", async ({ page }) => {
   await expect(page.locator("gnumarus-shell")).not.toContainText("empty cell");
 });
 
+test("dropping an image imports even after the OS drag payload is released @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  const bytes = await redPngBytes(page);
+  // Chromium releases OS-drag data once the drop dispatch completes, so
+  // items/files read back empty afterwards; the app must snapshot them
+  // synchronously. The release is queued first so it wins over any
+  // post-await read, exactly like the platform behaves.
+  await page.evaluate((payload: number[]) => {
+    const shell = document.querySelector("gnumarus-shell");
+    if (shell === null) {
+      throw new Error("no shell");
+    }
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([new Uint8Array(payload)], "red.png", { type: "image/png" }));
+    let alive = true;
+    const snapFiles = Array.from(transfer.files);
+    const snapItems = Array.from(transfer.items);
+    Object.defineProperties(transfer, {
+      files: { get: () => (alive ? snapFiles : []) },
+      items: { get: () => (alive ? snapItems : []) },
+    });
+    queueMicrotask(() => {
+      alive = false;
+    });
+    shell.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+  }, bytes);
+  await expect(page.locator("gnumarus-shell")).toContainText("imported as layer", { timeout: 15000 });
+});
+
 test("dropping an image still imports when the file-system handle hangs @recent", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");

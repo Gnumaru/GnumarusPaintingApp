@@ -8280,18 +8280,23 @@ export class GnumarusShell extends LitElement {
     // files keep the import path below. Directories resolve first so a
     // mixed drop never both opens a project and imports into it.
     void (async (): Promise<void> => {
-      const items = Array.from(event.dataTransfer?.items ?? []);
+      // Snapshot the drag payload synchronously: Chromium releases OS drag
+      // data once the drop dispatch completes (items/files read back empty
+      // afterwards), so everything must be captured before the first await.
+      const transfer = event.dataTransfer;
+      const items = Array.from(transfer?.items ?? []);
+      const files = Array.from(transfer?.files ?? []);
+      const directoryWithoutHandle = hasDroppedDirectoryWithoutHandle(items);
       const dir = await getDroppedDirectoryHandle(items);
       if (dir !== null) {
         await this.openDroppedProjectDirectory(dir);
         return;
       }
-      if (hasDroppedDirectoryWithoutHandle(items)) {
+      if (directoryWithoutHandle) {
         this.statusMessage = tr("status.openNeedsFs");
         this.showToast(tr("status.openNeedsFs"));
         return;
       }
-      const files = Array.from(event.dataTransfer?.files ?? []);
       const project = files.find((file) => projectDropKind(file.name) !== null);
       if (project !== undefined) {
         const buffer = await project.arrayBuffer();
