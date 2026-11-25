@@ -251,6 +251,7 @@ import {
   layerPixelCenterToProject,
   layerRotate3,
   normalizeRotation,
+  orbitPanForRotation,
   proportionalResizeScale,
   projectToLayerImageFloat,
   projectToLayerPixel,
@@ -18739,7 +18740,20 @@ export class GnumarusCanvasEngine {
   }
 
   setRotation(radians: number): void {
-    this.rotation = normalizeRotation(radians);
+    const next = normalizeRotation(radians);
+    // Keep the pivot on the camera: orbit the pan by the applied delta so
+    // the viewport-center content stays put (gestures already measure their
+    // angle around the viewport center).
+    let delta = next - this.rotation;
+    if (delta > Math.PI) {
+      delta -= Math.PI * 2;
+    } else if (delta < -Math.PI) {
+      delta += Math.PI * 2;
+    }
+    const orbited = orbitPanForRotation(this.panX, this.panY, delta);
+    this.panX = orbited.panX;
+    this.panY = orbited.panY;
+    this.rotation = next;
     this.layoutScene();
     this.render();
     this.updatePreviews();

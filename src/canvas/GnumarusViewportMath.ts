@@ -232,6 +232,29 @@ export function projectToScreen(
 }
 
 /**
+ * Orbit a screen-space pan vector by a view-rotation delta (same matrix as
+ * the projection, y-down clockwise-positive). Rotating the view by `delta`
+ * while replacing `pan` with this result keeps the viewport-center content
+ * fixed: the composed transform equals a rotation about the camera center.
+ * Zero pan is a fixed point, so centered views are unaffected.
+ */
+export function orbitPanForRotation(
+  panX: number,
+  panY: number,
+  deltaRadians: number,
+): { panX: number; panY: number } {
+  if (!(Math.abs(deltaRadians) > 1e-12) || (panX === 0 && panY === 0)) {
+    return { panX, panY };
+  }
+  const cos = Math.cos(deltaRadians);
+  const sin = Math.sin(deltaRadians);
+  return {
+    panX: cos * panX - sin * panY,
+    panY: sin * panX + cos * panY,
+  };
+}
+
+/**
  * Map a client (CSS pixel) point to a layer's image pixel.
  * Returns null when outside the layer.
  */

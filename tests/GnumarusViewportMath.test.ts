@@ -20,6 +20,7 @@ import {
   layerPixelToScreen,
   layerRotate3,
   normalizeRotation,
+  orbitPanForRotation,
   parseWrapMode,
   proportionalResizeScale,
   wrapLayerPixel,
@@ -658,5 +659,28 @@ describe("grow-or-crop box helpers", () => {
     // Center and far points miss.
     expect(hitQuadHandles(quad.nw, quad.ne, quad.sw, quad.se, 150, 150)).toBeNull();
     expect(hitQuadHandles(quad.nw, quad.ne, quad.sw, quad.se, 10, 10)).toBeNull();
+  });
+});
+
+describe("orbitPanForRotation", () => {
+  it("leaves centered views and zero deltas alone", () => {
+    expect(orbitPanForRotation(0, 0, 1.2)).toEqual({ panX: 0, panY: 0 });
+    expect(orbitPanForRotation(30, -40, 0)).toEqual({ panX: 30, panY: -40 });
+  });
+
+  it("rotates the pan vector with the projection matrix", () => {
+    // Quarter turn: (x, y) -> (-y, x), like projectToScreen.
+    const quarter = orbitPanForRotation(30, 10, Math.PI / 2);
+    expect(quarter.panX).toBeCloseTo(-10, 9);
+    expect(quarter.panY).toBeCloseTo(30, 9);
+    // Half turn negates.
+    const half = orbitPanForRotation(30, 10, Math.PI);
+    expect(half.panX).toBeCloseTo(-30, 9);
+    expect(half.panY).toBeCloseTo(-10, 9);
+    // Magnitude is preserved for any angle.
+    const tilted = orbitPanForRotation(30, 10, 0.2618);
+    expect(Math.hypot(tilted.panX, tilted.panY)).toBeCloseTo(Math.hypot(30, 10), 9);
+    expect(tilted.panX).toBeCloseTo(30 * Math.cos(0.2618) - 10 * Math.sin(0.2618), 9);
+    expect(tilted.panY).toBeCloseTo(30 * Math.sin(0.2618) + 10 * Math.cos(0.2618), 9);
   });
 });

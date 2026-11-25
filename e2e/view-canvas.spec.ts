@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { GnumarusViewState, getViewState, loadBlankProject, openPicker, paintedPixelCount, readPixel, setBrushColor } from "./e2e-helpers";
+import { GnumarusViewState, canvasCenter, canvasScreenPixel, getViewState, layerScreenTarget, loadBlankProject, openPicker, paintDot, paintedPixelCount, readPixel, setBrushColor } from "./e2e-helpers";
 
 test("brush draws a solid pixel on the WebGL2 canvas", async ({ page }) => {
   await page.goto("/");
@@ -369,4 +369,48 @@ test("loupe Alt+middle-click resets the transform", async ({ page }) => {
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "middle" });
   await page.keyboard.up("Control");
   expect((await getViewState(page)).rotation).toBeCloseTo(1.2, 5);
+});
+
+test("rotating pivots around the viewport center, not the canvas @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  // Red corner pixel, then zoom in and pan it onto the viewport center.
+  await paintDot(page, "#ff0000", 8, 8);
+  await page.evaluate(() => {
+    const root = window as unknown as { __gnumarus?: { engine?: { setZoom(z: number): void } } };
+    root.__gnumarus?.engine?.setZoom(8);
+  });
+  const red = await layerScreenTarget(page, 8, 8);
+  const center = await canvasCenter(page);
+  await page.evaluate(([dx, dy]: number[]) => {
+    const root = window as unknown as { __gnumarus?: { engine?: { panBy(dx: number, dy: number): void } } };
+    root.__gnumarus?.engine?.panBy(dx ?? 0, dy ?? 0);
+  }, [center.x - red.x, center.y - red.y]);
+  const panOf = (): Promise<{ x: number; y: number }> =>
+    page.evaluate(() => {
+      const root = window as unknown as { __gnumarus?: { engine?: unknown } };
+      const engine = root.__gnumarus?.engine as unknown as { panX: number; panY: number };
+      return { x: engine.panX, y: engine.panY };
+    });
+  const centered = await canvasScreenPixel(page, center.x, center.y);
+  expect(centered.r).toBeGreaterThan(200);
+  expect(centered.g).toBeLessThan(60);
+  const panBefore = await panOf();
+  expect(Math.hypot(panBefore.x, panBefore.y)).toBeGreaterThan(50);
+  // One clockwise step: the centered corner stays centered, pan orbits.
+  await page.keyboard.press("6");
+  expect((await getViewState(page)).rotation).toBeCloseTo(Math.PI / 12, 2);
+  const turned = await canvasScreenPixel(page, center.x, center.y);
+  expect(turned.r).toBeGreaterThan(200);
+  expect(turned.g).toBeLessThan(60);
+  const panAfter = await panOf();
+  expect(Math.hypot(panAfter.x, panAfter.y)).toBeCloseTo(Math.hypot(panBefore.x, panBefore.y), 6);
+  expect(Math.hypot(panAfter.x - panBefore.x, panAfter.y - panBefore.y)).toBeGreaterThan(5);
+  // Resetting the angle keeps the centered content in place too.
+  await page.keyboard.press("5");
+  expect((await getViewState(page)).rotation).toBeCloseTo(0, 5);
+  const reset = await canvasScreenPixel(page, center.x, center.y);
+  expect(reset.r).toBeGreaterThan(200);
+  expect(reset.g).toBeLessThan(60);
 });
