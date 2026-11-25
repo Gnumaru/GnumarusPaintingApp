@@ -1745,7 +1745,11 @@ export class GnumarusCanvasEngine {
     this.previewSvg.style.pointerEvents = "none";
     this.previewSvg.style.display = "none";
     this.previewSvg.style.zIndex = "6";
-    this.previewSvg.style.overflow = "visible";
+    // Clip to the canvas box: every child is positioned in canvas-relative
+    // pixels, so anything past the edge (zoomed-in selection borders,
+    // rotated quads, grow boxes) must not paint over the cell matrix,
+    // the menus or the sidebars.
+    this.previewSvg.style.overflow = "hidden";
     this.previewShapeRect = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
     this.previewShapeRect.setAttribute("data-testid", "box-preview");
     this.previewShapeRect.setAttribute("fill", "none");
