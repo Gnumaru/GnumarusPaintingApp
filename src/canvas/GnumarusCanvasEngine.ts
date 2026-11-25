@@ -357,6 +357,8 @@ import {
 import {
   computeImageDiff,
   GnumarusHistory,
+  type GnumarusAddedFrameSnapshot,
+  type GnumarusAddedLayerSnapshot,
   type GnumarusFitRecord,
   type GnumarusHistoryEntry,
   type GnumarusMergedLayerSnapshot,
@@ -2666,6 +2668,7 @@ export class GnumarusCanvasEngine {
     if (!Number.isInteger(at) || at < 0 || at > this.frameCount) {
       return -1;
     }
+    const prevFrame = this.currentFrame;
     const name = `F${this.frameNameCounter++}`;
     this.cells = insertFrameCells(this.cells, at);
     this.frameDurations = insertFrameDurations(this.frameDurations, at);
@@ -2678,6 +2681,10 @@ export class GnumarusCanvasEngine {
       this.floating.frame += 1;
     }
     this.currentFrame = at;
+    this.history.push({
+      type: "addFrame",
+      addFrame: { frame: at, name, frameCount: this.frameCount, prevFrame },
+    });
     this.stabilizerPos = null;
     this.stabilizerTarget = null;
     this.stopFollowLoop();
@@ -7959,6 +7966,7 @@ export class GnumarusCanvasEngine {
     const id = `layer${this.layerCounter}`;
     const name = `L${this.layerCounter + 1}`;
     this.layerCounter += 1;
+    const prevActiveLayerId = this.activeLayerId === id ? null : this.activeLayerId;
     const layer = this.createLayerInternal(
       id,
       name,
@@ -7978,6 +7986,23 @@ export class GnumarusCanvasEngine {
     // and no texture is materialized until the user paints, resizes or picks
     // a content via the Select content menu.
     this.activeLayerId = id;
+    this.history.push({
+      type: "addLayer",
+      addLayer: {
+        id,
+        name,
+        visible: layer.visible,
+        opacity: layer.opacity,
+        blend: layer.blend,
+        width: layer.width,
+        height: layer.height,
+        lockedChannels: { ...layer.lockedChannels },
+        parentId: layer.parentId,
+        isMask: layer.isMask,
+        stackIndex: clamped,
+        prevActiveLayerId,
+      },
+    });
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
     this.render();
@@ -8134,6 +8159,123 @@ export class GnumarusCanvasEngine {
     this.activeLayerId = snapshot.id;
     this.syncAllLayerRenders();
     this.refreshLayerStacking();
+  }
+
+  /**
+   * Undo/redo helper for layer creation: remove restores the pre-creation
+   * state (dropping the layer), reinsert brings the blank layer back.
+   * Removal is id-keyed so it always targets the created layer; redo
+   * refuses when that id is already taken.
+   */
+  private applyAddedLayer(snapshot: GnumarusAddedLayerSnapshot, remove: boolean): boolean {
+    if (remove) {
+      if (this.findLayer(snapshot.id) === null || this.layers.length <= 1) {
+        return false;
+      }
+      if (!this.removeLayerFull(snapshot.id)) {
+        return false;
+      }
+      if (snapshot.prevActiveLayerId !== null && this.findLayer(snapshot.prevActiveLayerId) !== null) {
+        this.activeLayerId = snapshot.prevActiveLayerId;
+      }
+      this.refreshLayerStacking();
+      this.render();
+      return true;
+    }
+    if (this.findLayer(snapshot.id) !== null) {
+      return false;
+    }
+    const layer = this.createLayerInternal(
+      snapshot.id,
+      snapshot.name,
+      snapshot.visible,
+      snapshot.opacity,
+      createPixelBuffer(snapshot.width, snapshot.height),
+      snapshot.width,
+      snapshot.height,
+      { ...IDENTITY_LAYER_TRANSFORM },
+      { ...snapshot.lockedChannels },
+      snapshot.blend,
+      snapshot.parentId,
+      snapshot.isMask,
+    );
+    const at = Math.min(Math.max(0, snapshot.stackIndex), this.layers.length);
+    this.layers.splice(at, 0, layer);
+    this.activeLayerId = snapshot.id;
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    return true;
+  }
+
+  /** True when no cell entry references the given frame. */
+  private frameHasCells(frame: number): boolean {
+    for (const key of this.cells.keys()) {
+      const separator = key.lastIndexOf("\n");
+      if (Number.parseInt(key.slice(separator + 1), 10) === frame) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Undo/redo helper for frame creation: remove drops the frame (cells
+   * included, like manual deletion), reinsert restores the empty frame.
+   * The stored frame count guards against untracked structural changes
+   * (manual deletes); renames are tolerated on empty frames only.
+   */
+  private applyAddedFrame(snapshot: GnumarusAddedFrameSnapshot, remove: boolean): boolean {
+    if (remove) {
+      if (this.frameCount !== snapshot.frameCount) {
+        return false;
+      }
+      if (snapshot.frame < 0 || snapshot.frame >= this.frameCount) {
+        return false;
+      }
+      if (this.frameNames[snapshot.frame] !== snapshot.name && this.frameHasCells(snapshot.frame)) {
+        return false;
+      }
+      if (!this.removeFrame(snapshot.frame)) {
+        return false;
+      }
+      if (
+        snapshot.prevFrame >= 0 &&
+        snapshot.prevFrame < this.frameCount &&
+        snapshot.prevFrame !== this.currentFrame
+      ) {
+        this.setCurrentFrame(snapshot.prevFrame);
+      }
+      return true;
+    }
+    if (this.frameCount !== snapshot.frameCount - 1) {
+      return false;
+    }
+    if (snapshot.frame < 0 || snapshot.frame > this.frameCount) {
+      return false;
+    }
+    this.cells = insertFrameCells(this.cells, snapshot.frame);
+    this.frameDurations = insertFrameDurations(this.frameDurations, snapshot.frame);
+    this.frameNames = insertFrameNames(this.frameNames, snapshot.frame, snapshot.name);
+    this.namedAnimations = mapNamedAnimationFrames(this.namedAnimations, (frame) =>
+      frame >= snapshot.frame ? frame + 1 : frame,
+    );
+    this.frameCount += 1;
+    if (this.floating !== null && this.floating.frame >= snapshot.frame) {
+      this.floating.frame += 1;
+    }
+    this.currentFrame = snapshot.frame;
+    this.stabilizerPos = null;
+    this.stabilizerTarget = null;
+    this.stopFollowLoop();
+    this.resetBrushPixelPerfect();
+    this.syncAllLayerRenders();
+    this.refreshLayerStacking();
+    this.render();
+    this.emitStats();
+    this.updateSelectionOverlay();
+    this.onLayersChanged?.();
+    return true;
   }
 
   /**
@@ -18710,6 +18852,8 @@ export class GnumarusCanvasEngine {
       (tilemapId, tiles) => this.applyTilemapForHistory(tilemapId, tiles),
       (modelId, view) => this.applyModelViewForHistory(modelId, view),
       (snapshots) => this.applyRegionForHistory(snapshots),
+      (snapshot, remove) => this.applyAddedLayer(snapshot, remove),
+      (snapshot, remove) => this.applyAddedFrame(snapshot, remove),
     );
     if (!applied) {
       return false;
@@ -18745,6 +18889,8 @@ export class GnumarusCanvasEngine {
       (tilemapId, tiles) => this.applyTilemapForHistory(tilemapId, tiles),
       (modelId, view) => this.applyModelViewForHistory(modelId, view),
       (snapshots) => this.applyRegionForHistory(snapshots),
+      (snapshot, remove) => this.applyAddedLayer(snapshot, remove),
+      (snapshot, remove) => this.applyAddedFrame(snapshot, remove),
     );
     if (!applied) {
       return false;

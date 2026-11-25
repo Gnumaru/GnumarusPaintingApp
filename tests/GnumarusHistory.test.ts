@@ -5,6 +5,8 @@ import {
   applyImageDiff,
   computeImageDiff,
   GnumarusHistory,
+  type GnumarusAddedFrameSnapshot,
+  type GnumarusAddedLayerSnapshot,
   type GnumarusFitRecord,
   type GnumarusHistoryLayer,
 } from "../src/history/GnumarusHistory";
@@ -487,6 +489,112 @@ describe("GnumarusHistory", () => {
       ],
     });
     expect(history.undo(() => null, () => {}, undefined, () => false)).toBe(false);
+    expect(history.canUndo()).toBe(false);
+  });
+
+  it("undoes and redoes a layer creation", () => {
+    const history = new GnumarusHistory();
+    const layers = new Set<string>(["layer0"]);
+    const snapshot: GnumarusAddedLayerSnapshot = {
+      id: "layer1",
+      name: "L2",
+      visible: true,
+      opacity: 1,
+      blend: "normal" as const,
+      width: 4,
+      height: 4,
+      lockedChannels: { r: false, g: false, b: false, a: false },
+      parentId: null as string | null,
+      isMask: false,
+      stackIndex: 1,
+      prevActiveLayerId: "layer0" as string | null,
+    };
+    layers.add("layer1");
+    history.push({ type: "addLayer", addLayer: snapshot });
+    const calls: string[] = [];
+    const applyAddedLayer = (entry: GnumarusAddedLayerSnapshot, remove: boolean): boolean => {
+      calls.push(`${entry.id}:${remove ? "remove" : "reinsert"}`);
+      if (remove) {
+        if (!layers.has(entry.id)) {
+          return false;
+        }
+        layers.delete(entry.id);
+        return true;
+      }
+      if (layers.has(entry.id)) {
+        return false;
+      }
+      layers.add(entry.id);
+      return true;
+    };
+    const undoArgs = undefined;
+    expect(history.undo(() => null, () => {}, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, applyAddedLayer, undefined)).toBe(true);
+    expect(layers.has("layer1")).toBe(false);
+    expect(calls).toEqual(["layer1:remove"]);
+    expect(history.redo(() => null, () => {}, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, applyAddedLayer, undefined)).toBe(true);
+    expect(layers.has("layer1")).toBe(true);
+    expect(calls).toEqual(["layer1:remove", "layer1:reinsert"]);
+    // Redo refuses when the id is already taken.
+    history.push({ type: "addLayer", addLayer: snapshot });
+    expect(history.undo(() => null, () => {}, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, applyAddedLayer, undefined)).toBe(true);
+    expect(layers.has("layer1")).toBe(false);
+    layers.add("layer1");
+    expect(history.redo(() => null, () => {}, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, applyAddedLayer, undefined)).toBe(false);
+  });
+
+  it("skips undoing a layer creation when the layer is gone", () => {
+    const history = new GnumarusHistory();
+    history.push({
+      type: "addLayer",
+      addLayer: {
+        id: "gone",
+        name: "Gone",
+        visible: true,
+        opacity: 1,
+        blend: "normal" as const,
+        width: 4,
+        height: 4,
+        lockedChannels: { r: false, g: false, b: false, a: false },
+        parentId: null,
+        isMask: false,
+        stackIndex: 0,
+        prevActiveLayerId: null,
+      },
+    });
+    expect(history.undo(() => null, () => {}, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => false, undefined)).toBe(false);
+    expect(history.canUndo()).toBe(false);
+  });
+
+  it("undoes and redoes a frame creation", () => {
+    const history = new GnumarusHistory();
+    let frames = 3;
+    const snapshot = { frame: 1, name: "F2", frameCount: 3, prevFrame: 0 };
+    history.push({ type: "addFrame", addFrame: snapshot });
+    const calls: string[] = [];
+    const applyAddedFrame = (entry: GnumarusAddedFrameSnapshot, remove: boolean): boolean => {
+      calls.push(`${entry.frame}:${remove ? "remove" : "reinsert"}`);
+      if (remove) {
+        frames -= 1;
+        return true;
+      }
+      frames += 1;
+      return true;
+    };
+    const undoArgs = undefined;
+    expect(history.undo(() => null, () => {}, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, applyAddedFrame)).toBe(true);
+    expect(frames).toBe(2);
+    expect(calls).toEqual(["1:remove"]);
+    expect(history.redo(() => null, () => {}, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, undoArgs, applyAddedFrame)).toBe(true);
+    expect(frames).toBe(3);
+    expect(calls).toEqual(["1:remove", "1:reinsert"]);
+  });
+
+  it("skips undoing a frame creation after structural drift", () => {
+    const history = new GnumarusHistory();
+    history.push({ type: "addFrame", addFrame: { frame: 1, name: "F2", frameCount: 3, prevFrame: 0 } });
+    // Engine-level validation rejects stale indices, surfaced here as false.
+    const applyAddedFrame = (): boolean => false;
+    expect(history.undo(() => null, () => {}, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, applyAddedFrame)).toBe(false);
     expect(history.canUndo()).toBe(false);
   });
 });

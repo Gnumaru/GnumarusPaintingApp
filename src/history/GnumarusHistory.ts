@@ -198,6 +198,35 @@ export interface GnumarusRegionRecord {
   regions: GnumarusRegionChange[];
 }
 
+/** Snapshot of a freshly created (hence empty) layer for addLayer undo/redo. */
+export interface GnumarusAddedLayerSnapshot {
+  id: string;
+  name: string;
+  visible: boolean;
+  opacity: number;
+  blend: GnumarusLayerBlendMode;
+  width: number;
+  height: number;
+  lockedChannels: GnumarusChannelLock;
+  parentId: string | null;
+  isMask: boolean;
+  /** Stack position at creation (clamped again on redo). */
+  stackIndex: number;
+  /** Active layer before creation (restored on undo when still present). */
+  prevActiveLayerId: string | null;
+}
+
+/** Snapshot of a freshly inserted frame for addFrame undo/redo. */
+export interface GnumarusAddedFrameSnapshot {
+  /** Frame index right after insertion. */
+  frame: number;
+  name: string;
+  /** Frame count right after insertion (guards against untracked deletes). */
+  frameCount: number;
+  /** Current frame before insertion (restored on undo when still valid). */
+  prevFrame: number;
+}
+
 export type GnumarusHistoryEntry =
   | { type: "stroke"; layerId: string; diff: GnumarusImageDiff }
   | { type: "merge"; merge: GnumarusMergeRecord }
@@ -208,7 +237,9 @@ export type GnumarusHistoryEntry =
   | { type: "text"; text: GnumarusTextRecord }
   | { type: "tilemap"; tilemap: GnumarusTilemapRecord }
   | { type: "model3d-view"; view: GnumarusModelViewRecord }
-  | { type: "region"; region: GnumarusRegionRecord };
+  | { type: "region"; region: GnumarusRegionRecord }
+  | { type: "addLayer"; addLayer: GnumarusAddedLayerSnapshot }
+  | { type: "addFrame"; addFrame: GnumarusAddedFrameSnapshot };
 
 export interface GnumarusHistoryLayer {
   buffer: Uint8ClampedArray;
@@ -271,6 +302,8 @@ export class GnumarusHistory {
     applyTilemap?: (tilemapId: string, tiles: GnumarusTilePlacement[]) => boolean,
     applyModelView?: (modelId: string, view: GnumarusModel3dView) => boolean,
     applyRegion?: (snapshots: Array<{ id: string; snapshot: GnumarusRegionSnapshot | null }>) => boolean,
+    applyAddedLayer?: (snapshot: GnumarusAddedLayerSnapshot, remove: boolean) => boolean,
+    applyAddedFrame?: (snapshot: GnumarusAddedFrameSnapshot, remove: boolean) => boolean,
   ): boolean {
     for (;;) {
       const entry = this.undoStack.pop();
@@ -402,6 +435,20 @@ export class GnumarusHistory {
         this.redoStack.push(entry);
         return true;
       }
+      if (entry.type === "addLayer") {
+        if (applyAddedLayer === undefined || !applyAddedLayer(entry.addLayer, true)) {
+          continue;
+        }
+        this.redoStack.push(entry);
+        return true;
+      }
+      if (entry.type === "addFrame") {
+        if (applyAddedFrame === undefined || !applyAddedFrame(entry.addFrame, true)) {
+          continue;
+        }
+        this.redoStack.push(entry);
+        return true;
+      }
       const needsAssociate = !entry.merge.removedLayer;
       if (needsAssociate && associateCell === undefined) {
         continue;
@@ -464,6 +511,8 @@ export class GnumarusHistory {
     applyTilemap?: (tilemapId: string, tiles: GnumarusTilePlacement[]) => boolean,
     applyModelView?: (modelId: string, view: GnumarusModel3dView) => boolean,
     applyRegion?: (snapshots: Array<{ id: string; snapshot: GnumarusRegionSnapshot | null }>) => boolean,
+    applyAddedLayer?: (snapshot: GnumarusAddedLayerSnapshot, remove: boolean) => boolean,
+    applyAddedFrame?: (snapshot: GnumarusAddedFrameSnapshot, remove: boolean) => boolean,
   ): boolean {
     for (;;) {
       const entry = this.redoStack.pop();
@@ -582,6 +631,20 @@ export class GnumarusHistory {
       }
       if (entry.type === "model3d-view") {
         if (applyModelView === undefined || !applyModelView(entry.view.modelId, entry.view.after)) {
+          continue;
+        }
+        this.undoStack.push(entry);
+        return true;
+      }
+      if (entry.type === "addLayer") {
+        if (applyAddedLayer === undefined || !applyAddedLayer(entry.addLayer, false)) {
+          continue;
+        }
+        this.undoStack.push(entry);
+        return true;
+      }
+      if (entry.type === "addFrame") {
+        if (applyAddedFrame === undefined || !applyAddedFrame(entry.addFrame, false)) {
           continue;
         }
         this.undoStack.push(entry);

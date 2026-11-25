@@ -2843,6 +2843,8 @@ export class GnumarusShell extends LitElement {
   private shortcutSpaceDown = false;
   /** Currently held main keys (lowercased key or code) for drag-gesture matching. */
   private shortcutHeldKeys = new Set<string>();
+  /** Last non-none grayscale mode (restored by the toggle shortcut/action). */
+  private lastGrayscaleMode: GnumarusGrayscaleMode = "luma";
 
   constructor() {
     super();
@@ -9247,6 +9249,14 @@ export class GnumarusShell extends LitElement {
       }
       return;
     }
+    if (this.matchesShortcut("view-toggle-grayscale", event)) {
+      if (inField || inPicker || dialogOpen || adjustOpen) {
+        return;
+      }
+      event.preventDefault();
+      this.toggleGrayscale();
+      return;
+    }
     if (
       this.tool === "flycam" &&
       !inField &&
@@ -9943,6 +9953,14 @@ export class GnumarusShell extends LitElement {
       },
     });
     this.actionRegistry.register({
+      id: "toggle-grayscale",
+      name: tr("action.toggleGrayscale"),
+      requirements: [],
+      run: (): void => {
+        this.toggleGrayscale();
+      },
+    });
+    this.actionRegistry.register({
       id: "licenses",
       name: tr("action.showLicenses"),
       requirements: [],
@@ -10266,6 +10284,7 @@ export class GnumarusShell extends LitElement {
       "edit-adjust-colors": "adjust-colors",
       "edit-reset-transform": "reset-canvas-transform",
       "edit-merge-down": "merge-down",
+      "view-toggle-grayscale": "toggle-grayscale",
       "action-fit-all": "fit-all-textures-to-size",
       "action-crop-all": "crop-all-cells-to-canvas",
       "action-new-animation": "new-animation",
@@ -10389,6 +10408,7 @@ export class GnumarusShell extends LitElement {
       "view-live-resize": "sc.liveResize",
       "view-transform-proportional": "sc.transformProportional",
       "view-drawer-flyout": "sc.drawerFlyout",
+      "view-toggle-grayscale": "sc.toggleGrayscale",
     };
     const scKey = scMap[id];
     if (scKey !== undefined) {
@@ -12716,7 +12736,14 @@ export class GnumarusShell extends LitElement {
    */
   private applyGrayscaleFromDialog(): void {
     const select = this.shadowRoot?.getElementById("grayscaleMode") as HTMLSelectElement | null;
-    const mode = parseGrayscaleMode(select?.value ?? "none");
+    this.setGrayscale(parseGrayscaleMode(select?.value ?? "none"));
+  }
+
+  /** Shared grayscale switch for the dropdown, the toggle action and shortcuts. */
+  private setGrayscale(mode: GnumarusGrayscaleMode): void {
+    if (mode !== "none") {
+      this.lastGrayscaleMode = mode;
+    }
     const activating = mode !== "none" && this.grayscale === "none";
     this.grayscale = mode;
     this.engine?.setGrayscaleMode(mode);
@@ -12725,6 +12752,11 @@ export class GnumarusShell extends LitElement {
     }
     this.statusMessage = tr("status.grayscale", { value: this.grayscaleLabel(mode) });
     void this.refreshPreview();
+  }
+
+  /** Toggle the grayscale preview: off becomes the last used mode and back. */
+  private toggleGrayscale(): void {
+    this.setGrayscale(this.grayscale === "none" ? this.lastGrayscaleMode : "none");
   }
 
   /** Human label for a grayscale preview mode. */

@@ -7,6 +7,7 @@ import {
   loadBlankProject,
   paintDot,
   readPixel,
+  runPaletteAction,
   setBrushColor,
 } from "./e2e-helpers";
 
@@ -97,4 +98,36 @@ test("grayscale locks painting, frame switches and playback", async ({ page }) =
   await grayscaleSelect(page).selectOption("none");
   await page.keyboard.press("ArrowRight");
   expect(await getMatrixFrame(page)).toBe((frozen + 1) % 2);
+});
+
+test("ctrl+g toggles grayscale and remembers the last mode", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await paintDot(page, "#ff0000", 10, 10);
+  const select = grayscaleSelect(page);
+  await page.keyboard.press("Control+g");
+  await expect(select).toHaveValue("luma");
+  const gray = await screenAt(page, 10, 10);
+  expect(gray.r).toBe(gray.g);
+  expect(gray.g).toBe(gray.b);
+  await page.keyboard.press("Control+g");
+  await expect(select).toHaveValue("none");
+  // The toggle restores the last non-none mode instead of always luma.
+  await select.selectOption("cielab");
+  await page.keyboard.press("Control+g");
+  await expect(select).toHaveValue("none");
+  await page.keyboard.press("Control+g");
+  await expect(select).toHaveValue("cielab");
+});
+
+test("toggle grayscale run action flips the preview", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  const select = grayscaleSelect(page);
+  await runPaletteAction(page, "toggle grayscale");
+  await expect(select).toHaveValue("luma");
+  await runPaletteAction(page, "toggle grayscale");
+  await expect(select).toHaveValue("none");
 });

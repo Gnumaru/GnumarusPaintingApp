@@ -201,6 +201,7 @@ export const GNUMARUS_DEFAULT_SHORTCUTS: GnumarusShortcutDef[] = [
   { id: "view-live-resize", keyboard: k("", { shift: true }), mouse: "left-drag" },
   { id: "view-transform-proportional", keyboard: k("", { alt: true }), mouse: "left-drag-handle" },
   { id: "view-drawer-flyout", keyboard: NONE, mouse: "right-click" },
+  { id: "view-toggle-grayscale", keyboard: k("g", { ctrl: true }), mouse: "" },
   { id: "tool-brush-resize-wheel", keyboard: k("", { ctrl: true }), mouse: "wheel" },
   // Flycam mode keys (exclusive: flycam owns every plain key while active).
   { id: "flycam-forward", keyboard: k("w"), mouse: "", allowOverlap: true },

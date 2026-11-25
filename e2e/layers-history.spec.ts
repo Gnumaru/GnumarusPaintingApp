@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { imageToScreenPixel, layerPixelToScreen } from "../src/canvas/GnumarusViewportMath";
-import { GnumarusViewState, getLayers, getViewState, loadBlankProject, paintCenter, readPixel, setEmptyCellHold, setBrushColor } from "./e2e-helpers";
+import { GnumarusViewState, animationFrameCount, getLayers, getViewState, loadBlankProject, paintCenter, readPixel, setEmptyCellHold, setBrushColor } from "./e2e-helpers";
 
 test("undo and redo restore image pixels via menu and shortcuts", async ({ page }) => {
   await page.goto("/");
@@ -701,4 +701,39 @@ test("layer resize reaches 1920x1080 canvas sizes @recent", async ({ page }) => 
   await page.getByRole("button", { name: "Resize", exact: true }).click();
   expect(await dimsOf()).toMatchObject({ width: 1920, height: 1024 });
   await expect(row0).toContainText("1920×1024");
+});
+
+test("creating a layer is undone and redone", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await page.getByRole("button", { name: "Add layer" }).click();
+  expect((await getLayers(page)).layers.map((layer) => layer.id)).toEqual(["layer0", "layer1"]);
+
+  await page.keyboard.press("Control+z");
+  expect((await getLayers(page)).layers.map((layer) => layer.id)).toEqual(["layer0"]);
+  expect((await getLayers(page)).active).toBe("layer0");
+  await expect(page.locator("gnumarus-shell")).toContainText("Undo");
+
+  await page.keyboard.press("Control+y");
+  expect((await getLayers(page)).layers.map((layer) => layer.id)).toEqual(["layer0", "layer1"]);
+  expect((await getLayers(page)).active).toBe("layer1");
+  await expect(page.locator("gnumarus-shell")).toContainText("Redo");
+});
+
+test("adding a frame is undone and redone", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
+  await matrix.getByRole("button", { name: "Add frame", exact: true }).click();
+  expect(await animationFrameCount(page)).toBe(2);
+
+  await page.keyboard.press("Control+z");
+  expect(await animationFrameCount(page)).toBe(1);
+  await expect(page.locator("gnumarus-shell")).toContainText("Undo");
+
+  await page.keyboard.press("Control+y");
+  expect(await animationFrameCount(page)).toBe(2);
+  await expect(page.locator("gnumarus-shell")).toContainText("Redo");
 });
