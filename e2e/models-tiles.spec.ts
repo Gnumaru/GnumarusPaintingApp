@@ -432,6 +432,7 @@ test("3d model transform wheel up zooms in and wheel down zooms out @recent", as
   await stubModelPicker(page, "tri.stl", SIMPLE_STL);
   await page.getByRole("button", { name: "File" }).click();
   await page.getByRole("button", { name: "Import 3D Model as layer" }).click();
+  await expect(page.locator("gnumarus-shell")).toContainText("imported");
   const modelId = await cellModel3dId(page, "layer0", 0);
   expect(typeof modelId).toBe("string");
   const before = await modelViewOf(page, modelId as string);

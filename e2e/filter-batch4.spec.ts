@@ -113,7 +113,7 @@ test("levels low clamps and resets @recent", async ({ page }) => {
   await popup.locator('[data-testid="filter-param-low-num"]').fill("100");
   await expect(popup.locator('[data-testid="filter-param-low-reset"]')).toHaveCount(1);
   await popup.locator('[data-testid="filter-param-low-reset"]').click();
-  expect(await popup.locator('[data-testid="filter-param-low"]')).toHaveValue("0");
+  await expect(popup.locator('[data-testid="filter-param-low"]')).toHaveValue("0");
   await page.keyboard.press("Escape");
   await expect(popup).toBeHidden();
 });

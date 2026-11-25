@@ -63,7 +63,7 @@ test("propagate-colors distance clamps and resets @recent", async ({ page }) => 
   await popup.locator('[data-testid="filter-param-distance-num"]').fill("20");
   await expect(popup.locator('[data-testid="filter-param-distance-reset"]')).toHaveCount(1);
   await popup.locator('[data-testid="filter-param-distance-reset"]').click();
-  expect(await popup.locator('[data-testid="filter-param-distance"]')).toHaveValue("8");
+  await expect(popup.locator('[data-testid="filter-param-distance"]')).toHaveValue("8");
   await page.keyboard.press("Escape");
   await expect(popup).toBeHidden();
 });

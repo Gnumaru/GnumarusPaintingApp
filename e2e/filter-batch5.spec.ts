@@ -114,7 +114,7 @@ test("selective-blur maxDelta clamps and resets @recent", async ({ page }) => {
   await popup.locator('[data-testid="filter-param-maxDelta-num"]').fill("200");
   await expect(popup.locator('[data-testid="filter-param-maxDelta-reset"]')).toHaveCount(1);
   await popup.locator('[data-testid="filter-param-maxDelta-reset"]').click();
-  expect(await popup.locator('[data-testid="filter-param-maxDelta"]')).toHaveValue("50");
+  await expect(popup.locator('[data-testid="filter-param-maxDelta"]')).toHaveValue("50");
   await page.keyboard.press("Escape");
   await expect(popup).toBeHidden();
 });

@@ -328,7 +328,7 @@ test("crop tool crops the cell texture to the dragged box @recent", async ({ pag
   const dims = await textureDims(page);
   expect(dims.width).toBeLessThan(64);
   expect(dims.height).toBeLessThan(64);
-  expect(await page.locator("gnumarus-shell")).toContainText(`Texture cropped to ${dims.width} x ${dims.height}`);
+  await expect(page.locator("gnumarus-shell")).toContainText(`Texture cropped to ${dims.width} x ${dims.height}`);
   await page.keyboard.press("Control+z");
   expect(await textureDims(page)).toEqual({ width: 64, height: 64 });
 });

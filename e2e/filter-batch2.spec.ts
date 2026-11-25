@@ -144,7 +144,7 @@ test("color-balance param round-trips and resets @recent", async ({ page }) => {
   await popup.locator('[data-testid="filter-param-cyanRed-num"]').fill("100");
   await expect(popup.locator('[data-testid="filter-param-cyanRed-reset"]')).toHaveCount(1);
   await popup.locator('[data-testid="filter-param-cyanRed-reset"]').click();
-  expect(await popup.locator('[data-testid="filter-param-cyanRed"]')).toHaveValue("0");
+  await expect(popup.locator('[data-testid="filter-param-cyanRed"]')).toHaveValue("0");
   await page.keyboard.press("Escape");
   await expect(popup).toBeHidden();
 });

@@ -148,7 +148,7 @@ test("mono-mixer param round-trips and resets @recent", async ({ page }) => {
   await popup.locator('[data-testid="filter-param-red-num"]').fill("100");
   await expect(popup.locator('[data-testid="filter-param-red-reset"]')).toHaveCount(1);
   await popup.locator('[data-testid="filter-param-red-reset"]').click();
-  expect(await popup.locator('[data-testid="filter-param-red"]')).toHaveValue("34");
+  await expect(popup.locator('[data-testid="filter-param-red"]')).toHaveValue("34");
   await page.keyboard.press("Escape");
   await expect(popup).toBeHidden();
 });

@@ -229,8 +229,10 @@ test("forward playback follows the animation order and skips other frames", asyn
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
   await matrix.getByRole("button", { name: "Play animation", exact: true }).click();
   // Custom order 3,1: from frame 1 the next shown frame is 3, then 1 again.
-  await expect.poll(async () => getMatrixFrame(page), { timeout: 5000 }).toBe(2);
-  await expect.poll(async () => getMatrixFrame(page), { timeout: 5000 }).toBe(0);
+  // Dense polls: frames flip every ~250ms, so the default poll backoff
+  // (100/250/500/1000ms) aliases and can miss a frame window under load.
+  await expect.poll(async () => getMatrixFrame(page), { timeout: 10000, intervals: [50] }).toBe(2);
+  await expect.poll(async () => getMatrixFrame(page), { timeout: 10000, intervals: [50] }).toBe(0);
   await matrix.getByRole("button", { name: "Stop animation", exact: true }).click();
   await expect(matrix.getByRole("button", { name: "Play animation", exact: true })).toBeVisible();
 });
@@ -243,7 +245,7 @@ test("a none animation stops after its last frame", async ({ page }) => {
   await selectAnimation(page, "once");
   const matrix = page.locator('gnumarus-shell [data-testid="animation-matrix"]');
   await matrix.getByRole("button", { name: "Play animation", exact: true }).click();
-  await expect.poll(async () => getMatrixFrame(page), { timeout: 5000 }).toBe(1);
+  await expect.poll(async () => getMatrixFrame(page), { timeout: 10000, intervals: [50] }).toBe(1);
   await expect(matrix.getByRole("button", { name: "Play animation", exact: true })).toBeVisible();
   await page.waitForTimeout(400);
   expect(await getMatrixFrame(page)).toBe(1);
