@@ -60,3 +60,29 @@ test("rotate canvas tool turns with the right and middle buttons", async ({ page
   expect(Math.abs((await getViewState(page)).rotation)).toBeGreaterThan(Math.abs(afterRight));
   expect(await paintedPixelCount(page)).toBe(0);
 });
+
+test("rotate canvas tool pans while space is held @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await selectTool(page, "Rotate canvas");
+  const panX = (): Promise<number> =>
+    page.evaluate(() => {
+      const root = window as unknown as { __gnumarus?: { engine?: { panX: number } } };
+      // TS-private, runtime-readable (same pattern as the history depth probes).
+      return (root.__gnumarus?.engine as unknown as { panX: number } | undefined)?.panX ?? NaN;
+    });
+  const before = await panX();
+  const center = await canvasCenter(page);
+  await page.keyboard.down("Space");
+  await page.mouse.move(center.x, center.y);
+  await page.mouse.down();
+  await page.mouse.move(center.x + 80, center.y, { steps: 5 });
+  await page.mouse.up();
+  await page.keyboard.up("Space");
+  // Pans like every other tool instead of rotating.
+  expect((await getViewState(page)).rotation).toBeCloseTo(0, 5);
+  expect((await panX()) - before).toBeGreaterThan(40);
+  expect(await paintedPixelCount(page)).toBe(0);
+  await expect(page.locator("gnumarus-shell")).toContainText("rotate canvas");
+});

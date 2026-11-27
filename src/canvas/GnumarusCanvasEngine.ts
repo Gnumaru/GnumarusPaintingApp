@@ -19949,10 +19949,14 @@ export class GnumarusCanvasEngine {
         canvas.setPointerCapture(event.pointerId);
         return;
       }
-      if (this.tool === "rotatecanvas" && (event.button === 0 || event.button === 1 || event.button === 2)) {
+      if (
+        this.tool === "rotatecanvas" &&
+        (event.button === 0 || event.button === 1 || event.button === 2) &&
+        !(this.spaceDown && this.gestureModifiersSatisfied("view-pan", event))
+      ) {
         // The rotate-canvas tool turns the canvas view with any mouse
-        // button, like Shift+Space+left-drag, ignoring every modifier and
-        // the space bar.
+        // button, like Shift+Space+left-drag, ignoring every modifier —
+        // except the space bar: Space+drag pans like with every other tool.
         const angle = this.pointerAngle(event.clientX, event.clientY);
         if (angle === null) {
           return;
