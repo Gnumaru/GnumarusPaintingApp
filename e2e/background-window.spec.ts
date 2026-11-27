@@ -14,6 +14,15 @@ test("background button opens a draggable window and closes it @recent", async (
   await loadBlankProject(page, 64);
   const bgWindow = await openBackgroundWindow(page);
   await expect(bgWindow).toContainText("Background");
+  // Opens already tall/wide enough for its rows: no scrollbar needed.
+  const overflow = await bgWindow.evaluate((element) => ({
+    scrollHeight: (element as HTMLElement).scrollHeight,
+    clientHeight: (element as HTMLElement).clientHeight,
+    scrollWidth: (element as HTMLElement).scrollWidth,
+    clientWidth: (element as HTMLElement).clientWidth,
+  }));
+  expect(overflow.scrollHeight).toBeLessThanOrEqual(overflow.clientHeight);
+  expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
   const box = await bgWindow.boundingBox();
   expect(box).not.toBeNull();
   const header = bgWindow.locator(".preview-header");
@@ -27,6 +36,25 @@ test("background button opens a draggable window and closes it @recent", async (
   await page.mouse.up();
   const moved = await bgWindow.boundingBox();
   expect(moved?.x).toBeGreaterThan((box?.x ?? 0) + 30);
+  // A user resize survives dragging: re-renders only touch the outer
+  // positioning anchor, never the inner window dimensions.
+  await bgWindow.evaluate((element) => {
+    (element as HTMLElement).style.width = "420px";
+    (element as HTMLElement).style.height = "360px";
+  });
+  const resized = await bgWindow.boundingBox();
+  expect(resized?.width).toBeCloseTo(422, -1);
+  const headerBox2 = await header.boundingBox();
+  if (headerBox2 === null) {
+    throw new Error("background window header lost its bounding box");
+  }
+  await page.mouse.move(headerBox2.x + headerBox2.width / 2, headerBox2.y + headerBox2.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(headerBox2.x + headerBox2.width / 2 + 40, headerBox2.y + headerBox2.height / 2 + 30, { steps: 5 });
+  await page.mouse.up();
+  const kept = await bgWindow.boundingBox();
+  expect(kept?.width).toBeCloseTo(422, -1);
+  expect(kept?.height).toBeCloseTo(362, -1);
   await bgWindow.getByRole("button", { name: "Close", exact: true }).click();
   await expect(bgWindow).toBeHidden();
 });

@@ -58,6 +58,26 @@ test("tool options window drags by its header and closes", async ({ page }) => {
   }
   expect(Math.round(boxAfter.x - boxBefore.x)).toBe(60);
   expect(Math.round(boxAfter.y - boxBefore.y)).toBe(40);
+  // A user resize survives dragging: re-renders only touch the outer
+  // positioning anchor, never the inner window dimensions.
+  await win.evaluate((element) => {
+    (element as HTMLElement).style.width = "420px";
+    (element as HTMLElement).style.height = "360px";
+  });
+  const headerBox2 = await header.boundingBox();
+  if (headerBox2 === null) {
+    throw new Error("tool options window header lost its bounding box");
+  }
+  await page.mouse.move(headerBox2.x + headerBox2.width / 2, headerBox2.y + headerBox2.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(headerBox2.x + headerBox2.width / 2 + 40, headerBox2.y + headerBox2.height / 2 + 30, { steps: 5 });
+  await page.mouse.up();
+  const boxKept = await win.boundingBox();
+  if (boxKept === null) {
+    throw new Error("tool options window lost its bounding box");
+  }
+  expect(boxKept.width).toBeCloseTo(422, -1);
+  expect(boxKept.height).toBeCloseTo(362, -1);
   await win.getByRole("button", { name: "Close" }).click();
   await expect(win).toBeHidden();
   await bar.getByRole("button", { name: "Tool options" }).click();

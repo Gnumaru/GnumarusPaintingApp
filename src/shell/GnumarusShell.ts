@@ -1451,6 +1451,24 @@ export class GnumarusShell extends LitElement {
       resize: both;
       box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
     }
+    /* Opt-in content sizing for floating option windows: the window opens
+    just big enough for its rows (up to the maxima above) instead of the
+    fixed 264x288 box. Manual resizes still work and are preserved because
+    re-renders only ever touch the outer positioning anchor below. */
+    .preview-window.size-auto {
+      width: auto;
+      height: auto;
+      max-width: 80vw;
+      max-height: 80vh;
+    }
+    /* Positioning anchor for draggable floating windows. Lit rewrites this
+    style attribute on every render (drag moves, live edits), so the inner
+    .preview-window keeps any user-resized dimensions: native CSS resizes
+    write inline width/height on the inner node, which no binding touches. */
+    .float-anchor {
+      position: absolute;
+      z-index: 30;
+    }
     .preview-header {
       display: flex;
       align-items: center;
@@ -16976,12 +16994,8 @@ export class GnumarusShell extends LitElement {
   /** Floating window with the active tool's options, stacked vertically. */
   private renderToolOptionsWindow() {
     return html`
-      <div
-        class="preview-window"
-        style="left: ${this.toolOptionsWindowX}px; top: ${this.toolOptionsWindowY}px;"
-        data-testid="tool-options-float"
-        ?hidden=${this.uiHidden}
-      >
+      <div class="float-anchor" style="left: ${this.toolOptionsWindowX}px; top: ${this.toolOptionsWindowY}px;" ?hidden=${this.uiHidden}>
+        <div class="preview-window size-auto" data-testid="tool-options-float">
         <div class="preview-header" @pointerdown=${(event: PointerEvent): void => this.onToolOptionsWindowDragStart(event)}>
           <span>${this.toolDisplayName(this.tool)}</span>
           <span class="spacer"></span>
@@ -16996,6 +17010,7 @@ export class GnumarusShell extends LitElement {
           </button>
         </div>
         ${this.renderToolOptions("Window")}
+        </div>
       </div>
     `;
   }
@@ -17003,26 +17018,23 @@ export class GnumarusShell extends LitElement {
   /** Floating shortcut to the canvas background settings (same rows as Edit > Settings). */
   private renderBackgroundWindow() {
     return html`
-      <div
-        class="preview-window"
-        style="left: ${this.backgroundWindowX}px; top: ${this.backgroundWindowY}px;"
-        data-testid="background-window"
-        ?hidden=${this.uiHidden}
-      >
-        <div class="preview-header" @pointerdown=${(event: PointerEvent): void => this.onBackgroundWindowDragStart(event)}>
-          <span>${tr("setting.background")}</span>
-          <span class="spacer"></span>
-          <button
-            aria-label=${tr("btn.close")}
-            title=${tr("btn.close")}
-            @click=${(): void => {
-              this.backgroundWindowOpen = false;
-            }}
-          >
-            ×
-          </button>
+      <div class="float-anchor" style="left: ${this.backgroundWindowX}px; top: ${this.backgroundWindowY}px;" ?hidden=${this.uiHidden}>
+        <div class="preview-window size-auto" data-testid="background-window">
+          <div class="preview-header" @pointerdown=${(event: PointerEvent): void => this.onBackgroundWindowDragStart(event)}>
+            <span>${tr("setting.background")}</span>
+            <span class="spacer"></span>
+            <button
+              aria-label=${tr("btn.close")}
+              title=${tr("btn.close")}
+              @click=${(): void => {
+                this.backgroundWindowOpen = false;
+              }}
+            >
+              ×
+            </button>
+          </div>
+          <div class="adjust-body">${this.renderBackgroundSettingsRows("Bg")}</div>
         </div>
-        <div class="adjust-body">${this.renderBackgroundSettingsRows("Bg")}</div>
       </div>
     `;
   }
