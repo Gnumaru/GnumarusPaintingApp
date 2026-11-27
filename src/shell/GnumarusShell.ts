@@ -577,6 +577,27 @@ export interface GnumarusToolDrawerDef {
   tools: GnumarusCanvasTool[];
 }
 
+/** Floating draggable windows sharing one Esc/focus/z-order manager. */
+export type GnumarusFloatWindowId =
+  | "preview"
+  | "bc"
+  | "hs"
+  | "filter"
+  | "tile"
+  | "tooloptions"
+  | "background";
+
+/** Canonical float-window order (only used to break ties between windows opened in the same frame). */
+const GNUMARUS_FLOAT_IDS: readonly GnumarusFloatWindowId[] = [
+  "preview",
+  "bc",
+  "hs",
+  "filter",
+  "tile",
+  "tooloptions",
+  "background",
+];
+
 export const GNUMARUS_TOOL_DRAWERS: GnumarusToolDrawerDef[] = [
   { id: "paint", tools: ["brush", "line", "curve"] },
   { id: "shape", tools: ["rectangle", "ellipseShape", "polygon", "gradient"] },
@@ -1432,6 +1453,12 @@ export class GnumarusShell extends LitElement {
     .reset-btn:hover {
       background: #0e639c;
       border-color: #0e639c;
+    }
+    .preview-window.float-focused {
+      border-color: #66ccff;
+    }
+    .preview-window.float-focused > .preview-header {
+      background: #0e639c;
     }
     .preview-window {
       position: absolute;
@@ -2329,6 +2356,7 @@ export class GnumarusShell extends LitElement {
     toolOptionsWindowX: { type: Number },
     backgroundWindowX: { type: Number },
     tileWindowY: { type: Number },
+    floatTrail: { type: Array },
     toolOptionsWindowY: { type: Number },
     backgroundWindowY: { type: Number },
     textPickerTarget: { type: Object },
@@ -2612,6 +2640,8 @@ export class GnumarusShell extends LitElement {
   declare tileWindowX: number;
   declare toolOptionsWindowX: number;
   declare backgroundWindowX: number;
+  /** Focus trail for floating windows (last entry = focused, topmost). */
+  declare floatTrail: GnumarusFloatWindowId[];
   declare toolOptionsWindowY: number;
   declare backgroundWindowY: number;
   declare tileWindowY: number;
@@ -2975,6 +3005,7 @@ export class GnumarusShell extends LitElement {
     this.backgroundWindowX = 280;
     this.backgroundWindowY = 132;
     this.tileWindowY = 120;
+    this.floatTrail = [];
     this.fitTextureTarget = null;
     this.fitThreshold = 0;
     this.adjustBrightness = 0;
@@ -3770,9 +3801,10 @@ export class GnumarusShell extends LitElement {
           ${this.previewOpen
             ? html`
                 <div
-                  class="preview-window"
-                  style="left: ${this.previewX}px; top: ${this.previewY}px;"
+                  class="preview-window ${this.floatFocus === "preview" ? "float-focused" : ""}"
+                  style="left: ${this.previewX}px; top: ${this.previewY}px; z-index: ${this.floatZ("preview")};"
                   data-testid="final-preview"
+                  data-float-window="preview"
                 >
                   <div
                     class="preview-header"
@@ -3833,15 +3865,10 @@ export class GnumarusShell extends LitElement {
           ${this.bcOpen
             ? html`
               <div
-                class="preview-window adjust-window"
-                style="left: ${this.bcWindowX}px; top: ${this.bcWindowY}px;"
+                class="preview-window adjust-window ${this.floatFocus === "bc" ? "float-focused" : ""}"
+                style="left: ${this.bcWindowX}px; top: ${this.bcWindowY}px; z-index: ${this.floatZ("bc")};"
                 data-testid="bc-window"
-                @keydown=${(event: KeyboardEvent): void => {
-                  if (event.key === "Escape") {
-                    event.stopPropagation();
-                    this.cancelBrightnessContrast();
-                  }
-                }}
+                data-float-window="bc"
               >
                 <div class="preview-header" @pointerdown=${(event: PointerEvent): void => this.onAdjustWindowDragStart(event, "bc")}>
                   <span>${tr("dialog.bcTitle")}</span>
@@ -3930,15 +3957,10 @@ export class GnumarusShell extends LitElement {
           ${this.hsOpen
             ? html`
               <div
-                class="preview-window adjust-window"
-                style="left: ${this.hsWindowX}px; top: ${this.hsWindowY}px;"
+                class="preview-window adjust-window ${this.floatFocus === "hs" ? "float-focused" : ""}"
+                style="left: ${this.hsWindowX}px; top: ${this.hsWindowY}px; z-index: ${this.floatZ("hs")};"
                 data-testid="hs-window"
-                @keydown=${(event: KeyboardEvent): void => {
-                  if (event.key === "Escape") {
-                    event.stopPropagation();
-                    void this.cancelHslAdjust();
-                  }
-                }}
+                data-float-window="hs"
               >
                 <div class="preview-header" @pointerdown=${(event: PointerEvent): void => this.onAdjustWindowDragStart(event, "hs")}>
                   <span>${tr("dialog.hsTitle")}</span>
@@ -4139,15 +4161,10 @@ export class GnumarusShell extends LitElement {
           ${this.filterOpen && this.filterDef() !== null
             ? html`
               <div
-                class="preview-window adjust-window"
-                style="left: ${this.filterWindowX}px; top: ${this.filterWindowY}px;"
+                class="preview-window adjust-window ${this.floatFocus === "filter" ? "float-focused" : ""}"
+                style="left: ${this.filterWindowX}px; top: ${this.filterWindowY}px; z-index: ${this.floatZ("filter")};"
                 data-testid="filter-window"
-                @keydown=${(event: KeyboardEvent): void => {
-                  if (event.key === "Escape") {
-                    event.stopPropagation();
-                    this.cancelFilterDialog();
-                  }
-                }}
+                data-float-window="filter"
               >
                 <div class="preview-header" @pointerdown=${(event: PointerEvent): void => this.onAdjustWindowDragStart(event, "filter")}>
                   <span>${tr(("filter." + (this.filterId ?? "")) as GnumarusMessageKey)}</span>
@@ -8277,6 +8294,7 @@ export class GnumarusShell extends LitElement {
 
   protected updated(): void {
     this.fitContextMenusToViewport();
+    this.syncFloatTrail();
   }
 
   override connectedCallback(): void {
@@ -8284,6 +8302,7 @@ export class GnumarusShell extends LitElement {
     this.addEventListener("dragenter", this.handleAppDragEnter);
     this.addEventListener("dragover", this.handleAppDragOver);
     this.addEventListener("drop", this.handleAppDrop);
+    this.addEventListener("pointerdown", this.onFloatPointerDown);
   }
 
   override disconnectedCallback(): void {
@@ -8292,6 +8311,7 @@ export class GnumarusShell extends LitElement {
     this.removeEventListener("dragenter", this.handleAppDragEnter);
     this.removeEventListener("dragover", this.handleAppDragOver);
     this.removeEventListener("drop", this.handleAppDrop);
+    this.removeEventListener("pointerdown", this.onFloatPointerDown);
   }
 
   /** Keep file drags alive over the app without disturbing inner drags. */
@@ -8937,6 +8957,110 @@ export class GnumarusShell extends LitElement {
     return this.bcOpen || this.hsOpen || this.filterOpen;
   }
 
+  /** Whether a managed floating window is currently visible. */
+  private isFloatOpen(id: GnumarusFloatWindowId): boolean {
+    switch (id) {
+      case "preview":
+        return this.previewOpen;
+      case "bc":
+        return this.bcOpen;
+      case "hs":
+        return this.hsOpen;
+      case "filter":
+        return this.filterOpen;
+      case "tile":
+        return this.tileWindowOpen && this.tool === "tilebrush";
+      case "tooloptions":
+        return this.toolOptionsWindowOpen;
+      case "background":
+        return this.backgroundWindowOpen;
+    }
+  }
+
+  /** Focused (topmost) floating window, or null when none is open. */
+  private get floatFocus(): GnumarusFloatWindowId | null {
+    return this.floatTrail[this.floatTrail.length - 1] ?? null;
+  }
+
+  /** Stacking order for a floating window (base class z-index is 30). */
+  private floatZ(id: GnumarusFloatWindowId): number {
+    return 30 + Math.max(0, this.floatTrail.indexOf(id));
+  }
+
+  /** Bring a floating window to the front (pointerdown on any of its nodes). */
+  private focusFloatWindow(id: GnumarusFloatWindowId): void {
+    if (this.floatTrail[this.floatTrail.length - 1] === id) {
+      return;
+    }
+    this.floatTrail = [...this.floatTrail.filter((entry) => entry !== id), id];
+  }
+
+  /** Reconcile the focus trail with actually open windows (runs after every render). */
+  private syncFloatTrail(): void {
+    const open = GNUMARUS_FLOAT_IDS.filter((id) => this.isFloatOpen(id));
+    let trail = this.floatTrail.filter((id) => open.includes(id));
+    let changed = trail.length !== this.floatTrail.length;
+    for (const id of open) {
+      if (!trail.includes(id)) {
+        trail = [...trail, id];
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.floatTrail = trail;
+    }
+  }
+
+  /** Pointerdown anywhere in the app: focus the float window under the cursor, if any. */
+  private onFloatPointerDown = (event: PointerEvent): void => {
+    for (const node of event.composedPath()) {
+      const id = (node as HTMLElement | null)?.dataset?.floatWindow as GnumarusFloatWindowId | undefined;
+      if (id !== undefined && (GNUMARUS_FLOAT_IDS as readonly string[]).includes(id)) {
+        this.focusFloatWindow(id);
+        return;
+      }
+    }
+  };
+
+  /** Close a floating window with its own Cancel semantics (live previews revert). */
+  private closeFloatWindow(id: GnumarusFloatWindowId): void {
+    switch (id) {
+      case "preview":
+        if (this.previewOpen) {
+          this.togglePreview();
+        }
+        break;
+      case "bc":
+        this.cancelBrightnessContrast();
+        break;
+      case "hs":
+        void this.cancelHslAdjust();
+        break;
+      case "filter":
+        this.cancelFilterDialog();
+        break;
+      case "tile":
+        this.tileWindowOpen = false;
+        break;
+      case "tooloptions":
+        this.toolOptionsWindowOpen = false;
+        break;
+      case "background":
+        this.backgroundWindowOpen = false;
+        break;
+    }
+  }
+
+  /** Close only the focused floating window; false when none is open. */
+  private closeFocusedFloatWindow(): boolean {
+    const focused = this.floatFocus;
+    if (focused === null) {
+      return false;
+    }
+    this.closeFloatWindow(focused);
+    return true;
+  }
+
   /** Drag state for the floating adjust windows (shared like the preview/tile drags). */
   private adjustWindowDragState: {
     which: "bc" | "hs" | "filter";
@@ -9359,11 +9483,10 @@ export class GnumarusShell extends LitElement {
       if (this.renamingId !== null) {
         this.renamingId = null;
       }
-      // Floating adjust windows have no native Esc handling: revert them
-      // here when no modal dialog is open (a modal consumes Esc itself).
+      // Floating windows share one Esc path: only the focused (topmost)
+      // window closes, with its own Cancel semantics (live previews revert).
       if (!dialogOpen) {
-        this.cancelBrightnessContrast();
-        this.cancelHslAdjust();
+        this.closeFocusedFloatWindow();
       }
       return;
     }
@@ -16935,7 +17058,7 @@ export class GnumarusShell extends LitElement {
       }
     }
     return html`
-      <div class="preview-window" style="left: ${this.tileWindowX}px; top: ${this.tileWindowY}px;" data-testid="tile-window">
+      <div class="preview-window ${this.floatFocus === "tile" ? "float-focused" : ""}" style="left: ${this.tileWindowX}px; top: ${this.tileWindowY}px; z-index: ${this.floatZ("tile")};" data-testid="tile-window" data-float-window="tile">
         <div class="preview-header" @pointerdown=${(event: PointerEvent): void => this.onTileWindowDragStart(event)}>
           <span>${tr("dialog.tilesTitle")}</span>
           <span class="spacer"></span>
@@ -16994,8 +17117,8 @@ export class GnumarusShell extends LitElement {
   /** Floating window with the active tool's options, stacked vertically. */
   private renderToolOptionsWindow() {
     return html`
-      <div class="float-anchor" style="left: ${this.toolOptionsWindowX}px; top: ${this.toolOptionsWindowY}px;" ?hidden=${this.uiHidden}>
-        <div class="preview-window size-auto" data-testid="tool-options-float">
+      <div class="float-anchor" style="left: ${this.toolOptionsWindowX}px; top: ${this.toolOptionsWindowY}px; z-index: ${this.floatZ("tooloptions")};" data-float-window="tooloptions" ?hidden=${this.uiHidden}>
+        <div class="preview-window size-auto ${this.floatFocus === "tooloptions" ? "float-focused" : ""}" data-testid="tool-options-float">
         <div class="preview-header" @pointerdown=${(event: PointerEvent): void => this.onToolOptionsWindowDragStart(event)}>
           <span>${this.toolDisplayName(this.tool)}</span>
           <span class="spacer"></span>
@@ -17018,8 +17141,8 @@ export class GnumarusShell extends LitElement {
   /** Floating shortcut to the canvas background settings (same rows as Edit > Settings). */
   private renderBackgroundWindow() {
     return html`
-      <div class="float-anchor" style="left: ${this.backgroundWindowX}px; top: ${this.backgroundWindowY}px;" ?hidden=${this.uiHidden}>
-        <div class="preview-window size-auto" data-testid="background-window">
+      <div class="float-anchor" style="left: ${this.backgroundWindowX}px; top: ${this.backgroundWindowY}px; z-index: ${this.floatZ("background")};" data-float-window="background" ?hidden=${this.uiHidden}>
+        <div class="preview-window size-auto ${this.floatFocus === "background" ? "float-focused" : ""}" data-testid="background-window">
           <div class="preview-header" @pointerdown=${(event: PointerEvent): void => this.onBackgroundWindowDragStart(event)}>
             <span>${tr("setting.background")}</span>
             <span class="spacer"></span>
@@ -20225,7 +20348,6 @@ export class GnumarusShell extends LitElement {
     this.filterWorking = false;
     this.filterRunQueued = false;
     this.filterOpen = true;
-    window.addEventListener("keydown", this.onFilterKeyDown);
     await this.updateComplete;
     await this.previewFilter();
   }
@@ -20237,17 +20359,10 @@ export class GnumarusShell extends LitElement {
     }
     this.filterOpen = false;
     this.filterId = null;
-    window.removeEventListener("keydown", this.onFilterKeyDown);
     this.engine?.cancelFilter();
   }
 
   /** Escape closes the filter dialog even when focus sits outside it. */
-  private readonly onFilterKeyDown = (event: KeyboardEvent): void => {
-    if (event.key === "Escape") {
-      this.cancelFilterDialog();
-    }
-  };
-
   /** One generic param row: label, typed control, reset-to-default arrow. */
   private renderFilterParam(param: GnumarusFilterParamDef): unknown {
     const key = `filter.${this.filterId ?? ""}.${param.key}` as GnumarusMessageKey;
@@ -20434,7 +20549,6 @@ export class GnumarusShell extends LitElement {
       return;
     }
     this.filterOpen = false;
-    window.removeEventListener("keydown", this.onFilterKeyDown);
     const id = this.filterId;
     this.filterId = null;
     if (this.engine === null || id === null) {
