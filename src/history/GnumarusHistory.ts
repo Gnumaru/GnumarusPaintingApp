@@ -292,6 +292,16 @@ export class GnumarusHistory {
     return this.redoStack.length;
   }
 
+  /** Undo entries oldest-first (read-only snapshot for the history panel). */
+  undoEntries(): GnumarusHistoryEntry[] {
+    return [...this.undoStack];
+  }
+
+  /** Redo entries in stack order (the next redo is the last element). */
+  redoEntries(): GnumarusHistoryEntry[] {
+    return [...this.redoStack];
+  }
+
   canUndo(): boolean {
     return this.undoStack.length > 0;
   }

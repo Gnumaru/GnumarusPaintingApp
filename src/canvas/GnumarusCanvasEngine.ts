@@ -19119,6 +19119,26 @@ export class GnumarusCanvasEngine {
     return true;
   }
 
+  /** Test hook + history panel: undo stack size. */
+  undoDepth(): number {
+    return this.history.undoDepth();
+  }
+
+  /** Test hook + history panel: redo stack size. */
+  redoDepth(): number {
+    return this.history.redoDepth();
+  }
+
+  /** History panel: undo entries oldest-first (do not mutate). */
+  undoEntries(): GnumarusHistoryEntry[] {
+    return this.history.undoEntries();
+  }
+
+  /** History panel: redo entries in stack order (next redo is last). */
+  redoEntries(): GnumarusHistoryEntry[] {
+    return this.history.redoEntries();
+  }
+
   undo(): boolean {
     if (this.denyEditsLocked()) {
       return false;

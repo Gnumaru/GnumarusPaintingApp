@@ -119,6 +119,7 @@ import {
   type GnumarusTextMeta,
   type GnumarusTilemapMeta,
 } from "../project/GnumarusProjectFormat";
+import type { GnumarusHistoryEntry } from "../history/GnumarusHistory";
 import {
   CHECKER_SETTINGS_STORAGE_KEY,
   DEFAULT_CHECKER_SETTINGS,
@@ -585,7 +586,8 @@ export type GnumarusFloatWindowId =
   | "filter"
   | "tile"
   | "tooloptions"
-  | "background";
+  | "background"
+  | "history";
 
 /** Canonical float-window order (only used to break ties between windows opened in the same frame). */
 const GNUMARUS_FLOAT_IDS: readonly GnumarusFloatWindowId[] = [
@@ -596,6 +598,7 @@ const GNUMARUS_FLOAT_IDS: readonly GnumarusFloatWindowId[] = [
   "tile",
   "tooloptions",
   "background",
+  "history",
 ];
 
 export const GNUMARUS_TOOL_DRAWERS: GnumarusToolDrawerDef[] = [
@@ -1460,6 +1463,33 @@ export class GnumarusShell extends LitElement {
     .preview-window.float-focused > .preview-header {
       background: #0e639c;
     }
+    .history-list {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 4px 0;
+      min-width: 200px;
+    }
+    .history-row {
+      text-align: left;
+      background: transparent;
+      color: #e6e6e6;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      padding: 4px 8px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .history-row:hover {
+      background: #3a3a3a;
+    }
+    .history-row.current {
+      background: #0e639c;
+      font-weight: 600;
+    }
+    .history-row.redo {
+      opacity: 0.55;
+    }
     .preview-window {
       position: absolute;
       z-index: 30;
@@ -2284,6 +2314,7 @@ export class GnumarusShell extends LitElement {
     statusMessage: { type: String },
     fileMenuOpen: { type: Boolean },
     editMenuOpen: { type: Boolean },
+    viewMenuOpen: { type: Boolean },
     helpMenuOpen: { type: Boolean },
     filterMenuOpen: { type: Boolean },
     filterSubmenu: { type: String },
@@ -2359,6 +2390,9 @@ export class GnumarusShell extends LitElement {
     floatTrail: { type: Array },
     toolOptionsWindowY: { type: Number },
     backgroundWindowY: { type: Number },
+    undoHistoryOpen: { type: Boolean },
+    undoHistoryX: { type: Number },
+    undoHistoryY: { type: Number },
     textPickerTarget: { type: Object },
     textEditor: { type: Object },
     textEditorColor: { type: String },
@@ -2580,6 +2614,7 @@ export class GnumarusShell extends LitElement {
   declare statusMessage: string;
   declare fileMenuOpen: boolean;
   declare editMenuOpen: boolean;
+  declare viewMenuOpen: boolean;
   declare helpMenuOpen: boolean;
   declare webglError: string;
   declare fsSupported: boolean;
@@ -2644,6 +2679,9 @@ export class GnumarusShell extends LitElement {
   declare floatTrail: GnumarusFloatWindowId[];
   declare toolOptionsWindowY: number;
   declare backgroundWindowY: number;
+  declare undoHistoryOpen: boolean;
+  declare undoHistoryX: number;
+  declare undoHistoryY: number;
   declare tileWindowY: number;
   declare textPickerTarget: { layerId: string; frame: number } | null;
   declare textEditor: {
@@ -2943,6 +2981,7 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.ready");
     this.fileMenuOpen = false;
     this.editMenuOpen = false;
+    this.viewMenuOpen = false;
     this.helpMenuOpen = false;
     this.webglError = "";
     this.fsSupported = true;
@@ -3004,6 +3043,9 @@ export class GnumarusShell extends LitElement {
     this.backgroundWindowOpen = false;
     this.backgroundWindowX = 280;
     this.backgroundWindowY = 132;
+    this.undoHistoryOpen = false;
+    this.undoHistoryX = 420;
+    this.undoHistoryY = 132;
     this.tileWindowY = 120;
     this.floatTrail = [];
     this.fitTextureTarget = null;
@@ -3433,6 +3475,22 @@ export class GnumarusShell extends LitElement {
                     ${tr("menu.resetCanvasTransform")}
                   </button>
                   <button title=${tr("menu.editShortcutsTitle")} @click=${(): void => void this.runAction("edit-shortcuts")}>${tr("menu.editShortcuts")}</button>
+                </div>
+              `
+            : html``}
+        </div>
+        <div class="menu">
+          <button
+            class=${this.viewMenuOpen ? "active" : ""}
+            @click=${(): void => this.toggleMenu("view")}
+            @mouseenter=${(): void => this.hoverMenu("view")}
+          >
+            ${tr("menu.view")}
+          </button>
+          ${this.viewMenuOpen
+            ? html`
+                <div class="dropdown">
+                  <button title=${tr("menu.undoHistoryTitle")} @click=${(): void => this.openUndoHistory()}>${tr("menu.undoHistory")}</button>
                 </div>
               `
             : html``}
@@ -6146,6 +6204,7 @@ export class GnumarusShell extends LitElement {
       ${this.tileWindowOpen && this.tool === "tilebrush" ? this.renderTileWindow() : html``}
       ${this.toolOptionsWindowOpen ? this.renderToolOptionsWindow() : html``}
       ${this.backgroundWindowOpen ? this.renderBackgroundWindow() : html``}
+      ${this.undoHistoryOpen ? this.renderUndoHistoryWindow() : html``}
       ${this.textPickerTarget !== null ? this.renderTextPickerDialog() : html``}
       ${this.textEditor !== null ? this.renderTextEditorDialog() : html``}
     `;
@@ -8805,12 +8864,13 @@ export class GnumarusShell extends LitElement {
   };
 
   private anyMenuOpen(): boolean {
-    return this.fileMenuOpen || this.editMenuOpen || this.toolsMenuOpen || this.helpMenuOpen || this.filterMenuOpen;
+    return this.fileMenuOpen || this.editMenuOpen || this.viewMenuOpen || this.toolsMenuOpen || this.helpMenuOpen || this.filterMenuOpen;
   }
 
   private closeAllMenus(): void {
     this.fileMenuOpen = false;
     this.editMenuOpen = false;
+    this.viewMenuOpen = false;
     this.helpMenuOpen = false;
     this.filterMenuOpen = false;
     this.filterSubmenu = null;
@@ -8974,6 +9034,8 @@ export class GnumarusShell extends LitElement {
         return this.toolOptionsWindowOpen;
       case "background":
         return this.backgroundWindowOpen;
+      case "history":
+        return this.undoHistoryOpen;
     }
   }
 
@@ -9047,6 +9109,9 @@ export class GnumarusShell extends LitElement {
         break;
       case "background":
         this.backgroundWindowOpen = false;
+        break;
+      case "history":
+        this.undoHistoryOpen = false;
         break;
     }
   }
@@ -9217,17 +9282,19 @@ export class GnumarusShell extends LitElement {
   }
 
   /** Header click toggles one menu, closing the others. */
-  private toggleMenu(which: "file" | "edit" | "tools" | "help" | "filters"): void {
+  private toggleMenu(which: "file" | "edit" | "view" | "tools" | "help" | "filters"): void {
     const open = !(
       which === "file"
         ? this.fileMenuOpen
         : which === "edit"
           ? this.editMenuOpen
-          : which === "tools"
-            ? this.toolsMenuOpen
-            : which === "help"
-              ? this.helpMenuOpen
-              : this.filterMenuOpen
+          : which === "view"
+            ? this.viewMenuOpen
+            : which === "tools"
+              ? this.toolsMenuOpen
+              : which === "help"
+                ? this.helpMenuOpen
+                : this.filterMenuOpen
     );
     // A menubar menu takes over the screen: dismiss picker popups so they
     // never sit above menu items (their document-click guard may still be
@@ -9240,6 +9307,8 @@ export class GnumarusShell extends LitElement {
       this.fileMenuOpen = open;
     } else if (which === "edit") {
       this.editMenuOpen = open;
+    } else if (which === "view") {
+      this.viewMenuOpen = open;
     } else if (which === "tools") {
       this.toolsMenuOpen = open;
       if (open) {
@@ -9256,7 +9325,7 @@ export class GnumarusShell extends LitElement {
   }
 
   /** Hover switches menus, but only while one is already open. */
-  private hoverMenu(which: "file" | "edit" | "tools" | "help" | "filters"): void {
+  private hoverMenu(which: "file" | "edit" | "view" | "tools" | "help" | "filters"): void {
     if (!this.anyMenuOpen()) {
       return;
     }
@@ -9265,6 +9334,8 @@ export class GnumarusShell extends LitElement {
       this.fileMenuOpen = true;
     } else if (which === "edit") {
       this.editMenuOpen = true;
+    } else if (which === "view") {
+      this.viewMenuOpen = true;
     } else if (which === "tools") {
       this.toolsMenuOpen = true;
       this.toolsSubmenu = null;
@@ -9928,6 +9999,7 @@ export class GnumarusShell extends LitElement {
 
   private resetCanvasTransform(): void {
     this.editMenuOpen = false;
+    this.viewMenuOpen = false;
     this.fileMenuOpen = false;
     this.engine?.resetViewTransform();
     this.statusMessage = tr("status.canvasTransformReset");
@@ -10845,11 +10917,80 @@ export class GnumarusShell extends LitElement {
     }
   }
 
+  /** Open the undo history panel (single View menu item for now). */
+  private openUndoHistory(): void {
+    this.closeAllMenus();
+    this.undoHistoryOpen = true;
+  }
+
+  /** Human-readable label for one history entry (panel rows). */
+  private historyEntryLabel(entry: GnumarusHistoryEntry): string {
+    switch (entry.type) {
+      case "stroke":
+        return tr("history.stroke");
+      case "merge":
+        return tr("history.merge");
+      case "resize":
+        return tr("history.resize");
+      case "fit":
+        return tr("history.fit");
+      case "fitBatch":
+        return tr("history.fitBatch", { count: entry.fits.length });
+      case "reloadBatch":
+        return tr("history.reloadBatch");
+      case "text":
+        return tr("history.text");
+      case "tilemap":
+        return tr("history.tilemap");
+      case "model3d-view":
+        return tr("history.modelView");
+      case "region":
+        return tr("history.region");
+      case "addLayer":
+        return tr("history.addLayer", { name: entry.addLayer.name });
+      case "addFrame":
+        return tr("history.addFrame", { name: entry.addFrame.name });
+      case "addContent":
+        return tr("history.addContent");
+    }
+  }
+
+  /** Walk undo/redo until the stack holds exactly `depth` entries. */
+  private jumpHistoryTo(depth: number): void {
+    if (this.denyEditWhileLocked()) {
+      return;
+    }
+    if (this.engine === null) {
+      return;
+    }
+    let applied = 0;
+    let guard = this.engine.undoDepth() + this.engine.redoDepth() + 1;
+    while (this.engine.undoDepth() > depth && guard > 0) {
+      guard -= 1;
+      if (!this.engine.undo()) {
+        break;
+      }
+      applied += 1;
+    }
+    while (this.engine.undoDepth() < depth && guard > 0) {
+      guard -= 1;
+      if (!this.engine.redo()) {
+        break;
+      }
+      applied += 1;
+    }
+    if (applied > 0) {
+      this.statusMessage = tr("status.undo");
+      this.requestUpdate();
+    }
+  }
+
   private doUndo(): void {
     if (this.denyEditWhileLocked()) {
       return;
     }
     this.editMenuOpen = false;
+    this.viewMenuOpen = false;
     this.fileMenuOpen = false;
     this.statusMessage = this.engine?.undo() === true ? tr("status.undo") : tr("status.nothingToUndo");
   }
@@ -10859,6 +11000,7 @@ export class GnumarusShell extends LitElement {
       return;
     }
     this.editMenuOpen = false;
+    this.viewMenuOpen = false;
     this.fileMenuOpen = false;
     this.statusMessage = this.engine?.redo() === true ? tr("status.redo") : tr("status.nothingToRedo");
   }
@@ -10869,6 +11011,7 @@ export class GnumarusShell extends LitElement {
       return false;
     }
     this.editMenuOpen = false;
+    this.viewMenuOpen = false;
     this.fileMenuOpen = false;
     if (this.engine?.cutFloatingSelection() !== true) {
       this.showToast(tr("status.copySelectionEmpty"));
@@ -10881,6 +11024,7 @@ export class GnumarusShell extends LitElement {
   /** Copy the active floating selection into memory (error toast without one). */
   private copySelectionToMemory(): boolean {
     this.editMenuOpen = false;
+    this.viewMenuOpen = false;
     this.fileMenuOpen = false;
     if (this.engine?.copyFloatingSelection() !== true) {
       this.showToast(tr("status.copySelectionEmpty"));
@@ -10893,6 +11037,7 @@ export class GnumarusShell extends LitElement {
   /** Copy the visible composite (floating box or full canvas) into memory. */
   private copyMergedToMemory(): boolean {
     this.editMenuOpen = false;
+    this.viewMenuOpen = false;
     this.fileMenuOpen = false;
     if (this.engine?.copyMergedSelection() !== true) {
       this.showToast(tr("status.copyFailed"));
@@ -10908,6 +11053,7 @@ export class GnumarusShell extends LitElement {
       return false;
     }
     this.editMenuOpen = false;
+    this.viewMenuOpen = false;
     this.fileMenuOpen = false;
     if (this.engine?.pasteClipboard() !== true) {
       this.showToast(tr("status.pasteBlocked"));
@@ -10918,6 +11064,7 @@ export class GnumarusShell extends LitElement {
 
   private openSettingsDialog(): void {
     this.editMenuOpen = false;
+    this.viewMenuOpen = false;
     this.fileMenuOpen = false;
     const dialog = this.shadowRoot?.getElementById("settingsDialog") as HTMLDialogElement | null;
     dialog?.showModal();
@@ -17136,6 +17283,93 @@ export class GnumarusShell extends LitElement {
         </div>
       </div>
     `;
+  }
+
+  /** Floating undo-history panel: click any state to undo/redo towards it. */
+  private renderUndoHistoryWindow() {
+    const undos = this.engine?.undoEntries() ?? [];
+    const redos = [...(this.engine?.redoEntries() ?? [])].reverse();
+    const depth = this.engine?.undoDepth() ?? 0;
+    return html`
+      <div class="float-anchor" style="left: ${this.undoHistoryX}px; top: ${this.undoHistoryY}px; z-index: ${this.floatZ("history")};" data-float-window="history" ?hidden=${this.uiHidden}>
+        <div class="preview-window size-auto ${this.floatFocus === "history" ? "float-focused" : ""}" data-testid="history-window">
+          <div class="preview-header" @pointerdown=${(event: PointerEvent): void => this.onUndoHistoryDragStart(event)}>
+            <span>${tr("history.title")}</span>
+            <span class="spacer"></span>
+            <button
+              aria-label=${tr("btn.close")}
+              title=${tr("btn.close")}
+              @click=${(): void => {
+                this.undoHistoryOpen = false;
+              }}
+            >
+              ×
+            </button>
+          </div>
+          <div class="adjust-body">
+            <div class="history-list">
+              <button
+                class="history-row ${depth === 0 ? "current" : ""}"
+                data-testid="history-row-0"
+                aria-current=${depth === 0 ? "true" : "false"}
+                @click=${(): void => this.jumpHistoryTo(0)}
+              >
+                ${tr("history.initialState")}
+              </button>
+              ${undos.map(
+                (entry, index) => html`
+                  <button
+                    class="history-row ${index + 1 === depth ? "current" : ""}"
+                    data-testid="history-row-${index + 1}"
+                    aria-current=${index + 1 === depth ? "true" : "false"}
+                    @click=${(): void => this.jumpHistoryTo(index + 1)}
+                  >
+                    ${this.historyEntryLabel(entry)}
+                  </button>
+                `,
+              )}
+              ${redos.map(
+                (entry, index) => html`
+                  <button
+                    class="history-row redo"
+                    data-testid="history-redo-${index}"
+                    @click=${(): void => this.jumpHistoryTo(depth + index + 1)}
+                  >
+                    ${this.historyEntryLabel(entry)}
+                  </button>
+                `,
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  private undoHistoryDragState: { startX: number; startY: number; originX: number; originY: number } | null = null;
+
+  private onUndoHistoryDragStart(event: PointerEvent): void {
+    const target = event.target as HTMLElement | null;
+    if (target !== null && target.closest("button") !== null) {
+      return;
+    }
+    this.undoHistoryDragState = { startX: event.clientX, startY: event.clientY, originX: this.undoHistoryX, originY: this.undoHistoryY };
+    const move = (moveEvent: PointerEvent): void => {
+      if (this.undoHistoryDragState === null) {
+        return;
+      }
+      this.undoHistoryX = Math.max(0, this.undoHistoryDragState.originX + (moveEvent.clientX - this.undoHistoryDragState.startX));
+      this.undoHistoryY = Math.max(0, this.undoHistoryDragState.originY + (moveEvent.clientY - this.undoHistoryDragState.startY));
+    };
+    const up = (): void => {
+      this.undoHistoryDragState = null;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
   }
 
   /** Floating shortcut to the canvas background settings (same rows as Edit > Settings). */
