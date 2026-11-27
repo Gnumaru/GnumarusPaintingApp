@@ -5,6 +5,7 @@ import {
   applyImageDiff,
   computeImageDiff,
   GnumarusHistory,
+  type GnumarusAddedContentSnapshot,
   type GnumarusAddedFrameSnapshot,
   type GnumarusAddedLayerSnapshot,
   type GnumarusFitRecord,
@@ -595,6 +596,56 @@ describe("GnumarusHistory", () => {
     // Engine-level validation rejects stale indices, surfaced here as false.
     const applyAddedFrame = (): boolean => false;
     expect(history.undo(() => null, () => {}, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, applyAddedFrame)).toBe(false);
+    expect(history.canUndo()).toBe(false);
+  });
+
+  it("undoes and redoes a cell materialization", () => {
+    const history = new GnumarusHistory();
+    const snapshot: GnumarusAddedContentSnapshot = {
+      contentId: "c1",
+      contentName: "C1",
+      textureId: "t1",
+      textureName: "t1",
+      textureWidth: 4,
+      textureHeight: 4,
+      layerId: "layer0",
+      frame: 0,
+      createdContent: true,
+    };
+    history.push({ type: "addContent", addContent: snapshot });
+    const calls: string[] = [];
+    const applyAddedContent = (entry: GnumarusAddedContentSnapshot, remove: boolean): boolean => {
+      calls.push(`${entry.contentId}:${remove ? "remove" : "recreate"}`);
+      return true;
+    };
+    const none = undefined;
+    expect(
+      history.undo(() => null, () => {}, none, none, none, none, none, none, none, none, none, none, none, applyAddedContent),
+    ).toBe(true);
+    expect(calls).toEqual(["c1:remove"]);
+    expect(
+      history.redo(() => null, () => {}, none, none, none, none, none, none, none, none, none, none, none, applyAddedContent),
+    ).toBe(true);
+    expect(calls).toEqual(["c1:remove", "c1:recreate"]);
+  });
+
+  it("skips a cell materialization without an applier", () => {
+    const history = new GnumarusHistory();
+    history.push({
+      type: "addContent",
+      addContent: {
+        contentId: "c1",
+        contentName: "C1",
+        textureId: null,
+        textureName: null,
+        textureWidth: 0,
+        textureHeight: 0,
+        layerId: "layer0",
+        frame: 0,
+        createdContent: true,
+      },
+    });
+    expect(history.undo(() => null, () => {})).toBe(false);
     expect(history.canUndo()).toBe(false);
   });
 });

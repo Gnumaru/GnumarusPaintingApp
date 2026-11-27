@@ -227,6 +227,21 @@ export interface GnumarusAddedFrameSnapshot {
   prevFrame: number;
 }
 
+/** Snapshot of a freshly materialized cell content (plus its texture, if the cell needed one). */
+export interface GnumarusAddedContentSnapshot {
+  contentId: string;
+  contentName: string;
+  /** Texture created alongside, or null when the content stayed textureless. */
+  textureId: string | null;
+  textureName: string | null;
+  textureWidth: number;
+  textureHeight: number;
+  layerId: string;
+  frame: number;
+  /** True when the content itself was created (false = reused textureless content). */
+  createdContent: boolean;
+}
+
 export type GnumarusHistoryEntry =
   | { type: "stroke"; layerId: string; diff: GnumarusImageDiff }
   | { type: "merge"; merge: GnumarusMergeRecord }
@@ -239,7 +254,8 @@ export type GnumarusHistoryEntry =
   | { type: "model3d-view"; view: GnumarusModelViewRecord }
   | { type: "region"; region: GnumarusRegionRecord }
   | { type: "addLayer"; addLayer: GnumarusAddedLayerSnapshot }
-  | { type: "addFrame"; addFrame: GnumarusAddedFrameSnapshot };
+  | { type: "addFrame"; addFrame: GnumarusAddedFrameSnapshot }
+  | { type: "addContent"; addContent: GnumarusAddedContentSnapshot };
 
 export interface GnumarusHistoryLayer {
   buffer: Uint8ClampedArray;
@@ -304,6 +320,7 @@ export class GnumarusHistory {
     applyRegion?: (snapshots: Array<{ id: string; snapshot: GnumarusRegionSnapshot | null }>) => boolean,
     applyAddedLayer?: (snapshot: GnumarusAddedLayerSnapshot, remove: boolean) => boolean,
     applyAddedFrame?: (snapshot: GnumarusAddedFrameSnapshot, remove: boolean) => boolean,
+    applyAddedContent?: (snapshot: GnumarusAddedContentSnapshot, remove: boolean) => boolean,
   ): boolean {
     for (;;) {
       const entry = this.undoStack.pop();
@@ -449,6 +466,13 @@ export class GnumarusHistory {
         this.redoStack.push(entry);
         return true;
       }
+      if (entry.type === "addContent") {
+        if (applyAddedContent === undefined || !applyAddedContent(entry.addContent, true)) {
+          continue;
+        }
+        this.redoStack.push(entry);
+        return true;
+      }
       const needsAssociate = !entry.merge.removedLayer;
       if (needsAssociate && associateCell === undefined) {
         continue;
@@ -513,6 +537,7 @@ export class GnumarusHistory {
     applyRegion?: (snapshots: Array<{ id: string; snapshot: GnumarusRegionSnapshot | null }>) => boolean,
     applyAddedLayer?: (snapshot: GnumarusAddedLayerSnapshot, remove: boolean) => boolean,
     applyAddedFrame?: (snapshot: GnumarusAddedFrameSnapshot, remove: boolean) => boolean,
+    applyAddedContent?: (snapshot: GnumarusAddedContentSnapshot, remove: boolean) => boolean,
   ): boolean {
     for (;;) {
       const entry = this.redoStack.pop();
@@ -645,6 +670,13 @@ export class GnumarusHistory {
       }
       if (entry.type === "addFrame") {
         if (applyAddedFrame === undefined || !applyAddedFrame(entry.addFrame, false)) {
+          continue;
+        }
+        this.undoStack.push(entry);
+        return true;
+      }
+      if (entry.type === "addContent") {
+        if (applyAddedContent === undefined || !applyAddedContent(entry.addContent, false)) {
           continue;
         }
         this.undoStack.push(entry);

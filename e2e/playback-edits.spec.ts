@@ -36,7 +36,8 @@ test("painting is blocked while playing unless allowed", async ({ page }) => {
         return null;
       }
     });
-  expect(await undoDepth()).toBe(1);
+  // Painting materializes the empty cell first: creation entry plus stroke.
+  expect(await undoDepth()).toBe(2);
   await startPlayback(page);
   // Brush strokes are swallowed while locked (default): no pixels, no history.
   const canvas = page.locator("gnumarus-shell canvas");
@@ -49,7 +50,7 @@ test("painting is blocked while playing unless allowed", async ({ page }) => {
   await page.mouse.move(box.x + box.width / 2 + 20, box.y + box.height / 2 + 20, { steps: 4 });
   await page.mouse.up();
   expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
-  expect(await undoDepth()).toBe(1);
+  expect(await undoDepth()).toBe(2);
   await expect(page.locator("gnumarus-shell")).toContainText("Stop playback to edit");
   await stopPlayback(page);
   // Allowing edits while playing restores painting (new history entry).
@@ -62,7 +63,7 @@ test("painting is blocked while playing unless allowed", async ({ page }) => {
   await page.mouse.down();
   await page.mouse.move(box.x + box.width / 2 + 20, box.y + box.height / 2 + 20, { steps: 6 });
   await page.mouse.up();
-  await expect.poll(undoDepth).toBe(2);
+  await expect.poll(undoDepth).toBe(3);
   await stopPlayback(page);
 });
 

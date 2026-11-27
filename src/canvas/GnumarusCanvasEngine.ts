@@ -359,6 +359,7 @@ import {
 import {
   computeImageDiff,
   GnumarusHistory,
+  type GnumarusAddedContentSnapshot,
   type GnumarusAddedFrameSnapshot,
   type GnumarusAddedLayerSnapshot,
   type GnumarusFitRecord,
@@ -1436,6 +1437,10 @@ export class GnumarusCanvasEngine {
   /** Coverage mask for non-accumulating brush strokes (union semantics). */
   private strokeMask: Uint8Array | null = null;
   private readonly history = new GnumarusHistory(100);
+  /** True while history.undo()/redo() applies entries (materialization then records nothing). */
+  private applyingHistory = false;
+  /** Cell content/texture materialized by the latest edit, flushed into history with its own entry. */
+  private pendingContentCreation: GnumarusAddedContentSnapshot | null = null;
   private lastPixel: { x: number; y: number } | null = null;
   private cursor: { x: number; y: number } | null = null;
   /** Floating selection cut out of a cell texture (null when none exists). */
@@ -7405,6 +7410,7 @@ export class GnumarusCanvasEngine {
     const key = animationCellKey(layerId, frame);
     let contentId = this.cells.get(key);
     let content = contentId === undefined ? undefined : this.contents.get(contentId);
+    let createdContent = false;
     if (content === undefined) {
       const createdId = this.nextContentId();
       content = {
@@ -7421,6 +7427,7 @@ export class GnumarusCanvasEngine {
       this.contents.set(createdId, content);
       this.cells.set(key, createdId);
       contentId = createdId;
+      createdContent = true;
     }
     if (content.textId !== null || content.svgId !== null || content.model3dId !== null || content.tilemapId !== null) {
       // Derived contents (text/vector/3D/tilemap) have no paintable texture;
@@ -7428,6 +7435,7 @@ export class GnumarusCanvasEngine {
       return null;
     }
     let texture = content.textureId === null ? null : (this.textures.get(content.textureId) ?? null);
+    let createdTextureId: string | null = null;
     if (texture === null) {
       const textureId = this.nextTextureId();
       texture = {
@@ -7439,6 +7447,23 @@ export class GnumarusCanvasEngine {
       };
       this.textures.set(textureId, texture);
       content.textureId = textureId;
+      createdTextureId = textureId;
+    }
+    if (!this.applyingHistory && (createdContent || createdTextureId !== null)) {
+      // Materialization is its own undo step below the edit that caused it:
+      // recorded lazily so no-op edits (no history entry of their own) keep
+      // a clean undo stack and never clear a pending redo.
+      this.pendingContentCreation = {
+        contentId: content.id,
+        contentName: content.name,
+        textureId: createdTextureId,
+        textureName: createdTextureId === null ? null : texture.name,
+        textureWidth: texture.width,
+        textureHeight: texture.height,
+        layerId,
+        frame,
+        createdContent,
+      };
     }
     return { content, texture };
   }
@@ -8189,6 +8214,89 @@ export class GnumarusCanvasEngine {
    * Removal is id-keyed so it always targets the created layer; redo
    * refuses when that id is already taken.
    */
+  /** Undo/redo helper for cell materialization: remove or blank-recreate the content/texture. */
+  private applyAddedContent(snapshot: GnumarusAddedContentSnapshot, remove: boolean): boolean {
+    const key = animationCellKey(snapshot.layerId, snapshot.frame);
+    if (remove) {
+      if (this.findLayer(snapshot.layerId) === null) {
+        return false;
+      }
+      if (snapshot.textureId !== null) {
+        if (this.floating !== null && this.floating.textureId === snapshot.textureId) {
+          this.dropFloating();
+        }
+        const content = this.contents.get(snapshot.contentId);
+        if (content !== undefined && content.textureId === snapshot.textureId) {
+          content.textureId = null;
+        }
+        this.textures.delete(snapshot.textureId);
+      }
+      if (snapshot.createdContent) {
+        if (this.cells.get(key) === snapshot.contentId) {
+          this.cells.delete(key);
+        }
+        let referenced = false;
+        for (const other of this.cells.values()) {
+          if (other === snapshot.contentId) {
+            referenced = true;
+            break;
+          }
+        }
+        if (!referenced) {
+          this.contents.delete(snapshot.contentId);
+        }
+      }
+      this.syncAllLayerRenders();
+      return true;
+    }
+    if (this.findLayer(snapshot.layerId) === null) {
+      return false;
+    }
+    if (!Number.isInteger(snapshot.frame) || snapshot.frame < 0 || snapshot.frame >= this.frameCount) {
+      return false;
+    }
+    if (snapshot.createdContent && this.contents.has(snapshot.contentId)) {
+      return false;
+    }
+    if (snapshot.textureId !== null && this.textures.has(snapshot.textureId)) {
+      return false;
+    }
+    const existing = this.cells.get(key);
+    if (existing !== undefined && existing !== snapshot.contentId) {
+      return false;
+    }
+    if (snapshot.createdContent) {
+      this.contents.set(snapshot.contentId, {
+        id: snapshot.contentId,
+        name: snapshot.contentName,
+        textureId: null,
+        textId: null,
+        svgId: null,
+        model3dId: null,
+        tilemapId: null,
+        flyCam: null,
+        transform: { ...IDENTITY_LAYER_TRANSFORM },
+      });
+    }
+    const content = this.contents.get(snapshot.contentId);
+    if (content === undefined) {
+      return false;
+    }
+    if (snapshot.textureId !== null) {
+      this.textures.set(snapshot.textureId, {
+        id: snapshot.textureId,
+        name: snapshot.textureName ?? snapshot.textureId,
+        width: snapshot.textureWidth,
+        height: snapshot.textureHeight,
+        buffer: createPixelBuffer(snapshot.textureWidth, snapshot.textureHeight),
+      });
+      content.textureId = snapshot.textureId;
+    }
+    this.cells.set(key, snapshot.contentId);
+    this.syncAllLayerRenders();
+    return true;
+  }
+
   private applyAddedLayer(snapshot: GnumarusAddedLayerSnapshot, remove: boolean): boolean {
     if (remove) {
       if (this.findLayer(snapshot.id) === null || this.layers.length <= 1) {
@@ -13285,7 +13393,15 @@ export class GnumarusCanvasEngine {
    */
   private pushHistory(entry: GnumarusHistoryEntry): void {
     this.pixelsVersion += 1;
-    const evicted = this.history.push(entry);
+    // A materialization with no edit of its own stays out of the stack, but
+    // the next real entry carries it underneath so both steps stay undoable.
+    const pending = this.pendingContentCreation;
+    this.pendingContentCreation = null;
+    let evicted = 0;
+    if (pending !== null) {
+      evicted += this.history.push({ type: "addContent", addContent: pending });
+    }
+    evicted += this.history.push(entry);
     if (this.floating !== null) {
       this.floating.cutDepth = Math.max(0, this.floating.cutDepth - evicted);
     }
@@ -19007,22 +19123,29 @@ export class GnumarusCanvasEngine {
     if (this.denyEditsLocked()) {
       return false;
     }
-    const applied = this.history.undo(
-      (layerId) => this.historyLayerFor(layerId),
-      (snapshot) => this.insertLayerSnapshot(snapshot),
-      (layerId, width, height, buffer) => this.applyLayerResize(layerId, width, height, buffer),
-      (textureId, width, height, buffer, transforms) =>
-        this.applyFitToSize(textureId, width, height, buffer, transforms),
-      (layerId, frame, contentId) => this.associateCellForHistory(layerId, frame, contentId),
-      (layerId, frame) => this.dissociateCellForHistory(layerId, frame),
-      (contentId, textureId) => this.setContentTextureForHistory(contentId, textureId),
-      (textId, document) => this.applyTextForHistory(textId, document),
-      (tilemapId, tiles) => this.applyTilemapForHistory(tilemapId, tiles),
-      (modelId, view) => this.applyModelViewForHistory(modelId, view),
-      (snapshots) => this.applyRegionForHistory(snapshots),
-      (snapshot, remove) => this.applyAddedLayer(snapshot, remove),
-      (snapshot, remove) => this.applyAddedFrame(snapshot, remove),
-    );
+    this.applyingHistory = true;
+    let applied = false;
+    try {
+      applied = this.history.undo(
+        (layerId) => this.historyLayerFor(layerId),
+        (snapshot) => this.insertLayerSnapshot(snapshot),
+        (layerId, width, height, buffer) => this.applyLayerResize(layerId, width, height, buffer),
+        (textureId, width, height, buffer, transforms) =>
+          this.applyFitToSize(textureId, width, height, buffer, transforms),
+        (layerId, frame, contentId) => this.associateCellForHistory(layerId, frame, contentId),
+        (layerId, frame) => this.dissociateCellForHistory(layerId, frame),
+        (contentId, textureId) => this.setContentTextureForHistory(contentId, textureId),
+        (textId, document) => this.applyTextForHistory(textId, document),
+        (tilemapId, tiles) => this.applyTilemapForHistory(tilemapId, tiles),
+        (modelId, view) => this.applyModelViewForHistory(modelId, view),
+        (snapshots) => this.applyRegionForHistory(snapshots),
+        (snapshot, remove) => this.applyAddedLayer(snapshot, remove),
+        (snapshot, remove) => this.applyAddedFrame(snapshot, remove),
+        (snapshot, remove) => this.applyAddedContent(snapshot, remove),
+      );
+    } finally {
+      this.applyingHistory = false;
+    }
     if (!applied) {
       return false;
     }
@@ -19042,24 +19165,31 @@ export class GnumarusCanvasEngine {
     if (this.denyEditsLocked()) {
       return false;
     }
-    const applied = this.history.redo(
-      (layerId) => this.historyLayerFor(layerId),
-      (layerId) => {
-        this.removeLayerFull(layerId);
-      },
-      (layerId, width, height, buffer) => this.applyLayerResize(layerId, width, height, buffer),
-      (textureId, width, height, buffer, transforms) =>
-        this.applyFitToSize(textureId, width, height, buffer, transforms),
-      (layerId, frame) => this.dissociateCellForHistory(layerId, frame),
-      (layerId, frame, contentId) => this.associateCellForHistory(layerId, frame, contentId),
-      (contentId, textureId) => this.setContentTextureForHistory(contentId, textureId),
-      (textId, document) => this.applyTextForHistory(textId, document),
-      (tilemapId, tiles) => this.applyTilemapForHistory(tilemapId, tiles),
-      (modelId, view) => this.applyModelViewForHistory(modelId, view),
-      (snapshots) => this.applyRegionForHistory(snapshots),
-      (snapshot, remove) => this.applyAddedLayer(snapshot, remove),
-      (snapshot, remove) => this.applyAddedFrame(snapshot, remove),
-    );
+    this.applyingHistory = true;
+    let applied = false;
+    try {
+      applied = this.history.redo(
+        (layerId) => this.historyLayerFor(layerId),
+        (layerId) => {
+          this.removeLayerFull(layerId);
+        },
+        (layerId, width, height, buffer) => this.applyLayerResize(layerId, width, height, buffer),
+        (textureId, width, height, buffer, transforms) =>
+          this.applyFitToSize(textureId, width, height, buffer, transforms),
+        (layerId, frame) => this.dissociateCellForHistory(layerId, frame),
+        (layerId, frame, contentId) => this.associateCellForHistory(layerId, frame, contentId),
+        (contentId, textureId) => this.setContentTextureForHistory(contentId, textureId),
+        (textId, document) => this.applyTextForHistory(textId, document),
+        (tilemapId, tiles) => this.applyTilemapForHistory(tilemapId, tiles),
+        (modelId, view) => this.applyModelViewForHistory(modelId, view),
+        (snapshots) => this.applyRegionForHistory(snapshots),
+        (snapshot, remove) => this.applyAddedLayer(snapshot, remove),
+        (snapshot, remove) => this.applyAddedFrame(snapshot, remove),
+        (snapshot, remove) => this.applyAddedContent(snapshot, remove),
+      );
+    } finally {
+      this.applyingHistory = false;
+    }
     if (!applied) {
       return false;
     }
