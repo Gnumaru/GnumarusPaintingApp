@@ -8727,6 +8727,7 @@ export class GnumarusShell extends LitElement {
         onNotice: (kind): void => {
           if (kind === "text-paint-blocked") {
             this.statusMessage = tr("status.textPaintBlocked");
+            this.showToast(tr("status.paintBlockedCellType", { type: tr("dialog.kindText") }));
           } else if (kind === "edits-locked") {
             this.statusMessage = tr("status.editsLockedWhilePlaying");
             this.showToast(tr("status.editsLockedWhilePlaying"));
@@ -8744,10 +8745,13 @@ export class GnumarusShell extends LitElement {
             this.showToast(tr("status.regionNameEmpty"));
           } else if (kind === "vector-paint-blocked") {
             this.statusMessage = tr("status.vectorPaintBlocked");
+            this.showToast(tr("status.paintBlockedCellType", { type: tr("dialog.kindVector") }));
           } else if (kind === "model3d-paint-blocked") {
             this.statusMessage = tr("status.model3dPaintBlocked");
+            this.showToast(tr("status.paintBlockedCellType", { type: tr("dialog.kindModel3d") }));
           } else if (kind === "tilemap-paint-blocked") {
             this.statusMessage = tr("status.tilemapPaintBlocked");
+            this.showToast(tr("status.paintBlockedCellType", { type: tr("dialog.kindTilemap") }));
           } else if (kind === "tile-rot-needs-square") {
             this.statusMessage = tr("status.tileRotNeedsSquare");
           } else if (kind === "model3d-needs-cell") {

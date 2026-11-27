@@ -65,6 +65,7 @@ test("painting a text cell toasts that rasterizing is needed", async ({ page }) 
   await page.keyboard.press("b");
   await paintCenter(page);
   await expect(page.locator("gnumarus-shell")).toContainText("rasterize the text first");
+  await expect(page.locator("gnumarus-shell")).toContainText("of type Text");
   expect(await textPaintedPixels(page)).toBe(before);
 });
 
