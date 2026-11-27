@@ -70,7 +70,7 @@ test("Edit > Settings changes the checkerboard", async ({ page }) => {
   await expect(page.locator("gnumarus-shell")).toContainText("Checker color A: #ff0000");
 });
 
-test("loupe left-drag zooms and right-drag rotates", async ({ page }) => {
+test("loupe left-drag and right-drag zoom without rotating", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.getByRole("button", { name: "Loupe" }).click();
@@ -91,12 +91,11 @@ test("loupe left-drag zooms and right-drag rotates", async ({ page }) => {
 
   await page.mouse.move(cx + 60, cy);
   await page.mouse.down({ button: "right" });
-  await page.mouse.move(cx, cy + 60, { steps: 5 });
+  await page.mouse.move(cx + 60, cy - 60, { steps: 5 });
   await page.mouse.up({ button: "right" });
-  const rotation = (await getViewState(page)).rotation;
-  expect(rotation).toBeGreaterThan(Math.PI / 3);
-  expect(rotation).toBeLessThan(Math.PI * 0.75);
-  await expect(page.locator("gnumarus-shell")).toContainText("°");
+  expect((await getViewState(page)).zoom).toBeGreaterThan(beforeZoom);
+  expect((await getViewState(page)).rotation).toBeCloseTo(0, 5);
+  expect(await paintedPixelCount(page)).toBe(0);
 });
 
 test("loupe rotation pivots on the viewport center", async ({ page }) => {
@@ -124,12 +123,16 @@ test("loupe rotation pivots on the viewport center", async ({ page }) => {
   expect(pan.x).toBe(50);
   expect(pan.y).toBe(30);
   // Dragging from east to south around the viewport center turns π/2
-  // no matter where the panned canvas sits.
+  // no matter where the panned canvas sits (Shift+Space rotates).
   await page.getByRole("button", { name: "Loupe" }).click();
+  await page.keyboard.down("Shift");
+  await page.keyboard.down("Space");
   await page.mouse.move(cx + 60, cy);
-  await page.mouse.down({ button: "right" });
+  await page.mouse.down();
   await page.mouse.move(cx, cy + 60, { steps: 5 });
-  await page.mouse.up({ button: "right" });
+  await page.mouse.up();
+  await page.keyboard.up("Space");
+  await page.keyboard.up("Shift");
   expect((await getViewState(page)).rotation).toBeCloseTo(Math.PI / 2, 1);
 });
 
@@ -279,7 +282,7 @@ test("status bar stays visible at tiny viewport heights", async ({ page }) => {
   expect(layout.barBottom).toBeLessThanOrEqual(layout.innerHeight);
 });
 
-test("loupe middle-click flips the canvas", async ({ page }) => {
+test("loupe middle-drag zooms without flipping", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.getByRole("button", { name: "Loupe" }).click();
@@ -291,13 +294,13 @@ test("loupe middle-click flips the canvas", async ({ page }) => {
   const cx = box.x + box.width / 2;
   const cy = box.y + box.height / 2;
   expect(await getViewState(page)).toMatchObject({ flipX: false, flipY: false });
-  await page.mouse.click(cx, cy, { button: "middle" });
-  expect(await getViewState(page)).toMatchObject({ flipX: true, flipY: false });
-  await page.keyboard.down("Shift");
-  await page.mouse.click(cx, cy, { button: "middle" });
-  await page.keyboard.up("Shift");
-  expect(await getViewState(page)).toMatchObject({ flipX: true, flipY: true });
-  await expect(page.locator("gnumarus-shell")).toContainText("Flip XY");
+  const beforeZoom = (await getViewState(page)).zoom;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down({ button: "middle" });
+  await page.mouse.move(cx, cy - 60, { steps: 5 });
+  await page.mouse.up({ button: "middle" });
+  expect((await getViewState(page)).zoom).toBeGreaterThan(beforeZoom);
+  expect(await getViewState(page)).toMatchObject({ flipX: false, flipY: false });
 });
 
 test("B and Z switch between brush and loupe", async ({ page }) => {
@@ -339,7 +342,7 @@ test("Edit > Reset Canvas Transform restores the default view", async ({ page })
   expect(await getViewState(page)).toEqual({ zoom: fit, rotation: 0, flipX: false, flipY: false });
 });
 
-test("loupe Alt+middle-click resets the transform", async ({ page }) => {
+test("loupe Alt+middle-drag zooms without resetting the transform", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("gnumarus-shell canvas");
   await page.getByRole("button", { name: "Loupe" }).click();
@@ -355,9 +358,14 @@ test("loupe Alt+middle-click resets the transform", async ({ page }) => {
     throw new Error("canvas has no bounding box");
   }
   await page.keyboard.down("Alt");
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "middle" });
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const zoomBeforeAlt = (await getViewState(page)).zoom;
+  await page.mouse.down({ button: "middle" });
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 - 60, { steps: 5 });
+  await page.mouse.up({ button: "middle" });
   await page.keyboard.up("Alt");
-  expect((await getViewState(page)).rotation).toBeCloseTo(0, 5);
+  expect((await getViewState(page)).zoom).toBeGreaterThan(zoomBeforeAlt);
+  expect((await getViewState(page)).rotation).toBeCloseTo(1.2, 5);
   // Ctrl+middle-click no longer resets the transform.
   await page.evaluate(() => {
     const root = window as unknown as {
@@ -413,4 +421,38 @@ test("rotating pivots around the viewport center, not the canvas @recent", async
   const reset = await canvasScreenPixel(page, center.x, center.y);
   expect(reset.r).toBeGreaterThan(200);
   expect(reset.g).toBeLessThan(60);
+});
+
+test("loupe Space+drag pans with every button @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await page.getByRole("button", { name: "Loupe" }).click();
+  const canvas = page.locator("gnumarus-shell canvas");
+  const box = await canvas.boundingBox();
+  if (box === null) {
+    throw new Error("canvas has no bounding box");
+  }
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  for (const button of ["left", "middle", "right"] as const) {
+    const before = await page.evaluate(() => {
+      const root = window as unknown as { __gnumarus?: { engine?: unknown } };
+      const engine = root.__gnumarus?.engine as unknown as { panX: number; panY: number };
+      return { x: engine.panX, y: engine.panY };
+    });
+    await page.keyboard.down("Space");
+    await page.mouse.move(cx, cy);
+    await page.mouse.down({ button });
+    await page.mouse.move(cx + 60, cy + 20, { steps: 5 });
+    await page.mouse.up({ button });
+    await page.keyboard.up("Space");
+    const after = await page.evaluate(() => {
+      const root = window as unknown as { __gnumarus?: { engine?: unknown } };
+      const engine = root.__gnumarus?.engine as unknown as { panX: number; panY: number };
+      return { x: engine.panX, y: engine.panY };
+    });
+    expect(Math.abs(after.x - before.x)).toBeGreaterThan(30);
+    expect((await getViewState(page)).rotation).toBeCloseTo(0, 5);
+  }
+  expect(await paintedPixelCount(page)).toBe(0);
 });

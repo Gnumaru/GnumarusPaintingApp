@@ -19967,27 +19967,25 @@ export class GnumarusCanvasEngine {
         canvas.setPointerCapture(event.pointerId);
         return;
       }
-      if (event.button === 1 && (this.tool === "loupe" || this.tool === "transform")) {
+      if (event.button === 1 && this.tool === "loupe" && !(this.spaceDown && this.gestureModifiersSatisfied("view-pan", event))) {
+        // The loupe zooms with every mouse button; Space+drag pans like
+        // with every other tool.
         event.preventDefault();
-        if (this.tool === "transform" && this.denyEditsLocked()) {
+        this.loupeZooming = true;
+        this.loupeAnchor = { x: event.clientX, y: event.clientY };
+        canvas.setPointerCapture(event.pointerId);
+        return;
+      }
+      if (event.button === 1 && this.tool === "transform") {
+        event.preventDefault();
+        if (this.denyEditsLocked()) {
           return;
         }
         if (this.gestureModifiersSatisfied("view-loupe-reset", event)) {
           // Alt+middle-click resets the transform (keyboard part configurable).
-          if (this.tool === "loupe") {
-            this.resetViewTransform();
-          } else {
-            const layer = this.activeLayer();
-            if (layer !== null) {
-              this.resetLayerTransform(layer.id);
-            }
-          }
-        } else if (this.tool === "loupe") {
-          // Middle click with the loupe tool flips the canvas view.
-          if (event.shiftKey) {
-            this.setFlip(this.flipX, !this.flipY);
-          } else {
-            this.setFlip(!this.flipX, this.flipY);
+          const layer = this.activeLayer();
+          if (layer !== null) {
+            this.resetLayerTransform(layer.id);
           }
         } else {
           // Middle click with the non-destructive cell transform tool flips the active layer.
@@ -20025,17 +20023,17 @@ export class GnumarusCanvasEngine {
         canvas.setPointerCapture(event.pointerId);
         return;
       }
-      if (event.button === 2 && this.tool === "loupe" && this.gestureModifiersSatisfied("view-loupe-rotate-drag", event)) {
-        // Right-drag rotates around the viewport (loupe) or layer (transform) center.
-        const angle = this.pointerAngle(event.clientX, event.clientY);
-        if (angle === null) {
-          return;
-        }
-        this.rotating = true;
-        this.lastPointerAngle = angle;
+      if (event.button === 2 && this.tool === "loupe" && !(this.spaceDown && this.gestureModifiersSatisfied("view-pan", event))) {
+        // The loupe zooms with every mouse button; Space+drag pans like
+        // with every other tool.
+        this.loupeZooming = true;
+        this.loupeAnchor = { x: event.clientX, y: event.clientY };
         canvas.setPointerCapture(event.pointerId);
         return;
       }
+      // (The loupe used to rotate here; it now zooms with every button,
+      // handled above. The view-loupe-rotate-drag shortcut id stays
+      // registered so saved remaps keep loading.)
       if (event.button === 2 && this.tool === "transform") {
         if (this.denyEditsLocked()) {
           return;
