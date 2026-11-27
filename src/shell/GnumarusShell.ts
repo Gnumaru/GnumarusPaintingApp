@@ -2306,10 +2306,13 @@ export class GnumarusShell extends LitElement {
     texturePickerTileset: { type: Boolean },
     tileWindowOpen: { type: Boolean },
     toolOptionsWindowOpen: { type: Boolean },
+    backgroundWindowOpen: { type: Boolean },
     tileWindowX: { type: Number },
     toolOptionsWindowX: { type: Number },
+    backgroundWindowX: { type: Number },
     tileWindowY: { type: Number },
     toolOptionsWindowY: { type: Number },
+    backgroundWindowY: { type: Number },
     textPickerTarget: { type: Object },
     textEditor: { type: Object },
     textEditorColor: { type: String },
@@ -2587,9 +2590,12 @@ export class GnumarusShell extends LitElement {
   declare texturePickerTileset: boolean;
   declare tileWindowOpen: boolean;
   declare toolOptionsWindowOpen: boolean;
+  declare backgroundWindowOpen: boolean;
   declare tileWindowX: number;
   declare toolOptionsWindowX: number;
+  declare backgroundWindowX: number;
   declare toolOptionsWindowY: number;
+  declare backgroundWindowY: number;
   declare tileWindowY: number;
   declare textPickerTarget: { layerId: string; frame: number } | null;
   declare textEditor: {
@@ -2947,6 +2953,9 @@ export class GnumarusShell extends LitElement {
     this.toolOptionsWindowOpen = false;
     this.toolOptionsWindowX = 8;
     this.toolOptionsWindowY = 132;
+    this.backgroundWindowOpen = false;
+    this.backgroundWindowX = 280;
+    this.backgroundWindowY = 132;
     this.tileWindowY = 120;
     this.fitTextureTarget = null;
     this.fitThreshold = 0;
@@ -4890,228 +4899,7 @@ export class GnumarusShell extends LitElement {
       </dialog>
       <dialog id="settingsDialog">
         <h3>${tr("dialog.settings")}</h3>
-        <div class="settings-section">${tr("setting.background")}</div>
-        <div class="setting-row">
-          <label
-            >${tr("setting.backgroundMode")}
-            <select id="backgroundMode" .value=${this.backgroundMode} @change=${(): void => this.applyBackgroundFromDialog()}>
-              <option value="checkerboard">${tr("setting.checkerboard")}</option>
-              <option value="solid">${tr("setting.solidColor")}</option>
-            </select>
-          </label>
-          ${this.backgroundMode !== DEFAULT_BACKGROUND_SETTINGS.mode
-            ? html`<button
-                class="reset-btn"
-                aria-label=${tr("a11y.resetBackgroundMode")}
-                title=${tr("a11y.resetToDefault")}
-                @click=${(): void => this.resetBackgroundModeToDefault()}
-              >
-                ↻
-              </button>`
-            : html``}
-        </div>
-        ${this.backgroundMode === "solid"
-          ? html`
-              <div class="setting-row">
-                <span>${tr("setting.solidColor")}</span>
-                <gnumarus-color-picker
-                  id="backgroundColor"
-                  .switchOutOfBlack=${this.colorSwitchOutOfBlack}
-                  .value=${this.backgroundColor}
-                  model="hsl"
-                  @gnumarus-color-change=${(event: Event): void => {
-                    const detail = (event as CustomEvent<{ value?: unknown }>).detail;
-                    if (typeof detail?.value === "string") {
-                      this.setBackgroundColor(detail.value);
-                    }
-                  }}
-                ></gnumarus-color-picker>
-                ${this.backgroundColor.toLowerCase() !== DEFAULT_BACKGROUND_SETTINGS.color.toLowerCase()
-                  ? html`<button
-                      class="reset-btn"
-                      aria-label=${tr("a11y.resetBackgroundColor")}
-                      title=${tr("a11y.resetToDefault")}
-                      @click=${(): void => this.resetBackgroundColorToDefault()}
-                    >
-                      ↻
-                    </button>`
-                  : html``}
-              </div>
-            `
-          : html``}
-        ${this.backgroundMode === "checkerboard"
-          ? html`
-              <div class="settings-section">${tr("setting.checkerboard")}</div>
-              <div class="setting-row">
-                <label
-                  >${tr("setting.checkerboardMode")}
-                  <select
-                    id="checkerMode"
-                    .value=${this.checkerMode}
-                    @change=${(): void => this.applyCheckerFromDialog()}
-                  >
-                    <option value="image">${tr("setting.checkerImage")}</option>
-                    <option value="screen">${tr("setting.checkerScreen")}</option>
-                  </select>
-                </label>
-                ${this.checkerMode !== DEFAULT_CHECKER_SETTINGS.mode
-                  ? html`<button
-                      class="reset-btn"
-                      aria-label=${tr("a11y.resetCheckerMode")}
-                      title=${tr("a11y.resetToDefault")}
-                      @click=${(): void => this.resetCheckerModeToDefault()}
-                    >
-                      ↻
-                    </button>`
-                  : html``}
-              </div>
-              <div class="setting-row">
-                <label
-                  >${tr("setting.checkerWidth")}
-                  <input
-                    type="number"
-                    id="checkerSizeX"
-                    min="1"
-                    max="128"
-                    .value=${String(this.checkerSizeX)}
-                    @input=${(): void => this.applyCheckerFromDialog()}
-                  />
-                </label>
-                ${this.checkerSizeX !== DEFAULT_CHECKER_SETTINGS.sizeX
-                  ? html`<button
-                      class="reset-btn"
-                      aria-label=${tr("a11y.resetCheckerWidth")}
-                      title=${tr("a11y.resetToDefault")}
-                      @click=${(): void => this.resetCheckerSizeXToDefault()}
-                    >
-                      ↻
-                    </button>`
-                  : html``}
-              </div>
-              <div class="setting-row">
-                <label
-                  >${tr("setting.checkerHeight")}
-                  <input
-                    type="number"
-                    id="checkerSizeY"
-                    min="1"
-                    max="128"
-                    .value=${String(this.checkerSizeY)}
-                    @input=${(): void => this.applyCheckerFromDialog()}
-                  />
-                </label>
-                ${this.checkerSizeY !== DEFAULT_CHECKER_SETTINGS.sizeY
-                  ? html`<button
-                      class="reset-btn"
-                      aria-label=${tr("a11y.resetCheckerHeight")}
-                      title=${tr("a11y.resetToDefault")}
-                      @click=${(): void => this.resetCheckerSizeYToDefault()}
-                    >
-                      ↻
-                    </button>`
-                  : html``}
-              </div>
-              <div class="setting-row">
-                <span>${tr("setting.checkerColorA")}</span>
-                <gnumarus-color-picker
-                  id="checkerColorA"
-                  .switchOutOfBlack=${this.colorSwitchOutOfBlack}
-                  .value=${this.checkerColorA}
-                  model="hsl"
-                  @gnumarus-color-change=${(event: Event): void => {
-                    const detail = (event as CustomEvent<{ value?: unknown }>).detail;
-                    if (typeof detail?.value === "string") {
-                      this.setCheckerColorA(detail.value);
-                    }
-                  }}
-                ></gnumarus-color-picker>
-                ${this.checkerColorA.toLowerCase() !== DEFAULT_CHECKER_SETTINGS.colorA.toLowerCase()
-                  ? html`<button
-                      class="reset-btn"
-                      aria-label=${tr("a11y.resetCheckerColorA")}
-                      title=${tr("a11y.resetToDefault")}
-                      @click=${(): void => this.resetCheckerColorAToDefault()}
-                    >
-                      ↻
-                    </button>`
-                  : html``}
-              </div>
-              <div class="setting-row">
-                <span>${tr("setting.checkerColorB")}</span>
-                <gnumarus-color-picker
-                  id="checkerColorB"
-                  .switchOutOfBlack=${this.colorSwitchOutOfBlack}
-                  .value=${this.checkerColorB}
-                  model="hsl"
-                  @gnumarus-color-change=${(event: Event): void => {
-                    const detail = (event as CustomEvent<{ value?: unknown }>).detail;
-                    if (typeof detail?.value === "string") {
-                      this.setCheckerColorB(detail.value);
-                    }
-                  }}
-                ></gnumarus-color-picker>
-                ${this.checkerColorB.toLowerCase() !== DEFAULT_CHECKER_SETTINGS.colorB.toLowerCase()
-                  ? html`<button
-                      class="reset-btn"
-                      aria-label=${tr("a11y.resetCheckerColorB")}
-                      title=${tr("a11y.resetToDefault")}
-                      @click=${(): void => this.resetCheckerColorBToDefault()}
-                    >
-                      ↻
-                    </button>`
-                  : html``}
-              </div>
-            `
-          : html``}
-        <div class="settings-section">${tr("setting.pixelGrid")}</div>
-        <div class="setting-row">
-          <label
-            >${tr("setting.gridMinZoom")}
-            <input
-              type="number"
-              id="gridMinZoom"
-              min="200"
-              max="6400"
-              step="50"
-              .value=${String(Math.round(this.gridMinZoom * 100))}
-              @input=${(): void => this.applyGridFromDialog()}
-            />
-          </label>
-          ${Math.abs(this.gridMinZoom - DEFAULT_GRID_SETTINGS.minZoom) > 1e-9
-            ? html`<button
-                class="reset-btn"
-                aria-label=${tr("a11y.resetGridMinZoom")}
-                title=${tr("a11y.resetToDefault")}
-                @click=${(): void => this.resetGridMinZoomToDefault()}
-              >
-                ↻
-              </button>`
-            : html``}
-        </div>
-        <div class="setting-row">
-          <label
-            >${tr("setting.gridOpacity")}
-            <input
-              type="number"
-              id="gridOpacity"
-              min="0"
-              max="100"
-              step="1"
-              .value=${String(this.gridOpacity)}
-              @input=${(): void => this.applyGridOpacityFromDialog()}
-            />
-          </label>
-          ${this.gridOpacity !== DEFAULT_GRID_SETTINGS.opacityPercent
-            ? html`<button
-                class="reset-btn"
-                aria-label=${tr("a11y.resetGridOpacity")}
-                title=${tr("a11y.resetToDefault")}
-                @click=${(): void => this.resetGridOpacityToDefault()}
-              >
-                ↻
-              </button>`
-            : html``}
-        </div>
+        ${this.renderBackgroundSettingsRows("")}
         <div class="settings-section">${tr("setting.canvasView")}</div>
         <div class="setting-row">
           <label
@@ -6322,6 +6110,7 @@ export class GnumarusShell extends LitElement {
       ${this.texturePickerContentId !== null || this.texturePickerTileset ? this.renderTexturePickerDialog() : html``}
       ${this.tileWindowOpen && this.tool === "tilebrush" ? this.renderTileWindow() : html``}
       ${this.toolOptionsWindowOpen ? this.renderToolOptionsWindow() : html``}
+      ${this.backgroundWindowOpen ? this.renderBackgroundWindow() : html``}
       ${this.textPickerTarget !== null ? this.renderTextPickerDialog() : html``}
       ${this.textEditor !== null ? this.renderTextEditorDialog() : html``}
     `;
@@ -7094,6 +6883,238 @@ export class GnumarusShell extends LitElement {
         : html``}
     `;
   }
+  /**
+   * Background-pattern rows shared by Edit > Settings and the floating
+   * background window (a shortcut to the same settings). `sfx` suffixes
+   * the dialog input ids so both dialogs can coexist in the shadow root.
+   */
+  private renderBackgroundSettingsRows(sfx: "" | "Bg") {
+    return html`
+        <div class="settings-section">${tr("setting.background")}</div>
+        <div class="setting-row">
+          <label
+            >${tr("setting.backgroundMode")}
+            <select id="backgroundMode${sfx}" .value=${this.backgroundMode} @change=${(): void => this.applyBackgroundFromDialog(sfx)}>
+              <option value="checkerboard">${tr("setting.checkerboard")}</option>
+              <option value="solid">${tr("setting.solidColor")}</option>
+            </select>
+          </label>
+          ${this.backgroundMode !== DEFAULT_BACKGROUND_SETTINGS.mode
+            ? html`<button
+                class="reset-btn"
+                aria-label=${tr("a11y.resetBackgroundMode")}
+                title=${tr("a11y.resetToDefault")}
+                @click=${(): void => this.resetBackgroundModeToDefault()}
+              >
+                ↻
+              </button>`
+            : html``}
+        </div>
+        ${this.backgroundMode === "solid"
+          ? html`
+              <div class="setting-row">
+                <span>${tr("setting.solidColor")}</span>
+                <gnumarus-color-picker
+                  id="backgroundColor${sfx}"
+                  .switchOutOfBlack=${this.colorSwitchOutOfBlack}
+                  .value=${this.backgroundColor}
+                  model="hsl"
+                  @gnumarus-color-change=${(event: Event): void => {
+                    const detail = (event as CustomEvent<{ value?: unknown }>).detail;
+                    if (typeof detail?.value === "string") {
+                      this.setBackgroundColor(detail.value);
+                    }
+                  }}
+                ></gnumarus-color-picker>
+                ${this.backgroundColor.toLowerCase() !== DEFAULT_BACKGROUND_SETTINGS.color.toLowerCase()
+                  ? html`<button
+                      class="reset-btn"
+                      aria-label=${tr("a11y.resetBackgroundColor")}
+                      title=${tr("a11y.resetToDefault")}
+                      @click=${(): void => this.resetBackgroundColorToDefault()}
+                    >
+                      ↻
+                    </button>`
+                  : html``}
+              </div>
+            `
+          : html``}
+        ${this.backgroundMode === "checkerboard"
+          ? html`
+              <div class="settings-section">${tr("setting.checkerboard")}</div>
+              <div class="setting-row">
+                <label
+                  >${tr("setting.checkerboardMode")}
+                  <select
+                    id="checkerMode${sfx}"
+                    .value=${this.checkerMode}
+                    @change=${(): void => this.applyCheckerFromDialog(sfx)}
+                  >
+                    <option value="image">${tr("setting.checkerImage")}</option>
+                    <option value="screen">${tr("setting.checkerScreen")}</option>
+                  </select>
+                </label>
+                ${this.checkerMode !== DEFAULT_CHECKER_SETTINGS.mode
+                  ? html`<button
+                      class="reset-btn"
+                      aria-label=${tr("a11y.resetCheckerMode")}
+                      title=${tr("a11y.resetToDefault")}
+                      @click=${(): void => this.resetCheckerModeToDefault()}
+                    >
+                      ↻
+                    </button>`
+                  : html``}
+              </div>
+              <div class="setting-row">
+                <label
+                  >${tr("setting.checkerWidth")}
+                  <input
+                    type="number"
+                    id="checkerSizeX${sfx}"
+                    min="1"
+                    max="128"
+                    .value=${String(this.checkerSizeX)}
+                    @input=${(): void => this.applyCheckerFromDialog(sfx)}
+                  />
+                </label>
+                ${this.checkerSizeX !== DEFAULT_CHECKER_SETTINGS.sizeX
+                  ? html`<button
+                      class="reset-btn"
+                      aria-label=${tr("a11y.resetCheckerWidth")}
+                      title=${tr("a11y.resetToDefault")}
+                      @click=${(): void => this.resetCheckerSizeXToDefault()}
+                    >
+                      ↻
+                    </button>`
+                  : html``}
+              </div>
+              <div class="setting-row">
+                <label
+                  >${tr("setting.checkerHeight")}
+                  <input
+                    type="number"
+                    id="checkerSizeY${sfx}"
+                    min="1"
+                    max="128"
+                    .value=${String(this.checkerSizeY)}
+                    @input=${(): void => this.applyCheckerFromDialog(sfx)}
+                  />
+                </label>
+                ${this.checkerSizeY !== DEFAULT_CHECKER_SETTINGS.sizeY
+                  ? html`<button
+                      class="reset-btn"
+                      aria-label=${tr("a11y.resetCheckerHeight")}
+                      title=${tr("a11y.resetToDefault")}
+                      @click=${(): void => this.resetCheckerSizeYToDefault()}
+                    >
+                      ↻
+                    </button>`
+                  : html``}
+              </div>
+              <div class="setting-row">
+                <span>${tr("setting.checkerColorA")}</span>
+                <gnumarus-color-picker
+                  id="checkerColorA${sfx}"
+                  .switchOutOfBlack=${this.colorSwitchOutOfBlack}
+                  .value=${this.checkerColorA}
+                  model="hsl"
+                  @gnumarus-color-change=${(event: Event): void => {
+                    const detail = (event as CustomEvent<{ value?: unknown }>).detail;
+                    if (typeof detail?.value === "string") {
+                      this.setCheckerColorA(detail.value);
+                    }
+                  }}
+                ></gnumarus-color-picker>
+                ${this.checkerColorA.toLowerCase() !== DEFAULT_CHECKER_SETTINGS.colorA.toLowerCase()
+                  ? html`<button
+                      class="reset-btn"
+                      aria-label=${tr("a11y.resetCheckerColorA")}
+                      title=${tr("a11y.resetToDefault")}
+                      @click=${(): void => this.resetCheckerColorAToDefault()}
+                    >
+                      ↻
+                    </button>`
+                  : html``}
+              </div>
+              <div class="setting-row">
+                <span>${tr("setting.checkerColorB")}</span>
+                <gnumarus-color-picker
+                  id="checkerColorB${sfx}"
+                  .switchOutOfBlack=${this.colorSwitchOutOfBlack}
+                  .value=${this.checkerColorB}
+                  model="hsl"
+                  @gnumarus-color-change=${(event: Event): void => {
+                    const detail = (event as CustomEvent<{ value?: unknown }>).detail;
+                    if (typeof detail?.value === "string") {
+                      this.setCheckerColorB(detail.value);
+                    }
+                  }}
+                ></gnumarus-color-picker>
+                ${this.checkerColorB.toLowerCase() !== DEFAULT_CHECKER_SETTINGS.colorB.toLowerCase()
+                  ? html`<button
+                      class="reset-btn"
+                      aria-label=${tr("a11y.resetCheckerColorB")}
+                      title=${tr("a11y.resetToDefault")}
+                      @click=${(): void => this.resetCheckerColorBToDefault()}
+                    >
+                      ↻
+                    </button>`
+                  : html``}
+              </div>
+            `
+          : html``}
+        <div class="settings-section">${tr("setting.pixelGrid")}</div>
+        <div class="setting-row">
+          <label
+            >${tr("setting.gridMinZoom")}
+            <input
+              type="number"
+              id="gridMinZoom${sfx}"
+              min="200"
+              max="6400"
+              step="50"
+              .value=${String(Math.round(this.gridMinZoom * 100))}
+              @input=${(): void => this.applyGridFromDialog(sfx)}
+            />
+          </label>
+          ${Math.abs(this.gridMinZoom - DEFAULT_GRID_SETTINGS.minZoom) > 1e-9
+            ? html`<button
+                class="reset-btn"
+                aria-label=${tr("a11y.resetGridMinZoom")}
+                title=${tr("a11y.resetToDefault")}
+                @click=${(): void => this.resetGridMinZoomToDefault()}
+              >
+                ↻
+              </button>`
+            : html``}
+        </div>
+        <div class="setting-row">
+          <label
+            >${tr("setting.gridOpacity")}
+            <input
+              type="number"
+              id="gridOpacity${sfx}"
+              min="0"
+              max="100"
+              step="1"
+              .value=${String(this.gridOpacity)}
+              @input=${(): void => this.applyGridOpacityFromDialog(sfx)}
+            />
+          </label>
+          ${this.gridOpacity !== DEFAULT_GRID_SETTINGS.opacityPercent
+            ? html`<button
+                class="reset-btn"
+                aria-label=${tr("a11y.resetGridOpacity")}
+                title=${tr("a11y.resetToDefault")}
+                @click=${(): void => this.resetGridOpacityToDefault()}
+              >
+                ↻
+              </button>`
+            : html``}
+        </div>
+    `;
+  }
+
 
   /**
    * Editor-level options bar, always visible regardless of the active tool
@@ -7146,6 +7167,15 @@ export class GnumarusShell extends LitElement {
             <option value="cielab">${tr("opt.grayscaleCielab")}</option>
           </select>
         </label>
+        <button
+          data-testid="background-button"
+          title=${tr("opt.backgroundHint")}
+          @click=${(): void => {
+            this.backgroundWindowOpen = !this.backgroundWindowOpen;
+          }}
+        >
+          ${tr("opt.background")}
+        </button>
       </div>
     `;
   }
@@ -10781,8 +10811,8 @@ export class GnumarusShell extends LitElement {
     return { ...DEFAULT_GRID_SETTINGS };
   }
 
-  private currentDialogGridMinZoom(): number {
-    const input = this.shadowRoot?.getElementById("gridMinZoom") as HTMLInputElement | null;
+  private currentDialogGridMinZoom(sfx: "" | "Bg" = ""): number {
+    const input = this.shadowRoot?.getElementById(`gridMinZoom${sfx}`) as HTMLInputElement | null;
     const percent = Number(input?.value ?? "1000") || 1000;
     const clampedPercent = Math.min(
       GNUMARUS_GRID_MAX_ZOOM * 100,
@@ -10791,24 +10821,24 @@ export class GnumarusShell extends LitElement {
     return clampGridMinZoom(clampedPercent / 100);
   }
 
-  private applyGridFromDialog(): void {
-    const minZoom = this.currentDialogGridMinZoom();
+  private applyGridFromDialog(sfx: "" | "Bg" = ""): void {
+    const minZoom = this.currentDialogGridMinZoom(sfx);
     this.gridMinZoom = minZoom;
     this.engine?.setGridMinZoom(minZoom);
     this.persistGrid();
     this.statusMessage = tr("status.gridMinZoom", { value: Math.round(minZoom * 100) });
   }
 
-  private currentDialogGridOpacity(): number {
-    const input = this.shadowRoot?.getElementById("gridOpacity") as HTMLInputElement | null;
+  private currentDialogGridOpacity(sfx: "" | "Bg" = ""): number {
+    const input = this.shadowRoot?.getElementById(`gridOpacity${sfx}`) as HTMLInputElement | null;
     const percent = Number(input?.value ?? "100") || 0;
     return clampGridOpacityPercent(
       Math.min(GNUMARUS_GRID_MAX_OPACITY_PERCENT, Math.max(GNUMARUS_GRID_MIN_OPACITY_PERCENT, Math.floor(percent))),
     );
   }
 
-  private applyGridOpacityFromDialog(): void {
-    const opacity = this.currentDialogGridOpacity();
+  private applyGridOpacityFromDialog(sfx: "" | "Bg" = ""): void {
+    const opacity = this.currentDialogGridOpacity(sfx);
     this.gridOpacity = opacity;
     this.engine?.setGridOpacityPercent(opacity);
     this.persistGrid();
@@ -11905,16 +11935,16 @@ export class GnumarusShell extends LitElement {
     }
   }
 
-  private currentDialogBackground(): GnumarusBackgroundSettings {
-    const modeInput = this.shadowRoot?.getElementById("backgroundMode") as HTMLSelectElement | null;
-    const colorInput = this.shadowRoot?.getElementById("backgroundColor") as HTMLInputElement | null;
+  private currentDialogBackground(sfx: "" | "Bg" = ""): GnumarusBackgroundSettings {
+    const modeInput = this.shadowRoot?.getElementById(`backgroundMode${sfx}`) as HTMLSelectElement | null;
+    const colorInput = this.shadowRoot?.getElementById(`backgroundColor${sfx}`) as HTMLInputElement | null;
     const mode: GnumarusBackgroundMode = modeInput?.value === "solid" ? "solid" : "checkerboard";
     const raw = colorInput?.value ?? this.backgroundColor;
     return { mode, color: typeof raw === "string" ? raw.slice(0, 7) : this.backgroundColor };
   }
 
-  private applyBackgroundFromDialog(): void {
-    const settings = this.currentDialogBackground();
+  private applyBackgroundFromDialog(sfx: "" | "Bg" = ""): void {
+    const settings = this.currentDialogBackground(sfx);
     this.backgroundMode = settings.mode;
     this.backgroundColor = settings.color;
     this.engine?.applyBackgroundSettings(settings);
@@ -13822,12 +13852,12 @@ export class GnumarusShell extends LitElement {
     this.statusMessage = tr("status.gridOpacityReset");
   }
 
-  private currentDialogChecker(): GnumarusCheckerSettings {
-    const modeInput = this.shadowRoot?.getElementById("checkerMode") as HTMLSelectElement | null;
-    const sizeXInput = this.shadowRoot?.getElementById("checkerSizeX") as HTMLInputElement | null;
-    const sizeYInput = this.shadowRoot?.getElementById("checkerSizeY") as HTMLInputElement | null;
-    const colorAInput = this.shadowRoot?.getElementById("checkerColorA") as HTMLInputElement | null;
-    const colorBInput = this.shadowRoot?.getElementById("checkerColorB") as HTMLInputElement | null;
+  private currentDialogChecker(sfx: "" | "Bg" = ""): GnumarusCheckerSettings {
+    const modeInput = this.shadowRoot?.getElementById(`checkerMode${sfx}`) as HTMLSelectElement | null;
+    const sizeXInput = this.shadowRoot?.getElementById(`checkerSizeX${sfx}`) as HTMLInputElement | null;
+    const sizeYInput = this.shadowRoot?.getElementById(`checkerSizeY${sfx}`) as HTMLInputElement | null;
+    const colorAInput = this.shadowRoot?.getElementById(`checkerColorA${sfx}`) as HTMLInputElement | null;
+    const colorBInput = this.shadowRoot?.getElementById(`checkerColorB${sfx}`) as HTMLInputElement | null;
     const mode: GnumarusCheckerMode = modeInput?.value === "screen" ? "screen" : "image";
     const rawA = colorAInput?.value ?? this.checkerColorA;
     const rawB = colorBInput?.value ?? this.checkerColorB;
@@ -13840,8 +13870,8 @@ export class GnumarusShell extends LitElement {
     };
   }
 
-  private applyCheckerFromDialog(): void {
-    const settings = this.currentDialogChecker();
+  private applyCheckerFromDialog(sfx: "" | "Bg" = ""): void {
+    const settings = this.currentDialogChecker(sfx);
     this.checkerMode = settings.mode;
     this.checkerSizeX = settings.sizeX;
     this.checkerSizeY = settings.sizeY;
@@ -16968,6 +16998,59 @@ export class GnumarusShell extends LitElement {
         ${this.renderToolOptions("Window")}
       </div>
     `;
+  }
+
+  /** Floating shortcut to the canvas background settings (same rows as Edit > Settings). */
+  private renderBackgroundWindow() {
+    return html`
+      <div
+        class="preview-window"
+        style="left: ${this.backgroundWindowX}px; top: ${this.backgroundWindowY}px;"
+        data-testid="background-window"
+        ?hidden=${this.uiHidden}
+      >
+        <div class="preview-header" @pointerdown=${(event: PointerEvent): void => this.onBackgroundWindowDragStart(event)}>
+          <span>${tr("setting.background")}</span>
+          <span class="spacer"></span>
+          <button
+            aria-label=${tr("btn.close")}
+            title=${tr("btn.close")}
+            @click=${(): void => {
+              this.backgroundWindowOpen = false;
+            }}
+          >
+            ×
+          </button>
+        </div>
+        <div class="adjust-body">${this.renderBackgroundSettingsRows("Bg")}</div>
+      </div>
+    `;
+  }
+
+  private backgroundWindowDragState: { startX: number; startY: number; originX: number; originY: number } | null = null;
+
+  private onBackgroundWindowDragStart(event: PointerEvent): void {
+    const target = event.target as HTMLElement | null;
+    if (target !== null && target.closest("button") !== null) {
+      return;
+    }
+    this.backgroundWindowDragState = { startX: event.clientX, startY: event.clientY, originX: this.backgroundWindowX, originY: this.backgroundWindowY };
+    const move = (moveEvent: PointerEvent): void => {
+      if (this.backgroundWindowDragState === null) {
+        return;
+      }
+      this.backgroundWindowX = Math.max(0, this.backgroundWindowDragState.originX + (moveEvent.clientX - this.backgroundWindowDragState.startX));
+      this.backgroundWindowY = Math.max(0, this.backgroundWindowDragState.originY + (moveEvent.clientY - this.backgroundWindowDragState.startY));
+    };
+    const up = (): void => {
+      this.backgroundWindowDragState = null;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
   }
 
   private toolOptionsWindowDragState: { startX: number; startY: number; originX: number; originY: number } | null = null;
