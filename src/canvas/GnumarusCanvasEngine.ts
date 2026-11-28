@@ -1311,6 +1311,8 @@ export class GnumarusCanvasEngine {
   private strokePaintStart = true;
   private pressureResponse: GnumarusPressureResponse = "none";
   private strokePressure = 1;
+  /** Master switch for pen pressure (editor bar checkbox, on by default). */
+  private pressureSensitivity = true;
   private brushAntialias = false;
   private brushPixelPerfect = false;
   private curvePixelPerfect = false;
@@ -12038,7 +12040,9 @@ export class GnumarusCanvasEngine {
    * override replaces the measured value while set.
    */
   private trackStrokeMotion(event: PointerEvent, floatPos: { x: number; y: number }): void {
-    this.strokeTiltMag = normalizePointerTilt(event.tiltX ?? 0, event.tiltY ?? 0).magnitude;
+    this.strokeTiltMag = this.pressureSensitivity
+      ? normalizePointerTilt(event.tiltX ?? 0, event.tiltY ?? 0).magnitude
+      : 0;
     if (this.velocityOverride !== null) {
       this.strokeVelocity = this.velocityOverride;
     } else if (this.strokeLastMovePos !== null) {
@@ -12063,6 +12067,33 @@ export class GnumarusCanvasEngine {
     this.emitStats();
     this.updatePreviews();
     return true;
+  }
+
+  getPressureSensitivity(): boolean {
+    return this.pressureSensitivity;
+  }
+
+  /** Master switch for pen pressure and tilt; off pins strokes at full pressure. */
+  setPressureSensitivity(enabled: boolean): boolean {
+    const next = enabled === true;
+    if (next === this.pressureSensitivity) {
+      return false;
+    }
+    this.pressureSensitivity = next;
+    this.emitStats();
+    this.updatePreviews();
+    return true;
+  }
+
+  /**
+   * Stroke pressure for one pointer event: the real pen pressure when the
+   * sensitivity switch is on, always full (mouse behavior) when off.
+   */
+  private pointerStrokePressure(event: PointerEvent): number {
+    if (!this.pressureSensitivity) {
+      return 1;
+    }
+    return normalizePointerPressure(event.pointerType, event.pressure);
   }
 
   /** Brush size scaled by the current stroke pressure and tilt when enabled. */
@@ -20955,7 +20986,7 @@ export class GnumarusCanvasEngine {
         }
         this.resetBrushPixelPerfect();
         this.resetPaintStroke();
-        this.strokePressure = normalizePointerPressure(event.pointerType, event.pressure);
+        this.strokePressure = this.pointerStrokePressure(event);
         this.trackStrokeMotion(event, { x: this.stabilizerPos.x, y: this.stabilizerPos.y });
         this.airbrushAt = { x: this.stabilizerPos.x, y: this.stabilizerPos.y };
         this.startAirbrush();
@@ -20982,7 +21013,7 @@ export class GnumarusCanvasEngine {
       }
       this.resetBrushPixelPerfect();
       this.resetPaintStroke();
-      this.strokePressure = normalizePointerPressure(event.pointerType, event.pressure);
+      this.strokePressure = this.pointerStrokePressure(event);
       this.trackStrokeMotion(event, { x: pixel.x, y: pixel.y });
       this.airbrushAt = { x: pixel.x, y: pixel.y };
       this.startAirbrush();
@@ -21409,7 +21440,7 @@ export class GnumarusCanvasEngine {
               const prev = this.stabilizerPos;
               this.stabilizerPos = next;
               if (this.drawing && this.strokeLayerId !== null) {
-                this.strokePressure = normalizePointerPressure(sub.pointerType, sub.pressure);
+                this.strokePressure = this.pointerStrokePressure(sub);
                 this.trackStrokeMotion(sub, { x: next.x, y: next.y });
                 this.airbrushAt = { x: next.x, y: next.y };
                 const layer = this.activeLayer();
@@ -21455,7 +21486,7 @@ export class GnumarusCanvasEngine {
           if (subPixel === null) {
             continue;
           }
-          this.strokePressure = normalizePointerPressure(sub.pointerType, sub.pressure);
+          this.strokePressure = this.pointerStrokePressure(sub);
           this.trackStrokeMotion(sub, { x: subPixel.x, y: subPixel.y });
           this.airbrushAt = { x: subPixel.x, y: subPixel.y };
           this.paintBrushLine(tex, layer.lockedChannels, this.lastPixel.x, this.lastPixel.y, subPixel.x, subPixel.y);

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { layerPixelToScreen } from "../src/canvas/GnumarusViewportMath";
-import { blurActiveElement, canvasCenter, getViewState, loadBlankProject, loadTinyLayer, paintedNeighborStats, paintedPixelCount, penDot, readPixel, selectTool, setBrushColor, stubPenPointerCapture } from "./e2e-helpers";
+import { blurActiveElement, canvasCenter, getViewState, loadBlankProject, loadTinyLayer, paintedNeighborStats, paintedPixelCount, penDot, penTiltDot, readPixel, selectTool, setBrushColor, setPaintTip, stubPenPointerCapture } from "./e2e-helpers";
 
 test("brush stabilizer dropdown defaults to none with conditional rope and follow settings", async ({ page }) => {
   await page.goto("/");
@@ -505,4 +505,61 @@ test("curve pixel perfect snaps width to 1 and keeps curves thin @recent", async
   expect(stats.max).toBeLessThanOrEqual(2);
   await page.keyboard.press("Control+z");
   expect((await paintedNeighborStats(page, 16)).painted).toBe(0);
+});
+
+test("pressure sensitivity switch makes pen paint like a mouse", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await stubPenPointerCapture(page);
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
+  const toggle = page.locator('gnumarus-shell [data-testid="pressure-sensitivity"]');
+  await expect(toggle).toBeChecked();
+  await page.locator("gnumarus-shell select#pressureResponse").selectOption("opacity");
+  await setBrushColor(page, "#00000080");
+  const center = await canvasCenter(page);
+  await penDot(page, center.x, center.y, 0.5);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 64 });
+  await blurActiveElement(page);
+  await page.keyboard.press("Control+z");
+  // Off: pen pressure is ignored, like a mouse at full pressure.
+  await toggle.uncheck();
+  await expect(page.locator("gnumarus-shell")).toContainText("Pressure sensitivity: off");
+  await penDot(page, center.x, center.y, 0.5);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 128 });
+  await blurActiveElement(page);
+  await page.keyboard.press("Control+z");
+  // Back on: pressure applies again.
+  await toggle.check();
+  await expect(page.locator("gnumarus-shell")).toContainText("Pressure sensitivity: on");
+  await penDot(page, center.x, center.y, 0.5);
+  expect(await readPixel(page, 32, 32)).toEqual({ r: 0, g: 0, b: 0, a: 64 });
+});
+
+test("pressure sensitivity switch also gates pen tilt", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await setBrushColor(page, "#ff0000");
+  await setPaintTip(page, "soft", 8, 100, 15);
+  await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { shell?: { setTiltSizeAmount(percent: number): void } };
+    };
+    root.__gnumarus?.shell?.setTiltSizeAmount(100);
+  });
+  await stubPenPointerCapture(page);
+  const center = await canvasCenter(page);
+  await penTiltDot(page, center.x, center.y, 1, 0, 0);
+  const straight = await paintedPixelCount(page);
+  await blurActiveElement(page);
+  await page.keyboard.press("Control+z");
+  await penTiltDot(page, center.x, center.y, 1, 60, 0);
+  expect(await paintedPixelCount(page)).toBeGreaterThan(straight);
+  await blurActiveElement(page);
+  await page.keyboard.press("Control+z");
+  // Off: tilt is ignored, so the tilted pen paints exactly like untilted.
+  await page.locator('gnumarus-shell [data-testid="pressure-sensitivity"]').uncheck();
+  await penTiltDot(page, center.x, center.y, 1, 60, 0);
+  expect(await paintedPixelCount(page)).toBe(straight);
 });

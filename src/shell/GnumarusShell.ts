@@ -2566,6 +2566,7 @@ export class GnumarusShell extends LitElement {
     symmetryMode: { type: String },
     wrapMode: { type: String },
     grayscale: { type: String },
+    pressureSensitivity: { type: Boolean },
     airbrushRate: { type: Number },
     smudgeRate: { type: Number },
     smudgeWet: { type: Number },
@@ -2891,6 +2892,7 @@ export class GnumarusShell extends LitElement {
   declare symmetryMode: GnumarusSymmetryMode;
   declare wrapMode: GnumarusWrapMode;
   declare grayscale: GnumarusGrayscaleMode;
+  declare pressureSensitivity: boolean;
   declare airbrushRate: number;
   declare smudgeRate: number;
   declare smudgeWet: number;
@@ -3225,6 +3227,7 @@ export class GnumarusShell extends LitElement {
     this.symmetryMode = "off";
     this.wrapMode = "off";
     this.grayscale = "none";
+    this.pressureSensitivity = true;
     this.airbrushRate = DEFAULT_AIRBRUSH_RATE;
     this.smudgeRate = DEFAULT_PAINT_SMUDGE_RATE;
     this.smudgeWet = DEFAULT_PAINT_SMUDGE_WET;
@@ -7283,6 +7286,16 @@ export class GnumarusShell extends LitElement {
             <option value="linear">${tr("opt.grayscaleLinear")}</option>
             <option value="cielab">${tr("opt.grayscaleCielab")}</option>
           </select>
+        </label>
+        <label title=${tr("opt.pressureSensitivityHint")}
+          >${tr("opt.pressureSensitivity")}
+          <input
+            type="checkbox"
+            id="pressureSensitivity"
+            data-testid="pressure-sensitivity"
+            .checked=${this.pressureSensitivity}
+            @change=${(): void => this.applyPressureSensitivityFromDialog()}
+          />
         </label>
         <button
           data-testid="background-button"
@@ -13049,6 +13062,19 @@ export class GnumarusShell extends LitElement {
     this.tipAngleMode = mode;
     this.engine?.setTipAngleMode(mode);
     this.statusMessage = tr("status.tipRotation", { value: this.tipAngleLabel(mode) });
+  }
+
+  /** Test hook: set the pen pressure master switch. */
+  setPressureSensitivity(enabled: boolean): void {
+    const next = enabled === true;
+    this.pressureSensitivity = next;
+    this.engine?.setPressureSensitivity(next);
+    this.statusMessage = tr("status.pressureSensitivity", { value: this.onOffLabel(next) });
+  }
+
+  private applyPressureSensitivityFromDialog(): void {
+    const input = this.shadowRoot?.getElementById("pressureSensitivity") as HTMLInputElement | null;
+    this.setPressureSensitivity(input?.checked ?? true);
   }
 
   /** Test hook: set the symmetry mode (off/mirror-x/mirror-y/both). */
