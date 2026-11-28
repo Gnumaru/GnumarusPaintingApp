@@ -703,6 +703,35 @@ export async function parseKraFile(bytes: Uint8Array): Promise<GnumarusKraDocume
     fail("too many layers");
   }
 
+  // Empty Krita frames must not become cell contents, and frames must stop
+  // after the last keyframe of all layers: pre-scan every layer's keyframes
+  // (a fresh Krita file declares range 0..100 with no keyframes at all and
+  // must import as a single still frame, not 101 filled frames).
+  const keyframesCache = new Map<string, GnumarusKraKeyframe[]>();
+  let maxKeyframeTime: number | null = null;
+  for (const element of fileOrder) {
+    const keyframesAttr = optionalAttr(element, "keyframes", "layer keyframes");
+    if (keyframesAttr === undefined) {
+      continue;
+    }
+    if (keyframesAttr.length === 0 || keyframesAttr.length > KRA_MAX_NAME_LENGTH || keyframesAttr.includes("/")) {
+      fail("invalid layer keyframes reference");
+    }
+    const keyframesText = textOfEntry(entries, layerDir + keyframesAttr, `keyframes ${keyframesAttr}`, 1 << 20);
+    const parsed = parseKeyframesXml(keyframesText, keyframesAttr);
+    keyframesCache.set(keyframesAttr, parsed);
+    for (const keyframe of parsed) {
+      if (keyframe.time >= fromTime && (maxKeyframeTime === null || keyframe.time > maxKeyframeTime)) {
+        maxKeyframeTime = keyframe.time;
+      }
+    }
+  }
+  if (maxKeyframeTime === null) {
+    frames = 1;
+  } else {
+    frames = Math.min(KRA_MAX_FRAMES, Math.max(1, maxKeyframeTime - fromTime + 1));
+  }
+
   interface GnumarusKraLoadedFrame {
     buffer: Uint8ClampedArray;
     width: number;
@@ -761,8 +790,7 @@ export async function parseKraFile(bytes: Uint8Array): Promise<GnumarusKraDocume
 
     let keyframes: GnumarusKraKeyframe[] = [];
     if (keyframesAttr !== undefined) {
-      const keyframesText = textOfEntry(entries, layerDir + keyframesAttr, `keyframes ${keyframesAttr}`, 1 << 20);
-      keyframes = parseKeyframesXml(keyframesText, keyframesAttr);
+      keyframes = keyframesCache.get(keyframesAttr) ?? [];
     }
     // Decoded tile boxes are relative to the layer/frame origin; the
     // returned frame boxes are absolute canvas boxes. Suffixes decode

@@ -285,15 +285,15 @@ describe("GnumarusKraImport", () => {
         extraFiles: { "test/layers/anim.f1": tileStore([{ x: 0, y: 0, pixels: green }], 4) },
       }),
     );
-    expect(doc.frames).toBe(5);
+    expect(doc.frames).toBe(3);
     expect(doc.defaultFrameDuration).toBeCloseTo(0.1, 5);
-    expect(doc.cells).toHaveLength(5);
-    // Frames 0-1 hold the first keyframe, frames 2-4 hold the second.
+    expect(doc.cells).toHaveLength(3);
+    // Frames 0-1 hold the first keyframe, frame 2 holds the second;
+    // nothing is imported past the last keyframe (time 4).
     const contentAt = (frame: number): string => doc.cells.find((cell) => cell.frame === frame)?.content ?? "";
     expect(contentAt(0)).toBe(contentAt(1));
-    expect(contentAt(2)).toBe(contentAt(3));
-    expect(contentAt(2)).toBe(contentAt(4));
     expect(contentAt(0)).not.toBe(contentAt(2));
+    expect(doc.cells.some((cell) => cell.frame > 2)).toBe(false);
     const first = doc.contents.find((c) => c.id === contentAt(0));
     const second = doc.contents.find((c) => c.id === contentAt(2));
     expect(first?.transform).toMatchObject({ x: 0 + 32 - 64, y: 0 + 32 - 64 });
@@ -302,6 +302,61 @@ describe("GnumarusKraImport", () => {
     const secondTex = doc.textures.find((t) => t.id === second?.textureId);
     expect(pixelOf(firstTex?.buffer as Uint8ClampedArray, 64, 0, 0)).toEqual([255, 0, 0, 255]);
     expect(pixelOf(secondTex?.buffer as Uint8ClampedArray, 64, 0, 0)).toEqual([0, 255, 0, 255]);
+  });
+
+  it("imports a keyframeless animation range as a single still frame", async () => {
+    // A fresh Krita file declares range 0..100 with no keyframes at all:
+    // it must import as one frame, not 101 copies of the same content.
+    const red = solidTile([0, 0, 255, 255]);
+    const doc = await parseKraFile(
+      buildKraBytes({
+        width: 64,
+        height: 64,
+        range: [0, 100],
+        layers: [{ name: "Background", filename: "bg", tiles: [{ x: 0, y: 0, pixels: red }] }],
+      }),
+    );
+    expect(doc.frames).toBe(1);
+    expect(doc.layers).toHaveLength(1);
+    expect(doc.contents).toHaveLength(1);
+    expect(doc.textures).toHaveLength(1);
+    expect(doc.cells).toEqual([{ layer: "layer0", frame: 0, content: "content0" }]);
+    expect(pixelOf(doc.textures[0]?.buffer as Uint8ClampedArray, 64, 0, 0)).toEqual([255, 0, 0, 255]);
+  });
+
+  it("stops frames after the last keyframe of all layers", async () => {
+    // 100-frame range, one keyframe per layer at times 0, 1 and 2:
+    // the project has exactly 3 frames and no cells past frame 2.
+    const red = solidTile([0, 0, 255, 255]);
+    const green = solidTile([0, 255, 0, 255]);
+    const blue = solidTile([255, 0, 0, 255]);
+    const doc = await parseKraFile(
+      buildKraBytes({
+        width: 64,
+        height: 64,
+        range: [0, 99],
+        layers: [
+          { name: "First", filename: "k1", keyframes: "k1.keyframes.xml", tiles: [{ x: 0, y: 0, pixels: red }] },
+          { name: "Second", filename: "k2", keyframes: "k2.keyframes.xml", tiles: [{ x: 0, y: 0, pixels: green }] },
+          { name: "Third", filename: "k3", keyframes: "k3.keyframes.xml", tiles: [{ x: 0, y: 0, pixels: blue }] },
+        ],
+        keyframes: {
+          "k1.keyframes.xml": [{ time: 0, frame: "k1" }],
+          "k2.keyframes.xml": [{ time: 1, frame: "k2" }],
+          "k3.keyframes.xml": [{ time: 2, frame: "k3" }],
+        },
+      }),
+    );
+    expect(doc.frames).toBe(3);
+    expect(doc.layers).toHaveLength(3);
+    expect(doc.cells).toHaveLength(9);
+    expect(doc.cells.some((cell) => cell.frame > 2)).toBe(false);
+    for (const layer of doc.layers) {
+      const layerCells = doc.cells.filter((cell) => cell.layer === layer.id);
+      expect(layerCells.map((cell) => cell.frame)).toEqual([0, 1, 2]);
+      // A single keyframe holds across the whole trimmed project.
+      expect(new Set(layerCells.map((cell) => cell.content)).size).toBe(1);
+    }
   });
 
   it("rejects corrupt and unsupported files with precise errors", async () => {

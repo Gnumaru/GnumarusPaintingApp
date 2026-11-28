@@ -100,14 +100,14 @@ test("File > Import loads layers, pixels and frames from .kra", async ({ page })
   await page.locator('gnumarus-shell .menubar .dropdown').getByRole("button", { name: "Import full project", exact: true }).click();
   const toast = page.locator('gnumarus-shell [data-testid="toast"]');
   await expect(toast).toBeVisible();
-  await expect(toast).toContainText("Imported art.kra (2 layers, 2 frames)");
+  await expect(toast).toContainText("Imported art.kra (2 layers, 1 frame)");
   // File order is top-first; the engine stacks bottom-first.
   const state = await getLayers(page);
   expect(state.layers.map((layer) => layer.name)).toEqual(["Bottom", "Top"]);
   expect(state.layers.map((layer) => layer.id)).toEqual(["layer0", "layer1"]);
   // The 64x64 tile at layer offset (2,2) centers on the 64x64 canvas: offset (2,2).
   expect(state.layers[1]?.transform).toMatchObject({ x: 2, y: 2 });
-  expect(await animationFrameCount(page)).toBe(2);
+  expect(await animationFrameCount(page)).toBe(1);
   expect(await frameDuration(page, 0)).toBeCloseTo(0.1, 3);
 });
 
