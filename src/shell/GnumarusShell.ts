@@ -1196,6 +1196,29 @@ export class GnumarusShell extends LitElement {
       background: #2b2b2b;
       z-index: 2;
     }
+    .matrix-eye {
+      background: transparent;
+      color: #e6e6e6;
+      border: 0;
+      padding: 0 6px 0 0;
+      margin: 0;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      vertical-align: baseline;
+    }
+    .matrix-eye:hover {
+      background: #3a3a3a;
+    }
+    /* Closed by its own flag: dimmed and struck through. */
+    .matrix-eye.eye-closed {
+      opacity: 0.35;
+      text-decoration: line-through;
+    }
+    /* Visible by itself but hidden by an invisible ancestor. */
+    .matrix-eye.eye-half {
+      opacity: 0.6;
+    }
     .anim-corner {
       top: 0;
       left: 0;
@@ -8190,6 +8213,7 @@ export class GnumarusShell extends LitElement {
                     this.openMatrixLayerMenu(row.layerId, event.clientX, event.clientY);
                   }}
                 >
+                  ${this.renderMatrixVisibilityEye(row.layerId, row.layerName, row.visible, row.effectivelyVisible)}
                   ${row.layerName}
                 </div>
                 ${row.cells.map((cell) => {
@@ -8734,6 +8758,9 @@ export class GnumarusShell extends LitElement {
           } else if (kind === "edits-grayscale") {
             this.statusMessage = tr("status.grayscaleLocked");
             this.showToast(tr("status.grayscaleLocked"));
+          } else if (kind === "edits-hidden-layer") {
+            this.statusMessage = tr("status.hiddenLayerBlocked");
+            this.showToast(tr("status.hiddenLayerBlocked"));
           } else if (kind === "region-needs-texture") {
             this.statusMessage = tr("status.regionNeedsTexture");
             this.showToast(tr("status.regionNeedsTexture"));
@@ -19839,6 +19866,50 @@ export class GnumarusShell extends LitElement {
     if (target !== undefined) {
       this.showToast(this.layerToastFor(index, this.layers.length, target.name));
     }
+  }
+
+  /**
+   * Visibility eye for one animation-matrix layer row: open when the layer
+   * renders, struck-through when hidden by its own flag, dimmed ("half")
+   * when hidden only by an invisible ancestor. Clicking toggles the own
+   * flag, exactly like the layers-panel checkbox.
+   */
+  private renderMatrixVisibilityEye(
+    layerId: string,
+    layerName: string,
+    visible: boolean,
+    effectivelyVisible: boolean,
+  ): unknown {
+    const state = visible ? (effectivelyVisible ? "open" : "half") : "closed";
+    const label = !visible
+      ? tr("matrix.layerShow", { name: layerName })
+      : effectivelyVisible
+        ? tr("matrix.layerHide", { name: layerName })
+        : tr("matrix.layerShownByParent", { name: layerName });
+    return html`
+      <button
+        class="matrix-eye eye-${state}"
+        data-testid="matrix-layer-visibility"
+        data-visibility-for=${layerId}
+        data-visibility-state=${state}
+        aria-label=${label}
+        title=${label}
+        @click=${(event: MouseEvent): void => {
+          event.stopPropagation();
+          this.onToggleVisible(layerId, !visible);
+        }}
+        @keydown=${(event: KeyboardEvent): void => {
+          // Only Enter/Space would double-trigger the parent row's own
+          // keydown (row selection); every other key must keep bubbling to
+          // the window-level shortcuts (Delete, Ctrl+Z, ...).
+          if (event.key === "Enter" || event.key === " ") {
+            event.stopPropagation();
+          }
+        }}
+      >
+        👁
+      </button>
+    `;
   }
 
   private onToggleVisible(id: string, visible: boolean): void {

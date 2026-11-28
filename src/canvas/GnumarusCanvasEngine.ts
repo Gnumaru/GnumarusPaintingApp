@@ -658,6 +658,10 @@ export interface GnumarusMatrixRowView {
   layerId: string;
   layerName: string;
   isMask: boolean;
+  /** Own visibility flag (the eye state the user toggles). */
+  visible: boolean;
+  /** Own flag plus every ancestor must be visible to render. */
+  effectivelyVisible: boolean;
   cells: GnumarusMatrixCellView[];
 }
 
@@ -884,7 +888,7 @@ export interface GnumarusEngineOptions {
   /** Fired when the crop tool resolves a drag (for status/toast display). */
   onCropOutcome?: (outcome: "cropped" | "unchanged" | "outside" | "empty", width: number, height: number) => void;
   /** Fired for user-facing notices that need a toast (blocked paint on derived cells). */
-  onNotice?: (kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked" | "tilemap-paint-blocked" | "tile-rot-needs-square" | "model3d-needs-cell" | "region-needs-texture" | "region-name-taken" | "region-name-empty" | "edits-locked" | "edits-grayscale") => void;
+  onNotice?: (kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked" | "tilemap-paint-blocked" | "tile-rot-needs-square" | "model3d-needs-cell" | "region-needs-texture" | "region-name-taken" | "region-name-empty" | "edits-locked" | "edits-grayscale" | "edits-hidden-layer") => void;
   /** Tile-brush click outcomes for shell status/toast display. */
   onTileBrushOutcome?: (outcome: "placed" | "erased" | "no-tileset" | "occupied" | "nothing") => void;
   checker?: GnumarusCheckerSettings;
@@ -1156,6 +1160,51 @@ export class GnumarusCanvasEngine {
       return false;
     }
     this.onNotice?.("edits-locked");
+    return true;
+  }
+
+  /**
+   * Content-edit guard for invisible layers: pixel/text/vector/3D/tilemap
+   * edits, transforms, resizes, merges and clipboard writes are denied when
+   * the target layer is not effectively visible (own flag or an ancestor
+   * hides it). Layer administration (select, rename, reorder, opacity,
+   * delete, visibility toggle) stays allowed. Toasts via onNotice.
+   */
+  private denyEditIfLayerHidden(id: string): boolean {
+    if (this.isLayerEffectivelyVisible(id)) {
+      return false;
+    }
+    this.onNotice?.("edits-hidden-layer");
+    return true;
+  }
+
+  /**
+   * True when a texture is referenced only by effectively-invisible
+   * layers. Shared textures with at least one visible referencing layer
+   * stay editable; unreferenced textures are unaffected.
+   */
+  private isTextureHiddenFromEdits(textureId: string): boolean {
+    let referenced = false;
+    for (const [key, contentId] of this.cells) {
+      const content = this.contents.get(contentId);
+      if (content?.textureId !== textureId) {
+        continue;
+      }
+      referenced = true;
+      const separator = key.lastIndexOf("\n");
+      const layerId = separator < 0 ? key : key.slice(0, separator);
+      if (this.isLayerEffectivelyVisible(layerId)) {
+        return false;
+      }
+    }
+    return referenced;
+  }
+
+  private denyEditIfTextureHidden(textureId: string): boolean {
+    if (!this.isTextureHiddenFromEdits(textureId)) {
+      return false;
+    }
+    this.onNotice?.("edits-hidden-layer");
     return true;
   }
   /** Previous tool while Ctrl temporarily holds the eyedropper, or null. */
@@ -1600,7 +1649,7 @@ export class GnumarusCanvasEngine {
   private readonly onTextEditRequested:
     | ((info: { layerId: string; frame: number; contentId: string; textId: string }) => void)
     | undefined;
-  private readonly onNotice: ((kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked" | "tilemap-paint-blocked" | "tile-rot-needs-square" | "model3d-needs-cell" | "region-needs-texture" | "region-name-taken" | "region-name-empty" | "edits-locked" | "edits-grayscale") => void) | undefined;
+  private readonly onNotice: ((kind: "text-paint-blocked" | "vector-paint-blocked" | "model3d-paint-blocked" | "tilemap-paint-blocked" | "tile-rot-needs-square" | "model3d-needs-cell" | "region-needs-texture" | "region-name-taken" | "region-name-empty" | "edits-locked" | "edits-grayscale" | "edits-hidden-layer") => void) | undefined;
   private readonly onTileBrushOutcome:
     | ((outcome: "placed" | "erased" | "no-tileset" | "occupied" | "nothing") => void)
     | undefined;
@@ -3511,13 +3560,19 @@ export class GnumarusCanvasEngine {
   /**
    * Paint-guard for derived cells: pixel tools cannot paint rasterized
    * text or vector graphics (rasters are derived and re-generated from
-   * the source document). Notifies the shell once per blocked gesture
-   * so it can toast (text suggests rasterizing).
+   * the source document). Also blocks any paint gesture whose active layer
+   * is not effectively visible (own flag or an ancestor hides it).
+   * Notifies the shell once per blocked gesture so it can toast (text
+   * suggests rasterizing).
    */
   private denyPaintOnDerived(): boolean {
     const layer = this.activeLayer();
     if (layer === null) {
       return false;
+    }
+    if (!this.isLayerEffectivelyVisible(layer.id)) {
+      this.onNotice?.("edits-hidden-layer");
+      return true;
     }
     if (this.getCellTextId(layer.id, this.currentFrame) !== null) {
       this.onNotice?.("text-paint-blocked");
@@ -3543,6 +3598,8 @@ export class GnumarusCanvasEngine {
       layerId: layer.id,
       layerName: layer.name,
       isMask: layer.isMask,
+      visible: layer.visible,
+      effectivelyVisible: this.isLayerEffectivelyVisible(layer.id),
       cells: Array.from({ length: this.frameCount }, (_unused, frame) => {
         const contentId = this.cells.get(animationCellKey(layer.id, frame)) ?? null;
         const content = contentId === null ? undefined : this.contents.get(contentId);
@@ -4334,6 +4391,10 @@ export class GnumarusCanvasEngine {
     if (this.denyEditsLocked()) {
       return false;
     }
+    const active = this.activeLayer();
+    if (active !== null && this.denyEditIfLayerHidden(active.id)) {
+      return false;
+    }
     const entry = this.texts.get(textId);
     if (entry === undefined) {
       return false;
@@ -4369,6 +4430,9 @@ export class GnumarusCanvasEngine {
    */
   rasterizeTextContent(layerId: string, frame: number): boolean {
     if (this.denyEditsLocked()) {
+      return false;
+    }
+    if (this.denyEditIfLayerHidden(layerId)) {
       return false;
     }
     if (this.findLayer(layerId) === null) {
@@ -6586,6 +6650,9 @@ export class GnumarusCanvasEngine {
     if (this.denyEditsLocked()) {
       return false;
     }
+    if (this.denyEditIfLayerHidden(layerId)) {
+      return false;
+    }
     const contentId = this.cells.get(animationCellKey(layerId, frame));
     const content = contentId === undefined ? undefined : this.contents.get(contentId);
     const tilemap = content?.tilemapId === undefined || content?.tilemapId === null ? undefined : this.tilemaps.get(content.tilemapId);
@@ -6870,6 +6937,10 @@ export class GnumarusCanvasEngine {
     clientY: number,
     button: 0 | 2,
   ): "placed" | "erased" | "no-tileset" | "occupied" | "nothing" | null {
+    const active = this.activeLayer();
+    if (active !== null && this.denyEditIfLayerHidden(active.id)) {
+      return null;
+    }
     const resolved = this.resolveTilemapForStamp(clientX, clientY, button);
     if (!("entry" in resolved)) {
       return resolved.reason;
@@ -6989,6 +7060,10 @@ export class GnumarusCanvasEngine {
   private commitTileLineRect(clientX: number, clientY: number, mode: "line" | "rect"): boolean {
     const anchor = this.tileAnchor;
     if (anchor === null) {
+      return false;
+    }
+    const active = this.activeLayer();
+    if (active !== null && this.denyEditIfLayerHidden(active.id)) {
       return false;
     }
     if (!this.tilePlaceArmed()) {
@@ -8434,6 +8509,11 @@ export class GnumarusCanvasEngine {
     if (upper === undefined || lower === undefined) {
       return false;
     }
+    // Merging reads the upper layer and writes the lower one: both sides
+    // must be effectively visible.
+    if (this.denyEditIfLayerHidden(upper.id) || this.denyEditIfLayerHidden(lower.id)) {
+      return false;
+    }
     // Masks modulate instead of compositing, and parents carrying masks would
     // orphan them: merging with masks involved is refused.
     if (upper.isMask || lower.isMask || this.directMasksOf(upper.id).length > 0) {
@@ -8984,6 +9064,9 @@ export class GnumarusCanvasEngine {
     if (this.denyEditsLocked()) {
       return false;
     }
+    if (this.denyEditIfLayerHidden(id)) {
+      return false;
+    }
     if (
       this.floating !== null &&
       this.floating.active &&
@@ -9067,6 +9150,9 @@ export class GnumarusCanvasEngine {
     if (this.denyEditsLocked()) {
       return false;
     }
+    if (this.denyEditIfLayerHidden(id)) {
+      return false;
+    }
     if (
       this.floating !== null &&
       this.floating.active &&
@@ -9129,6 +9215,9 @@ export class GnumarusCanvasEngine {
     }
     const layer = this.findLayer(id);
     if (layer === null) {
+      return false;
+    }
+    if (this.denyEditIfLayerHidden(id)) {
       return false;
     }
     if (!Number.isFinite(newWidth) || !Number.isFinite(newHeight)) {
@@ -9194,6 +9283,9 @@ export class GnumarusCanvasEngine {
     if (entry === undefined) {
       return false;
     }
+    if (this.denyEditIfTextureHidden(textureId)) {
+      return false;
+    }
     this.commitFloatingIfHomeTexture(textureId);
     const limit = Number.isFinite(threshold) ? Math.min(254, Math.max(0, Math.floor(threshold))) : 0;
     const found = findAlphaBoundingBox(entry.buffer, entry.width, entry.height, limit);
@@ -9231,6 +9323,9 @@ export class GnumarusCanvasEngine {
     height: number,
   ): "cropped" | "unchanged" | "outside" | "empty" {
     if (this.denyEditsLocked()) {
+      return "unchanged";
+    }
+    if (this.denyEditIfLayerHidden(layerId)) {
       return "unchanged";
     }
     if (this.isCellContentEmpty(layerId, frame)) {
@@ -9276,6 +9371,9 @@ export class GnumarusCanvasEngine {
     height: number,
   ): "cropped" | "unchanged" | "outside" | "empty" {
     if (this.denyEditsLocked()) {
+      return "unchanged";
+    }
+    if (this.denyEditIfLayerHidden(layerId)) {
       return "unchanged";
     }
     if (this.isCellContentEmpty(layerId, frame)) {
@@ -9900,6 +9998,9 @@ export class GnumarusCanvasEngine {
     if (this.denyEditsLocked()) {
       return "unchanged";
     }
+    if (this.denyEditIfLayerHidden(layerId)) {
+      return "unchanged";
+    }
     const contentId = this.cells.get(animationCellKey(layerId, frame));
     const content = contentId === undefined ? undefined : this.contents.get(contentId);
     const textureId = content?.textureId ?? null;
@@ -9935,6 +10036,9 @@ export class GnumarusCanvasEngine {
    */
   resizeCellTextureToCanvas(layerId: string, frame: number): "resized" | "unchanged" | "outside" {
     if (this.denyEditsLocked()) {
+      return "unchanged";
+    }
+    if (this.denyEditIfLayerHidden(layerId)) {
       return "unchanged";
     }
     const contentId = this.cells.get(animationCellKey(layerId, frame));
@@ -9980,6 +10084,9 @@ export class GnumarusCanvasEngine {
     amount: number,
   ): "expanded" | "unchanged" {
     if (this.denyEditsLocked()) {
+      return "unchanged";
+    }
+    if (this.denyEditIfLayerHidden(layerId)) {
       return "unchanged";
     }
     const contentId = this.cells.get(animationCellKey(layerId, frame));
@@ -10128,6 +10235,10 @@ export class GnumarusCanvasEngine {
     const touched = new Set<string>();
     let unchanged = 0;
     for (const [textureId, entry] of this.textures) {
+      if (this.isTextureHiddenFromEdits(textureId)) {
+        unchanged += 1;
+        continue;
+      }
       this.commitFloatingIfHomeTexture(textureId);
       const found = findAlphaBoundingBox(entry.buffer, entry.width, entry.height, limit);
       if (found === null) {
@@ -10186,6 +10297,10 @@ export class GnumarusCanvasEngine {
     let unchanged = 0;
     let outside = 0;
     for (const [textureId, contentIds] of byTexture) {
+      if (this.isTextureHiddenFromEdits(textureId)) {
+        unchanged += contentIds.length;
+        continue;
+      }
       this.commitFloatingIfHomeTexture(textureId);
       for (const contentId of contentIds) {
         const content = this.contents.get(contentId);
@@ -13559,6 +13674,9 @@ export class GnumarusCanvasEngine {
     if (floating === null || !floating.active) {
       return false;
     }
+    if (this.denyEditIfLayerHidden(floating.layerId)) {
+      return false;
+    }
     // Cutting needs the texture: materialize the pending hole first.
     if (!this.materializeFloatingCut()) {
       return false;
@@ -13588,6 +13706,9 @@ export class GnumarusCanvasEngine {
     }
     const layer = this.activeLayer();
     if (layer === null) {
+      return false;
+    }
+    if (this.denyEditIfLayerHidden(layer.id)) {
       return false;
     }
     const ensured = this.ensureCellContent(layer.id, this.currentFrame);
@@ -14982,6 +15103,9 @@ export class GnumarusCanvasEngine {
       this.render();
       return false;
     }
+    if (this.denyEditIfLayerHidden(floating.layerId)) {
+      return false;
+    }
     const tex = this.textures.get(floating.textureId);
     if (tex === undefined) {
       this.floating = null;
@@ -15400,6 +15524,11 @@ export class GnumarusCanvasEngine {
     if (layer === null || width < 1 || height < 1 || mask.length !== width * height) {
       return false;
     }
+    // Selections are the start of a content-edit workflow: do not create
+    // one on a layer that cannot be edited.
+    if (this.denyEditIfLayerHidden(layer.id)) {
+      return false;
+    }
     if (minX < 0 || minY < 0 || minX + width > tex.width || minY + height > tex.height) {
       return false;
     }
@@ -15468,6 +15597,9 @@ export class GnumarusCanvasEngine {
     }
     if (!floating.pendingCut) {
       return true;
+    }
+    if (this.denyEditIfLayerHidden(floating.layerId)) {
+      return false;
     }
     const tex = this.textures.get(floating.textureId);
     if (tex === undefined) {
@@ -16422,6 +16554,9 @@ export class GnumarusCanvasEngine {
     if (layer === null) {
       return false;
     }
+    if (this.denyEditIfLayerHidden(layer.id)) {
+      return false;
+    }
     const ensured = this.ensureCellContent(layer.id, this.currentFrame);
     if (ensured === null) {
       return false;
@@ -16501,6 +16636,9 @@ export class GnumarusCanvasEngine {
   private commitShapePaint(paint: (tex: GnumarusPaintTarget) => void): boolean {
     const layer = this.activeLayer();
     if (layer === null) {
+      return false;
+    }
+    if (this.denyEditIfLayerHidden(layer.id)) {
       return false;
     }
     const ensured = this.ensureCellContent(layer.id, this.currentFrame);
@@ -16723,6 +16861,9 @@ export class GnumarusCanvasEngine {
     if (layer === null) {
       return false;
     }
+    if (this.denyEditIfLayerHidden(layer.id)) {
+      return false;
+    }
     const ensured = this.ensureCellContent(layer.id, this.currentFrame);
     if (ensured === null) {
       return false;
@@ -16845,6 +16986,9 @@ export class GnumarusCanvasEngine {
     }
     const ensured = this.ensureCellContent(layer.id, this.currentFrame);
     if (ensured === null) {
+      return false;
+    }
+    if (this.denyEditIfLayerHidden(layer.id)) {
       return false;
     }
     const tex = ensured.texture;
@@ -18475,6 +18619,9 @@ export class GnumarusCanvasEngine {
     if (layer === null) {
       return;
     }
+    if (this.denyEditIfLayerHidden(layer.id)) {
+      return;
+    }
     const ensured = this.ensureCellContent(layer.id, this.currentFrame);
     if (ensured === null) {
       return;
@@ -18506,6 +18653,9 @@ export class GnumarusCanvasEngine {
     }
     const layer = this.activeLayer();
     if (layer === null) {
+      return false;
+    }
+    if (this.denyEditIfLayerHidden(layer.id)) {
       return false;
     }
     const contentId = this.getCellContentId(layer.id, this.currentFrame);
@@ -18548,6 +18698,9 @@ export class GnumarusCanvasEngine {
     }
     const layer = this.activeLayer();
     if (layer === null) {
+      return 0;
+    }
+    if (this.denyEditIfLayerHidden(layer.id)) {
       return 0;
     }
     const ensured = this.ensureCellContent(layer.id, this.currentFrame);
@@ -20107,6 +20260,9 @@ export class GnumarusCanvasEngine {
         if (layer === null) {
           return;
         }
+        if (this.denyEditIfLayerHidden(layer.id)) {
+          return;
+        }
         const hit = this.layerHitTest(event.clientX, event.clientY);
         if (hit !== null && this.beginLayerGesture(hit, event)) {
           this.lastMouseClient = { x: event.clientX, y: event.clientY };
@@ -20322,6 +20478,9 @@ export class GnumarusCanvasEngine {
         if (layer === null) {
           return;
         }
+        if (this.denyEditIfLayerHidden(layer.id)) {
+          return;
+        }
         const created = this.ensureTextContent(layer.id, this.currentFrame);
         this.lastMouseClient = { x: event.clientX, y: event.clientY };
         if (created !== null) {
@@ -20346,6 +20505,9 @@ export class GnumarusCanvasEngine {
         }
         const layer = this.activeLayer();
         if (layer === null) {
+          return;
+        }
+        if (this.denyEditIfLayerHidden(layer.id)) {
           return;
         }
         if (this.getCellModel3dId(layer.id, this.currentFrame) === null) {
