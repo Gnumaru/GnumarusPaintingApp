@@ -51,6 +51,7 @@ import {
   smudgeDabAlpha,
   smudgeMixColor,
   softTipCoverage,
+  softRimCoverage,
   stampPaintDabCoverage,
   strokeDabPositions,
   strokeSpeedNorm,
@@ -498,5 +499,64 @@ describe("selection-clipped soft dabs", () => {
         expect(mask[y * 16 + x]).toBe(0);
       }
     }
+  });
+});
+
+describe("soft dab rim anti-aliasing", () => {
+  const red = { r: 255, g: 0, b: 0, a: 255 };
+
+  it("softRimCoverage fades partial overlaps and vanishes far out", () => {
+    // Quarter-pixel taps around a rim point give a mid value, far points zero.
+    const mid = softRimCoverage(0.9, 0, 0.25, 0.5, null);
+    expect(mid).toBeGreaterThan(0);
+    expect(mid).toBeLessThan(1);
+    expect(softRimCoverage(3, 0, 0.25, 0.5, null)).toBe(0);
+    // Matches a manual 2x2 average of the analytic falloff.
+    const taps = [
+      [0.65, -0.25],
+      [1.15, -0.25],
+      [0.65, 0.25],
+      [1.15, 0.25],
+    ].map(([u, v]) => {
+      const r = Math.sqrt(u * u + v * v);
+      if (!(r < 1)) {
+        return 0;
+      }
+      const t = (r - 0.5) / 0.5;
+      return 0.5 * (1 + Math.cos(Math.PI * t));
+    });
+    const expected = (taps[0]! + taps[1]! + taps[2]! + taps[3]!) / 4;
+    expect(mid).toBeCloseTo(expected, 9);
+  });
+
+  it("a size-1 soft dab centered between pixels still deposits paint", () => {
+    // Dab center exactly on integer coords: every pixel center sits on or
+    // past the rim, which used to paint nothing at all.
+    const buffer = new Uint8ClampedArray(16 * 16 * 4);
+    paintSoftDab(buffer, 16, 16, 8, 8, 1, "soft", 0.5, null, red, 1);
+    let total = 0;
+    for (let i = 3; i < buffer.length; i += 4) {
+      total += buffer[i] ?? 0;
+    }
+    expect(total).toBeGreaterThan(0);
+    // The deposit stays local to the dab footprint.
+    expect(buffer[(0 * 16 + 0) * 4 + 3]).toBe(0);
+    expect(buffer[(15 * 16 + 15) * 4 + 3]).toBe(0);
+  });
+
+  it("a size-1 soft dab centered on a pixel paints it nearly fully", () => {
+    const buffer = new Uint8ClampedArray(16 * 16 * 4);
+    paintSoftDab(buffer, 16, 16, 8.5, 8.5, 1, "soft", 0.5, null, red, 1);
+    expect(buffer[(8 * 16 + 8) * 4 + 3]).toBeGreaterThan(200);
+  });
+
+  it("a size-1 coverage mask stamp is never empty", () => {
+    const mask = new Uint8Array(16 * 16);
+    stampPaintDabCoverage(mask, 16, 16, 8, 8, 1, "soft", 0.5, null, 1);
+    let total = 0;
+    for (const v of mask) {
+      total += v ?? 0;
+    }
+    expect(total).toBeGreaterThan(0);
   });
 });

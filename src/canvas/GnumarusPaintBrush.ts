@@ -173,6 +173,33 @@ export function softLutCoverage(lut: Float32Array, r: number): number {
   return a + (b - a) * frac;
 }
 
+/**
+ * 2x2 supersampled soft-tip coverage for rim pixels: averages the falloff
+ * at quarter-pixel offsets so a pixel box that merely overlaps the dab disk
+ * still deposits paint instead of vanishing. This is what keeps ~1px soft
+ * dabs drawing continuous strokes (like Krita's resampled dab masks)
+ * instead of isolated dots. Interior pixels keep the single center sample,
+ * so large brushes pay nothing extra.
+ *
+ * `quarterStep` is the quarter-pixel offset in normalized (u, v) units.
+ */
+export function softRimCoverage(
+  u: number,
+  v: number,
+  quarterStep: number,
+  hardness: number,
+  lut: Float32Array | null,
+): number {
+  const sample = (su: number, sv: number): number => {
+    if (lut !== null) {
+      return softLutCoverage(lut, Math.sqrt(su * su + sv * sv));
+    }
+    return softTipCoverage(su, sv, hardness);
+  };
+  const h = quarterStep;
+  return (sample(u - h, v - h) + sample(u + h, v - h) + sample(u - h, v + h) + sample(u + h, v + h)) / 4;
+}
+
 /** Dab slot along a stroke segment. */
 export interface GnumarusDabPosition {
   x: number;
@@ -313,16 +340,22 @@ export function paintSoftDab(  buffer: Uint8ClampedArray,
       for (let x = x0; x <= x1; x += 1) {
         const u = (x + 0.5 - centerX) * radiusInv;
         const q = u * u + v * v;
-        if (!(q < 1)) {
-          continue;
-        }
         let coverage: number;
-        if (isHardDisk) {
-          coverage = 1;
-        } else if (lut !== null) {
-          coverage = softLutCoverage(lut, Math.sqrt(q));
+        if (q < 1) {
+          if (isHardDisk) {
+            coverage = 1;
+          } else if (lut !== null) {
+            coverage = softLutCoverage(lut, Math.sqrt(q));
+          } else {
+            coverage = softTipCoverage(u, v, hardness);
+          }
         } else {
-          coverage = softTipCoverage(u, v, hardness);
+          // Rim anti-aliasing: the pixel box can still overlap the dab disk.
+          const rim = 1 + 0.5 * radiusInv;
+          if (Math.abs(u) >= rim || Math.abs(v) >= rim) {
+            continue;
+          }
+          coverage = softRimCoverage(u, v, 0.25 * radiusInv, hardness, lut);
         }
         if (coverage <= 0) {
           continue;
@@ -368,16 +401,22 @@ export function paintSoftDab(  buffer: Uint8ClampedArray,
       const u = (x + 0.5 - centerX) * radiusInv;
       const v = (y + 0.5 - centerY) * radiusInv;
       const q = u * u + v * v;
-      if (!(q < 1)) {
-        continue;
-      }
       let coverage: number;
-      if (isHardDisk) {
-        coverage = 1;
-      } else if (lut !== null) {
-        coverage = softLutCoverage(lut, Math.sqrt(q));
+      if (q < 1) {
+        if (isHardDisk) {
+          coverage = 1;
+        } else if (lut !== null) {
+          coverage = softLutCoverage(lut, Math.sqrt(q));
+        } else {
+          coverage = softTipCoverage(u, v, hardness);
+        }
       } else {
-        coverage = softTipCoverage(u, v, hardness);
+        // Rim anti-aliasing: the pixel box can still overlap the dab disk.
+        const rim = 1 + 0.5 * radiusInv;
+        if (Math.abs(u) >= rim || Math.abs(v) >= rim) {
+          continue;
+        }
+        coverage = softRimCoverage(u, v, 0.25 * radiusInv, hardness, lut);
       }
       if (coverage <= 0) {
         continue;
@@ -484,16 +523,22 @@ export function stampPaintDabCoverage(
       const u = (x + 0.5 - centerX) * radiusInv;
       const v = (y + 0.5 - centerY) * radiusInv;
       const q = u * u + v * v;
-      if (!(q < 1)) {
-        continue;
-      }
       let coverage: number;
-      if (isHardDisk) {
-        coverage = 1;
-      } else if (lut !== null) {
-        coverage = softLutCoverage(lut, Math.sqrt(q));
+      if (q < 1) {
+        if (isHardDisk) {
+          coverage = 1;
+        } else if (lut !== null) {
+          coverage = softLutCoverage(lut, Math.sqrt(q));
+        } else {
+          coverage = softTipCoverage(u, v, hardness);
+        }
       } else {
-        coverage = softTipCoverage(u, v, hardness);
+        // Rim anti-aliasing: the pixel box can still overlap the dab disk.
+        const rim = 1 + 0.5 * radiusInv;
+        if (Math.abs(u) >= rim || Math.abs(v) >= rim) {
+          continue;
+        }
+        coverage = softRimCoverage(u, v, 0.25 * radiusInv, hardness, lut);
       }
       if (coverage <= 0) {
         continue;

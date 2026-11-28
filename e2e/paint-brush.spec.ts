@@ -263,7 +263,9 @@ test("wide tip spacing leaves gaps between dabs", async ({ page }) => {
   await setPaintTip(page, "soft", 8, 100, 400);
   const sparseCount = await dense();
   expect(sparseCount).toBeGreaterThan(0);
-  expect(sparseCount).toBeLessThan(denseCount / 4);
+  // Wide spacing still leaves clear gaps; the bound allows the ~1px rim
+  // anti-aliasing fringe each dab carries.
+  expect(sparseCount).toBeLessThan(denseCount / 3);
 });
 
 test("image tip masks paint by its luminance", async ({ page }) => {
@@ -830,4 +832,40 @@ test("scrollbars match the dark app theme", async ({ page }) => {
     return getComputedStyle(bar as Element).scrollbarColor;
   });
   expect(colors).toContain("rgb(85, 85, 85)");
+});
+
+test("size-1 soft tip draws a continuous stroke @recent", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("gnumarus-shell canvas");
+  await loadBlankProject(page, 64);
+  await setBrushColor(page, "#000000");
+  await setPaintTip(page, "soft", 1, 50, 15);
+  // Short horizontal stroke; every layer pixel along it must get paint.
+  const start = await layerScreenTarget(page, 8, 32);
+  const end = await layerScreenTarget(page, 56, 32);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 24 });
+  await page.mouse.up();
+  const alphas = await page.evaluate(() => {
+    const root = window as unknown as {
+      __gnumarus?: { engine?: { readPixel(x: number, y: number): { a: number } | null } };
+    };
+    const out: number[] = [];
+    for (let x = 8; x <= 56; x += 1) {
+      let best = 0;
+      for (let y = 31; y <= 33; y += 1) {
+        const p = root.__gnumarus?.engine?.readPixel(x, y);
+        if (p !== null && p !== undefined) {
+          best = Math.max(best, p.a);
+        }
+      }
+      out.push(best);
+    }
+    return out;
+  });
+  expect(alphas.length).toBe(49);
+  for (const a of alphas) {
+    expect(a).toBeGreaterThan(0);
+  }
 });
