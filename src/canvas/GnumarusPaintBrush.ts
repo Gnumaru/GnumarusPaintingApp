@@ -317,6 +317,15 @@ export function paintSoftDab(  buffer: Uint8ClampedArray,
   const hardClamped = clampBrushHardness(hardness);
   const isHardDisk = !useImage && hardClamped >= 1 - 1e-9;
   const lut = useImage || isHardDisk ? null : softCoverageLut(hardness);
+  // Krita-style AA footprint: the soft falloff stretches over an extra half
+  // pixel so rim pixels get real (weak) coverage instead of vanishing.
+  // Hard disks keep their exact radius (rim supersampling alone gives them
+  // partial edge pixels). `tinyGain` conserves dab energy for sub-pixel
+  // diameters instead of punching full-alpha holes.
+  const fringe = isHardDisk ? 0 : 0.5;
+  const fallRadius = radius + fringe;
+  const fallInv = fallRadius > 1e-9 ? 1 / fallRadius : 0;
+  const tinyGain = Math.min(1, diameter * diameter);
   const dualScale = hasDual && dual !== undefined && dual !== null ? clampPaintDualScale(dual.scale) : 1;
   const dualStrength = hasDual && dual !== undefined && dual !== null ? clampPaintDualStrength(dual.strength) : 0;
   const dualTip = hasDual && dual !== undefined && dual !== null ? dual.tip : null;
@@ -335,28 +344,29 @@ export function paintSoftDab(  buffer: Uint8ClampedArray,
     const y0 = Math.max(0, minY);
     const y1 = Math.min(height - 1, maxY);
     for (let y = y0; y <= y1; y += 1) {
-      const v = (y + 0.5 - centerY) * radiusInv;
+      const sv = (y + 0.5 - centerY) * fallInv;
       const row = y * width * 4;
       for (let x = x0; x <= x1; x += 1) {
-        const u = (x + 0.5 - centerX) * radiusInv;
-        const q = u * u + v * v;
+        const su = (x + 0.5 - centerX) * fallInv;
+        const sq = su * su + sv * sv;
         let coverage: number;
-        if (q < 1) {
+        if (sq < 1) {
           if (isHardDisk) {
             coverage = 1;
           } else if (lut !== null) {
-            coverage = softLutCoverage(lut, Math.sqrt(q));
+            coverage = softLutCoverage(lut, Math.sqrt(sq));
           } else {
-            coverage = softTipCoverage(u, v, hardness);
+            coverage = softTipCoverage(su, sv, hardness);
           }
         } else {
           // Rim anti-aliasing: the pixel box can still overlap the dab disk.
-          const rim = 1 + 0.5 * radiusInv;
-          if (Math.abs(u) >= rim || Math.abs(v) >= rim) {
+          const rim = 1 + 0.25 * fallInv;
+          if (Math.abs(su) >= rim || Math.abs(sv) >= rim) {
             continue;
           }
-          coverage = softRimCoverage(u, v, 0.25 * radiusInv, hardness, lut);
+          coverage = softRimCoverage(su, sv, 0.25 * fallInv, hardness, lut);
         }
+        coverage *= tinyGain;
         if (coverage <= 0) {
           continue;
         }
@@ -400,24 +410,27 @@ export function paintSoftDab(  buffer: Uint8ClampedArray,
       }
       const u = (x + 0.5 - centerX) * radiusInv;
       const v = (y + 0.5 - centerY) * radiusInv;
-      const q = u * u + v * v;
+      const su = (x + 0.5 - centerX) * fallInv;
+      const sv = (y + 0.5 - centerY) * fallInv;
+      const sq = su * su + sv * sv;
       let coverage: number;
-      if (q < 1) {
+      if (sq < 1) {
         if (isHardDisk) {
           coverage = 1;
         } else if (lut !== null) {
-          coverage = softLutCoverage(lut, Math.sqrt(q));
+          coverage = softLutCoverage(lut, Math.sqrt(sq));
         } else {
-          coverage = softTipCoverage(u, v, hardness);
+          coverage = softTipCoverage(su, sv, hardness);
         }
       } else {
         // Rim anti-aliasing: the pixel box can still overlap the dab disk.
-        const rim = 1 + 0.5 * radiusInv;
-        if (Math.abs(u) >= rim || Math.abs(v) >= rim) {
+        const rim = 1 + 0.25 * fallInv;
+        if (Math.abs(su) >= rim || Math.abs(sv) >= rim) {
           continue;
         }
-        coverage = softRimCoverage(u, v, 0.25 * radiusInv, hardness, lut);
+        coverage = softRimCoverage(su, sv, 0.25 * fallInv, hardness, lut);
       }
+      coverage *= tinyGain;
       if (coverage <= 0) {
         continue;
       }
@@ -502,6 +515,15 @@ export function stampPaintDabCoverage(
   const hardClamped = clampBrushHardness(hardness);
   const isHardDisk = !useImage && hardClamped >= 1 - 1e-9;
   const lut = useImage || isHardDisk ? null : softCoverageLut(hardness);
+  // Krita-style AA footprint: the soft falloff stretches over an extra half
+  // pixel so rim pixels get real (weak) coverage instead of vanishing.
+  // Hard disks keep their exact radius (rim supersampling alone gives them
+  // partial edge pixels). `tinyGain` conserves dab energy for sub-pixel
+  // diameters instead of punching full-alpha holes.
+  const fringe = isHardDisk ? 0 : 0.5;
+  const fallRadius = radius + fringe;
+  const fallInv = fallRadius > 1e-9 ? 1 / fallRadius : 0;
+  const tinyGain = Math.min(1, diameter * diameter);
   const dualScale = hasDual && dual !== undefined && dual !== null ? clampPaintDualScale(dual.scale) : 1;
   const dualStrength = hasDual && dual !== undefined && dual !== null ? clampPaintDualStrength(dual.strength) : 0;
   const dualTip = hasDual && dual !== undefined && dual !== null ? dual.tip : null;
@@ -522,24 +544,27 @@ export function stampPaintDabCoverage(
       }
       const u = (x + 0.5 - centerX) * radiusInv;
       const v = (y + 0.5 - centerY) * radiusInv;
-      const q = u * u + v * v;
+      const su = (x + 0.5 - centerX) * fallInv;
+      const sv = (y + 0.5 - centerY) * fallInv;
+      const sq = su * su + sv * sv;
       let coverage: number;
-      if (q < 1) {
+      if (sq < 1) {
         if (isHardDisk) {
           coverage = 1;
         } else if (lut !== null) {
-          coverage = softLutCoverage(lut, Math.sqrt(q));
+          coverage = softLutCoverage(lut, Math.sqrt(sq));
         } else {
-          coverage = softTipCoverage(u, v, hardness);
+          coverage = softTipCoverage(su, sv, hardness);
         }
       } else {
         // Rim anti-aliasing: the pixel box can still overlap the dab disk.
-        const rim = 1 + 0.5 * radiusInv;
-        if (Math.abs(u) >= rim || Math.abs(v) >= rim) {
+        const rim = 1 + 0.25 * fallInv;
+        if (Math.abs(su) >= rim || Math.abs(sv) >= rim) {
           continue;
         }
-        coverage = softRimCoverage(u, v, 0.25 * radiusInv, hardness, lut);
+        coverage = softRimCoverage(su, sv, 0.25 * fallInv, hardness, lut);
       }
+      coverage *= tinyGain;
       if (coverage <= 0) {
         continue;
       }

@@ -560,3 +560,20 @@ describe("soft dab rim anti-aliasing", () => {
     expect(total).toBeGreaterThan(0);
   });
 });
+
+describe("soft dab AA footprint", () => {
+  const red = { r: 255, g: 0, b: 0, a: 255 };
+
+  it("stretches the falloff half a pixel past the nominal disk", () => {
+    // Hard disk, diameter 2 centered on a pixel center: the 2x2 core stays
+    // fully opaque, the pixel just past the rim gets partial AA coverage
+    // instead of vanishing, and two pixels out stays empty.
+    const buffer = new Uint8ClampedArray(16 * 16 * 4);
+    paintSoftDab(buffer, 16, 16, 8.5, 8.5, 2, "soft", 1, null, red, 1);
+    expect(buffer[(8 * 16 + 8) * 4 + 3]).toBe(255);
+    const fringe = buffer[(9 * 16 + 8) * 4 + 3] ?? 0;
+    expect(fringe).toBeGreaterThan(0);
+    expect(fringe).toBeLessThan(255);
+    expect(buffer[(10 * 16 + 8) * 4 + 3]).toBe(0);
+  });
+});
